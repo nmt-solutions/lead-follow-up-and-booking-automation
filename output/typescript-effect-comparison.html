@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TypeScript implementation trade-offs</title>
+  <style>
+    #ts-options { display: grid; gap: 12px; }
+    #ts-options table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+    #ts-options th, #ts-options td { overflow-wrap: break-word; vertical-align: top; text-align: left; padding: 8px 6px 8px 0; }
+    #ts-options th { font-weight: 500; }
+    #ts-options tbody tr { border-top: 1px solid var(--border); }
+    #ts-options th:first-child { width: 22%; }
+    #ts-options caption { text-align: left; padding-bottom: 8px; font-weight: 500; color: var(--foreground); }
+    #ts-options .sources { display: flex; flex-wrap: wrap; gap: 12px; }
+  </style>
+</head>
+<body>
+  <main id="ts-options">
+    <table class="table table-sm">
+      <caption>Implementation trade-offs</caption>
+      <thead><tr><th scope="col">Concern</th><th scope="col">Traditional TypeScript</th><th scope="col">Scoped Effect</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Failures</th><td>Thrown errors; add explicit domain types and classification.</td><td>Typed error channel; classify SDK failures at the adapter.</td></tr>
+        <tr><th scope="row">Fan-out</th><td>Compose concurrency, abort signals and cleanup explicitly.</td><td>Compose bounded concurrency, interruption and scopes.</td></tr>
+        <tr><th scope="row">Services</th><td>Pass provider, clock and repository interfaces.</td><td>Provide services through Context and Layer.</td></tr>
+        <tr><th scope="row">Effort</th><td>Familiar async/await; maintain application conventions.</td><td>Additional programming model; benefit depends on coherent use.</td></tr>
+        <tr><th scope="row">Durable jobs</th><td>Trigger.dev and persisted application state.</td><td>Trigger.dev and persisted application state remain selected.</td></tr>
+      </tbody>
+    </table>
+    <div class="sources text-small"><a href="https://effect.website/docs/v4/error-management/expected-errors">Error model</a><a href="https://effect.website/docs/v4/requirements-management/services">Services</a><a href="https://effect.website/docs/v4/resource-management/introduction">Resource management</a></div>
+  </main>
+</body>
+</html>

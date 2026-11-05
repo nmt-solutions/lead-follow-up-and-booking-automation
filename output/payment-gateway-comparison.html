@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment gateway comparison</title>
+<style>
+html, body { background: transparent; }
+#gateway-fit { display: grid; gap: 12px; }
+#gateway-fit h2, #gateway-fit p { margin: 0; }
+#gateway-fit .caption { color: var(--muted-foreground); }
+#gateway-fit .sources { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+#gateway-fit a { color: var(--foreground); text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+<figure id="gateway-fit" style="margin:0" aria-labelledby="gateway-title">
+  <div>
+    <h2 id="gateway-title">Gateways for INR and USD subscriptions</h2>
+    <p class="caption text-small">India-based merchant | Official documentation checked November 5, 2026</p>
+  </div>
+  <table class="table" aria-label="Recurring-payment capability comparison">
+    <thead><tr><th scope="col">Gateway</th><th scope="col">Recurring currencies / methods</th><th scope="col">Main decision factor</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Razorpay</th><td>INR: cards, UPI, eMandate.<br>USD: cards.<br>Settlement: INR.</td><td>International activation required. Native proration for eligible cards; domestic-card/UPI plan-change restrictions.</td></tr>
+      <tr><th scope="row">Cashfree</th><td>INR: cards, UPI, eNACH.<br>USD: Visa/Mastercard.<br>Settlement: INR.</td><td>Verify enabled USD recurring flow and all-in quote. App owns proration; plan changes stay within mandate limits.</td></tr>
+      <tr><th scope="row">Stripe India</th><td>INR and USD: supported cards.<br>No UPI in current India coverage.<br>Settlement: INR.</td><td>Invite-only onboarding. Native billing/proration; processing, Billing and conversion fees can stack.</td></tr>
+      <tr><th scope="row">PayPal India</th><td>USD subscriptions.<br>Indian domestic receipts unavailable.</td><td>Optional international method. App handles prorated adjustments; cannot cover both customer markets alone.</td></tr>
+    </tbody>
+  </table>
+  <figcaption class="caption text-small">Documented capability is subject to merchant activation and supported issuer/network/method combinations. No provider has approved this specific product yet.</figcaption>
+  <div class="sources text-small" aria-label="Official sources">
+    <a href="https://razorpay.com/docs/payments/subscriptions/faqs/" target="_blank" rel="noreferrer">Razorpay</a>
+    <a href="https://www.cashfree.com/docs/payments/subscription/payment-modes" target="_blank" rel="noreferrer">Cashfree</a>
+    <a href="https://support.stripe.com/questions/supported-payment-methods-currencies-and-businesses-for-stripe-accounts-in-india?locale=en-GB" target="_blank" rel="noreferrer">Stripe India</a>
+    <a href="https://www.paypal.com/in/business/paypal-business-fees" target="_blank" rel="noreferrer">PayPal India</a>
+  </div>
+</figure>
+</body>
+</html>

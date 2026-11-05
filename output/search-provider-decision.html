@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search provider decision</title>
+<style>
+html, body { background: transparent; }
+#search-choice { display: grid; gap: 12px; }
+#search-choice h2, #search-choice p { margin: 0; }
+#search-choice .caption { color: var(--muted-foreground); }
+#search-choice .sources { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+#search-choice a { color: var(--foreground); text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+<figure id="search-choice" style="margin:0" aria-labelledby="search-choice-title">
+  <div>
+    <h2 id="search-choice-title">Search provider contract fit</h2>
+    <p class="caption text-small">Durable lead records and customer display/export | November 5, 2026</p>
+  </div>
+  <table class="table" aria-label="Comparison of search-provider contract routes">
+    <thead><tr><th scope="col">Route</th><th scope="col">Finding for our use</th><th scope="col">Decision</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Exa MSA + order</th><td>Customer-product/output-ownership route. Execute explicit retention/export scope and obtain actual quote.</td><td>Selected</td></tr>
+      <tr><th scope="row">Brave standard</th><td>Transient storage only; durable storage/export needs a custom order.</td><td>Not selected</td></tr>
+      <tr><th scope="row">Firecrawl / SerpApi public terms</th><td>No clear complete grant for our persistent commercial records and customer exports.</td><td>Not selected</td></tr>
+      <tr><th scope="row">Valyu / You.com / Parallel standard terms</th><td>Dataset, retention, export or individual-profile restrictions conflict with or leave the workflow unresolved.</td><td>Not selected</td></tr>
+    </tbody>
+  </table>
+  <figcaption class="caption text-small">Provider choice is finalized. No order is signed, price agreed or account activated. Third-party source and privacy rights remain separate.</figcaption>
+  <div class="sources text-small" aria-label="Official agreement sources">
+    <a href="https://exa.ai/msa" target="_blank" rel="noreferrer">Exa MSA</a>
+    <a href="https://api-dashboard.search.brave.com/documentation/resources/terms-of-service" target="_blank" rel="noreferrer">Brave</a>
+    <a href="https://www.firecrawl.dev/terms-of-service" target="_blank" rel="noreferrer">Firecrawl</a>
+    <a href="https://serpapi.com/legal" target="_blank" rel="noreferrer">SerpApi</a>
+    <a href="https://www.valyu.ai/valyu-platform-service-agreement" target="_blank" rel="noreferrer">Valyu</a>
+    <a href="https://you.com/aup" target="_blank" rel="noreferrer">You.com</a>
+    <a href="https://parallel.ai/customer-terms" target="_blank" rel="noreferrer">Parallel</a>
+  </div>
+</figure>
+</body>
+</html>

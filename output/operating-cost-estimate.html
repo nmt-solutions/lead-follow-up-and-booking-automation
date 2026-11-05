@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Priced monthly core</title>
+<style>
+html, body { background: transparent; }
+#operating-cost { display: grid; gap: 12px; }
+#operating-cost h2, #operating-cost p { margin: 0; }
+#operating-cost .plot { width: 100%; height: 265px; display: block; }
+#operating-cost .plot text { fill: var(--foreground); font-size: 12px; font-family: var(--font-sans); }
+#operating-cost .axis { stroke: var(--border); stroke-width: 1; }
+#operating-cost .legend { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+#operating-cost .legend span { display: inline-flex; gap: 6px; align-items: center; }
+#operating-cost .swatch { width: 12px; height: 12px; display: inline-block; }
+#operating-cost .caption { color: var(--muted-foreground); }
+#operating-cost a { color: var(--foreground); text-underline-offset: 3px; }
+#operating-cost .sources { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+</style>
+</head>
+<body>
+<figure id="operating-cost" style="margin:0">
+  <div>
+    <h2>Priced monthly core</h2>
+    <p class="caption text-small">Shared platform, 1-10 Businesses | USD/month | November 5, 2026</p>
+  </div>
+  <svg class="plot" role="img" aria-labelledby="cost-title cost-description">
+    <title id="cost-title">Two explicit database activity scenarios</title>
+    <desc id="cost-description">Both scenarios include Vercel Pro at 20 dollars and Trigger.dev Hobby at 10 dollars, with usage inside included credits. At 0.25 Neon compute units and 1 to 5 GB of database storage, 40 active hours gives a priced core of 31.41 to 32.81 dollars a month; 730 active hours gives 49.70 to 51.10 dollars. R2 and Resend are inside free allowances. AI, search, mailbox integration, WhatsApp, retained history, excess usage, payment fees, tax and FX are excluded.</desc>
+  </svg>
+  <div class="legend text-small" aria-label="Cost components">
+    <span><i class="swatch" style="background:var(--chart-1)" aria-hidden="true"></i>Vercel Pro: $20</span>
+    <span><i class="swatch" style="background:var(--chart-2)" aria-hidden="true"></i>Trigger Hobby: $10</span>
+    <span><i class="swatch" style="background:var(--chart-3)" aria-hidden="true"></i>Neon compute + 1-5 GB</span>
+  </div>
+  <figcaption class="caption text-small">Scenario subtotal, not a full operating forecast. R2/Resend inside free allowances; Vercel/Trigger inside credits. Excludes AI, search, mailbox/WhatsApp services, retained history, excess usage, Paddle fees, tax and FX.</figcaption>
+  <div class="sources text-small" aria-label="Official pricing sources">
+    <a href="https://vercel.com/docs/plans/pro-plan" target="_blank" rel="noreferrer">Vercel</a>
+    <a href="https://trigger.dev/pricing" target="_blank" rel="noreferrer">Trigger.dev</a>
+    <a href="https://neon.com/pricing" target="_blank" rel="noreferrer">Neon</a>
+  </div>
+</figure>
+<script>
+(() => {
+  const root = document.getElementById('operating-cost');
+  const svg = root.querySelector('.plot');
+  const rows = [
+    {label: '40 active h', dbLow: 1.41, dbHigh: 2.81, costLabel: '$31.41-32.81'},
+    {label: '730 active h', dbLow: 19.695, dbHigh: 21.095, costLabel: '$49.70-51.10'}
+  ];
+  const ns = 'http://www.w3.org/2000/svg';
+  const add = (tag, attrs, label) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    if (label !== undefined) node.textContent = label;
+    svg.appendChild(node);
+    return node;
+  };
+  const draw = () => {
+    svg.querySelectorAll('[data-drawn]').forEach(node => node.remove());
+    const width = svg.getBoundingClientRect().width;
+    svg.setAttribute('viewBox', `0 0 ${width} 265`);
+    const left = 102;
+    const right = 10;
+    const max = Math.max(...rows.map(row => 30 + row.dbHigh));
+    const upper = Math.ceil(max / 10) * 10;
+    const x = value => left + value / upper * Math.max(100, width - left - right);
+    const bottom = 214;
+    add('line', {'data-drawn': '', x1: left, x2: x(upper), y1: bottom, y2: bottom, class: 'axis'});
+    const ticks = [0, upper / 3, 2 * upper / 3, upper];
+    ticks.forEach(value => {
+      add('line', {'data-drawn': '', x1: x(value), x2: x(value), y1: bottom, y2: bottom + 5, class: 'axis'});
+      add('text', {'data-drawn': '', x: x(value), y: bottom + 21, 'text-anchor': value === upper ? 'end' : 'middle'}, String(Math.round(value)));
+    });
+    add('text', {'data-drawn': '', x: left - 9, y: 18, 'text-anchor': 'end', class: 'axis-title', 'data-axis': 'y'}, 'Neon activity');
+    add('text', {'data-drawn': '', x: (left + x(upper)) / 2, y: 260, 'text-anchor': 'middle', class: 'axis-title', 'data-axis': 'x'}, 'USD / month');
+    rows.forEach((row, i) => {
+      const y = 48 + i * 83;
+      const dbMid = (row.dbLow + row.dbHigh) / 2;
+      const values = [20, 10, dbMid];
+      let start = 0;
+      values.forEach((value, index) => {
+        add('rect', {'data-drawn': '', x: x(start), y, width: x(start + value) - x(start), height: 27, fill: `var(--chart-${index + 1})`});
+        start += value;
+      });
+      add('text', {'data-drawn': '', x: left - 9, y: y + 18, 'text-anchor': 'end'}, row.label);
+      add('text', {'data-drawn': '', x: left, y: y - 10}, row.costLabel);
+      const lowX = x(30 + row.dbLow);
+      const highX = x(30 + row.dbHigh);
+      add('line', {'data-drawn': '', x1: lowX, x2: highX, y1: y + 13.5, y2: y + 13.5, stroke: 'var(--foreground)', 'stroke-width': 1});
+      [lowX, highX].forEach(end => add('line', {'data-drawn': '', x1: end, x2: end, y1: y + 7, y2: y + 20, stroke: 'var(--foreground)', 'stroke-width': 1}));
+    });
+  };
+  new ResizeObserver(draw).observe(svg);
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+# Direct payment gateway comparison
+
+Research date: 2026-11-05. The accepted model is direct selling with [application-owned billing and tax management](billing-and-tax.md), not a Merchant of Record. Q34 selects Razorpay as the initial gateway; Cashfree remains a researched alternative if merchant approval or commercial terms are unsuitable. No account is activated by this selection.
+
+## Selection context
+
+- India-based operating business and bank account, initially 1-10 subscribing Businesses across geographies.
+- Recurring subscriptions with approved prorated upgrades, renewal-time downgrades and application-owned reach/usage limits.
+- Q33 confirms INR billing for Indian Businesses and USD billing for international Businesses, with other presentment currencies later. Merchant geography, billing country, checkout currency and settlement currency are separate concepts. Customer prices and conversion policy remain open.
+- Evaluate international recurring-card support explicitly. A gateway's international one-time currency list is not proof that its recurring product supports the same list or payment methods.
+- Compare recurring add-ons, FX, taxes on provider fees, refunds/disputes and settlement terms alongside the headline processing rate. Do not use a domestic-card rate as an all-in international subscription estimate.
+- Keep seller invoices, tax rules/evidence/calculations, filing/remittance records and reconciliation in our app. Hosted checkout and recurring-payment APIs can be used without delegating those responsibilities.
+
+## Verified recurring and cost facts
+
+### Razorpay
+
+Its current subscription FAQ explicitly documents supported foreign-currency subscriptions through cards; UPI and eMandate use INR. International subscription receipts settle in INR using the conversion rate at payment creation. The FAQ says Add-ons are deprecated, despite marketing pages still advertising them. Plan changes are payment-method-specific, so upgrades may need separate authorized checkout and mandate handling rather than relying on a generic proration claim. [Subscription FAQ](https://razorpay.com/docs/payments/subscriptions/faqs).
+
+- Eligible card subscriptions support immediate prorated changes or end-of-cycle updates; failed upgrade payment prevents the change. Domestic-card subscriptions permit only linked-offer changes at cycle end, while UPI/eMandate subscriptions cannot be updated through the same mechanism. Preserve our approved upgrade/downgrade policy with supported methods and explicit separate checkout/mandate replacement when needed. [Update rules](https://razorpay.com/docs/payments/subscriptions/update/).
+- The official pricing explainer lists most domestic payments at 2%, domestic corporate/business cards and international cards at 3%, plus GST on fees. It lists a 0.99% subscription surcharge, whereas the subscriptions product page advertises a limited-time 0.5% surcharge. Standard setup/AMC/minimum fees are not required according to the explainer. Obtain the actual recurring quote; a B2B corporate card should not be assumed to use the lowest domestic rate. [Pricing explainer](https://razorpay.com/blog/razorpay-payment-gateway-pricing-explained), [subscription pricing](https://razorpay.com/subscriptions/).
+- For planning scenarios only, an international card with the 0.5% surcharge gives `(3% + 0.5%) × 1.18 = 4.13%`; with 0.99%, it gives `4.7082%`. These assume 18% GST applies to the fees and exclude separately applicable FX/bank/optional charges. Do not treat the two published surcharge values as a guaranteed contractual range.
+- International activation needs account/KYC and banking/risk approval. Regular refunds retain original processing fees/taxes, although the regular refund itself has no added fee; instant refunds cost more. [Activation](https://razorpay.com/docs/payments/international-payments/international-debit-credit-cards/), [refund FAQ](https://razorpay.com/docs/payments/refunds/faqs/).
+
+### Cashfree
+
+- Its subscription-specific payment-method documentation explicitly supports international Visa/Mastercard. Current Create Plan API `plan_currency` permits non-INR currencies, and the linked currency list includes USD; settlement is INR. This establishes a documented USD/foreign-card recurring path, subject to account activation rather than relying only on generic one-time international acceptance. [Subscription methods](https://www.cashfree.com/docs/payments/subscription/payment-modes), [Create Plan API](https://www.cashfree.com/docs/api-reference/payments/latest/subscription/create-a-plan), [currencies](https://www.cashfree.com/docs/payments/international-payments/ipg/currencies-supported).
+- Periodic subscriptions can change to a revised plan within the original authorized maximum. The API does not automatically notify customers; no automatic proration behavior was established. Our app would own proration/approval and use an expressly authorized one-time upgrade payment where appropriate. On-demand plans have different change restrictions. [Manage Subscription](https://www.cashfree.com/docs/api-reference/payments/latest/subscription/manage-subscription).
+- Public standard pricing lists 1.95% domestic and 2.99% international Visa/Mastercard. Card subscriptions add INR 7.50 mandate creation and INR 7.50 per presentation, with transaction platform fees separately. Confirm whether that flat subscription tariff applies unchanged to international recurring transactions. The first-cumulative-INR-20-lakh festive 0% offer through 2027-03-31 explicitly excludes subscriptions and international PG, so it is not our pricing basis. GST and FX/refund/dispute terms need the actual quote. Setup is zero; optional premium support has an unpriced AMC. [Pricing/offer terms](https://www.cashfree.com/payment-gateway-charges/).
+- APIs have operation-level idempotency and signed subscription webhooks. The FAQ says missed subscription webhooks cannot currently be replayed; recover through payment-status polling/reconciliation. [FAQ](https://www.cashfree.com/docs/payments/subscription/faq), [signatures](https://www.cashfree.com/docs/payments/subscription/webhook-signature).
+
+### Stripe India
+
+India's current pricing page requires an invitation. Published processing rates include 2% domestic Visa/Mastercard, 3% international Visa/Mastercard in the INR-presentment category, 3.5% international Amex, and 4.3% for international cards presented in USD/other foreign currency; add 2% where currency conversion is required. Stripe Billing is separately priced at 0.7% of Billing volume. These are distinct fee components and do not include every tax/exception/contract variation. [India pricing](https://stripe.com/in/pricing).
+
+For a clearly labelled fee-component illustration only, foreign-currency international subscriptions using Billing and requiring conversion can add up to `4.3% + 2% + 0.7% = 7%` before taxes and exceptions. This is not a quote, an account approval, or a statement that every Stripe payment costs 7%.
+
+- New India accounts remain invite-only for a selected set of businesses; availability/timing cannot be assumed. The current India support article also lists no UPI/netbanking support for these accounts. International presentment settles INR to the Indian bank. [Account opening](https://support.stripe.com/questions/how-can-i-open-a-stripe-account-in-india?locale=en-GB), [India methods](https://support.stripe.com/questions/supported-payment-methods-currencies-and-businesses-for-stripe-accounts-in-india?locale=en-GB), [cross-border options](https://support.stripe.com/questions/additional-pricing-information-for-indian-cross-border-sellers?locale=en-GB).
+- Stripe Billing has native proration and configurable collection behavior; supported India-issued recurring cards still have mandate/authentication/notification rules. Do not substitute a standalone payment authorization for that recurring integration. [Proration](https://docs.stripe.com/billing/subscriptions/prorations), [India recurring](https://docs.stripe.com/india-recurring-payments).
+
+### PayPal India
+
+- PayPal India supports international receipts, not Indian domestic payments. Its subscriptions support USD/other supported currencies but not INR. It can be an optional international checkout method rather than our only India-plus-international processor. [India fees](https://www.paypal.com/in/business/paypal-business-fees), [subscription guide](https://developer.paypal.com/platforms/subscriptions/integrate/).
+- The published international fee is 4.4% plus a currency-specific fixed amount, for example USD 0.30. Received-balance conversion adds 3% above PayPal's base exchange rate; that is an FX markup rather than a flat extra transaction percentage. The live fee schedule bears a 2024-03-28 effective date. [Merchant fees](https://www.paypal.com/in/business/paypal-business-fees).
+- Subscription revisions start next cycle and do not automatically prorate one-time adjustments; some revisions require customer re-consent. India balances transfer automatically to the preferred local bank daily; manual transfer is unavailable. [Revisions](https://developer.paypal.com/docs/subscriptions/customize/revise-subscriptions/), [India transfers](https://www.paypal.com/in/cshelp/article/how-do-i-transfer-funds-to-my-bank-account-help394).
+
+## Product acceptance
+
+Razorpay and Cashfree explicitly restrict spam-enabling bulk-marketing tools and mailing-list/database activities. Cashfree also classifies SaaS as high risk. Stripe and PayPal restrict relevant prohibited activity/privacy infringements. This does not establish a blanket rejection of lawful CRM: Razorpay itself markets sales/marketing automation and CRMs. Actual prospect discovery, data retention/use, outreach channels, human approval and abuse controls must be described accurately during merchant review; no candidate is recorded as having approved this product. [Razorpay terms](https://razorpay.com/terms/), [Razorpay SaaS](https://razorpay.com/solutions/saas/), [Cashfree terms](https://www.cashfree.com/tnc), [Stripe restrictions](https://stripe.com/legal/restricted-businesses), [PayPal India AUP](https://www.paypal.com/in/legalhub/paypal/acceptableuse-full).
+
+## Accepted first-pilot selection
+
+Select Razorpay for the first pilot because international recurring and eligible-card proration are explicitly documented, while keeping method restrictions and quote uncertainty visible. Cashfree remains a researched alternative if approval/commercial terms are unsuitable; it is not an automatically active second processor. Stripe and PayPal remain comparison research rather than selected providers.
+
+Q35 confirms recurring cards first for INR/USD and UPI AutoPay after validation of its separate upgrade/new-mandate flow. Domestic-card update restrictions still apply; use a supported approved payment/mandate path where native updates are unavailable. Other recurring methods are not selected by this decision.
+
+Start with one processor behind our payment adapter. Our app owns tax/invoices, customer prices, approved changes and entitlements; adding several gateways immediately would add integration and reconciliation work. Actual merchant/product approval, international recurring activation, subscription surcharge and FX terms remain prerequisites to live billing. Record provisional pricing in [operating-costs.md](operating-costs.md). [ADR 0007](adr/0007-use-razorpay-for-direct-subscriptions.md) captures the selection.

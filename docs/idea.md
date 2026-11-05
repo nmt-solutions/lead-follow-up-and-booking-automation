@@ -1,217 +1,241 @@
-# Lead Follow-up and Booking Automation
+# Prospect Discovery and Sales Automation
 
-## Business concept
+## 1. Business concept and stage
 
-Build a managed software service that helps small service businesses respond to inbound inquiries, qualify potential customers, book appointments, and follow up consistently. Start with interior design studios in one city, then expand to adjacent services only after the first workflow is repeatable.
+Build one configurable subscription product that helps a business find potential customers from public internet information and manage sales inquiries through a business-specific outcome.
 
-The customer buys a reliable inquiry-to-appointment process, configured and maintained for their business. Software handles routine steps; the business owner handles sales conversations, unusual requests, and final commercial decisions.
+The product has two core capabilities:
 
-**Initial positioning:** "We help interior design studios turn more of their existing inquiries into attended consultations, with less manual follow-up."
+- **A — Full inquiry and sales automation:** a shared inbox, business-specific answers, qualification, follow-ups, booking or quotation-request workflows, a sales pipeline, human takeover, and reporting.
+- **B — Prospect discovery:** context-bound research agents find relevant buyers, publicly listed contacts, and open buying requests, with evidence for each result.
 
-- Business type: a standardized automation service, developing into subscription software.
-- Initial geography and currency: India; pricing examples use INR.
-- Original opportunity rating: **9/10**, a subjective judgment of build feasibility, customer access, recurring revenue, and automation potential.
-- Stage: proposed business; customer demand, pricing, and conversion improvements remain unvalidated.
-- Document date: 2026-11-04.
+Both capabilities are required. Each customer configures the product around its offerings, buyer types, operating geography, qualification rules, commercial authority, and conversion goals.
 
-## 1. The problem and the buying trigger
+**Positioning:** "Find relevant potential customers and manage the conversations that turn interest into business."
 
-A small studio may receive inquiries through its website, advertising, referrals, and direct messages. Its owner or salesperson must repeatedly acknowledge the inquiry, collect project details, suggest a consultation, remind the prospect, and update a spreadsheet.
+Working problem hypothesis: businesses spend staff time finding suitable buyers and keeping inquiries moving across fragmented sources and manual processes. Validate how often this happens, what they already use, and why the combined product would be worth paying for.
 
-The business hypothesis is that some studios lose opportunities or spend excessive staff time because this process is inconsistent. Interviews must establish whether the problem is frequent and valuable enough to justify a recurring fee.
+The subscription provides sales automation and bounded discovery capacity. Lead counts, appointments, orders, and revenue are outcomes to measure, without fixed-result guarantees.
 
-Likely buying triggers include a new advertising campaign, an employee leaving, growing inquiry volume, or an owner discovering that leads have received no follow-up. The best prospect already has inbound demand and wants a better process for handling it.
+Stage: proposed business. The product direction is defined; willingness to pay, source coverage, contact quality, operating costs, and repeatable customer value remain unvalidated. Initial delivery is operated by a solo founder with assisted onboarding. Exact prices and launch dates require pilot costing.
 
-The product does not create demand by itself. A business with almost no inquiries is a poor first customer.
+## 2. Customers and targeting
 
-## 2. First customer profile
+Support businesses across industries and geographies through configuration. Examples of buyer relationships include:
 
-Use these as prospecting filters to test, rather than established market facts:
+- A steel manufacturer seeking fabrication providers and other businesses that use its steel products.
+- A scissors manufacturer seeking barbers, tailors, stationery retailers, or other suitable buyers, depending on its actual product range.
+- A service provider seeking people or businesses with an explicit relevant requirement.
 
-- Owner-led interior design studios with approximately 2-10 employees.
-- Around 50-300 inbound inquiries a month, with enough activity to observe a pilot.
-- A defined service area, minimum project size, and consultation process.
-- An owner or sales coordinator who currently follows up manually.
-- A calendar and someone responsible for attending booked consultations.
-- Willingness to provide historical inquiry counts and record appointment outcomes.
+Business buyers include larger organizations, sole proprietors, business end users, and resellers. A barber purchasing work scissors is a business buyer. An individual purchasing for personal use is an individual consumer; consumer discovery is based on explicit public buying requests.
 
-The buyer is the owner. The daily user is the sales coordinator or designer. The end user is a person asking about an interior project.
+During onboarding, the customer confirms:
 
-Start with one service category and one city. Use familiar project questions, local service boundaries, and an appropriate communication style. Avoid launching as an automation platform for every industry.
+- Products or services, relevant specifications, minimum order requirements where applicable, and delivery or service constraints.
+- Buyer categories suggested by the product, with customer refinements and exclusions.
+- Its home market and any selected additional markets.
+- Qualification rules, approved business information, conversion goals, and commercial permissions.
+- Sales mailboxes, communication identities, team access, and human escalation contacts.
 
-## 3. The initial paid offer
+The home market is the customer's confirmed operating/service geography. Its address may suggest an initial setting, but the customer confirms where it can sell or deliver. Discovery prioritizes that market by default; selected and international markets are optional paid reach.
 
-Deliver a configured workflow, a simple lead inbox, appointment reminders, exception handling, and a weekly outcome report.
+## 3. Buyer and opportunity model
 
-Proposed offer wording:
+Use the terminology in [GLOSSARY.md](../GLOSSARY.md).
 
-> We connect your inquiry form to a follow-up and consultation-booking process. Your team sees who replied, who booked, and who needs personal attention. We maintain the workflow and report the results each week.
+Discovery identifies prospects. A prospect becomes an engaged lead when it directly inquires with the business or replies with buying interest. A public buying signal alone does not establish engagement with the subscribing business.
 
-Define success around response coverage, attended consultations, and staff time saved. Do not promise a specific number of sales or guaranteed revenue.
+Track distinct purchasing needs as separate opportunities linked to the buyer. Repeated messages about the same need belong to the same opportunity. For example, unrelated requests for steel sheets and pipes may be separate opportunities for one fabrication business.
 
-## 4. The customer journey
+Preserve the difference between:
 
-1. **Onboarding:** Record the studio's service area, minimum project requirements, opening hours, appointment types, approved answers, staff assignments, and escalation contact.
-2. **Lead capture:** Receive inquiries from one agreed source, initially a website form or a structured import with documented permission to contact.
-3. **Acknowledgment:** Send an approved acknowledgment through the selected channel and record its delivery status.
-4. **Qualification:** Collect location, property type, approximate budget range, project timeline, and preferred consultation format. Ask only unanswered questions.
-5. **Routing:** Apply owner-defined rules. Route suitable inquiries toward booking; send unclear or exceptional cases to a person.
-6. **Booking:** Offer available slots through an existing booking/calendar provider. Confirm only after that provider confirms the reservation.
-7. **Follow-up:** Send a bounded sequence when an eligible inquiry has not replied. Stop the current sequence when someone replies, books, opts out, or receives a manual handoff.
-8. **Reminders:** Send approved appointment reminders and provide a rescheduling path.
-9. **Outcome recording:** The studio marks whether the appointment happened and, later, whether the opportunity was won or lost.
-10. **Reporting:** Summarize eligible leads, replies, bookings, attended appointments, unresolved exceptions, and customer-recorded outcomes.
+- An evidence-backed match and a contactable prospect.
+- A buyer contact and a general business contact.
+- Contact availability, channel eligibility, customer approval, and actual engagement.
+- A booking request, confirmed appointment, attended appointment, quotation request, issued quote, and customer-recorded sale.
 
-Example: A prospect submits a form for a two-bedroom apartment project. The workflow confirms the service location, collects the timeline, and offers a consultation. A request for an unsupported location or a special commercial commitment goes to the studio.
+## 4. B — Prospect discovery
 
-## 5. What AI does, and what software controls
+### Discovery brief and execution
 
-| Responsibility | Proposed approach |
-| --- | --- |
-| Identify intent and extract project details | AI returns structured fields, backed by the original message. |
-| Draft a natural reply | AI uses approved business information and templates. |
-| Determine eligibility and routing | Explicit business rules, with a manual exception path. |
-| Decide when a message may be sent | Code checks permissions, channel rules, timing, and lead state. |
-| Check and reserve an appointment | Calendar/booking integration is authoritative. |
-| Count conversions and calculate reporting metrics | Database queries and deterministic calculations. |
-| Handle uncertain claims or commercial exceptions | Human handoff. |
+Each discovery brief captures the offering, product requirements, target buyer categories, geography, exclusions, and the kind of buyer/contact sought.
 
-AI should never invent prices, discounts, availability, guarantees, or details about completed projects. Reuse approved answers for routine questions. Treat incoming messages as customer content rather than instructions that can change the workflow.
+Run discovery on demand or through saved searches with a customer-selected schedule and usage allowance. Agents use approved web search tools, MCP connectors, and public-page retrieval within that brief and the source coverage available to the service.
 
-The goal is automated routine delivery with a visible exception queue. Onboarding, sales, monitoring, and relationship management remain real work.
+Use pooled workers by default, with isolated customer context for every run. Offer paid dedicated/reserved execution capacity where commercially justified. Dedicated capacity is an execution-resource option, not a separate requirement for keeping customer context private.
 
-## 6. MVP scope
+Every run has a visible resource/credit budget. When it reaches the limit, return the partial sourced results, completed work, spend/allowance used, and stop reason. Additional spend requires approval. Consolidate duplicate results across runs within the customer's workspace.
 
-### Include
+Maintain declared coverage by source, geography, and data type. Access conditions and available evidence determine which sources can be supported. Vendor and connector selection remains part of pilot costing and source validation.
 
-- One lead source, one messaging channel, and one booking integration.
-- A mobile-friendly lead inbox showing status, last activity, owner, and next action.
-- A small set of qualification rules and approved responses.
-- A fixed follow-up sequence with configurable delays and business hours.
-- Appointment confirmation, reminders, cancellation, and rescheduling events.
-- Manual pause, takeover, and opt-out controls.
-- Delivery/error tracking, duplicate prevention, and a weekly report.
-- Workspace separation, basic access roles, and an audit trail.
+### Two discovery sections
 
-For the first demonstration, a form and email workflow can establish the experience. Select the paid pilot's actual channel with the customer; if WhatsApp is required, complete its provider onboarding before promising an activation date.
+**Potential buyers:** public evidence supports fit with the customer's offering and geography. General product consumption, business activity, or expansion may support relevance without proving a present purchase request.
 
-### Defer
+**Open buying requests:** an explicit, dated request for a relevant product/service that the source still shows as open. Display the source, request date, relevant requirements, and deadline/status where available. Uncertain or expired status must be explicit and must not be counted as established open demand.
 
-Voice agents, a full CRM, custom calendar software, automatic project quoting, every social channel, complex lead scoring, and self-service onboarding for many industries.
+Consumer opportunities must remain tied to the relevant public buying request. A request's visibility supports discovery; sending eligibility is assessed separately.
 
-## 7. Messaging and operational boundaries
+### Evidence and contact quality
 
-WhatsApp requires recipient opt-in and approved templates to initiate conversations. Free-form replies are allowed within its 24-hour customer service window; outside it, approved templates are required. Automated responses must provide a clear escalation route. These are platform constraints, not optional product settings. [WhatsApp Business Messaging Policy](https://whatsappbusiness.com/policy/)
+Each match should expose:
 
-Record permission source and time, respect opt-outs immediately, and check channel eligibility again immediately before sending. Use the official platform or a supported provider. Include messaging/provider fees in the commercial agreement.
+- The prospect and why it fits the discovery brief.
+- Supporting source URLs and retrieval/check date.
+- Geography and relevant product/use evidence.
+- Contact classification: buyer contact, general business contact, or contact missing.
+- Whether a named person's buying responsibility is supported or remains unverified.
+- Buying-request status and uncertainty where relevant.
 
-If inbound-reply visibility fails, pause follow-ups and surface the problem. Otherwise a prospect could receive an irrelevant message after replying. Calendar outages should produce a booking request or handoff, never a fabricated confirmation.
+The target contact is the person responsible for purchasing or supplier selection: a procurement/purchase lead, another relevant buyer, or the owner.
 
-## 8. High-level product architecture
+Retain strong company matches when only a general mailbox, switchboard, or contact form is available. Clearly mark the missing buyer contact. Count evidence-backed matches separately from contactable prospects and report named-buyer coverage separately.
 
-Use a small web application with authentication, a relational database, a durable job queue, messaging and calendar adapters, and an AI API for bounded language tasks. A workflow tool can coordinate early integrations, while durable application records retain the authoritative lead and task state.
+## 5. A — Full inquiry and sales automation
 
-Core records:
+A handles direct incoming inquiries and conversations arising from B's approved outreach. It remains a full product capability, including:
 
-- Business/workspace, team members, business rules, and approved content.
-- Lead, consent record, conversation, and received/sent message events.
-- Workflow enrollment, scheduled action, delivery attempt, and exception.
-- Appointment, assigned staff member, and appointment outcome.
-- Opportunity outcome, subscription, usage totals, and audit event.
+- A shared sales inbox and opportunity pipeline.
+- Answers grounded in the customer's approved offerings, information, and policies.
+- Qualification that collects missing details and applies the customer's rules.
+- Follow-ups driven by the current conversation and opportunity state.
+- Booking or quotation-request workflows aligned to the chosen conversion goal.
+- Human takeover, assignment, activity history, and outcome reporting.
 
-Keep appointment status separate from sales status. A booked consultation is not a completed appointment or a won project.
+Commercial authority is configurable per customer. The customer decides whether the service may send listed prices, create custom quotations, grant discounts, or accept orders, and sets the associated limits. Commercial actions require approval until automatic permissions are explicitly enabled.
 
-Scheduled actions must recheck the current lead state before executing. Use stable identifiers to prevent duplicate messages when webhooks or jobs are retried. Keep credentials server-side, separate customer workspaces, and retain only information needed to provide the service.
+Check current permissions and authoritative business information before executing an action. Prices, availability, booking confirmations, and order commitments must be supported by the business's approved rules and systems. Cases outside that authority go to a person.
 
-## 9. Differentiation and competition
+For appointments, use customer-owned Google or Microsoft calendars through native integrations, with calendar access granted separately from email. The application owns availability, booking rules, holds, time zones, retries and conflict recovery; confirm only after the authoritative calendar event is created and recorded. Validate the supported personal/work account path before declaring a calendar ready. Quotation-request workflows remain native and do not require a calendar unless an appointment is requested.
 
-Generic CRM suites already offer timed follow-up sequences and can stop them on replies or bookings. HubSpot documents these capabilities. The opportunity therefore depends on a simpler buying experience, industry-specific setup, reliable operation, and useful reporting. [HubSpot sequence documentation](https://knowledge.hubspot.com/sequences/create-and-edit-sequences)
+Before first outreach to discovered prospects, the business approves the recipient set, initial messages, and bounded follow-up sequence: message content, timing, maximum attempts, and stop conditions.
 
-Proposed advantages to validate:
+A reply ends the unanswered-message sequence. An opt-out stops the applicable further outreach. A human takeover pauses automated messages across all channels for that opportunity until control is explicitly returned; other opportunities continue. Detect manual replies from connected mailboxes and supported WhatsApp app workflows.
 
-- A working interior-design consultation process delivered with the service.
-- Setup handled for the owner, including content and qualification rules.
-- A focused inbox rather than a broad CRM migration.
-- Reporting that distinguishes booked, attended, and customer-reported won outcomes.
-- Fast handling of exceptions and workflow failures.
+Recheck current opportunity state immediately before a scheduled action. Prevent duplicate sends on retries. If reply visibility fails, pause affected follow-ups and surface the issue. Keep human handoff and the next responsible person visible.
 
-AI-generated replies alone provide little differentiation. Repeatable onboarding, distribution partners, and trusted operating history could become more durable advantages.
+## 6. Email strategy
 
-## 10. Pricing hypotheses
+### Sender options and production policy
 
-These are proposed experiments, not verified market prices. Confirm channel/provider costs before quoting.
+Distinguish three setups:
 
-| Offer | Proposed price | Defined scope |
-| --- | --- | --- |
-| Paid pilot | INR 4,500 for 14 days | One source, one channel, one calendar, up to 75 new leads, agreed reporting. |
-| Setup | INR 10,000 once | Business rules, approved content, connection setup, and team training. |
-| Starter | INR 6,000/month | Up to 150 new leads, one location, one channel, two staff accounts. |
-| Growth | INR 10,000/month | Up to 500 new leads, more staff routing, and a monthly workflow review. |
+1. **Connected mailbox:** the business authorizes sending and synchronization of sales conversations through an existing mailbox.
+2. **Verified sending domain:** the business demonstrates control of a domain/subdomain and authorizes sending through it. Reply routing/capture is a separate setup requirement.
+3. **Service-provided address:** a business-specific address on a domain operated by the service.
 
-Quote messaging/provider usage separately or define an explicit allowance. Agree on overages before incurring them. Avoid unlimited custom changes and unlimited support. Start with a fixed subscription instead of performance-only billing, which would require reliable attribution and agreement on sales outcomes.
+First-contact prospecting requires a connected customer-controlled mailbox or verified customer sending domain. Service-provided addresses initially support trials, incoming inquiries, and existing conversations, with truthful business/platform identification.
 
-## 11. Illustrative economics
+B uses a dedicated outreach address per business, and its replies flow into A. The ordinary sales inbox can be connected separately. Customers can continue working in Gmail/Outlook while the service synchronizes relevant conversations and detects human replies.
 
-For one Starter customer, assume:
+Sending access and reading/synchronizing replies are distinct permissions. Domain verification alone does not connect an existing inbox. [Gmail permissions](https://developers.google.com/workspace/gmail/api/auth/scopes), [Microsoft mail integration](https://learn.microsoft.com/en-us/graph/api/resources/mail-api-overview?view=graph-rest-1.0), [domain verification](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html), [inbound email setup](https://docs.aws.amazon.com/ses/latest/dg/receiving-email-setting-up.html).
 
-| Monthly item | Illustrative amount |
-| --- | ---: |
-| Subscription revenue | INR 6,000 |
-| Messaging, workflow, and AI cost allowance | INR 800 |
-| Allocated hosting and monitoring | INR 250 |
-| Founder support: 2 hours valued at INR 500/hour | INR 1,000 |
-| Contribution after these costs | INR 3,950 |
+The customer explicitly selects the sales mailboxes or conversations A processes. Historical imports are optional. A connection does not automatically make the entire mailbox history part of the business context.
 
-This is a planning scenario, not a forecast. It excludes customer acquisition, shared administration, taxes, and unusual incidents. Treat setup revenue and onboarding labor separately. Measure actual usage and support time during pilots; a customer requiring extensive bespoke work may need a higher fee or a narrower scope.
+### Authenticity, sending health, and eligibility
 
-The customer's value case should use their contribution from incremental business and labor savings, rather than the full selling price of a project. Compare outcomes against a baseline and document attribution limits.
+Use accurate sender identity, authenticated domains, working reply handling, and the applicable receiver-provider requirements. Design for SPF, DKIM, and DMARC alignment, appropriate unsubscribe handling, suppression, and measured sender limits.
 
-## 12. Finding the first customers
+Monitor authentication, delivery failures, and recipient complaints. Authentication failure or excessive bounces/complaints pauses the affected sender's outbound automation and alerts the customer and service operator. Keep incoming mail and records available; resume sending after resolution.
 
-1. Identify 20 suitable studios in one city through business directories, referrals, and agency relationships.
-2. Hold discovery conversations with at least 10 owners or sales coordinators.
-3. Build a short demonstration with fictional inquiries and the studio's permitted public service information.
-4. Offer a bounded paid pilot to businesses with enough current inquiries and a responsible staff member.
-5. Record baseline handling time and follow-up coverage before activation.
-6. Review outcomes with the owner, then offer the monthly plan if it creates sufficient value.
+Inbox placement is controlled by recipient providers and reputation signals. A dedicated address/subdomain does not establish complete reputation isolation when infrastructure or parent-domain reputation is shared. [Google sender guidelines](https://support.google.com/mail/answer/81126?hl=en), [Google sender FAQ](https://support.google.com/mail/answer/14229414?hl=en), [Yahoo sender requirements](https://senders.yahooinc.com/best-practices/).
 
-Useful discovery questions: How many inquiries arrive each week? Who follows up? What happens after no reply? Which leads are unsuitable? How are appointments recorded? What would make a monthly fee worthwhile?
+Evaluate email eligibility separately from contact availability, paid reach, and customer approval. Consider destination, recipient type, message purpose, relevant permission/relationship evidence, sender identity, and opt-out state.
 
-Potential channel partners include website builders and advertising agencies serving interior design businesses. Any referral fee must be included in acquisition economics.
+Country and recipient-type differences matter: the FTC's guide covers US commercial email, including B2B; the ICO's published guidance distinguishes companies from sole traders and other individual subscribers. Supported-market policies require review before automated sending is enabled. [FTC guidance](https://www.ftc.gov/business-guidance/resources/can-spam-act-compliance-guide-business), [ICO guidance](https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/business-to-business-marketing/).
 
-## 13. First 30 days and validation gates
+## 7. Phone and WhatsApp
 
-| Period | Work | Evidence to collect |
-| --- | --- | --- |
-| Days 1-7 | Interviews, process mapping, and a demo | Repeated pain, current workflow, a decision-maker, and willingness to pay. |
-| Days 8-14 | Sell a pilot and configure the smallest working flow | A paying customer, agreed scope, approved messages, and baseline metrics. |
-| Days 15-28 | Run the pilot and inspect exceptions | Delivery reliability, replies, bookings, attendance, support time, and total cost. |
-| Days 29-30 | Review results and revise the offer | Renewal decision and a documented reason to continue, change niche, or stop. |
+Initial phone support is human-led calling with written notes, outcomes, and next actions. Autonomous AI voice calling is a separate optional later capability.
 
-The schedule is a target. Provider approval and customer readiness may change it. Low lead volume may require a longer measurement window, agreed in advance.
+Each customer controls its WhatsApp business identity and associated number. Offer connection of an existing number or assisted setup of a new customer-controlled number. Check the supported onboarding path before promising that an existing Business App workflow can be retained. Meta provides a specific coexistence path for eligible Business App onboarding. [Business onboarding](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/overview), [Business App coexistence](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users).
 
-Track eligible leads acknowledged, time to acknowledgment, qualification completion, appointments booked, appointments attended, opt-outs, delivery failures, operator minutes, and renewal. Separate automated acknowledgments from substantive responses.
+Use Meta Cloud API directly with each Business's own account/number and payment method. The Business pays Meta for messaging; our subscription covers the automation service. Show these charges separately in quotes, onboarding and usage views, without counting Meta's bill as included operator-paid credit. Platform/recipient permissions and messaging limits still apply. Provider approval and account/coexistence eligibility remain production prerequisites.
 
-Before live use, verify duplicate-event handling, opt-out suppression, stopping on replies, stale scheduled actions, time zones, calendar conflicts, provider failures, and workspace isolation. Proposed pilot targets include zero duplicate sends in checked flows and acknowledgment within five minutes for at least 95% of eligible leads under agreed operating conditions. These are engineering targets to validate, not established performance claims.
+Recipient permission and WhatsApp's messaging rules are separate from discovering a public number. Business-initiated messaging requires the appropriate approved templates and recipient opt-in. Ordinary replies are available within the 24-hour customer-service window; outside it, templates are required. Automated handling must provide a clear human escalation path. [WhatsApp messaging policy](https://business.whatsapp.com/policy).
 
-## 14. Main risks and decisions
+Number provisioning, customer control, and any transfer/portability conditions must be made clear during assisted setup. Email, telephone, and WhatsApp each need their own channel strategy and eligibility checks.
 
-- **Weak demand:** If owners do not see sufficient value, narrow the customer profile or change the offer before building more features.
-- **Poor-quality inquiries:** Qualification cannot repair the customer's advertising. Report source quality separately.
-- **Owner response delays:** Escalations need an accountable staff member and an agreed response process.
-- **Messaging cost or restrictions:** Price usage explicitly and maintain a clear fallback process.
-- **Unreliable attribution:** Do not represent every booked appointment as an incremental sale.
-- **Excessive customization:** Reuse one workflow and charge separately for material additions.
+## 8. Geographic reach, subscription, and billing
 
-Before implementation, choose the city, confirm the first communication channel and booking provider, define retention/deletion practices, and agree on pilot qualification rules. These decisions should follow customer discovery.
+Geographic subscriptions control B's discovery coverage and new-prospect campaigns. A continues handling incoming inquiries from any geography, subject to the applicable communication and action rules.
 
-## 15. Recommended next action
+Use one clear subscription quote combining:
 
-Create a five-minute demo showing one inquiry becoming a consultation and one unusual inquiry reaching a person. Use it to sell a paid pilot. Expand into a broader subscription product only after several customers can use substantially the same workflow with manageable support.
+- Selected geographic reach, with the customer's home market prioritized by default.
+- Included discovery and messaging-automation allowances, with customer-paid Meta messaging charges disclosed separately.
+- Optional dedicated/reserved discovery capacity.
+- Customer-approved upgrades or additional usage.
 
-## Sources and evidence limits
+Wider and narrower reach changes the subscription price. Price discovery and communication usage together with their operating costs; country count alone is not the complete model.
 
-Primary platform documentation was checked on 2026-11-04. Platform capabilities are documented above; niche selection, pricing, demand, cost allowances, and conversion benefits are business hypotheses. Recheck provider rules, API access, and current fees before implementation.
+Keep our subscription/usage charges separate from provider bills paid directly by the Business. In the selected WhatsApp arrangement, Meta charges are a customer expense, while our AI/infrastructure/automation usage remains part of our operating economics. Do not charge twice for the same Meta consumption or imply the subscription prepays Meta's bill.
 
-- [WhatsApp Business Messaging Policy](https://whatsappbusiness.com/policy/)
-- [HubSpot: Create and edit sequences](https://knowledge.hubspot.com/sequences/create-and-edit-sequences)
+Reach upgrades take effect immediately after the customer sees and approves the prorated charge. Reductions take effect at the next renewal. Retain previously discovered records and engaged conversations, and adjust future discovery permissions when the change takes effect.
+
+Paid international coverage does not establish permission to contact every discovered recipient. Sending eligibility remains a separate check.
+
+Sell platform subscriptions directly through a payment gateway, with the service operator as the seller. Implement billing and tax management as part of the application: Business billing profiles and tax identifiers/evidence, configurable tax rules and calculations, numbered invoices and credit notes, payment/refund/dispute records, subscription entitlements, and reconciliation from gross payment through fees/FX to bank settlement.
+
+The application also manages the operator's subscription-related tax registrations/obligations, reporting periods, due dates, liability reports, filing/remittance status, supporting documents, approvals and audit history. Support accounting/filing exports and record authoritative submissions/payment confirmations; automated external filing/remittance requires a supported jurisdiction and integration. Preserve issued invoice details and the tax rules/evidence used for each transaction; unknown treatment requires review rather than an assumed exemption.
+
+Keep platform-wide tax administration under platform-operator authority and each Business's billing records isolated. Gateway payment confirmation and recurring-payment state feed application-owned billing; the gateway does not replace the seller's invoice or tax responsibilities.
+
+Start with INR billing for Indian Businesses and USD billing for international Businesses, with other billing currencies added later. Use Razorpay as the initial gateway with recurring cards first; UPI AutoPay follows validation of its separate upgrade/new-mandate workflow. Cashfree remains a researched alternative if approval or terms are unsuitable. Determine the billing-country classification from confirmed Business billing details, separately from discovery geography. Processor settlement currency can differ from the customer invoice and must be reconciled explicitly.
+
+Exact plan amounts, allowance units, Razorpay activation/commercial terms, applicable jurisdiction rules, provider fees, filing integrations and detailed billing edge cases must be settled before commercial billing. Set prices and rollout dates after pilot costing; choosing INR/USD does not set price amounts or a customer exchange-rate policy.
+
+## 9. Onboarding and operating model
+
+Assist the first paid pilots with:
+
+1. Business offerings, buyer categories, home market, exclusions, qualification rules, and goals.
+2. Sender/mailbox connections, authentication, selected processing scope, and reply capture.
+3. WhatsApp identity/number onboarding where included.
+4. Commercial authority, recipient/message approvals, follow-up limits, and human ownership.
+5. Discovery briefs, schedules, geographic entitlements, and spend limits.
+6. A checked workflow for incoming messages, manual replies, opt-outs, retries, and handoffs.
+
+Introduce self-service onboarding after the setup process is repeatable. The customer's team owns business decisions and sales exceptions; the service operator owns platform operation and support.
+
+The high-level system needs customer configuration and access roles, durable prospect/opportunity/message records, an evidence store, a job queue, bounded discovery workers, channel adapters, application-owned subscription billing/tax management, reporting, and an audit trail. AI supports research, extraction, and language work; authoritative state and permissions control actions.
+
+Keep customer context and credentials isolated. Treat external web pages and incoming messages as evidence/content, with execution governed by the customer's approved configuration and platform controls.
+
+Use Exa Search + Contents through the MSA/executed-order route for discovery and source verification. The order must cover durable derived lead/contact facts, evidence URLs/dates/short excerpts, customer display/export and post-cancellation retention, with the actual data/commercial terms agreed before activation. Use minimal public/business-level queries and keep private mailbox/business context out of the external search payload unless supported by the applicable agreement. Initial monitoring uses provider-native logs plus app-owned audit, error/health records and budget alerts, with no separate monitoring subscription.
+
+## 10. Validation and rollout
+
+The first milestone is one business completing a paid pilot and renewing at a monthly price agreed before the pilot starts.
+
+Cost and scope that pilot around a real business, its offering, home/selected markets, source coverage, communication channels, observed inquiry volume, and conversion goal. Set numeric acceptance criteria before activation.
+
+Evaluate:
+
+- **Discovery:** product/geographic fit, evidence coverage, duplicate rate, named-buyer coverage, contact accuracy, open-request freshness, and cost per evidence-backed/contactable result.
+- **Inquiry handling:** response coverage/time, qualification, engaged conversations, chosen conversion-goal outcomes, handoffs, manual effort, and failure handling.
+- **Sending health:** delivery failures, complaints, opt-outs, suppression, and paused automation.
+- **Economics:** actual AI/search/tool, hosting, messaging, and provisioning costs; setup/support and founder sales time; payment costs; and contribution after the measured costs.
+- **Customer value:** outcomes and time saved relative to a baseline, followed by the paid renewal decision.
+
+Keep bookings, attended appointments, quotation requests, issued quotes, and sales outcomes distinct. Report attribution limits rather than treating every recorded outcome as incremental revenue.
+
+After the first paid renewal, test a materially different workflow before expanding onboarding. A supplier handling quotation requests and a service business handling appointments are example contrasting pilots. This tests configuration reuse while the product's intended market remains cross-industry.
+
+## 11. Assumptions and launch gates
+
+The main hypotheses are that customers value the combined A/B workflow, public sources provide enough relevant evidence and usable contacts, configuration is reusable across businesses, and subscription revenue can cover research, communication, setup, and support.
+
+Carry these as explicit decisions for pilot costing, onboarding, and the relevant production launch:
+
+- The first real customer, offering, search brief, conversion goal, and acceptance thresholds.
+- Founder weekly availability and cash budget; both remain unspecified.
+- Approved source/connector coverage, access conditions, refresh policy, and contact verification methods.
+- AI/search/email/telephony/payment providers, supported integrations, and actual operating costs.
+- Enabled outbound markets and their recipient/channel eligibility policies.
+- Exact INR/USD prices and allowances, Razorpay activation/fees and supported upgrade/mandate flows, configured tax jurisdictions/rules and filing integrations, and remaining entitlement edge cases.
+- Customer data access, retention/deletion, export, cancellation, number provisioning/transfer, and connection-offboarding policies.
+
+The design-session source checks establish relevant platform and policy constraints, not a universal launch approval. Recheck the chosen providers and supported markets before live use.
+
+**Next action:** choose one real pilot customer, collect its business context and baseline, verify source/channel coverage, and prepare a bounded pilot quote with the renewal price agreed upfront.

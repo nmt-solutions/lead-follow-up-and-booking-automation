@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Authentication feature and ownership comparison</title>
+<style>
+#auth-options{font-family:var(--font-sans);color:var(--foreground);display:grid;gap:16px}
+#auth-options .matrix{display:grid;gap:8px}
+#auth-options .matrix-row{display:grid;grid-template-columns:minmax(130px,1.05fr) repeat(3,minmax(0,1fr));gap:8px;align-items:stretch}
+#auth-options .row-label{display:flex;align-items:center;font-weight:500;overflow-wrap:anywhere}
+#auth-options .head-label{align-content:center;font-weight:500}
+#auth-options .cell{padding:16px;border-radius:var(--radius);display:grid;align-content:center;gap:4px;overflow-wrap:anywhere}
+#auth-options .managed{background:color-mix(in srgb,var(--success) 12%,transparent)}
+#auth-options .owned{background:color-mix(in srgb,var(--info) 12%,transparent)}
+#auth-options .limited{background:color-mix(in srgb,var(--warning) 12%,transparent)}
+#auth-options .value{font-weight:500}
+#auth-options .sub{color:var(--muted-foreground)}
+#auth-options .legend{display:flex;flex-wrap:wrap;gap:16px;color:var(--muted-foreground)}
+#auth-options .key{display:inline-flex;gap:6px;align-items:center}
+#auth-options .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+#auth-options .dot.managed{background:var(--success)}
+#auth-options .dot.owned{background:var(--info)}
+#auth-options .dot.limited{background:var(--warning)}
+#auth-options .detail{display:grid;gap:8px;padding-block:12px;border-block:1px solid var(--border)}
+#auth-options .detail h3{font-weight:500;margin:0}
+#auth-options p{margin:0}
+#auth-options .sources{display:flex;flex-wrap:wrap;gap:8px 16px}
+#auth-options a{color:var(--primary)}
+@media(max-width:520px){
+ #auth-options .matrix-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+ #auth-options .row-label{grid-column:1/-1;padding-top:8px}
+ #auth-options .head-label{display:none}
+}
+</style>
+</head>
+<body>
+<figure id="auth-options" style="margin:0" aria-label="Feature coverage and operating ownership: WorkOS AuthKit, Neon Managed Better Auth, and app-hosted Better Auth">
+ <div class="matrix" role="table" aria-label="Authentication options">
+  <div class="matrix-row" role="row">
+   <div class="head-label" role="columnheader">Capability</div>
+   <div role="columnheader"><button class="btn" type="button" data-provider="workos" aria-pressed="true">WorkOS<br>AuthKit</button></div>
+   <div role="columnheader"><button class="btn" type="button" data-provider="neon" aria-pressed="false">Neon<br>Managed Auth</button></div>
+   <div role="columnheader"><button class="btn" type="button" data-provider="better" aria-pressed="false">Better Auth<br>App-hosted</button></div>
+  </div>
+  <div class="matrix-row" role="row">
+   <div class="row-label" role="rowheader">Auth fee at pilot scale</div>
+   <div class="cell managed" role="cell"><span class="value">$0</span><span class="sub">Up to 1M MAU</span></div>
+   <div class="cell managed" role="cell"><span class="value">Included</span><span class="sub">1M MAU on paid project</span></div>
+   <div class="cell owned" role="cell"><span class="value">$0 license</span><span class="sub">MIT library</span></div>
+  </div>
+  <div class="matrix-row" role="row">
+   <div class="row-label" role="rowheader">Google / Microsoft login</div>
+   <div class="cell managed" role="cell"><span class="value">Included</span></div>
+   <div class="cell managed" role="cell"><span class="value">Included</span></div>
+   <div class="cell owned" role="cell"><span class="value">Library</span></div>
+  </div>
+  <div class="matrix-row" role="row">
+   <div class="row-label" role="rowheader">Organizations, invitations, roles</div>
+   <div class="cell managed" role="cell"><span class="value">Included</span><span class="sub">Org RBAC</span></div>
+   <div class="cell limited" role="cell"><span class="value">Beta</span><span class="sub">Fixed roles</span></div>
+   <div class="cell owned" role="cell"><span class="value">Plugin</span><span class="sub">Custom roles</span></div>
+  </div>
+  <div class="matrix-row" role="row">
+   <div class="row-label" role="rowheader">Multi-factor authentication</div>
+   <div class="cell managed" role="cell"><span class="value">Included</span></div>
+   <div class="cell limited" role="cell"><span class="value">Not yet</span></div>
+   <div class="cell owned" role="cell"><span class="value">Plugin</span></div>
+  </div>
+  <div class="matrix-row" role="row">
+   <div class="row-label" role="rowheader">Enterprise SSO</div>
+   <div class="cell managed" role="cell"><span class="value">$125/mo</span><span class="sub">Per connection</span></div>
+   <div class="cell limited" role="cell"><span class="value">Not verified</span></div>
+   <div class="cell owned" role="cell"><span class="value">MIT plugin</span><span class="sub">App-operated</span></div>
+  </div>
+  <div class="matrix-row" role="row">
+   <div class="row-label" role="rowheader">Directory provisioning</div>
+   <div class="cell managed" role="cell"><span class="value">$125/mo</span><span class="sub">Per connection</span></div>
+   <div class="cell limited" role="cell"><span class="value">Not verified</span></div>
+   <div class="cell owned" role="cell"><span class="value">SCIM plugin</span><span class="sub">App integration</span></div>
+  </div>
+  <div class="matrix-row" role="row">
+   <div class="row-label" role="rowheader">Auth server and updates</div>
+   <div class="cell managed" role="cell"><span class="value">WorkOS</span></div>
+   <div class="cell managed" role="cell"><span class="value">Neon</span></div>
+   <div class="cell owned" role="cell"><span class="value">Our app</span></div>
+  </div>
+ </div>
+ <div class="legend" aria-label="Color legend">
+  <span class="key"><span class="dot managed"></span>Managed</span>
+  <span class="key"><span class="dot owned"></span>App-operated</span>
+  <span class="key"><span class="dot limited"></span>Limited / unavailable / unverified</span>
+ </div>
+ <div class="detail" aria-live="polite">
+  <h3 id="auth-detail-title">WorkOS: production billing setup</h3>
+  <p id="auth-detail-text">A payment method is required for production, but basic B2B AuthKit can remain $0. Enterprise SSO and Directory Sync are separate paid products. Basic Google/Microsoft login is not an enterprise SSO connection.</p>
+  <div class="sources" id="auth-detail-links">
+   <a href="https://workos.com/docs/authkit/environments" target="_blank" rel="noreferrer">Production terms</a>
+   <a href="https://workos.com/pricing" target="_blank" rel="noreferrer">Pricing</a>
+  </div>
+ </div>
+ <p class="sub">Auth fees exclude hosting, database usage, email delivery, and engineering. Managed Neon Auth and app-hosted Better Auth are different operating models. Checked 5 Nov 2026.</p>
+ <div class="sources">
+  <a href="https://workos.com/docs/authkit/users-organizations" target="_blank" rel="noreferrer">WorkOS organizations</a>
+  <a href="https://neon.com/docs/auth/roadmap" target="_blank" rel="noreferrer">Neon feature status</a>
+  <a href="https://neon.com/docs/auth/guides/plugins/organization" target="_blank" rel="noreferrer">Neon organizations</a>
+  <a href="https://better-auth.com/docs/plugins/organization" target="_blank" rel="noreferrer">Better Auth organizations</a>
+  <a href="https://better-auth.com/docs/plugins/sso" target="_blank" rel="noreferrer">SSO plugin</a>
+  <a href="https://better-auth.com/docs/plugins/scim" target="_blank" rel="noreferrer">SCIM plugin</a>
+ </div>
+</figure>
+<script>
+(() => {
+ const root = document.getElementById("auth-options");
+ const data = {
+  workos: {
+   title: "WorkOS: production billing setup",
+   text: "A payment method is required for production, but basic B2B AuthKit can remain $0. Enterprise SSO and Directory Sync are separate paid products. Basic Google/Microsoft login is not an enterprise SSO connection.",
+   links: [["Production terms","https://workos.com/docs/authkit/environments"],["Pricing","https://workos.com/pricing"]]
+  },
+  neon: {
+   title: "Neon: managed service, limited organization plugin",
+   text: "Neon operates the auth server and stores auth data in your project. The service is GA; its organization plugin is beta with fixed roles, and MFA is not yet available. Production email/OAuth setup and application permissions remain ours.",
+   links: [["About Managed Better Auth","https://neon.com/docs/auth/about"],["Feature status","https://neon.com/docs/auth/roadmap"]]
+  },
+  better: {
+   title: "Better Auth: maintained library, operated by us",
+   text: "Run the library in Next.js with Neon. We own upgrades, schema changes, secrets, email callbacks, and shared production rate limits. MIT SSO/SCIM plugins provide protocols; managed self-service infrastructure is a separate optional product.",
+   links: [["Installation","https://better-auth.com/docs/installation"],["License","https://raw.githubusercontent.com/better-auth/better-auth/main/LICENSE.md"],["Rate-limit setup","https://better-auth.com/docs/concepts/rate-limit"]]
+  }
+ };
+ function select(key, save) {
+  if (!data[key]) key = "workos";
+  const item = data[key];
+  root.querySelectorAll("[data-provider]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.provider === key)));
+  root.querySelector("#auth-detail-title").textContent = item.title;
+  root.querySelector("#auth-detail-text").textContent = item.text;
+  const links = root.querySelector("#auth-detail-links");
+  links.replaceChildren(...item.links.map(([label, href]) => {
+   const link = document.createElement("a");
+   link.textContent = label;
+   link.href = href;
+   link.target = "_blank";
+   link.rel = "noreferrer";
+   return link;
+  }));
+  if (save && window.openai && typeof window.openai.setWidgetState === "function") {
+   window.openai.setWidgetState({modelContent:null,privateContent:{focusedAuthOption:key}}).catch(() => {});
+  }
+ }
+ const saved = window.openai && window.openai.widgetState;
+ select(saved && saved.privateContent && saved.privateContent.focusedAuthOption, false);
+ root.querySelectorAll("[data-provider]").forEach(button => button.addEventListener("click", () => select(button.dataset.provider, true)));
+ window.addEventListener("openai:set_globals", event => {
+  const savedState = event.detail && event.detail.globals && event.detail.globals.widgetState;
+  if (savedState && savedState.privateContent) select(savedState.privateContent.focusedAuthOption, false);
+ });
+})();
+</script>
+</body>
+</html>

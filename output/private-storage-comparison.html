@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Private storage comparison</title>
+<style>
+html, body { background: transparent; }
+#private-storage { display: grid; gap: 12px; }
+#private-storage h2, #private-storage p { margin: 0; }
+#private-storage .chart { width: 100%; height: 280px; display: block; }
+#private-storage .chart text { fill: var(--foreground); font-size: 12px; font-family: var(--font-sans); }
+#private-storage .chart .bar { fill: var(--chart-1); }
+#private-storage .chart .axis { stroke: var(--border); stroke-width: 1; }
+#private-storage .caption { color: var(--muted-foreground); }
+#private-storage a { color: var(--foreground); text-underline-offset: 3px; }
+#private-storage .sources { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+</style>
+</head>
+<body>
+<figure id="private-storage" style="margin:0">
+  <div>
+    <h2>Private storage at 100 GB</h2>
+    <p class="caption text-small">One month | USD list rates | checked November 5, 2026</p>
+  </div>
+  <svg class="chart" role="img" aria-labelledby="storage-title storage-desc">
+    <title id="storage-title">Monthly storage or plan subtotal for 100 GB</title>
+    <desc id="storage-desc">R2 Standard: $1.35 after its 10 GB monthly storage allowance. S3 Standard N. Virginia: $2.30. Vercel Blob: $2.30 before shared Pro credits. UploadThing private plan: $10, including its managed upload workflow. Requests, transfers, taxes and other services are excluded; these offerings do not include identical features.</desc>
+  </svg>
+  <figcaption class="caption text-small">Storage/plan subtotal only. R2 includes its account's 10 GB allowance; Blob is before shared Pro credits. Requests, transfer, taxes and other services excluded. UploadThing includes a managed upload workflow.</figcaption>
+  <div class="sources text-small" aria-label="Official price sources">
+    <a href="https://developers.cloudflare.com/r2/pricing/" target="_blank" rel="noreferrer">R2 pricing</a>
+    <a href="https://aws.amazon.com/s3/pricing/" target="_blank" rel="noreferrer">S3 pricing</a>
+    <a href="https://vercel.com/docs/vercel-blob/usage-and-pricing" target="_blank" rel="noreferrer">Blob pricing</a>
+    <a href="https://uploadthing.com/" target="_blank" rel="noreferrer">UploadThing pricing</a>
+  </div>
+</figure>
+<script>
+(() => {
+  const root = document.getElementById('private-storage');
+  const svg = root.querySelector('.chart');
+  const rows = [
+    {name: 'R2 Standard', value: 1.35},
+    {name: 'S3 Standard', value: 2.30},
+    {name: 'Vercel Blob', value: 2.30},
+    {name: 'UploadThing', value: 10.00}
+  ];
+  const ns = 'http://www.w3.org/2000/svg';
+  const add = (tag, attributes, label) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    if (label !== undefined) node.textContent = label;
+    svg.appendChild(node);
+    return node;
+  };
+  const draw = () => {
+    svg.querySelectorAll('[data-drawn]').forEach(node => node.remove());
+    const width = svg.getBoundingClientRect().width;
+    const height = 280;
+    const left = 122;
+    const right = 44;
+    const top = 32;
+    const bottom = 224;
+    const span = Math.max(70, width - left - right);
+    const max = Math.max(...rows.map(row => row.value));
+    const x = value => left + value / max * span;
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    add('line', {'data-drawn': '', x1: left, x2: x(max), y1: bottom, y2: bottom, class: 'axis'});
+    [0, max / 2, max].forEach(value => {
+      add('line', {'data-drawn': '', x1: x(value), x2: x(value), y1: bottom, y2: bottom + 5, class: 'axis'});
+      add('text', {'data-drawn': '', x: x(value), y: bottom + 20, 'text-anchor': 'middle'}, String(value));
+    });
+    add('text', {'data-drawn': '', x: left - 12, y: 16, 'text-anchor': 'end', class: 'axis-title', 'data-axis': 'y'}, 'Service');
+    add('text', {'data-drawn': '', x: left + span / 2, y: 270, 'text-anchor': 'middle', class: 'axis-title', 'data-axis': 'x'}, 'USD / month');
+    rows.forEach((row, index) => {
+      const y = top + index * 47;
+      add('text', {'data-drawn': '', x: left - 12, y: y + 17, 'text-anchor': 'end'}, row.name);
+      add('rect', {'data-drawn': '', x: left, y, width: x(row.value) - left, height: 26, class: 'bar'});
+      add('text', {'data-drawn': '', x: x(row.value) + 7, y: y + 17}, '$' + row.value.toFixed(2));
+    });
+  };
+  new ResizeObserver(draw).observe(svg);
+  draw();
+})();
+</script>
+</body>
+</html>
