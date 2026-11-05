@@ -53,19 +53,17 @@ export function createKnowledgeRepository(
                 ? latest?.configuration
                 : state.current?.configuration;
           if (!configuration) throw new ApplicationError("CONFLICT");
-          await tx
-            .insert(knowledgeRevision)
-            .values({
-              id: randomUUID(),
-              businessId,
-              version: state.version + 1,
-              action,
-              configuration,
-              actorId: actor.userId,
-              actorName: await actorName(tx, actor.userId),
-              at,
-              note: input.note,
-            });
+          await tx.insert(knowledgeRevision).values({
+            id: randomUUID(),
+            businessId,
+            version: state.version + 1,
+            action,
+            configuration,
+            actorId: actor.userId,
+            actorName: await actorName(tx, actor.userId),
+            at,
+            note: input.note,
+          });
           return read(tx, businessId, true);
         },
         { lock: true },
