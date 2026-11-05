@@ -70,6 +70,7 @@ describe("Bounded discovery at the primary application seam", () => {
   };
   let application: ReturnType<typeof createDiscoveryApplication<Headers>>;
   let behavior: Partial<DiscoveryProvider> = {};
+  let queueFailure = false;
   let afterWorkAuthorization: (() => Promise<void>) | undefined;
   const request = (budget = 5) => ({
     markets: [configuration.homeMarket],
@@ -81,6 +82,8 @@ describe("Bounded discovery at the primary application seam", () => {
   const execute = () => application.execute(queued.at(-1));
   beforeEach(() => {
     behavior = {};
+    queueFailure = false;
+    harness.invitations.sent.length = 0;
     afterWorkAuthorization = undefined;
     searches.length = 0;
     reviews.length = 0;
@@ -105,6 +108,7 @@ describe("Bounded discovery at the primary application seam", () => {
       queue: {
         async enqueue(job) {
           queued.push(job);
+          if (queueFailure) throw new Error("sensitive-queue-timeout");
         },
       },
       provider: {
@@ -1591,6 +1595,107 @@ describe("Bounded discovery at the primary application seam", () => {
     expect(reviews).toHaveLength(1);
   });
 
+  it("separately approves bounded extra units and resumes only unfinished reviews with retained identities and audit", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) =>
+      ["about", "suppliers"].map((page) => ({
+        name: "Hudson Fabrication",
+        market: input.market,
+        url: `https://fabricator.example/${page}`,
+        excerpt:
+          "We fabricate galvanized steel sheet to ASTM A653. Hudson Fabrication: https://fabricator.example/",
+      }));
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Steel fabrication",
+      evidenceQuote: "fabricate galvanized steel sheet to ASTM A653",
+      uncertainty: "Timing unknown",
+      request: null,
+      company: {
+        name: "Hudson Fabrication",
+        website: "https://fabricator.example/",
+        quote: "Hudson Fabrication: https://fabricator.example/",
+      },
+    });
+    const started = await application.start(owner, business.id, request(3));
+    await execute();
+    const before = (await application.workspace(owner, business.id)).runs[0];
+    expect(before).toMatchObject({
+      status: "stopped",
+      consumed: 3,
+      reserved: 0,
+      remaining: 0,
+      resumable: true,
+    });
+    const approval = {
+      runId: started.id,
+      budget: 5,
+      expectedBudget: 3,
+      confirmExtraUsage: true,
+      requestKey: crypto.randomUUID(),
+    };
+    await Promise.all([
+      application.approveAllowance(owner, business.id, approval),
+      application.approveAllowance(owner, business.id, approval),
+    ]);
+    expect(queued).toHaveLength(1);
+    harness.clock.set("2026-11-05T10:00:00Z");
+    const resume = {
+      runId: started.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    };
+    await Promise.all([
+      application.resume(owner, business.id, resume),
+      application.resume(owner, business.id, resume),
+    ]);
+    const work = queued.at(-1)!;
+    await Promise.all([application.execute(work), application.execute(work)]);
+    await application.execute(queued[0]);
+    await application.stopWorker(queued[0]);
+    await harness.reapplySchema();
+    const after = await application.workspace(owner, business.id);
+    expect(after.runs[0]).toMatchObject({
+      id: started.id,
+      budget: 5,
+      used: 4,
+      consumed: 4,
+      reserved: 0,
+      remaining: 1,
+      status: "completed",
+      completedSteps: 1,
+      attempt: 1,
+      counts: { evidenceBacked: 1 },
+      consolidation: {
+        rawResults: 2,
+        matchedObservations: 2,
+        created: 1,
+        duplicates: 1,
+      },
+    });
+    expect(after.runs[0].prospects[0].id).toBe(before.prospects[0].id);
+    expect(after.runs[0].audit).toMatchObject([
+      {
+        action: "increase",
+        actorId: before.createdBy,
+        budgetBefore: 3,
+        budgetAfter: 5,
+        stopReason: "budget_exhausted",
+      },
+      {
+        action: "resume",
+        actorId: before.createdBy,
+        budgetBefore: 5,
+        budgetAfter: 5,
+        at: "2026-11-05T10:00:00.000Z",
+      },
+    ]);
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(2);
+    expect(discoveryWorkspaceSchema.safeParse(after).success).toBe(true);
+  });
+
   it("arbitrates concurrent provider reservations in PostgreSQL without exceeding initial allowance", async () => {
     const { owner, business } = await setup({
       buyerCategories: [
@@ -1611,6 +1716,554 @@ describe("Bounded discovery at the primary application seam", () => {
     expect(searches).toHaveLength(1);
     expect(reviews).toHaveLength(1);
     expect(run.prospects).toHaveLength(1);
+  });
+
+  it("enforces current approver scope, MFA, bounded validation and safe HTTP command diagnostics", async () => {
+    const { owner, business } = await setup();
+    const started = await application.start(owner, business.id, request(2));
+    await execute();
+    const http = createDiscoveryHttp({
+      application,
+      origin: "http://localhost:3000",
+      reportFailure: (d) => harness.diagnostics.push(d),
+    });
+    const approval = {
+      runId: started.id,
+      budget: 5,
+      expectedBudget: 2,
+      confirmExtraUsage: true,
+      requestKey: crypto.randomUUID(),
+    };
+    const resume = {
+      runId: started.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    };
+    const post = (
+      headers: Headers,
+      input: unknown,
+      origin = "http://localhost:3000",
+    ) =>
+      new Request("http://localhost:3000/api/discovery", {
+        method: "POST",
+        headers: new Headers([
+          ...headers,
+          ["origin", origin],
+          ["content-type", "application/json"],
+        ]),
+        body: JSON.stringify(input),
+      });
+    expect(
+      (await http.approveAllowance(post(new Headers(), approval), business.id))
+        .status,
+    ).toBe(401);
+    const outsider = await harness.signIn(
+      `outsider-${crypto.randomUUID()}@example.com`,
+    );
+    expect(
+      (await http.approveAllowance(post(outsider, approval), business.id))
+        .status,
+    ).toBe(404);
+    expect(
+      (await http.resume(post(outsider, resume), business.id)).status,
+    ).toBe(404);
+    const other = await setup();
+    expect(
+      (
+        await http.approveAllowance(
+          post(other.owner, approval),
+          other.business.id,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (await http.resume(post(other.owner, resume), other.business.id)).status,
+    ).toBe(404);
+    expect(
+      (
+        await http.get(
+          new Request("http://localhost:3000", { headers: other.owner }),
+          business.id,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await http.approveAllowance(
+          post(owner, { ...approval, budget: 13 }),
+          business.id,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await http.approveAllowance(
+          post(owner, { ...approval, budget: 1 }),
+          business.id,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await http.approveAllowance(
+          post(owner, { ...approval, confirmExtraUsage: false }),
+          business.id,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await http.approveAllowance(
+          post(owner, { ...approval, budget: "5", userId: "forged" }),
+          business.id,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await http.approveAllowance(
+          post(owner, approval, "https://attacker.example"),
+          business.id,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await http.resume(
+          post(owner, { ...resume, confirmResume: false }),
+          business.id,
+        )
+      ).status,
+    ).toBe(400);
+    const identity = await harness.auth.api.getSession({ headers: owner });
+    const unverified = await harness.signIn(identity!.user.email, false);
+    expect(
+      (await http.approveAllowance(post(unverified, approval), business.id))
+        .status,
+    ).toBe(403);
+    expect(
+      (await http.resume(post(unverified, resume), business.id)).status,
+    ).toBe(403);
+    await harness.team.invite(owner, business.id, {
+      email: `sales-${business.id}@example.com`,
+      role: "salesperson",
+    });
+    const invitation = harness.invitations.sent.at(-1)!;
+    const sales = await harness.signIn(`sales-${business.id}@example.com`);
+    await harness.team.accept(sales, {
+      token: new URLSearchParams(new URL(invitation.url).hash.slice(1)).get(
+        "token",
+      ),
+    });
+    expect(
+      (await http.approveAllowance(post(sales, approval), business.id)).status,
+    ).toBe(403);
+    expect((await http.resume(post(sales, resume), business.id)).status).toBe(
+      403,
+    );
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({ budget: 2, audit: [], attempt: 0 });
+    expect(
+      (await http.approveAllowance(post(owner, approval), business.id)).status,
+    ).toBe(200);
+    expect((await http.resume(post(owner, resume), business.id)).status).toBe(
+      202,
+    );
+    await harness.admin.query(
+      "update session set mfa_verified_at = null where id = $1",
+      [queued.at(-1)!.sessionId],
+    );
+    expect(
+      (await http.approveAllowance(post(owner, approval), business.id)).status,
+    ).toBe(403);
+    expect((await http.resume(post(owner, resume), business.id)).status).toBe(
+      403,
+    );
+    expect(await execute()).toEqual({ outcome: "authorization_revoked" });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(0);
+    expect(JSON.stringify(harness.diagnostics)).not.toMatch(
+      /cookie|secret|sessionId|executionKey/,
+    );
+  });
+
+  it("charges failed work once per explicit attempt and retries only the failed step from remaining allowance", async () => {
+    const { owner, business } = await setup();
+    let fail = true;
+    behavior.review = async () => {
+      if (fail) throw new DiscoveryProviderFailure("unavailable");
+      return {
+        relevant: true,
+        reason: "Steel fit",
+        evidenceQuote: "fabricate galvanized steel sheet",
+        uncertainty: "Timing unknown",
+        request: null,
+      };
+    };
+    const started = await application.start(owner, business.id, request(5));
+    expect(await execute()).toEqual({ outcome: "provider_unavailable" });
+    await execute();
+    expect(reviews).toHaveLength(1);
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      consumed: 3,
+      reserved: 0,
+      remaining: 2,
+      usage: [{ outcome: "succeeded" }, { outcome: "failed" }],
+    });
+    fail = false;
+    await application.resume(owner, business.id, {
+      runId: started.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    });
+    await Promise.all([execute(), execute(), execute()]);
+    const run = (await application.workspace(owner, business.id)).runs[0];
+    expect(run).toMatchObject({
+      budget: 5,
+      used: 4,
+      consumed: 4,
+      reserved: 0,
+      remaining: 1,
+      status: "completed",
+      consolidation: { rawResults: 1, matchedObservations: 1 },
+      usage: [
+        { outcome: "succeeded", units: 2 },
+        { outcome: "failed", units: 1 },
+        { outcome: "succeeded", units: 1 },
+      ],
+    });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(2);
+    expect(new Set(reviews.map((r) => r.operationId)).size).toBe(2);
+    await expect(
+      application.resume(owner, business.id, {
+        runId: started.id,
+        expectedAttempt: 1,
+        confirmResume: true,
+        requestKey: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("settles cancellation as uncertain, never silently restarts it and ignores an old worker after explicit recovery", async () => {
+    const { owner, business } = await setup();
+    let entered!: () => void;
+    let release!: () => void;
+    const inReview = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    behavior.review = async () => {
+      entered();
+      await wait;
+      return {
+        relevant: true,
+        reason: "Fit",
+        evidenceQuote: "fabricate galvanized steel sheet",
+        uncertainty: "Unknown",
+        request: null,
+      };
+    };
+    const started = await application.start(owner, business.id, request(5));
+    const oldWork = queued[0];
+    const running = execute();
+    await inReview;
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({ consumed: 2, reserved: 1, remaining: 2 });
+    const cancel = {
+      runId: started.id,
+      expectedAttempt: 0,
+      requestKey: crypto.randomUUID(),
+    };
+    await Promise.all([
+      application.cancel(owner, business.id, cancel),
+      application.cancel(owner, business.id, cancel),
+    ]);
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      stopReason: "cancelled",
+      consumed: 3,
+      reserved: 0,
+      remaining: 2,
+      usage: [{ outcome: "succeeded" }, { outcome: "uncertain" }],
+      audit: [{ action: "cancel" }],
+    });
+    await execute();
+    expect(reviews).toHaveLength(1);
+    release();
+    await running;
+    expect(
+      (await application.workspace(owner, business.id)).runs[0].stopReason,
+    ).toBe("cancelled");
+    behavior = {};
+    await application.resume(owner, business.id, {
+      runId: started.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    });
+    await application.stopWorker(oldWork, "interrupted");
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      status: "completed",
+      consumed: 4,
+      reserved: 0,
+      remaining: 1,
+      counts: { evidenceBacked: 1 },
+    });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(2);
+  });
+
+  it("arbitrates competing increases and resumed workers without multiplying the run allowance", async () => {
+    const buyers = ["Fabricators", "Builders", "Retailers"].map((label) => ({
+      ...configuration.buyerCategories[0],
+      label,
+    }));
+    const { owner, business } = await setup({ buyerCategories: buyers });
+    const started = await application.start(owner, business.id, request(2));
+    await execute();
+    const approval = {
+      runId: started.id,
+      expectedBudget: 2,
+      budget: 5,
+      confirmExtraUsage: true,
+    };
+    const approvals = await Promise.allSettled([
+      application.approveAllowance(owner, business.id, {
+        ...approval,
+        requestKey: crypto.randomUUID(),
+      }),
+      application.approveAllowance(owner, business.id, {
+        ...approval,
+        requestKey: crypto.randomUUID(),
+      }),
+    ]);
+    expect(approvals.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(approvals.filter((r) => r.status === "rejected")).toMatchObject([
+      { reason: { code: "CONFLICT" } },
+    ]);
+    const resumes = await Promise.allSettled(
+      [0, 1].map(() =>
+        application.resume(owner, business.id, {
+          runId: started.id,
+          expectedAttempt: 0,
+          confirmResume: true,
+          requestKey: crypto.randomUUID(),
+        }),
+      ),
+    );
+    expect(resumes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    await Promise.all([execute(), execute(), execute()]);
+    const run = (await application.workspace(owner, business.id)).runs[0];
+    expect(run).toMatchObject({
+      budget: 5,
+      consumed: 5,
+      reserved: 0,
+      remaining: 0,
+      attempt: 1,
+      stopReason: "budget_exhausted",
+    });
+    expect(run.usage.reduce((sum, u) => sum + u.units, 0)).toBe(5);
+    expect(searches.length * 2 + reviews.length).toBe(5);
+    expect(new Set(run.usage.map((u) => u.id)).size).toBe(run.usage.length);
+    expect(run.audit).toHaveLength(2);
+  });
+
+  it("lets a current verified Admin resume under their own identity and rechecks revoked membership", async () => {
+    const { owner, business } = await setup();
+    const started = await application.start(owner, business.id, request(2));
+    await execute();
+    const email = `admin-${business.id}@example.com`;
+    await harness.team.invite(owner, business.id, { email, role: "admin" });
+    const invitation = harness.invitations.sent.at(-1)!;
+    const admin = await harness.signIn(email);
+    await harness.team.accept(admin, {
+      token: new URLSearchParams(new URL(invitation.url).hash.slice(1)).get(
+        "token",
+      ),
+    });
+    const actor = await harness.authenticate(admin);
+    await application.approveAllowance(admin, business.id, {
+      runId: started.id,
+      expectedBudget: 2,
+      budget: 5,
+      confirmExtraUsage: true,
+      requestKey: crypto.randomUUID(),
+    });
+    const resume = {
+      runId: started.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    };
+    await application.resume(admin, business.id, resume);
+    expect(queued.at(-1)!.userId).toBe(actor.userId);
+    await harness.team.removeMember(owner, business.id, {
+      userId: actor.userId,
+    });
+    await expect(
+      application.resume(admin, business.id, resume),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await execute()).toEqual({ outcome: "authorization_revoked" });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(0);
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      createdBy: expect.any(String),
+      audit: [{ actorId: actor.userId }, { actorId: actor.userId }],
+    });
+  });
+
+  it("keeps interrupted search usage consumed and requires a new explicit attempt before another external call", async () => {
+    const { owner, business } = await setup();
+    let entered!: () => void;
+    const inSearch = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let joined = false;
+    behavior.search = async (input) =>
+      new Promise((_, reject) => {
+        entered();
+        input.signal.addEventListener(
+          "abort",
+          () => {
+            joined = true;
+            reject(input.signal.reason);
+          },
+          { once: true },
+        );
+      });
+    const started = await application.start(owner, business.id, request(7));
+    const controller = new AbortController();
+    const running = application.execute(queued[0], {
+      signal: controller.signal,
+    });
+    await inSearch;
+    controller.abort();
+    expect(await running).toEqual({ outcome: "interrupted" });
+    expect(joined).toBe(true);
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      consumed: 2,
+      reserved: 0,
+      remaining: 5,
+      usage: [{ outcome: "uncertain" }],
+    });
+    await execute();
+    expect(searches).toHaveLength(1);
+    behavior = {};
+    await application.resume(owner, business.id, {
+      runId: started.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    });
+    await Promise.all([execute(), execute()]);
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      status: "completed",
+      consumed: 5,
+      reserved: 0,
+      remaining: 2,
+      counts: { evidenceBacked: 1 },
+    });
+    expect(searches).toHaveLength(2);
+    expect(reviews).toHaveLength(1);
+  });
+
+  it("recovers an ambiguous queue submission only through a new explicit resume and rejects stale or changed approvals", async () => {
+    const { owner, business } = await setup();
+    queueFailure = true;
+    const input = request(5);
+    await expect(
+      application.start(owner, business.id, input),
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    const before = (await application.workspace(owner, business.id)).runs[0];
+    expect(before).toMatchObject({
+      stopReason: "queue_unavailable",
+      consumed: 0,
+      reserved: 0,
+      remaining: 5,
+    });
+    queueFailure = false;
+    await application.start(owner, business.id, input);
+    expect(queued).toHaveLength(1);
+    const resume = {
+      runId: before.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    };
+    await application.resume(owner, business.id, resume);
+    await application.execute(queued[0]);
+    await execute();
+    const run = (await application.workspace(owner, business.id)).runs[0];
+    expect(run).toMatchObject({ status: "completed", consumed: 3, attempt: 1 });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+    await expect(
+      application.resume(owner, business.id, { ...resume, expectedAttempt: 1 }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(JSON.stringify(run)).not.toMatch(
+      /executionKey|sessionId|sensitive-queue/,
+    );
+  });
+
+  it("rejects expired approval assurance and changed targeting without rewriting the stopped run", async () => {
+    const { owner, business } = await setup();
+    const started = await application.start(owner, business.id, request(2));
+    await execute();
+    const approval = {
+      runId: started.id,
+      expectedBudget: 2,
+      budget: 5,
+      confirmExtraUsage: true,
+      requestKey: crypto.randomUUID(),
+    };
+    const resume = {
+      runId: started.id,
+      expectedAttempt: 0,
+      confirmResume: true,
+      requestKey: crypto.randomUUID(),
+    };
+    harness.clock.set("2026-11-05T21:00:00Z");
+    await expect(
+      application.approveAllowance(owner, business.id, approval),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    await expect(
+      application.resume(owner, business.id, resume),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    harness.clock.set("2026-11-05T10:00:00Z");
+    await harness.application.saveConfiguration(owner, business.id, {
+      ...configuration,
+      exclusions: ["Changed scope"],
+    });
+    await expect(
+      application.approveAllowance(owner, business.id, approval),
+    ).rejects.toMatchObject({ code: "DISCOVERY_SCOPE_INVALID" });
+    await expect(
+      application.resume(owner, business.id, resume),
+    ).rejects.toMatchObject({ code: "DISCOVERY_SCOPE_INVALID" });
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({ budget: 2, consumed: 2, audit: [], attempt: 0 });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(0);
   });
 
   it("keeps prior completed work and classifies expected provider failures without leaking payloads", async () => {

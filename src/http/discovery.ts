@@ -10,7 +10,23 @@ export function createDiscoveryHttp(options: {
 }) {
   const respond = createResponder(options.reportFailure);
   const body = createJsonBodyReader(options.origin, 16384);
+  const command =
+    (action: "approveAllowance" | "resume" | "cancel", status: number) =>
+    (request: Request, id: string) =>
+      respond(async () =>
+        dataResponse(
+          await options.application[action](
+            request.headers,
+            id,
+            await body(request),
+          ),
+          status,
+        ),
+      );
   return {
+    approveAllowance: command("approveAllowance", 200),
+    resume: command("resume", 202),
+    cancel: command("cancel", 200),
     get: (request: Request, id: string) =>
       respond(async () =>
         dataResponse(await options.application.workspace(request.headers, id)),

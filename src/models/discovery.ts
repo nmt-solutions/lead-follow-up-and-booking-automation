@@ -39,6 +39,52 @@ export const startDiscoverySchema = z.strictObject({
   requestKey: z.uuid(),
 });
 export type StartDiscovery = z.infer<typeof startDiscoverySchema>;
+export const allowanceApprovalSchema = z.strictObject({
+  runId: z.uuid(),
+  requestKey: z.uuid(),
+  expectedBudget: units,
+  budget: units,
+  confirmExtraUsage: z.literal(true),
+});
+export const resumeDiscoverySchema = z.strictObject({
+  runId: z.uuid(),
+  requestKey: z.uuid(),
+  expectedAttempt: z.number().int().nonnegative(),
+  confirmResume: z.literal(true),
+});
+export const cancelDiscoverySchema = z.strictObject({
+  runId: z.uuid(),
+  requestKey: z.uuid(),
+  expectedAttempt: z.number().int().nonnegative(),
+});
+export type DiscoveryCommand =
+  | ({ action: "increase" } & z.infer<typeof allowanceApprovalSchema>)
+  | ({ action: "resume" } & z.infer<typeof resumeDiscoverySchema>)
+  | ({ action: "cancel" } & z.infer<typeof cancelDiscoverySchema>);
+const stopReasonSchema = z.enum([
+  "completed",
+  "budget_exhausted",
+  "provider_unavailable",
+  "provider_rate_limited",
+  "provider_permission_denied",
+  "invalid_provider_response",
+  "interrupted",
+  "defect",
+  "authorization_revoked",
+  "configuration_changed",
+  "queue_unavailable",
+  "worker_lost",
+  "cancelled",
+]);
+export const discoveryAuditSchema = z.strictObject({
+  id: z.uuid(),
+  action: z.enum(["increase", "resume", "cancel"]),
+  actorId: z.string(),
+  budgetBefore: units,
+  budgetAfter: units,
+  stopReason: stopReasonSchema.nullable(),
+  at: z.iso.datetime(),
+});
 export const workSchema = z.strictObject({
   businessId: z.uuid(),
   runId: z.uuid(),
@@ -196,7 +242,8 @@ export type StopReason =
   | "authorization_revoked"
   | "configuration_changed"
   | "queue_unavailable"
-  | "worker_lost";
+  | "worker_lost"
+  | "cancelled";
 // Defaults read #10 snapshots conservatively; no backfilled role/currentness claims.
 export const persistedProspectSchema = z.strictObject({
   name: text,
@@ -286,6 +333,9 @@ export type DiscoveryRun = {
   sessionId: string;
   requestKey: string;
   executionId: string | null;
+  executionUserId: string | null;
+  attempt: number;
+  completedSearchKeys: string[];
   status: RunStatus;
   stopReason: StopReason | null;
   budget: number;
@@ -297,6 +347,8 @@ export type DiscoveryRun = {
 export type RunView = Omit<
   DiscoveryRun,
   | "sessionId"
+  | "executionUserId"
+  | "completedSearchKeys"
   | "executionId"
   | "requestKey"
   | "policy"
@@ -306,6 +358,12 @@ export type RunView = Omit<
   createdAt: string;
   updatedAt: string;
   allowanceUnit: string;
+  consumed: number;
+  reserved: number;
+  remaining: number;
+  maxBudget: number;
+  resumable: boolean;
+  audit: z.infer<typeof discoveryAuditSchema>[];
   prospects: ProspectView[];
   counts: z.infer<typeof countsSchema>;
   usage: DiscoveryUsage[];
@@ -364,20 +422,7 @@ const briefSchema = z.strictObject({
   exclusions: z.array(z.string().max(300)).max(50),
   homeMarket: z.string().max(200),
 });
-const stopReasonSchema = z.enum([
-  "completed",
-  "budget_exhausted",
-  "provider_unavailable",
-  "provider_rate_limited",
-  "provider_permission_denied",
-  "invalid_provider_response",
-  "interrupted",
-  "defect",
-  "authorization_revoked",
-  "configuration_changed",
-  "queue_unavailable",
-  "worker_lost",
-]);
+
 export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
   z.strictObject({
     canRun: z.boolean(),
@@ -400,6 +445,13 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
         used: z.number().int().nonnegative(),
         completedSteps: z.number().int().nonnegative(),
         allowanceUnit: text,
+        attempt: z.number().int().nonnegative(),
+        consumed: z.number().int().nonnegative(),
+        reserved: z.number().int().nonnegative(),
+        remaining: z.number().int().nonnegative(),
+        maxBudget: units,
+        resumable: z.boolean(),
+        audit: z.array(discoveryAuditSchema),
         createdAt: z.iso.datetime(),
         updatedAt: z.iso.datetime(),
         counts: countsSchema,

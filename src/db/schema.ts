@@ -27,6 +27,8 @@ import type {
   StopReason,
   DiscoveryProspect,
   ObservationOutcome,
+  DiscoveryCommand,
+  SearchResult,
 } from "../models/discovery";
 
 export const appRuntime = pgRole("app_runtime").existing();
@@ -612,6 +614,12 @@ export const discoveryRun = pgTable(
     sessionId: text("session_id").notNull(),
     requestKey: uuid("request_key").notNull(),
     executionId: uuid("execution_id").notNull(),
+    executionUserId: text("execution_user_id"),
+    attempt: integer("attempt").notNull().default(0),
+    completedSearchKeys: jsonb("completed_search_keys")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
     status: text("status").$type<RunStatus>().notNull(),
     stopReason: text("stop_reason").$type<StopReason>(),
     budget: integer("budget").notNull(),
@@ -788,12 +796,20 @@ export const discoveryUsage = pgTable(
       .notNull(),
     query: text("query"),
     returnedResults: integer("returned_results"),
+    stepKey: text("step_key"),
+    executionId: uuid("execution_id"),
+    sources: jsonb("sources").$type<SearchResult[]>(),
     sourceUrl: text("source_url"),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
     checkOrder: bigint("check_order", { mode: "number" }),
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    uniqueIndex("discovery_usage_step_attempt").on(
+      table.runId,
+      table.stepKey,
+      table.executionId,
+    ),
     index("discovery_usage_run_idx").on(table.businessId, table.runId),
     uniqueIndex("discovery_check_order").on(table.businessId, table.checkOrder),
     check("discovery_usage_positive", sql`${table.units} > 0`),
@@ -822,6 +838,45 @@ export const discoveryUsage = pgTable(
       to: "public",
       using: discoveryOwner,
       withCheck: discoveryOwner,
+    }),
+  ],
+).enableRLS();
+
+// Append-only approvals and execution commands; capabilities stay off public views.
+export const discoveryCommand = pgTable(
+  "discovery_command",
+  {
+    id: uuid("id").notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => discoveryRun.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    executionId: uuid("execution_id").notNull(),
+    input: jsonb("input").$type<DiscoveryCommand>().notNull(),
+    position: integer("position").notNull(),
+    budgetBefore: integer("budget_before").notNull(),
+    budgetAfter: integer("budget_after").notNull(),
+    stopReason: text("stop_reason").$type<StopReason>(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.businessId, table.id] }),
+    index("discovery_command_run_idx").on(table.businessId, table.runId),
+    pgPolicy("discovery_command_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_command_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${discoveryWrite}) and actor_id = current_setting('app.actor_id', true) and exists (select 1 from public.discovery_run r where r.id = run_id and r.business_id = ${table.businessId})`,
     }),
   ],
 ).enableRLS();

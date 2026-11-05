@@ -3,6 +3,10 @@ import { businessIdSchema, type Actor, type Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import {
   startDiscoverySchema,
+  allowanceApprovalSchema,
+  resumeDiscoverySchema,
+  cancelDiscoverySchema,
+  type DiscoveryCommand,
   workSchema,
   type DiscoveryProvider,
   type DiscoveryWork,
@@ -41,6 +45,39 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   }): void;
 }) {
   const { repository, clock } = dependencies;
+  async function command(
+    credentials: Credentials,
+    id: unknown,
+    input: DiscoveryCommand,
+  ) {
+    const actor = await dependencies.authenticateForWork(credentials);
+    const businessId = validate(businessIdSchema, id);
+    if (input.action === "resume") {
+      const state = await repository.workspace(actor, businessId);
+      if (!state.canRun) throw new ApplicationError("FORBIDDEN");
+      if (
+        !dependencies.provider ||
+        !dependencies.queue ||
+        state.policy?.adapterId !== dependencies.provider.id
+      )
+        throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
+    }
+    const result = await repository.command(
+      actor,
+      businessId,
+      input,
+      clock.now(),
+    );
+    if (result.work) {
+      try {
+        await dependencies.queue!.enqueue(result.work);
+      } catch {
+        await repository.finish(result.work, "queue_unavailable", clock.now());
+        throw new ApplicationError("PROVIDER_UNAVAILABLE");
+      }
+    }
+    return { id: result.id, status: result.status };
+  }
   async function workspace(credentials: Credentials, id: unknown) {
     const actor = await dependencies.authenticate(credentials);
     const state = await repository.workspace(
@@ -60,6 +97,24 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   }
   return {
     workspace,
+    approveAllowance(credentials: Credentials, id: unknown, input: unknown) {
+      return command(credentials, id, {
+        ...validate(allowanceApprovalSchema, input),
+        action: "increase",
+      });
+    },
+    resume(credentials: Credentials, id: unknown, input: unknown) {
+      return command(credentials, id, {
+        ...validate(resumeDiscoverySchema, input),
+        action: "resume",
+      });
+    },
+    cancel(credentials: Credentials, id: unknown, input: unknown) {
+      return command(credentials, id, {
+        ...validate(cancelDiscoverySchema, input),
+        action: "cancel",
+      });
+    },
     async start(credentials: Credentials, id: unknown, input: unknown) {
       const actor = await dependencies.authenticateForWork(credentials);
       const businessId = validate(businessIdSchema, id);

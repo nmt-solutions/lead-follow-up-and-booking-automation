@@ -178,11 +178,15 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
         ),
       );
     let exhausted = false;
-    const reserve = (kind: "search" | "review", query: string | null) =>
+    const reserve = (
+      kind: "search" | "review",
+      query: string | null,
+      stepKey: string,
+    ) =>
       Effect.gen(function* () {
         yield* owned(() => authorize());
         const reservation = yield* owned(() =>
-          repository.reserve(work, kind, query, clock.now()),
+          repository.reserve(work, kind, query, clock.now(), stepKey),
         );
         if (!reservation) exhausted = true;
         return reservation;
@@ -193,54 +197,73 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
         Number(b === run.brief.homeMarket) - Number(a === run.brief.homeMarket),
     );
     const searches = markets.flatMap((market) =>
-      run.brief.buyers.map((buyer) => ({ market, buyer })),
+      run.brief.buyers.map((buyer, buyerIndex) => ({
+        market,
+        buyer,
+        searchKey: JSON.stringify([market, buyerIndex]),
+      })),
     );
     yield* Effect.forEach(
       searches,
-      ({ market, buyer }) =>
+      ({ market, buyer, searchKey }) =>
         Effect.gen(function* () {
           const query = `${run.brief.publicOffering} | ${buyer.label} | ${market}`;
-          const search = yield* reserve("search", query);
+          const search = yield* reserve("search", query, `search:${searchKey}`);
           if (!search) return;
-          const sources = yield* account(
-            search.id,
-            Effect.gen(function* () {
-              const raw = yield* owned((signal) =>
-                provider.search({
-                  businessId: work.businessId,
-                  runId: work.runId,
-                  operationId: search.id,
-                  offering: run.brief.publicOffering,
-                  buyer,
-                  market,
-                  limit: run.policy.maxResults,
-                  signal,
+          const sources = search.completed
+            ? yield* parse(
+                z.array(searchResultSchema).max(run.policy.maxResults),
+                search.sources,
+              )
+            : yield* account(
+                search.id,
+                Effect.gen(function* () {
+                  const raw = yield* owned((signal) =>
+                    provider.search({
+                      businessId: work.businessId,
+                      runId: work.runId,
+                      operationId: search.id,
+                      offering: run.brief.publicOffering,
+                      buyer,
+                      market,
+                      limit: run.policy.maxResults,
+                      signal,
+                    }),
+                  );
+                  const parsedSources = yield* parse(
+                    z.array(searchResultSchema).max(run.policy.maxResults),
+                    raw,
+                  );
+                  if (parsedSources.some((source) => source.market !== market))
+                    yield* Effect.fail(
+                      new DiscoveryFailure("invalid_provider_response"),
+                    );
+                  return parsedSources;
                 }),
               );
-              const parsedSources = yield* parse(
-                z.array(searchResultSchema).max(run.policy.maxResults),
-                raw,
-              );
-              if (parsedSources.some((source) => source.market !== market))
-                yield* Effect.fail(
-                  new DiscoveryFailure("invalid_provider_response"),
-                );
-              return parsedSources;
-            }),
-          );
           // Attribution and result validation commit before any next provider call.
           yield* owned(() =>
             repository.record(work, search.id, null, clock.now(), {
               returnedResults: sources.length,
+              sources,
             }),
           );
           const seen = new Set<string>();
-          for (const source of sources) {
+          let allReviewed = true;
+          for (const [sourceIndex, source] of sources.entries()) {
             const sourceKey = JSON.stringify(source);
             if (seen.has(sourceKey)) continue;
             seen.add(sourceKey);
-            const review = yield* reserve("review", null);
-            if (!review) break;
+            const review = yield* reserve(
+              "review",
+              null,
+              `review:${searchKey}:${sourceIndex}`,
+            );
+            if (!review) {
+              allReviewed = false;
+              break;
+            }
+            if (review.completed) continue;
             const result = yield* account(
               review.id,
               Effect.gen(function* () {
@@ -327,7 +350,10 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
               ),
             );
           }
-          yield* owned(() => repository.progress(work, clock.now()));
+          if (allReviewed)
+            yield* owned(() =>
+              repository.progress(work, clock.now(), searchKey),
+            );
         }),
       { concurrency: run.policy.concurrency, discard: true },
     );

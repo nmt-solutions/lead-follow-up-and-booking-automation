@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
@@ -12,6 +13,7 @@ import {
   discoveryUsage,
   discoveryProspectAlias,
   discoveryObservation,
+  discoveryCommand,
   session,
 } from "./schema";
 import { ApplicationError } from "../models/application-error";
@@ -21,6 +23,7 @@ import {
   observationOutcomeSchema,
   sourceCheckSchema,
   evidenceUrlSchema,
+  searchResultSchema,
   type DiscoveryRun,
   type DiscoveryWork,
   type DiscoveryBrief,
@@ -175,7 +178,7 @@ async function ownedRun(tx: Transaction, work: DiscoveryWork) {
     .for("update");
   if (
     !run ||
-    run.createdBy !== work.userId ||
+    (run.executionUserId ?? run.createdBy) !== work.userId ||
     run.sessionId !== work.sessionId ||
     run.executionId !== work.executionKey
   )
@@ -283,6 +286,44 @@ export function createDiscoveryRepository(
             budget: row.budget,
             used: row.used,
             completedSteps: row.completedSteps,
+            attempt: row.attempt,
+            consumed: usage
+              .filter((u) => u.outcome !== "reserved")
+              .reduce((n, u) => n + u.units, 0),
+            reserved: usage
+              .filter((u) => u.outcome === "reserved")
+              .reduce((n, u) => n + u.units, 0),
+            remaining: row.budget - row.used,
+            maxBudget: row.policy.maxRunBudget,
+            resumable:
+              row.status === "stopped" &&
+              usage.every(
+                (u) =>
+                  u.stepKey !== null &&
+                  (u.kind !== "search" ||
+                    u.outcome !== "succeeded" ||
+                    u.sources !== null),
+              ),
+            audit: (
+              await tx
+                .select()
+                .from(discoveryCommand)
+                .where(
+                  and(
+                    eq(discoveryCommand.businessId, businessId),
+                    eq(discoveryCommand.runId, row.id),
+                  ),
+                )
+                .orderBy(asc(discoveryCommand.position))
+            ).map((c) => ({
+              id: c.id,
+              action: c.input.action,
+              actorId: c.actorId,
+              budgetBefore: c.budgetBefore,
+              budgetAfter: c.budgetAfter,
+              stopReason: c.stopReason,
+              at: c.at.toISOString(),
+            })),
             allowanceUnit: row.policy.allowanceUnit,
             createdAt: row.createdAt.toISOString(),
             updatedAt: row.updatedAt.toISOString(),
@@ -361,13 +402,25 @@ export function createDiscoveryRepository(
               ),
             );
           if (existing) {
+            const [increase] = await tx
+              .select()
+              .from(discoveryCommand)
+              .where(
+                and(
+                  eq(discoveryCommand.businessId, businessId),
+                  eq(discoveryCommand.runId, existing.id),
+                ),
+              )
+              .orderBy(asc(discoveryCommand.budgetBefore))
+              .limit(1);
+            const initialBudget = increase?.budgetBefore ?? existing.budget;
             if (
               existing.createdBy !== actor.userId ||
               existing.sessionId !== actor.sessionId
             )
               throw new ApplicationError("CONFLICT");
             if (
-              existing.budget !== input.budget ||
+              initialBudget !== input.budget ||
               !isDeepStrictEqual(existing.brief.markets, input.markets) ||
               existing.brief.publicOffering !== input.publicOffering
             )
@@ -399,6 +452,7 @@ export function createDiscoveryRepository(
               id,
               businessId,
               createdBy: actor.userId,
+              executionUserId: actor.userId,
               sessionId: actor.sessionId,
               executionId,
               requestKey: input.requestKey,
@@ -423,6 +477,167 @@ export function createDiscoveryRepository(
         { lock: true },
       );
     },
+    command(actor, businessId, input, at) {
+      return scoped(
+        database,
+        actor,
+        businessId,
+        async (tx) => {
+          await requireCapability(tx, actor, businessId, "profile.manage");
+          await requireWorkSession(tx, actor, clock.now());
+          const [run] = await tx
+            .select()
+            .from(discoveryRun)
+            .where(
+              and(
+                eq(discoveryRun.id, input.runId),
+                eq(discoveryRun.businessId, businessId),
+              ),
+            )
+            .for("update");
+          if (!run) throw new ApplicationError("NOT_FOUND");
+          const [existing] = await tx
+            .select()
+            .from(discoveryCommand)
+            .where(
+              and(
+                eq(discoveryCommand.businessId, businessId),
+                eq(discoveryCommand.id, input.requestKey),
+              ),
+            );
+          if (existing) {
+            if (
+              existing.actorId !== actor.userId ||
+              existing.sessionId !== actor.sessionId ||
+              !isDeepStrictEqual(existing.input, input)
+            )
+              throw new ApplicationError("CONFLICT");
+            return {
+              id: run.id,
+              status: run.status,
+              work:
+                input.action === "resume" &&
+                run.status === "queued" &&
+                run.executionId === existing.executionId
+                  ? {
+                      businessId,
+                      runId: run.id,
+                      ...actor,
+                      executionKey: existing.executionId,
+                    }
+                  : null,
+            };
+          }
+          let executionId = run.executionId;
+          let status = run.status;
+          let budget = run.budget;
+          if (input.action === "cancel") {
+            if (
+              input.expectedAttempt !== run.attempt ||
+              !["queued", "running"].includes(run.status)
+            )
+              throw new ApplicationError("CONFLICT");
+            await tx.execute(
+              sql`select public.finish_discovery(${run.id}::uuid, ${businessId}::uuid, ${run.executionId}::uuid, 'cancelled', ${at.toISOString()}::timestamptz)`,
+            );
+            status = "stopped";
+          } else {
+            await checkCurrent(tx, run);
+            if (run.status !== "stopped")
+              throw new ApplicationError("CONFLICT");
+            if (input.action === "increase") {
+              if (input.expectedBudget !== run.budget)
+                throw new ApplicationError("CONFLICT");
+              if (
+                input.budget <= run.budget ||
+                input.budget > run.policy.maxRunBudget
+              )
+                throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+              budget = input.budget;
+              await tx
+                .update(discoveryRun)
+                .set({ budget, updatedAt: at })
+                .where(eq(discoveryRun.id, run.id));
+            } else {
+              if (input.expectedAttempt !== run.attempt)
+                throw new ApplicationError("CONFLICT");
+              const usage = await tx
+                .select()
+                .from(discoveryUsage)
+                .where(
+                  and(
+                    eq(discoveryUsage.businessId, businessId),
+                    eq(discoveryUsage.runId, run.id),
+                  ),
+                );
+              if (
+                run.used >= run.budget ||
+                usage.some(
+                  (u) =>
+                    u.stepKey === null ||
+                    u.outcome === "reserved" ||
+                    (u.kind === "search" &&
+                      u.outcome === "succeeded" &&
+                      u.sources === null),
+                )
+              )
+                throw new ApplicationError("CONFLICT");
+              executionId = randomUUID();
+              status = "queued";
+              await tx
+                .update(discoveryRun)
+                .set({
+                  executionId,
+                  executionUserId: actor.userId,
+                  sessionId: actor.sessionId,
+                  status,
+                  stopReason: null,
+                  attempt: run.attempt + 1,
+                  updatedAt: at,
+                })
+                .where(eq(discoveryRun.id, run.id));
+            }
+          }
+          const priorCommands = await tx
+            .select({ id: discoveryCommand.id })
+            .from(discoveryCommand)
+            .where(
+              and(
+                eq(discoveryCommand.businessId, businessId),
+                eq(discoveryCommand.runId, run.id),
+              ),
+            );
+          await tx.insert(discoveryCommand).values({
+            position: priorCommands.length,
+            id: input.requestKey,
+            businessId,
+            runId: run.id,
+            actorId: actor.userId,
+            sessionId: actor.sessionId,
+            executionId,
+            input,
+            budgetBefore: run.budget,
+            budgetAfter: budget,
+            stopReason: run.stopReason,
+            at,
+          });
+          return {
+            id: run.id,
+            status,
+            work:
+              input.action === "resume"
+                ? {
+                    businessId,
+                    runId: run.id,
+                    ...actor,
+                    executionKey: executionId,
+                  }
+                : null,
+          };
+        },
+        { lock: true },
+      );
+    },
     claim(work, at) {
       return scoped(
         database,
@@ -442,7 +657,7 @@ export function createDiscoveryRepository(
         { lock: true },
       );
     },
-    reserve(work, kind, query, at) {
+    reserve(work, kind, query, at, stepKey) {
       return scoped(
         database,
         work,
@@ -452,6 +667,39 @@ export function createDiscoveryRepository(
           await requireWorkSession(tx, work, clock.now());
           if (run.status !== "running") return null;
           await checkCurrent(tx, run);
+          const previous = await tx
+            .select()
+            .from(discoveryUsage)
+            .where(
+              and(
+                eq(discoveryUsage.businessId, work.businessId),
+                eq(discoveryUsage.runId, run.id),
+                eq(discoveryUsage.stepKey, stepKey),
+              ),
+            );
+          const completed = previous.find((u) => u.outcome === "succeeded");
+          if (completed)
+            return {
+              id: completed.id,
+              units: completed.units,
+              completed: true,
+              sources:
+                completed.sources === null
+                  ? null
+                  : z
+                      .array(searchResultSchema)
+                      .max(run.policy.maxResults)
+                      .parse(completed.sources),
+            };
+          // One outbound attempt per logical step per explicit execution. A failed or
+          // ambiguous call stays charged; only another authorized resume can retry it.
+          if (
+            previous.some(
+              (u) =>
+                u.executionId === work.executionKey || u.outcome === "reserved",
+            )
+          )
+            throw new ApplicationError("CONFLICT");
           const units =
             kind === "search" ? run.policy.searchUnits : run.policy.reviewUnits;
           if (run.used + units > run.budget) return null;
@@ -468,10 +716,12 @@ export function createDiscoveryRepository(
             units,
             position: run.used,
             outcome: "reserved",
+            stepKey,
+            executionId: work.executionKey,
             query: run.policy.permissions.retainQueries ? query : null,
             at,
           });
-          return { id, units };
+          return { id, units, completed: false, sources: null };
         },
         { lock: true },
       );
@@ -662,7 +912,15 @@ export function createDiscoveryRepository(
             .set({
               outcome: "succeeded",
               ...(usage.kind === "search"
-                ? { returnedResults: details?.returnedResults ?? null }
+                ? {
+                    returnedResults: details?.returnedResults ?? null,
+                    sources: details?.sources
+                      ? z
+                          .array(searchResultSchema)
+                          .max(run.policy.maxResults)
+                          .parse(details.sources)
+                      : null,
+                  }
                 : {
                     sourceUrl: details?.sourceUrl
                       ? evidenceUrlSchema.parse(details.sourceUrl)
@@ -680,17 +938,24 @@ export function createDiscoveryRepository(
         { lock: true },
       );
     },
-    progress(work, at) {
+    progress(work, at, searchKey) {
       return scoped(
         database,
         work,
         work.businessId,
         async (tx) => {
           const run = await ownedRun(tx, work);
-          if (run.status === "running")
+          if (
+            run.status === "running" &&
+            !run.completedSearchKeys.includes(searchKey)
+          )
             await tx
               .update(discoveryRun)
-              .set({ completedSteps: run.completedSteps + 1, updatedAt: at })
+              .set({
+                completedSteps: run.completedSteps + 1,
+                completedSearchKeys: [...run.completedSearchKeys, searchKey],
+                updatedAt: at,
+              })
               .where(eq(discoveryRun.id, run.id));
         },
         { lock: true },

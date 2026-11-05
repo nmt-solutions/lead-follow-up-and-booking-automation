@@ -28,8 +28,18 @@ export async function verifyRuntimeRole(
           ELSE false END)) FROM pg_policies WHERE schemaname = 'public'
         AND tablename IN ('discovery_configuration', 'discovery_run', 'discovery_prospect', 'discovery_result', 'discovery_usage'))
       AND NOT has_table_privilege(current_user, 'public.discovery_configuration', 'INSERT,UPDATE,DELETE,TRUNCATE')
-      AND NOT has_column_privilege(current_user, 'public.discovery_run', 'budget', 'UPDATE')
-      AND NOT has_column_privilege(current_user, 'public.discovery_run', 'execution_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.discovery_run', 'policy', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.discovery_run', 'created_by', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.discovery_run', 'brief', 'UPDATE')
+      AND (SELECT count(*) = 1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'discovery_command')
+      AND (SELECT count(*) = 2 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname = 'public' AND tablename = 'discovery_command')
+      AND NOT has_table_privilege(current_user, 'public.discovery_command', 'UPDATE,DELETE,TRUNCATE')
       AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

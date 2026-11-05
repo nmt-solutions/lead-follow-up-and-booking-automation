@@ -21,6 +21,7 @@ import {
   discoveryUsage,
   discoveryProspectAlias,
   discoveryObservation,
+  discoveryCommand,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -94,7 +95,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     CREATE OR REPLACE FUNCTION public.finish_discovery(run uuid, scope uuid, execution uuid, reason text, at_time timestamptz)
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
     BEGIN
-      IF reason NOT IN ('completed', 'budget_exhausted', 'provider_unavailable', 'provider_rate_limited', 'provider_permission_denied', 'invalid_provider_response', 'interrupted', 'defect', 'authorization_revoked', 'configuration_changed', 'queue_unavailable', 'worker_lost') THEN RAISE EXCEPTION 'Invalid stop reason'; END IF;
+      IF reason NOT IN ('completed', 'budget_exhausted', 'provider_unavailable', 'provider_rate_limited', 'provider_permission_denied', 'invalid_provider_response', 'interrupted', 'defect', 'authorization_revoked', 'configuration_changed', 'queue_unavailable', 'worker_lost', 'cancelled') THEN RAISE EXCEPTION 'Invalid stop reason'; END IF;
       UPDATE public.discovery_run r SET status = CASE WHEN reason = 'completed' THEN 'completed' ELSE 'stopped' END,
         stop_reason = reason, updated_at = at_time
         WHERE r.id = run AND r.business_id = scope AND r.execution_id = execution AND r.status IN ('queued', 'running');
@@ -185,6 +186,11 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES (status, stop_reason, used, completed_steps, updated_at) ON public.discovery_run FROM app_runtime;
         REVOKE ALL PRIVILEGES (outcome) ON public.discovery_usage FROM app_runtime;
       END IF;
+      IF to_regclass('public.discovery_command') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.discovery_command FROM app_runtime;
+        REVOKE ALL PRIVILEGES (budget, execution_id, execution_user_id, session_id, attempt, completed_search_keys) ON public.discovery_run FROM app_runtime;
+        REVOKE ALL PRIVILEGES (sources) ON public.discovery_usage FROM app_runtime;
+      END IF;
       IF to_regclass('public.discovery_observation') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.discovery_observation, public.discovery_prospect_alias FROM app_runtime;
         REVOKE ALL PRIVILEGES (returned_results, source_url, checked_at, check_order) ON public.discovery_usage FROM app_runtime;
@@ -229,6 +235,7 @@ export async function secureDatabase(pool: Pool) {
       discoveryUsage,
       discoveryProspectAlias,
       discoveryObservation,
+      discoveryCommand,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -284,6 +291,11 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE discovery_usage FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_prospect_alias FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_observation FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON discovery_command FROM app_runtime;
+      GRANT SELECT, INSERT ON discovery_command TO app_runtime;
+      ALTER TABLE discovery_command FORCE ROW LEVEL SECURITY;
+      GRANT UPDATE (budget, execution_id, execution_user_id, session_id, attempt, completed_search_keys) ON discovery_run TO app_runtime;
+      GRANT UPDATE (sources) ON discovery_usage TO app_runtime;
       SET LOCAL ROLE app_runtime;
     `);
     await verifyRuntimeRole(client);

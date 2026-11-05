@@ -30,5 +30,6 @@ export default defineConfig({
     "discovery_usage",
     "discovery_prospect_alias",
     "discovery_observation",
+    "discovery_command",
   ],
 });

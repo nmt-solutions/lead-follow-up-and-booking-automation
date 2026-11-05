@@ -9,6 +9,8 @@ import type {
   WorkIdentity,
   DiscoveryProspect,
   StopReason,
+  DiscoveryCommand,
+  SearchResult,
 } from "../models/discovery";
 
 export type DiscoveryRepository = {
@@ -19,21 +21,41 @@ export type DiscoveryRepository = {
     input: StartDiscovery,
     at: Date,
   ): Promise<{ run: DiscoveryRun; work: DiscoveryWork }>;
+  command(
+    actor: WorkIdentity,
+    businessId: string,
+    input: DiscoveryCommand,
+    at: Date,
+  ): Promise<{
+    id: string;
+    status: DiscoveryRun["status"];
+    work: DiscoveryWork | null;
+  }>;
   claim(work: DiscoveryWork, at: Date): Promise<DiscoveryRun | null>;
   reserve(
     work: DiscoveryWork,
     kind: "search" | "review",
     query: string | null,
     at: Date,
-  ): Promise<{ id: string; units: number } | null>;
+    stepKey: string,
+  ): Promise<{
+    id: string;
+    units: number;
+    completed: boolean;
+    sources: SearchResult[] | null;
+  } | null>;
   record(
     work: DiscoveryWork,
     operationId: string,
     prospect: Omit<DiscoveryProspect, "id"> | null,
     at: Date,
-    details?: { returnedResults?: number; sourceUrl?: string },
+    details?: {
+      returnedResults?: number;
+      sourceUrl?: string;
+      sources?: SearchResult[];
+    },
   ): Promise<void>;
-  progress(work: DiscoveryWork, at: Date): Promise<void>;
+  progress(work: DiscoveryWork, at: Date, searchKey: string): Promise<void>;
   failOperation(work: DiscoveryWork, operationId: string): Promise<void>;
   finish(work: DiscoveryWork, reason: StopReason, at: Date): Promise<void>;
 };

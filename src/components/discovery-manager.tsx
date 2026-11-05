@@ -1,11 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { z } from "zod";
 import {
   discoveryWorkspaceSchema,
   startDiscoverySchema,
+  allowanceApprovalSchema,
+  resumeDiscoverySchema,
+  cancelDiscoverySchema,
   type DiscoveryWorkspace,
   type RunView,
   type StopReason,
@@ -19,6 +22,7 @@ import { DiscoveryProspectCard } from "./discovery-prospect";
 
 const reasons: Record<StopReason, string> = {
   completed: "Completed",
+  cancelled: "Cancelled by an Owner or Admin",
   budget_exhausted: "Authorized allowance reached",
   provider_unavailable: "Source provider unavailable",
   provider_rate_limited: "Provider rate limit reached",
@@ -53,7 +57,248 @@ class DiscoveryRequestError extends Error {
   }
 }
 
-function RunResults({ run }: { run: RunView }) {
+function RunControls({
+  run,
+  enabled,
+  ready,
+  command,
+}: {
+  run: RunView;
+  enabled: boolean;
+  ready: boolean;
+  command(
+    action: "allowance" | "resume" | "cancel",
+    input: unknown,
+  ): Promise<void>;
+}) {
+  const [budget, setBudget] = useState("");
+  const [extraApproved, setExtraApproved] = useState(false);
+  const [resumeApproved, setResumeApproved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const keys = useRef<
+    Partial<
+      Record<
+        "allowance" | "resume" | "cancel",
+        { scope: string; requestKey: string }
+      >
+    >
+  >({});
+  async function act(action: "allowance" | "resume" | "cancel") {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    // Replay an unchanged command after an uncertain response. Once a refresh
+    // establishes another attempt/allowance, a new explicit action needs its own
+    // identity rather than reusing a key with a different expected state.
+    const scope =
+      action === "allowance"
+        ? JSON.stringify([run.budget, budget])
+        : String(run.attempt);
+    if (keys.current[action]?.scope !== scope)
+      keys.current[action] = { scope, requestKey: crypto.randomUUID() };
+    try {
+      const common = {
+        runId: run.id,
+        requestKey: keys.current[action]?.requestKey,
+      };
+      const input =
+        action === "allowance"
+          ? allowanceApprovalSchema.parse({
+              ...common,
+              expectedBudget: run.budget,
+              budget: Number(budget),
+              confirmExtraUsage: extraApproved,
+            })
+          : action === "resume"
+            ? resumeDiscoverySchema.parse({
+                ...common,
+                expectedAttempt: run.attempt,
+                confirmResume: resumeApproved,
+              })
+            : cancelDiscoverySchema.parse({
+                ...common,
+                expectedAttempt: run.attempt,
+              });
+      await command(action, input);
+      delete keys.current[action];
+      setExtraApproved(false);
+      setResumeApproved(false);
+      setMessage(
+        action === "allowance"
+          ? "Allowance approved. Review the remaining units, then explicitly resume."
+          : action === "resume"
+            ? "Resume requested. Refresh to see saved progress."
+            : "Run cancelled. Completed results are retained.",
+      );
+    } catch (failure: unknown) {
+      setExtraApproved(false);
+      setResumeApproved(false);
+      setError(
+        failure instanceof DiscoveryRequestError
+          ? (errorMessages[failure.code] ??
+              "The action could not complete. Refresh the run and review its saved state before retrying.")
+          : "The action could not complete. Refresh the run and review its saved state before retrying.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  const validBudget =
+    /^\d+$/.test(budget) &&
+    Number(budget) > run.budget &&
+    Number(budget) <= run.maxBudget;
+  return (
+    <section
+      className="space-y-4 rounded-xl border border-border bg-muted p-5"
+      aria-label="Run allowance and recovery"
+    >
+      <p className="text-sm text-muted-foreground">
+        Allowance units authorize research capacity. Pricing and commercial
+        terms are not configured here; this approval is not a price, charge or
+        bill. Failed and uncertain calls remain consumed. Retrying them uses
+        another reservation from the remaining allowance.
+      </p>
+      {run.status === "stopped" && enabled && (
+        <>
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void act("allowance");
+            }}
+          >
+            <Label htmlFor={`allowance-${run.id}`}>
+              New total allowance ({run.allowanceUnit})
+            </Label>
+            <Input
+              id={`allowance-${run.id}`}
+              inputMode="numeric"
+              value={budget}
+              disabled={busy}
+              aria-describedby={`limit-${run.id}`}
+              onChange={(event) => {
+                setBudget(event.target.value);
+                setExtraApproved(false);
+                delete keys.current.allowance;
+              }}
+            />
+            <p id={`limit-${run.id}`} className="text-sm text-muted-foreground">
+              Current total: {run.budget}. Configured maximum: {run.maxBudget}.{" "}
+              {validBudget
+                ? `You are approving ${Number(budget) - run.budget} extra ${run.allowanceUnit}.`
+                : "Enter a higher whole-number total within the configured maximum."}
+            </p>
+            <Label className="flex min-h-11 items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 size-5 accent-primary"
+                checked={extraApproved}
+                disabled={busy || !validBudget}
+                onChange={(event) => setExtraApproved(event.target.checked)}
+              />
+              <span>
+                I approve this bounded allowance increase. It will not resume
+                the run until I request it separately.
+              </span>
+            </Label>
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={busy || !validBudget || !extraApproved}
+            >
+              {busy ? "Saving…" : "Approve allowance increase"}
+            </Button>
+          </form>
+          {run.resumable ? (
+            <div className="space-y-3 border-t border-border pt-4">
+              <Label className="flex min-h-11 items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-5 accent-primary"
+                  checked={resumeApproved}
+                  disabled={busy || !ready || run.remaining === 0}
+                  onChange={(event) => setResumeApproved(event.target.checked)}
+                />
+                <span>
+                  I request continuation of this stopped run within its
+                  remaining {run.remaining} {run.allowanceUnit}, including
+                  retrying failed or uncertain work. Completed work will be
+                  skipped.
+                </span>
+              </Label>
+              <Button
+                disabled={
+                  busy || !ready || !resumeApproved || run.remaining === 0
+                }
+                onClick={() => void act("resume")}
+              >
+                {busy ? "Requesting…" : "Resume remaining work"}
+              </Button>
+              {!ready && (
+                <p className="text-sm text-muted-foreground">
+                  Complete the discovery setup above before requesting
+                  continuation.
+                </p>
+              )}
+              {run.remaining === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Approve a bounded increase before resuming.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              This older run has no resumable checkpoints. Its results and usage
+              remain available. Authorize a separate run to research again.
+            </p>
+          )}
+        </>
+      )}
+      {!enabled && (
+        <p className="text-sm text-muted-foreground">
+          An Owner or Admin with verified MFA can approve allowance and request
+          recovery.
+        </p>
+      )}
+      {enabled && (run.status === "queued" || run.status === "running") && (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Cancellation stops further reservations. Calls already reserved may
+            finish; unsettled outcomes remain consumed as uncertain. Resuming
+            later requires an explicit request.
+          </p>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => void act("cancel")}
+          >
+            {busy ? "Cancelling…" : "Cancel this run"}
+          </Button>
+        </div>
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            {error}{" "}
+            <Link href="/security" className="underline">
+              Security
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
+      {message && (
+        <p role="status" className="text-sm">
+          {message}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
   const openRequests = run.prospects.filter((p) => p.requestState === "open");
   const potentialBuyers = run.prospects.filter(
     (p) => p.requestState !== "open",
@@ -78,9 +323,20 @@ function RunResults({ run }: { run: RunView }) {
       </p>
       <dl className="grid gap-4 sm:grid-cols-3">
         <div>
-          <dt className="text-sm text-muted-foreground">Allowance reserved</dt>
+          <dt className="text-sm text-muted-foreground">
+            Authorized allowance
+          </dt>
           <dd className="mt-1 font-medium">
-            {run.used} / {run.budget} {run.allowanceUnit}
+            {run.budget} {run.allowanceUnit}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted-foreground">
+            Consumed / reserved / remaining
+          </dt>
+          <dd className="mt-1 font-medium">
+            {run.consumed} / {run.reserved} / {run.remaining}{" "}
+            {run.allowanceUnit}
           </dd>
         </div>
         <div>
@@ -151,10 +407,11 @@ function RunResults({ run }: { run: RunView }) {
       {run.status === "stopped" && (
         <p className="text-sm text-muted-foreground">
           Completed work is retained. Uncertain calls consume their reserved
-          allowance. This run will not spend more; any new run needs a separate
-          authorization.
+          allowance. Further execution requires an explicit resume request;
+          increasing allowance alone does not continue research.
         </p>
       )}
+      {children}
       <details className="rounded-lg border border-border p-4">
         <summary className="min-h-11 cursor-pointer font-medium">
           Reviewed brief and usage
@@ -201,6 +458,29 @@ function RunResults({ run }: { run: RunView }) {
             </li>
           ))}
         </ul>
+        <h4 className="mt-4 font-medium">Allowance and recovery history</h4>
+        {run.audit.length ? (
+          <ul className="mt-3 space-y-2 text-sm">
+            {run.audit.map((entry) => (
+              <li key={entry.id} className="wrap-anywhere">
+                {entry.action === "increase"
+                  ? "Allowance increase"
+                  : entry.action === "resume"
+                    ? "Resume requested"
+                    : "Run cancelled"}{" "}
+                · {entry.budgetBefore} → {entry.budgetAfter} {run.allowanceUnit}{" "}
+                · Actor {entry.actorId} · {new Date(entry.at).toLocaleString()}
+                {entry.stopReason
+                  ? ` · Previous stop: ${reasons[entry.stopReason] ?? entry.stopReason}`
+                  : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No additional allowance or recovery actions.
+          </p>
+        )}
       </details>
       <section className="space-y-4" aria-labelledby={`open-${run.id}`}>
         <h4 id={`open-${run.id}`} className="text-lg font-semibold">
@@ -273,8 +553,9 @@ export function DiscoveryManager({
   async function request(
     method: "GET" | "POST",
     payload?: unknown,
+    action?: "allowance" | "resume" | "cancel",
   ): Promise<unknown> {
-    const response = await fetch(endpoint, {
+    const response = await fetch(action ? `${endpoint}/${action}` : endpoint, {
       method,
       cache: "no-store",
       headers:
@@ -616,7 +897,31 @@ export function DiscoveryManager({
             No discovery runs yet. Review your brief and setup above to begin.
           </p>
         ) : (
-          state.runs.map((run) => <RunResults key={run.id} run={run} />)
+          state.runs.map((run) => (
+            <RunResults key={run.id} run={run}>
+              <RunControls
+                run={run}
+                enabled={state.canRun}
+                ready={state.setup.length === 0}
+                command={async (action, input) => {
+                  const result = await request("POST", input, action);
+                  z.object({
+                    success: z.literal(true),
+                    data: z.object({
+                      id: z.uuid(),
+                      status: z.enum([
+                        "queued",
+                        "running",
+                        "completed",
+                        "stopped",
+                      ]),
+                    }),
+                  }).parse(result);
+                  await refresh();
+                }}
+              />
+            </RunResults>
+          ))
         )}
         {state.runs.length === 50 && (
           <p className="text-sm text-muted-foreground">

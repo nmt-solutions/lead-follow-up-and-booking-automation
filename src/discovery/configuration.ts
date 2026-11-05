@@ -12,7 +12,7 @@ export function configuredDiscoveryQueue(environment: NodeJS.ProcessEnv) {
   return {
     async enqueue(work: DiscoveryWork) {
       await tasks.trigger("bounded-prospect-discovery", work, {
-        idempotencyKey: `discovery-${work.runId}`,
+        idempotencyKey: `discovery-${work.runId}-${work.executionKey}`,
         idempotencyKeyTTL: "30d",
       });
     },
