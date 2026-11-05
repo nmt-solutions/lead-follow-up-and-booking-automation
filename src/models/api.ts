@@ -4,6 +4,11 @@ import {
 } from "./application-error";
 
 const failures = {
+  CALENDAR_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "Booking needs a configured calendar adapter and separate read/write calendar permission. Ask an Admin to review appointment setup. RFQ handling remains available.",
+  },
   COMMERCIAL_SETUP_REQUIRED: {
     status: 503,
     message:

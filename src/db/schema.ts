@@ -32,6 +32,13 @@ import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { InquirySnapshot, InquiryResult } from "../models/inquiries";
 import type { RfqRecord } from "../models/rfq";
 import type {
+  BookingConfiguration,
+  CalendarDescriptor,
+  BookingIntent,
+  CalendarEvent,
+  AppointmentView,
+} from "../models/appointments";
+import type {
   CommercialPayload,
   CommercialActionView,
   CommercialEvidence,
@@ -2114,6 +2121,148 @@ export const commercialScopeForeignKeys = [
           ],
         }),
       ),
+  ),
+];
+
+export const bookingPolicy = pgTable(
+  "booking_policy",
+  {
+    ...inboxColumns(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration")
+      .$type<BookingConfiguration>()
+      .notNull(),
+    calendar: jsonb("calendar").$type<CalendarDescriptor>(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    note: text("note").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("booking_policy_version").on(t.businessId, t.version),
+    uniqueIndex("booking_policy_scope").on(t.id, t.businessId),
+    check("booking_policy_positive", sql`${t.version} > 0`),
+    ...commercialPolicies("booking_policy", true),
+  ],
+).enableRLS();
+
+export const appointment = pgTable(
+  "appointment",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    policyId: uuid("policy_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    mode: text("mode").$type<"manual" | "automation">().notNull(),
+    contextKey: text("context_key").notNull(),
+    intent: jsonb("intent").$type<BookingIntent>().notNull(),
+    blockedStart: timestamp("blocked_start", { withTimezone: true }).notNull(),
+    blockedEnd: timestamp("blocked_end", { withTimezone: true }).notNull(),
+    holdExpiresAt: timestamp("hold_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    status: text("status").$type<AppointmentView["status"]>().notNull(),
+    phase: text("phase").$type<AppointmentView["phase"]>().notNull(),
+    event: jsonb("event").$type<CalendarEvent>(),
+    reason: text("reason"),
+    cancellation: jsonb("cancellation").$type<{
+      actorId: string;
+      contextKey: string;
+    }>(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("appointment_request").on(t.businessId, t.requestKey),
+    uniqueIndex("appointment_provider_event").on(
+      t.businessId,
+      sql`(${t.intent}->>'connectionId')`,
+      sql`(${t.intent}->>'calendarId')`,
+      sql`(${t.event}->>'eventId')`,
+    ),
+    uniqueIndex("appointment_scope").on(t.id, t.businessId, t.opportunityId),
+    check("appointment_interval", sql`${t.blockedStart} < ${t.blockedEnd}`),
+    check("appointment_mode", sql`${t.mode} in ('manual', 'automation')`),
+    check(
+      "appointment_status",
+      sql`${t.status} in ('requested', 'confirmed', 'attended', 'cancelled')`,
+    ),
+    check(
+      "appointment_phase",
+      sql`${t.phase} in ('held', 'expired', 'blocked', 'committed', 'ambiguous', 'booked', 'conflict', 'failed', 'cancel_committed', 'cancel_ambiguous', 'finished')`,
+    ),
+    check(
+      "appointment_confirmation_evidence",
+      sql`${t.status} not in ('confirmed', 'attended') or (${t.event} is not null and ${t.event}->>'status' = 'active')`,
+    ),
+    ...commercialPolicies("appointment", false, true),
+  ],
+).enableRLS();
+
+export const appointmentHistory = pgTable(
+  "appointment_history",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    appointmentId: uuid("appointment_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    requestKey: uuid("request_key"),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    kind: text("kind").notNull(),
+    source: text("source")
+      .$type<"application" | "provider" | "business">()
+      .notNull(),
+    reference: text("reference"),
+    note: text("note").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("appointment_evidence_request").on(t.businessId, t.requestKey),
+    uniqueIndex("appointment_history_sequence").on(t.appointmentId, t.sequence),
+    ...commercialPolicies("appointment_history"),
+  ],
+).enableRLS();
+
+export const appointmentScopeForeignKeys = [
+  new ForeignKey(
+    appointment,
+    foreignKey({
+      name: "appointment_need_scope",
+      columns: [appointment.opportunityId, appointment.businessId],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    appointment,
+    foreignKey({
+      name: "appointment_policy_scope",
+      columns: [appointment.policyId, appointment.businessId],
+      foreignColumns: [bookingPolicy.id, bookingPolicy.businessId],
+    }),
+  ),
+  new ForeignKey(
+    appointmentHistory,
+    foreignKey({
+      name: "appointment_history_scope",
+      columns: [
+        appointmentHistory.appointmentId,
+        appointmentHistory.businessId,
+        appointmentHistory.opportunityId,
+      ],
+      foreignColumns: [
+        appointment.id,
+        appointment.businessId,
+        appointment.opportunityId,
+      ],
+    }),
   ),
 ];
 

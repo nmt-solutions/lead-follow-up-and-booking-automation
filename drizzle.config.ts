@@ -7,6 +7,9 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "booking_policy",
+    "appointment",
+    "appointment_history",
     "commercial_proposal",
     "commercial_decision",
     "commercial_execution",

@@ -1,4 +1,8 @@
 import "server-only";
+import { createAppointmentApplication } from "../application/appointments";
+import { createAppointmentRepository } from "../db/appointment-repository";
+import { createAppointmentHttp } from "../http/appointments";
+import { unavailableCalendarProvider } from "../appointments/provider";
 import { createCommercialApplication } from "../application/commercial-actions";
 import { createCommercialRepository } from "../db/commercial-actions-repository";
 import { createCommercialHttp } from "../http/commercial-actions";
@@ -204,7 +208,24 @@ async function composeServices() {
       },
     },
   });
+  const appointments = createAppointmentApplication({
+    authenticateForWork: access.authenticateForWork,
+    repository: createAppointmentRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    clock: { now: () => new Date() },
+    // Separate native grants and live transports are implemented in #24/#25.
+    // No fixture adapter, mailbox grant or hidden scheduling service is activated.
+    provider: unavailableCalendarProvider,
+    timeoutMs: 5000,
+  });
   return {
+    appointments,
+    appointmentsHttp: createAppointmentHttp({
+      application: appointments,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     commercialActions,
     commercialActionsHttp: createCommercialHttp({
       application: commercialActions,

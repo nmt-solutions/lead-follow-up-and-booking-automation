@@ -54,6 +54,10 @@ import {
   commercialExecution,
   commercialOutcome,
   commercialScopeForeignKeys,
+  bookingPolicy,
+  appointment,
+  appointmentHistory,
+  appointmentScopeForeignKeys,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -303,6 +307,10 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.commercial_proposal, public.commercial_decision, public.commercial_execution, public.commercial_outcome FROM app_runtime;
         REVOKE ALL PRIVILEGES (state, reason, reference) ON public.commercial_execution FROM app_runtime;
       END IF;
+      IF to_regclass('public.booking_policy') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.booking_policy, public.appointment, public.appointment_history FROM app_runtime;
+        REVOKE ALL PRIVILEGES (status, phase, event, reason, cancellation) ON public.appointment FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -324,6 +332,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     ...inboxScopeForeignKeys,
     ...opportunityScopeForeignKeys,
     ...commercialScopeForeignKeys,
+    ...appointmentScopeForeignKeys,
   ]) {
     const { name } = getTableConfig(key.table);
     const exists = await pool.query<{ present: boolean }>(
@@ -370,6 +379,7 @@ export async function secureDatabase(pool: Pool) {
       ...inboxScopeForeignKeys,
       ...opportunityScopeForeignKeys,
       ...commercialScopeForeignKeys,
+      ...appointmentScopeForeignKeys,
     ]) {
       const table = key.table;
       const reference = key.reference();
@@ -401,6 +411,9 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      bookingPolicy,
+      appointment,
+      appointmentHistory,
       commercialProposal,
       commercialDecision,
       commercialExecution,
@@ -457,6 +470,12 @@ export async function secureDatabase(pool: Pool) {
     }
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON booking_policy, appointment, appointment_history FROM app_runtime;
+      GRANT SELECT, INSERT ON booking_policy, appointment, appointment_history TO app_runtime;
+      GRANT UPDATE (status, phase, event, reason, cancellation) ON appointment TO app_runtime;
+      ALTER TABLE booking_policy FORCE ROW LEVEL SECURITY;
+      ALTER TABLE appointment FORCE ROW LEVEL SECURITY;
+      ALTER TABLE appointment_history FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON commercial_proposal, commercial_decision, commercial_execution, commercial_outcome FROM app_runtime;
       GRANT SELECT, INSERT ON commercial_proposal, commercial_decision, commercial_execution, commercial_outcome TO app_runtime;
       GRANT UPDATE (state, reason, reference) ON commercial_execution TO app_runtime;
