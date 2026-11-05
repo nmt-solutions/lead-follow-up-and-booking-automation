@@ -21,6 +21,9 @@ import { filesConfiguration } from "./files-configuration";
 import { createKnowledgeApplication } from "../application/knowledge";
 import { createKnowledgeRepository } from "../db/knowledge-repository";
 import { createKnowledgeHttp } from "../http/knowledge";
+import { createCommercialAuthorityApplication } from "../application/commercial-authority";
+import { createCommercialAuthorityRepository } from "../db/commercial-authority-repository";
+import { createCommercialAuthorityHttp } from "../http/commercial-authority";
 
 export function reportFailure(diagnostic: FailureDiagnostic) {
   console.error(JSON.stringify({ event: "request_failed", ...diagnostic }));
@@ -88,6 +91,12 @@ async function composeServices() {
     repository: createKnowledgeRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
   });
+  const commercialAuthority = createCommercialAuthorityApplication({
+    authenticate,
+    authenticatePrivileged,
+    repository: createCommercialAuthorityRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+  });
   return {
     auth,
     access,
@@ -95,6 +104,12 @@ async function composeServices() {
     team,
     files,
     knowledge,
+    commercialAuthority,
+    commercialAuthorityHttp: createCommercialAuthorityHttp({
+      application: commercialAuthority,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     knowledgeHttp: createKnowledgeHttp({
       application: knowledge,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

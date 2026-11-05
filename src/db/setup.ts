@@ -13,6 +13,7 @@ import {
   fileAccess,
   fileUsage,
   knowledgeRevision,
+  commercialAuthorityRevision,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -82,6 +83,22 @@ export async function prepareDatabaseRole(pool: Pool) {
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
   await prepareFileCleanup(pool);
+  // Current escalation owners are visible to current Business members, including
+  // Salespeople whose ordinary membership reads cannot enumerate the team.
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION public.commercial_approvers()
+    RETURNS TABLE("userId" text, name text, role text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      IF public.current_business_role() IS NULL THEN RETURN; END IF;
+      RETURN QUERY SELECT m.user_id, coalesce(nullif(u.name, ''), u.email), m.role FROM public.membership m
+        JOIN public."user" u ON u.id = m.user_id
+        WHERE m.business_id = nullif(current_setting('app.business_id', true), '')::uuid
+          AND m.role IN ('owner', 'admin') ORDER BY u.name, m.user_id;
+    END $$;
+    REVOKE ALL ON FUNCTION public.commercial_approvers() FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.commercial_approvers() TO app_runtime;
+  `);
   // Narrow definer helpers avoid recursive membership RLS. PL/pgSQL resolves
   // tables at execution, so they can be installed before the first schema push.
   await pool.query(`
@@ -128,6 +145,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.knowledge_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.knowledge_revision FROM app_runtime;
       END IF;
+      IF to_regclass('public.commercial_authority_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.commercial_authority_revision FROM app_runtime;
+      END IF;
     END $$;
   `);
 }
@@ -160,6 +180,7 @@ export async function secureDatabase(pool: Pool) {
       fileAccess,
       fileUsage,
       knowledgeRevision,
+      commercialAuthorityRevision,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -197,6 +218,9 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON knowledge_revision FROM app_runtime;
       GRANT SELECT, INSERT ON knowledge_revision TO app_runtime;
       ALTER TABLE knowledge_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON commercial_authority_revision FROM app_runtime;
+      GRANT SELECT, INSERT ON commercial_authority_revision TO app_runtime;
+      ALTER TABLE commercial_authority_revision FORCE ROW LEVEL SECURITY;
       SET LOCAL ROLE app_runtime;
     `);
     await verifyRuntimeRole(client);

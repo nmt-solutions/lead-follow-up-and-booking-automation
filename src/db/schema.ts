@@ -19,6 +19,7 @@ import type { BusinessRole, Invitation } from "../models/team";
 import type { SavedConfiguration } from "../models/configuration";
 import type { FileState } from "../models/files";
 import type { KnowledgeConfiguration } from "../models/knowledge";
+import type { CommercialPolicy } from "../models/commercial-authority";
 
 export const appRuntime = pgRole("app_runtime").existing();
 
@@ -232,6 +233,40 @@ export const membership = pgTable(
 
 const managerScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid
   and public.current_business_role() in ('owner', 'admin')`;
+export const commercialAuthorityRevision = pgTable(
+  "commercial_authority_revision",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    version: integer("version").notNull(),
+    policy: jsonb("policy").$type<CommercialPolicy>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (table) => [
+    uniqueIndex("commercial_authority_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check("commercial_authority_version_positive", sql`${table.version} > 0`),
+    pgPolicy("commercial_authority_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`,
+    }),
+    pgPolicy("commercial_authority_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${table.actorId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
 export const knowledgeRevision = pgTable(
   "knowledge_revision",
   {

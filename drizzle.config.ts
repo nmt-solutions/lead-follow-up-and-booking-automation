@@ -22,5 +22,6 @@ export default defineConfig({
     "file_access",
     "file_usage",
     "knowledge_revision",
+    "commercial_authority_revision",
   ],
 });
