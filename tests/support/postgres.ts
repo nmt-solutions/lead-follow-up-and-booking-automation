@@ -63,7 +63,7 @@ export async function startPostgres() {
   });
   async function reapplySchema() {
     await prepareDatabaseRole(admin);
-    await run(process.execPath, [drizzleCli, "push"], {
+    const pushed = await run(process.execPath, [drizzleCli, "push"], {
       env: {
         ...process.env,
         DATABASE_ADMIN_URL: `postgresql://postgres:${password}@127.0.0.1:${port}/postgres`,
@@ -71,6 +71,9 @@ export async function startPostgres() {
       windowsHide: true,
       timeout: 30000,
     });
+    // The pinned CLI can print a database error and still exit zero.
+    if (/^(?:error|Error):/m.test(`${pushed.stdout}\n${pushed.stderr}`))
+      throw new Error("The test schema push reported a database failure");
     await secureDatabase(admin);
   }
   try {

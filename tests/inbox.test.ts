@@ -365,6 +365,243 @@ describe("shared sales inbox at the application seam", () => {
     ).toBeNull();
   });
 
+  it("reuses a verified reply's need for a new provider thread and its later repeated messages", async () => {
+    const { owner, business, connection } = await setup("reply-new-thread");
+    const captured = await inbox.capture(
+      owner,
+      business.id,
+      connection.id,
+      event,
+    );
+    const original = await inbox.conversation(
+      owner,
+      business.id,
+      captured.conversationId,
+    );
+    const second = await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "new-thread",
+      messageRef: "new-thread",
+      conversationRef: "new-thread",
+      replyToMessageRef: event.messageRef,
+    });
+    await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "repeat-new-thread",
+      messageRef: "repeat-new-thread",
+      conversationRef: "new-thread",
+    });
+    const reloaded = await inbox.conversation(
+      owner,
+      business.id,
+      second.conversationId,
+    );
+    expect(reloaded.opportunities).toHaveLength(1);
+    expect(reloaded.messages.map((message) => message.opportunityId)).toEqual([
+      original.opportunity.id,
+      original.opportunity.id,
+    ]);
+  });
+
+  it("explicitly retains immutable discovery evidence with an engaged need without granting engagement or authority from a public signal", async () => {
+    const { owner, business, connection } = await setup("discovery-source");
+    const actor = await h.authenticate(owner);
+    // Persisted research fixture: association reads the same immutable observation records as discovery.
+    const ids = (
+      await h.admin.query(
+        "select gen_random_uuid() as run, gen_random_uuid() as prospect, gen_random_uuid() as observation",
+      )
+    ).rows[0];
+    await h.admin.query(
+      "insert into discovery_run (id,business_id,brief,policy,created_by,session_id,request_key,execution_id,status,budget,used,completed_steps,created_at,updated_at) values ($1,$2,'{}','{}',$3,'fixture',gen_random_uuid(),gen_random_uuid(),'completed',1,1,1,$4,$4)",
+      [ids.run, business.id, actor.userId, h.clock.now()],
+    );
+    await h.admin.query(
+      "insert into discovery_prospect (id,business_id,canonical_url) values ($1,$2,'https://buyer.example/request')",
+      [ids.prospect, business.id],
+    );
+    await h.admin.query(
+      "insert into discovery_usage (id,run_id,business_id,kind,units,position,outcome,at) values ($1,$2,$3,'review',1,0,'succeeded',$4)",
+      [ids.observation, ids.run, business.id, h.clock.now()],
+    );
+    const evidence = [
+      {
+        url: "https://buyer.example/request",
+        quote: "Seeking steel for the second site",
+        checkedAt: "2026-11-05T09:00:00.000Z",
+      },
+    ];
+    await h.admin.query(
+      "insert into discovery_observation (id,business_id,run_id,prospect_id,data,outcome,checked_at) values ($1,$2,$3,$4,$5,'created',$6)",
+      [
+        ids.observation,
+        business.id,
+        ids.run,
+        ids.prospect,
+        JSON.stringify({
+          name: "Verified fabricator",
+          market: "US",
+          buyer: {
+            label: "Fabricators",
+            identity: "organization",
+            use: "business_end_user",
+            requiresBuyingRequest: false,
+          },
+          relationship: "potential_buyer",
+          matchReason: "Purchases relevant steel",
+          uncertainty: "Person's purchasing role still requires verification",
+          request: null,
+          evidence,
+        }),
+        h.clock.now(),
+      ],
+    );
+    await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "public",
+      kind: "public_signal",
+    });
+    expect((await inbox.workspace(owner, business.id)).conversations).toEqual(
+      [],
+    );
+    const captured = await inbox.capture(
+      owner,
+      business.id,
+      connection.id,
+      event,
+    );
+    const before = await inbox.conversation(
+      owner,
+      business.id,
+      captured.conversationId,
+    );
+    expect(before.opportunity.sources).toEqual([]);
+    expect(
+      (await inbox.workspace(owner, business.id)).discoverySources,
+    ).toMatchObject([
+      {
+        observationId: ids.observation,
+        prospectId: ids.prospect,
+        runId: ids.run,
+        evidence,
+      },
+    ]);
+    const mailBefore = h.mail.sent.length;
+    const command = {
+      expectedVersion: before.association.version,
+      buyerId: before.buyer.id,
+      messageIds: [],
+      allMessages: true,
+      discoveryObservationId: ids.observation,
+      target: { kind: "existing", opportunityId: before.opportunity.id },
+      future: "target",
+      reason: "Buyer verified the public request is this purchasing need",
+    };
+    await inbox.associate(owner, business.id, before.id, command);
+    const after = await inbox.conversation(owner, business.id, before.id);
+    expect(after.opportunity.sources).toMatchObject([
+      {
+        observationId: ids.observation,
+        prospectId: ids.prospect,
+        runId: ids.run,
+        name: "Verified fabricator",
+        matchReason: "Purchases relevant steel",
+        uncertainty: "Person's purchasing role still requires verification",
+        evidence,
+      },
+    ]);
+    expect(after.history.at(-1)).toMatchObject({
+      actorId: actor.userId,
+      discoveryObservationId: ids.observation,
+    });
+    const other = await setup("source-foreign");
+    const otherCapture = await inbox.capture(
+      other.owner,
+      other.business.id,
+      other.connection.id,
+      event,
+    );
+    const foreign = await inbox.conversation(
+      other.owner,
+      other.business.id,
+      otherCapture.conversationId,
+    );
+    await expect(
+      inbox.associate(other.owner, other.business.id, foreign.id, {
+        ...command,
+        expectedVersion: foreign.association.version,
+        buyerId: foreign.buyer.id,
+        target: { kind: "existing", opportunityId: foreign.opportunity.id },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      h.admin.query(
+        "update inbox_association_history set discovery_observation_id=$1 where business_id=$2",
+        [ids.observation, other.business.id],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+    await inbox.capture(owner, business.id, connection.id, event);
+    expect(
+      (await inbox.conversation(owner, business.id, before.id)).opportunity
+        .sources,
+    ).toEqual(after.opportunity.sources);
+    // Only signing into the separate Business above added authentication mail.
+    expect(
+      h.mail.sent
+        .slice(mailBefore)
+        .every((mail) => mail.email === "inbox-source-foreign@example.com"),
+    ).toBe(true);
+  });
+
+  it("corrects every message using a versioned all-messages command without a request-size limit on conversation history", async () => {
+    const { owner, business, connection } = await setup("all-messages");
+    const captured = await inbox.capture(
+      owner,
+      business.id,
+      connection.id,
+      event,
+    );
+    const other = await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "other-person",
+      messageRef: "other-person",
+      conversationRef: "other-person",
+      senderRef: "verified@example.net",
+    });
+    for (let index = 0; index < 500; index++)
+      await inbox.capture(owner, business.id, connection.id, {
+        ...event,
+        eventId: `history-${index}`,
+        messageRef: `history-${index}`,
+      });
+    const before = await inbox.conversation(
+      owner,
+      business.id,
+      captured.conversationId,
+    );
+    const buyer = await inbox.conversation(
+      owner,
+      business.id,
+      other.conversationId,
+    );
+    await inbox.associate(owner, business.id, before.id, {
+      expectedVersion: before.association.version,
+      buyerId: buyer.buyer.id,
+      messageIds: [],
+      allMessages: true,
+      target: { kind: "existing", opportunityId: buyer.opportunity.id },
+      future: "target",
+      reason: "Confirmed all correspondence is this buyer's need",
+    });
+    const after = await inbox.conversation(owner, business.id, before.id);
+    expect(after.buyer.id).toBe(buyer.buyer.id);
+    expect(after.messages[0].opportunityId).toBe(buyer.opportunity.id);
+    expect(after.messages).toHaveLength(501);
+    expect(
+      new Set(after.messages.map((message) => message.opportunityId)),
+    ).toEqual(new Set([buyer.opportunity.id]));
+  }, 60000);
+
   it("serializes competing corrections and intake without duplicate needs, erased links or rewritten event provenance", async () => {
     const { owner, business, connection } = await setup("association-race");
     const captured = await inbox.capture(

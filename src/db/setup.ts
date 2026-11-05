@@ -274,6 +274,22 @@ export async function prepareDatabaseRole(pool: Pool) {
       END IF;
     END $$;
   `);
+  // The pinned introspector treats an index referenced by any FK as constraint-
+  // generated and hides it, then tries to CREATE the existing index. Runtime
+  // access above is paused. Remove only our scoped FKs (never rows/indexes);
+  // secureDatabase validates and restores them before restoring access.
+  const database = drizzle(pool);
+  for (const key of inboxScopeForeignKeys) {
+    const { name } = getTableConfig(key.table);
+    const exists = await pool.query<{ present: boolean }>(
+      "select to_regclass($1) is not null as present",
+      [`public.${name}`],
+    );
+    if (!exists.rows[0]?.present) continue;
+    await database.execute(
+      sql`alter table ${key.table} drop constraint if exists ${sql.identifier(key.getName())}`,
+    );
+  }
 }
 
 /** Idempotent security settings which the pinned Drizzle version cannot express. */
@@ -286,11 +302,13 @@ export async function secureDatabase(pool: Pool) {
     await client.query(`
       UPDATE inbox_opportunity o SET buyer_id = c.buyer_id, title = c.subject
         FROM inbox_conversation c WHERE o.conversation_id = c.id AND o.business_id = c.business_id AND o.buyer_id IS NULL;
-      INSERT INTO inbox_association (id,business_id,buyer_id,default_opportunity_id,version,review_reason,review_owner_id,next_action)
-        SELECT c.id,c.business_id,c.buyer_id,o.id,0,NULL,cn.created_by,'Review incoming inquiry'
+      INSERT INTO inbox_association (id,business_id,buyer_id,initial_opportunity_id,default_opportunity_id,version,review_reason,review_owner_id,next_action)
+        SELECT c.id,c.business_id,c.buyer_id,o.id,o.id,0,NULL,cn.created_by,'Review incoming inquiry'
         FROM inbox_conversation c JOIN inbox_opportunity o ON o.conversation_id = c.id AND o.business_id = c.business_id
         JOIN inbox_connection cn ON cn.id = c.connection_id AND cn.business_id = c.business_id
         ON CONFLICT (id) DO NOTHING;
+      UPDATE inbox_association a SET initial_opportunity_id=o.id FROM inbox_opportunity o
+        WHERE o.conversation_id=a.id AND o.business_id=a.business_id AND a.initial_opportunity_id IS NULL;
       INSERT INTO inbox_message_link (id,business_id,conversation_id,opportunity_id)
         SELECT m.id,m.business_id,m.conversation_id,o.id FROM inbox_message m
         JOIN inbox_opportunity o ON o.conversation_id = m.conversation_id AND o.business_id = m.business_id

@@ -193,6 +193,39 @@ export function createInboxRepository(database: Database): InboxRepository {
             );
           if (conversation && conversation.buyerId !== buyerId)
             throw new ApplicationError("CONFLICT");
+          const replies = event.replyToMessageRef
+            ? await tx
+                .select({
+                  opportunityId: inboxMessageLink.opportunityId,
+                  buyerId: inboxAssociation.buyerId,
+                  originalBuyerId: inboxConversation.buyerId,
+                })
+                .from(inboxMessage)
+                .innerJoin(
+                  inboxMessageLink,
+                  eq(inboxMessageLink.id, inboxMessage.id),
+                )
+                .innerJoin(
+                  inboxConversation,
+                  eq(inboxConversation.id, inboxMessage.conversationId),
+                )
+                .innerJoin(
+                  inboxAssociation,
+                  eq(inboxAssociation.id, inboxMessage.conversationId),
+                )
+                .where(
+                  and(
+                    eq(inboxMessage.businessId, businessId),
+                    eq(inboxMessage.connectionId, connectionId),
+                    eq(inboxMessage.messageRef, event.replyToMessageRef),
+                  ),
+                )
+            : [];
+          const reply = replies[0];
+          // An exact channel identity and received reply reference establish continuity; names/domains never do.
+          const verifiedReply =
+            reply?.originalBuyerId === buyerId ? reply : undefined;
+          const effectiveBuyerId = verifiedReply?.buyerId ?? buyerId;
           const conversationId = conversation?.id ?? randomUUID();
           let [association] = await tx
             .select()
@@ -213,46 +246,53 @@ export function createInboxRepository(database: Database): InboxRepository {
               subject: event.subject,
               lastReceivedAt: at,
             });
-            const opportunityId = randomUUID();
+            const opportunityId = verifiedReply?.opportunityId ?? randomUUID();
             const [candidate] = await tx
               .select({ id: inboxOpportunity.id })
               .from(inboxOpportunity)
               .where(
                 and(
                   eq(inboxOpportunity.businessId, businessId),
-                  eq(inboxOpportunity.buyerId, buyerId),
+                  eq(inboxOpportunity.buyerId, effectiveBuyerId),
                 ),
               )
               .limit(1);
-            await tx.insert(inboxOpportunity).values({
-              id: opportunityId,
-              businessId,
-              buyerId,
-              title: event.subject,
-              connectionId,
-              conversationId,
-              stage: "inquiry",
-              ownerId: null,
-              handoffReason:
-                "Human review required; intake grants no action authority",
-              nextAction: "Review incoming inquiry",
-              createdAt: at,
-            });
+            if (!verifiedReply?.opportunityId)
+              await tx.insert(inboxOpportunity).values({
+                id: opportunityId,
+                businessId,
+                buyerId: effectiveBuyerId,
+                title: event.subject,
+                connectionId,
+                conversationId,
+                stage: "inquiry",
+                ownerId: null,
+                handoffReason:
+                  "Human review required; intake grants no action authority",
+                nextAction: "Review incoming inquiry",
+                createdAt: at,
+              });
             [association] = await tx
               .insert(inboxAssociation)
               .values({
                 id: conversationId,
                 businessId,
-                buyerId,
-                defaultOpportunityId: opportunityId,
+                buyerId: effectiveBuyerId,
+                initialOpportunityId: opportunityId,
+                defaultOpportunityId:
+                  verifiedReply && !verifiedReply.opportunityId
+                    ? null
+                    : opportunityId,
                 version: 0,
-                reviewReason: candidate
-                  ? "Buyer has other purchasing needs; compare before associating"
-                  : null,
+                reviewReason:
+                  candidate && !verifiedReply
+                    ? "Buyer has other purchasing needs; compare before associating"
+                    : null,
                 reviewOwnerId: actor.userId,
-                nextAction: candidate
-                  ? "Compare this inquiry with the buyer's existing Opportunities; keep separate or explicitly associate"
-                  : "Review incoming inquiry",
+                nextAction:
+                  candidate && !verifiedReply
+                    ? "Compare this inquiry with the buyer's existing Opportunities; keep separate or explicitly associate"
+                    : "Review incoming inquiry",
               })
               .returning();
           } else {
@@ -263,34 +303,11 @@ export function createInboxRepository(database: Database): InboxRepository {
           }
           if (!association) throw new ApplicationError("CONFLICT");
           let opportunityId = association.defaultOpportunityId;
-          if (event.replyToMessageRef) {
-            const [reply] = await tx
-              .select({
-                opportunityId: inboxMessageLink.opportunityId,
-                buyerId: inboxAssociation.buyerId,
-              })
-              .from(inboxMessage)
-              .innerJoin(
-                inboxMessageLink,
-                eq(inboxMessageLink.id, inboxMessage.id),
-              )
-              .innerJoin(
-                inboxAssociation,
-                eq(inboxAssociation.id, inboxMessage.conversationId),
-              )
-              .where(
-                and(
-                  eq(inboxMessage.businessId, businessId),
-                  eq(inboxMessage.connectionId, connectionId),
-                  eq(inboxMessage.messageRef, event.replyToMessageRef),
-                ),
-              );
-            if (reply)
-              opportunityId =
-                reply.buyerId === association.buyerId
-                  ? reply.opportunityId
-                  : null;
-          }
+          if (reply)
+            opportunityId =
+              reply.buyerId === association.buyerId
+                ? reply.opportunityId
+                : null;
           const messageId = randomUUID();
           await tx.insert(inboxMessage).values({
             id: messageId,

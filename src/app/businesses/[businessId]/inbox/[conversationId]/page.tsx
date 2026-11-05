@@ -4,7 +4,10 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { OpportunityHistoryEntry } from "@/models/inbox";
+import type {
+  OpportunityHistoryEntry,
+  InboxDiscoverySource,
+} from "@/models/inbox";
 import { InboxAssociation } from "@/components/inbox-association";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +103,7 @@ export default async function ConversationPage({
               ))}
             </dl>
             <OpportunityHistory entries={conversation.opportunity.history} />
+            <DiscoverySources sources={conversation.opportunity.sources} />
           </CardContent>
         </Card>
       </div>
@@ -132,6 +136,7 @@ export default async function ConversationPage({
                   Reference: {need.id}
                 </p>
                 <OpportunityHistory entries={need.history} />
+                <DiscoverySources sources={need.sources} />
               </CardContent>
             </Card>
           ))}
@@ -286,6 +291,47 @@ export default async function ConversationPage({
         )}
       </section>
     </div>
+  );
+}
+
+function DiscoverySources({ sources }: { sources: InboxDiscoverySource[] }) {
+  if (!sources.length) return null;
+  return (
+    <details className="mt-4 text-sm">
+      <summary className="min-h-11 cursor-pointer py-3 font-medium">
+        Retained discovery evidence
+      </summary>
+      <ul className="space-y-4">
+        {sources.map((source) => (
+          <li key={source.observationId} className="space-y-2">
+            <p className="font-medium">
+              {source.name}: {source.matchReason}
+            </p>
+            <p>Uncertainty: {source.uncertainty}</p>
+            <p className="text-muted-foreground">
+              Prospect: {source.prospectId} · Observation:{" "}
+              {source.observationId} · Run: {source.runId}
+            </p>
+            {source.evidence.map((entry, index) => (
+              <div key={index}>
+                <a
+                  href={entry.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex min-h-11 items-center text-primary underline"
+                >
+                  {entry.url} (new tab)
+                </a>
+                <p>{entry.quote}</p>
+                <p className="text-muted-foreground">
+                  Checked: {entry.checkedAt}
+                </p>
+              </div>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

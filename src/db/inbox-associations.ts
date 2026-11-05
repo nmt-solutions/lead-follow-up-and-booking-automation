@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import {
+  planInquiryAssociation,
+  purchasingNeedDefaults,
+} from "../application/inbox-association";
 import type { InboxRepository } from "../application/inbox";
 import { ApplicationError } from "../models/application-error";
 import type {
@@ -7,9 +11,10 @@ import type {
   InboxOpportunity,
   InboxSummary,
   InboxConnection,
-  AssociationChange,
   OpportunityHistoryEntry,
+  InboxDiscoverySource,
 } from "../models/inbox";
+import { persistedProspectSchema } from "../models/discovery";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import {
@@ -23,6 +28,7 @@ import {
   inboxOpportunity,
   inboxOpportunityHistory,
   user,
+  discoveryObservation,
 } from "./schema";
 
 export function connectionView(
@@ -50,6 +56,7 @@ function buyerView(row: typeof inboxBuyer.$inferSelect): InboxBuyer {
 function opportunityView(
   row: typeof inboxOpportunity.$inferSelect,
   history: OpportunityHistoryEntry[],
+  sources: InboxDiscoverySource[],
 ): InboxOpportunity {
   if (!row.buyerId) throw new ApplicationError("CONFLICT");
   return {
@@ -62,7 +69,56 @@ function opportunityView(
     nextAction: row.nextAction,
     createdAt: row.createdAt.toISOString(),
     history,
+    sources,
   };
+}
+async function discoverySources(
+  tx: Transaction,
+  businessId: string,
+): Promise<InboxDiscoverySource[]> {
+  const rows = await tx
+    .select()
+    .from(discoveryObservation)
+    .where(eq(discoveryObservation.businessId, businessId))
+    .orderBy(
+      desc(discoveryObservation.checkedAt),
+      asc(discoveryObservation.id),
+    );
+  return rows.map((row) => {
+    const parsed = persistedProspectSchema.safeParse(row.data);
+    if (!parsed.success) throw new ApplicationError("CONFLICT");
+    return {
+      observationId: row.id,
+      prospectId: row.prospectId,
+      runId: row.runId,
+      name: parsed.data.name,
+      matchReason: parsed.data.matchReason,
+      uncertainty: parsed.data.uncertainty,
+      evidence: parsed.data.evidence.map((entry) => ({
+        url: entry.url,
+        quote: entry.quote,
+        checkedAt: entry.checkedAt,
+      })),
+    };
+  });
+}
+async function opportunitySources(
+  tx: Transaction,
+  businessId: string,
+  sources: InboxDiscoverySource[],
+) {
+  const rows = await tx
+    .select()
+    .from(inboxAssociationHistory)
+    .where(eq(inboxAssociationHistory.businessId, businessId));
+  return (id: string) =>
+    sources.filter((source) =>
+      rows.some(
+        (entry) =>
+          entry.discoveryObservationId === source.observationId &&
+          entry.after.messages.some((link) => link.opportunityId === id),
+      ),
+    );
 }
 async function opportunityHistory(tx: Transaction, businessId: string) {
   const rows = await tx
@@ -141,13 +197,16 @@ export function createAssociationRepository(
           .where(eq(inboxOpportunity.businessId, businessId))
           .orderBy(asc(inboxOpportunity.createdAt), asc(inboxOpportunity.id));
         const history = await opportunityHistory(tx, businessId);
+        const sources = await discoverySources(tx, businessId);
+        const attached = await opportunitySources(tx, businessId, sources);
         return {
           canManage: role !== "salesperson",
           connections: connections.map(connectionView),
           buyers: buyers.map(buyerView),
           opportunities: needs.map((need) =>
-            opportunityView(need, history(need.id)),
+            opportunityView(need, history(need.id), attached(need.id)),
           ),
+          discoverySources: sources,
           conversations: await summaries(tx, businessId),
         };
       });
@@ -175,7 +234,7 @@ export function createAssociationRepository(
           .innerJoin(inboxBuyer, eq(inboxBuyer.id, inboxConversation.buyerId))
           .innerJoin(
             inboxOpportunity,
-            eq(inboxOpportunity.conversationId, inboxConversation.id),
+            eq(inboxOpportunity.id, inboxAssociation.initialOpportunityId),
           )
           .where(
             and(
@@ -189,6 +248,11 @@ export function createAssociationRepository(
           .from(user)
           .where(eq(user.id, row.association.reviewOwnerId));
         const outcomeHistory = await opportunityHistory(tx, businessId);
+        const sources = await opportunitySources(
+          tx,
+          businessId,
+          await discoverySources(tx, businessId),
+        );
         const [buyer] = await tx
           .select()
           .from(inboxBuyer)
@@ -251,9 +315,10 @@ export function createAssociationRepository(
           opportunity: opportunityView(
             row.initial,
             outcomeHistory(row.initial.id),
+            sources(row.initial.id),
           ),
           opportunities: needs.map((need) =>
-            opportunityView(need, outcomeHistory(need.id)),
+            opportunityView(need, outcomeHistory(need.id), sources(need.id)),
           ),
           association: {
             version: row.association.version,
@@ -308,6 +373,18 @@ export function createAssociationRepository(
               ),
             );
           if (!buyer) throw new ApplicationError("NOT_FOUND");
+          if (input.discoveryObservationId) {
+            const [source] = await tx
+              .select({ id: discoveryObservation.id })
+              .from(discoveryObservation)
+              .where(
+                and(
+                  eq(discoveryObservation.id, input.discoveryObservationId),
+                  eq(discoveryObservation.businessId, businessId),
+                ),
+              );
+            if (!source) throw new ApplicationError("NOT_FOUND");
+          }
           const links = await tx
             .select()
             .from(inboxMessageLink)
@@ -317,17 +394,6 @@ export function createAssociationRepository(
                 eq(inboxMessageLink.conversationId, id),
               ),
             );
-          const selected = links.filter((link) =>
-            input.messageIds.includes(link.id),
-          );
-          if (selected.length !== input.messageIds.length)
-            throw new ApplicationError("NOT_FOUND");
-          // Changing the conversation's buyer requires an explicit disposition for every message.
-          if (
-            buyer.id !== state.buyerId &&
-            (selected.length !== links.length || input.future === "keep")
-          )
-            throw new ApplicationError("INVALID_INPUT");
           let opportunityId: string | null = null;
           if (input.target.kind === "existing") {
             const [need] = await tx
@@ -350,33 +416,17 @@ export function createAssociationRepository(
               businessId,
               buyerId: buyer.id,
               title: input.target.title,
-              stage: "inquiry",
-              ownerId: null,
-              handoffReason:
-                "Human review required; association grants no action authority",
-              nextAction: "Review purchasing need",
+              ...purchasingNeedDefaults(),
               createdAt: at,
             });
           }
-          const defaultOpportunityId =
-            input.future === "keep"
-              ? state.defaultOpportunityId
-              : input.future === "target"
-                ? opportunityId
-                : null;
-          const before: AssociationChange = {
-            buyerId: state.buyerId,
-            defaultOpportunityId: state.defaultOpportunityId,
-            messages: selected.map((link) => ({
-              id: link.id,
-              opportunityId: link.opportunityId,
-            })),
-          };
-          const after: AssociationChange = {
-            buyerId: buyer.id,
-            defaultOpportunityId,
-            messages: selected.map((link) => ({ id: link.id, opportunityId })),
-          };
+          const plan = planInquiryAssociation(
+            state,
+            links,
+            input,
+            opportunityId,
+            actor.userId,
+          );
           await tx
             .update(inboxMessageLink)
             .set({ opportunityId })
@@ -384,36 +434,12 @@ export function createAssociationRepository(
               and(
                 eq(inboxMessageLink.businessId, businessId),
                 eq(inboxMessageLink.conversationId, id),
-                inArray(inboxMessageLink.id, input.messageIds),
+                inArray(inboxMessageLink.id, plan.selectedIds),
               ),
             );
-          const [unresolved] = await tx
-            .select({ id: inboxMessageLink.id })
-            .from(inboxMessageLink)
-            .where(
-              and(
-                eq(inboxMessageLink.businessId, businessId),
-                eq(inboxMessageLink.conversationId, id),
-                isNull(inboxMessageLink.opportunityId),
-              ),
-            )
-            .limit(1);
           await tx
             .update(inboxAssociation)
-            .set({
-              buyerId: buyer.id,
-              defaultOpportunityId,
-              version: state.version + 1,
-              reviewReason: unresolved
-                ? "Messages need a purchasing-need association"
-                : null,
-              reviewOwnerId: actor.userId,
-              nextAction: unresolved
-                ? "Review unassociated messages and choose or create a purchasing need"
-                : defaultOpportunityId
-                  ? "Review incoming inquiry"
-                  : "Review new messages without a matching reply reference",
-            })
+            .set(plan.state)
             .where(
               and(
                 eq(inboxAssociation.id, id),
@@ -427,8 +453,9 @@ export function createAssociationRepository(
             version: state.version + 1,
             actorId: actor.userId,
             reason: input.reason,
-            before,
-            after,
+            discoveryObservationId: input.discoveryObservationId,
+            before: plan.before,
+            after: plan.after,
             at,
           });
         },

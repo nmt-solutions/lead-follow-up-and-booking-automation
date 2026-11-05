@@ -73,6 +73,7 @@ export type InboxWorkspace = {
   conversations: InboxSummary[];
   buyers: InboxBuyer[];
   opportunities: InboxOpportunity[];
+  discoverySources: InboxDiscoverySource[];
 };
 export type InboxConversation = {
   id: string;
@@ -109,6 +110,16 @@ export type InboxOpportunity = {
   nextAction: string;
   createdAt: string;
   history: OpportunityHistoryEntry[];
+  sources: InboxDiscoverySource[];
+};
+export type InboxDiscoverySource = {
+  observationId: string;
+  prospectId: string;
+  runId: string;
+  name: string;
+  matchReason: string;
+  uncertainty: string;
+  evidence: { url: string; quote: string; checkedAt: string }[];
 };
 // Read-only history seam: association never authors ownership or conversion outcomes.
 export type OpportunityHistoryEntry = {
@@ -126,22 +137,29 @@ export type OpportunityHistoryEntry = {
   sourceRef: string | null;
   at: string;
 };
-export const associateInquirySchema = z.strictObject({
-  expectedVersion: z.number().int().min(0).max(2147483646),
-  buyerId: z.uuid(),
-  messageIds: z
-    .array(z.uuid())
-    .min(1)
-    .max(500)
-    .refine((ids) => new Set(ids).size === ids.length),
-  target: z.discriminatedUnion("kind", [
-    z.strictObject({ kind: z.literal("existing"), opportunityId: z.uuid() }),
-    z.strictObject({ kind: z.literal("new"), title: content(200) }),
-    z.strictObject({ kind: z.literal("review") }),
-  ]),
-  future: z.enum(["keep", "target", "review"]),
-  reason: content(1000),
-});
+export const associateInquirySchema = z
+  .strictObject({
+    expectedVersion: z.number().int().min(0).max(2147483646),
+    buyerId: z.uuid(),
+    messageIds: z
+      .array(z.uuid())
+      .max(500)
+      .refine((ids) => new Set(ids).size === ids.length),
+    allMessages: z.boolean().default(false),
+    discoveryObservationId: z.uuid().nullable().default(null),
+    target: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("existing"), opportunityId: z.uuid() }),
+      z.strictObject({ kind: z.literal("new"), title: content(200) }),
+      z.strictObject({ kind: z.literal("review") }),
+    ]),
+    future: z.enum(["keep", "target", "review"]),
+    reason: content(1000),
+  })
+  .refine((value) =>
+    value.allMessages
+      ? value.messageIds.length === 0
+      : value.messageIds.length > 0,
+  );
 export type AssociateInquiry = z.infer<typeof associateInquirySchema>;
 export type AssociationChange = {
   buyerId: string;
@@ -154,6 +172,7 @@ export type AssociationHistory = {
   reason: string;
   at: string;
   sourceEventId: string | null;
+  discoveryObservationId: string | null;
   before: AssociationChange;
   after: AssociationChange;
 };

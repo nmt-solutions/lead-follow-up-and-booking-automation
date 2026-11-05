@@ -1026,6 +1026,10 @@ export const discoveryObservation = pgTable(
       table.prospectId,
       table.checkedAt,
     ),
+    uniqueIndex("discovery_observation_business_scope").on(
+      table.id,
+      table.businessId,
+    ),
     pgPolicy("discovery_observation_read", {
       for: "select",
       to: appRuntime,
@@ -1463,6 +1467,7 @@ export const inboxAssociation = pgTable(
   {
     ...inboxColumns(),
     buyerId: uuid("buyer_id").notNull(),
+    initialOpportunityId: uuid("initial_opportunity_id").notNull(),
     defaultOpportunityId: uuid("default_opportunity_id"),
     version: integer("version").notNull(),
     reviewReason: text("review_reason"),
@@ -1497,6 +1502,7 @@ export const inboxAssociationHistory = pgTable(
       .references(() => user.id),
     reason: text("reason").notNull(),
     sourceEventId: text("source_event_id"),
+    discoveryObservationId: uuid("discovery_observation_id"),
     before: jsonb("before").$type<AssociationChange>().notNull(),
     after: jsonb("after").$type<AssociationChange>().notNull(),
     at: timestamp("at", { withTimezone: true }).notNull(),
@@ -1531,6 +1537,31 @@ export const inboxOpportunityHistory = pgTable(
 
 // Installed after unique indexes by secureDatabase, matching the pinned push contract.
 export const inboxScopeForeignKeys = [
+  new ForeignKey(
+    inboxAssociationHistory,
+    foreignKey({
+      name: "inbox_association_discovery_scope",
+      columns: [
+        inboxAssociationHistory.discoveryObservationId,
+        inboxAssociationHistory.businessId,
+      ],
+      foreignColumns: [
+        discoveryObservation.id,
+        discoveryObservation.businessId,
+      ],
+    }),
+  ),
+  new ForeignKey(
+    inboxAssociation,
+    foreignKey({
+      name: "inbox_association_initial_need_scope",
+      columns: [
+        inboxAssociation.initialOpportunityId,
+        inboxAssociation.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
   new ForeignKey(
     inboxOpportunityHistory,
     foreignKey({

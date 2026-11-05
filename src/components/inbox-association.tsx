@@ -61,7 +61,10 @@ export function InboxAssociation({
     const parsed = associateInquirySchema.safeParse({
       expectedVersion: conversation.association.version,
       buyerId,
-      messageIds: selected,
+      messageIds:
+        selected.length === conversation.messages.length ? [] : selected,
+      allMessages: selected.length === conversation.messages.length,
+      discoveryObservationId: form.get("discoverySource") || null,
       target:
         target === "new"
           ? { kind: "new", title: form.get("title") }
@@ -291,6 +294,34 @@ export function InboxAssociation({
                   maxLength={200}
                   placeholder="e.g. Steel for the second site"
                 />
+              </div>
+            )}
+            {workspace.discoverySources.length > 0 && target !== "review" && (
+              <div className="space-y-2">
+                <Label htmlFor="association-source">
+                  Discovery evidence to retain (optional)
+                </Label>
+                <NativeSelect
+                  id="association-source"
+                  name="discoverySource"
+                  defaultValue=""
+                >
+                  <option value="">No discovery evidence to attach</option>
+                  {workspace.discoverySources.map((source) => (
+                    <option
+                      key={source.observationId}
+                      value={source.observationId}
+                    >
+                      {source.name} · {source.evidence[0]?.checkedAt} ·{" "}
+                      {source.observationId.slice(0, 8)}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <p className="text-sm text-muted-foreground">
+                  Choose evidence only after verifying its relationship to this
+                  buyer and need. Public evidence alone does not establish
+                  engagement or permission to send.
+                </p>
               </div>
             )}
             <div className="space-y-2">
