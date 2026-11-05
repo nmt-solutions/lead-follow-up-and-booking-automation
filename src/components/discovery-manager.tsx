@@ -105,12 +105,43 @@ function RunResults({ run }: { run: RunView }) {
           </dt>
           <dd className="mt-1 font-medium">{run.counts.namedBuyers}</dd>
         </div>
+        <div>
+          <dt className="text-sm text-muted-foreground">Raw search results</dt>
+          <dd className="mt-1 font-medium">
+            {run.consolidation.rawResults ?? "Not recorded"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted-foreground">
+            Matched observations
+          </dt>
+          <dd className="mt-1 font-medium">
+            {run.consolidation.matchedObservations}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted-foreground">
+            New / refreshed / duplicates
+          </dt>
+          <dd className="mt-1 font-medium">
+            {run.consolidation.created} / {run.consolidation.refreshed} /{" "}
+            {run.consolidation.duplicates}
+          </dd>
+        </div>
       </dl>
       <p className="text-sm text-muted-foreground">
         Counts cover unique prospects in this run. Named-buyer coverage counts
         prospects with an evidenced purchasing person or owner, even without a
         contact route. Contactable means a usable public route, including
         general business contacts; it does not establish permission to send.
+      </p>
+      <p className="text-sm text-muted-foreground">
+        Raw results include repeated search entries and results that do not
+        establish a match. Refreshed means an existing prospect first
+        encountered in this run; duplicates are further observations of that
+        prospect within the run. Both retain evidence. Earlier runs may lack
+        these outcome measurements. Each newly authorized run uses its own
+        allowance.
       </p>
       {(run.status === "queued" || run.status === "running") && (
         <p className="text-sm text-muted-foreground">
@@ -512,6 +543,51 @@ export function DiscoveryManager({
           {message}
         </p>
       )}
+      <section className="space-y-5" aria-labelledby="retained-prospects">
+        <h2 id="retained-prospects" className="text-lg font-semibold">
+          Retained prospects ({state.counts.evidenceBacked})
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Consolidated within this Business across saved runs. Exact evidenced
+          company identities and purchasing needs stay separate; a name or
+          shared mailbox alone does not establish a match.{" "}
+          {state.counts.contactable} contactable · {state.counts.namedBuyers}{" "}
+          with evidenced named buyers. Conflicting roles are unverified until
+          reviewed. Reloading saved evidence makes no provider calls.
+        </p>
+        {[
+          {
+            key: "open",
+            title: "Open buying requests",
+            prospects: state.prospects.filter((p) => p.requestState === "open"),
+          },
+          {
+            key: "potential",
+            title: "Potential buyers",
+            prospects: state.prospects.filter((p) => p.requestState !== "open"),
+          },
+        ].map((section) => (
+          <div key={section.key} className="space-y-4">
+            <h3 className="font-semibold">
+              {section.title} ({section.prospects.length})
+            </h3>
+            {section.prospects.length ? (
+              <ul className="space-y-4">
+                {section.prospects.map((prospect) => (
+                  <DiscoveryProspectCard
+                    key={prospect.id}
+                    prospect={prospect}
+                  />
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No retained {section.title.toLowerCase()}.
+              </p>
+            )}
+          </div>
+        ))}
+      </section>
       <section className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">

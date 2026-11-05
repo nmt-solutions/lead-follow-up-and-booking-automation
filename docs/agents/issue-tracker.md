@@ -10,22 +10,22 @@ Issues and specs live in `Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation
 - List: `gh issue list --state open --json number,title,body,labels,assignees`; add label filters as needed.
 - Comment: `gh issue comment <number> --body-file <file>`. Use UTF-8 files with actual newlines for multiline bodies.
 - Label: `gh issue edit <number> --add-label "..."` or `--remove-label "..."`.
-- Close: reserved for user acceptance; implementation alone ends at `in-test`. If the user explicitly asks you to close an accepted issue, post the explanation as a separate comment, then run `gh issue close <number>`.
+- Close: after implementation, database changes, automated checks, review and push, post the handoff as a separate comment, add `done`, then run `gh issue close <number> --reason completed`. Human verification is tracked separately by `tested`.
 - Sub-issues: `gh issue create --parent <parent> ...` or `gh issue edit <parent> --add-sub-issue <child>`. If unavailable, link the child in the parent's task list and put `Part of #<parent>` in the child body.
-- Dependencies: `gh issue edit <child> --add-blocked-by <blocker>`. Preserve native relationships even after a prerequisite reaches `in-test`; they record the dependency, while the readiness rules below determine whether implementation can proceed. If native dependencies are unavailable, use a `Blocked by: #<number>` fallback.
+- Dependencies: `gh issue edit <child> --add-blocked-by <blocker>`. Preserve native relationships after implementation and closure; they record the dependency, while the readiness rules below determine whether implementation can proceed. If native dependencies are unavailable, use a `Blocked by: #<number>` fallback.
 - Count open native blockers: `gh api repos/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/<number> --jq .issue_dependencies_summary.blocked_by`. This is GitHub's raw count, not the implementation readiness decision.
 
 ## Dependency readiness
 
-`in-test` means the AI implementation, required database changes, automated checks, review and push are complete. Human testing happens later. This status satisfies a prerequisite for dependent implementation while user acceptance remains pending.
+`done` and closed means the AI implementation, required database changes, automated checks, review and push are complete. Human testing happens later and is recorded with the separate `tested` label. A completed prerequisite satisfies dependent implementation even without `tested`. Legacy `in-test` issues also represent completed AI implementation; migrate them to `done` and closed.
 
 Before starting dependent work, inspect each prerequisite's state and labels using `gh api repos/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/<number>/dependencies/blocked_by`. Also fetch any prerequisites recorded in the body's `Implementation prerequisites` section or a `Blocked by:` fallback.
 
-- A prerequisite marked `rework` blocks dependent implementation until corrected and returned to `in-test`; this takes precedence over stale completion labels or state.
+- A prerequisite marked `rework` blocks dependent implementation until corrected and completed again; this takes precedence over `done`, `tested` and closed state.
 - Otherwise, a prerequisite that is closed or labelled `in-test` or `done` is satisfied for implementation.
 - Any other unresolved prerequisite remains blocking. Start when every prerequisite is satisfied.
 
-Keep native blocking relationships visible for traceability. GitHub's native Blocked badge follows issue closure rather than these lifecycle labels, so an open `in-test` prerequisite can still produce a Blocked badge or positive raw blocker count. This display does not block agent implementation when the readiness rules are satisfied. Preserve the relationship and the prerequisite's open state; do not remove links or close issues to clear the badge.
+Keep native blocking relationships visible for traceability. Closing an implemented prerequisite naturally resolves its native Blocked badge. A legacy open `in-test` prerequisite can still produce a positive raw blocker count while satisfying implementation readiness. A closed prerequisite marked `rework` remains blocking under these rules even if GitHub does not show a native block. Use the individual states and labels; preserve the links.
 
 Body sections named `Implementation prerequisites` and `Implementation dependents` may supplement native relationships with `- #<number>` references. Preserve these mentions and the native links. These readiness rules override generic skill filters that require every blocker to be closed.
 
@@ -35,15 +35,17 @@ Body sections named `Implementation prerequisites` and `Implementation dependent
 
 ## Implementation handoff and user acceptance
 
-Use the lifecycle labels in [triage labels](triage-labels.md). The user owns UI validation and acceptance.
+Use the labels in [triage labels](triage-labels.md). Implementation completion and human verification are separate. The user owns UI validation and acceptance.
 
 1. Preserve the issue's agreed acceptance criteria. Clarify or supplement them only when a necessary testable requirement is missing or ambiguous; retain the original scope and identify the clarification. Sufficient criteria need no rewrite. Implementation limitations remain limitations, rather than weaker acceptance criteria.
 2. Complete the implementation, required database changes, automated checks, code review, commit and push. UI/browser validation is performed by the user; it is not an agent completion gate. Follow [frontend guidance](frontend.md) for the existing UI standards.
 3. Add a concise handoff comment with the commit, automated check and database results, known limitations, and manual workflow steps with expected outcomes for the user to test against the criteria. Identify UI validation and user acceptance as pending; automated results do not establish human acceptance.
-4. Leave the issue **open**, add `in-test`, and remove `ready-for-agent`, `rework` and `done` when present. Preserve its native dependency relationships. Do not close the issue or mark it `done` after implementation.
-5. The user either accepts it by applying `done` and closing it, or requests changes by applying `rework`, keeping/reopening it and recording failing steps with expected and actual results. Clear the previous lifecycle label. Labels and GitHub's open/closed state are maintained manually.
+4. Add `done`, remove `ready-for-agent`, `in-test` and resolved `rework` when present, and close the issue as **completed** after the separate handoff comment. Preserve native dependency relationships and acceptance criteria. Leave `tested` absent until the user verifies the implementation; automated tests and code review do not grant it.
+5. The user finds completed issues without `tested` to test later. After successful testing, the user adds `tested`. If changes are needed, the user adds `rework` and records failing steps with expected and actual results; the issue may still be closed when feedback arrives.
 
-Continue dependent work within the user's authorized implementation scope as soon as its prerequisites satisfy the readiness rules. `in-test` does not require another approval or a pause. A label change alone does not authorize an unrequested implementation or rework round. When asked to pause after the current implementation, finish its handoff and wait.
+At the next authorized iteration, include `gh issue list --state all --label rework --json number,title,state,body,labels,comments` so feedback on closed issues is visible. Reopen an issue when beginning its fix, clear `done` and stale `tested`, and use the same implementation/check/push/closure handoff after correction. A `rework` label is a change request within an ongoing authorized round; the user need not manually reopen the issue. Label edits alone do not launch an agent outside an authorized round.
+
+Continue dependent work within the user's authorized implementation scope as soon as its prerequisites satisfy the readiness rules. Pending human testing and absence of `tested` do not require another approval or a pause. When asked to pause after the current implementation, finish its handoff and wait.
 
 ## Skill operations
 

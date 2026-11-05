@@ -30,6 +30,16 @@ export async function verifyRuntimeRole(
       AND NOT has_table_privilege(current_user, 'public.discovery_configuration', 'INSERT,UPDATE,DELETE,TRUNCATE')
       AND NOT has_column_privilege(current_user, 'public.discovery_run', 'budget', 'UPDATE')
       AND NOT has_column_privilege(current_user, 'public.discovery_run', 'execution_id', 'UPDATE')
+      AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('discovery_prospect_alias', 'discovery_observation'))
+      AND (SELECT count(*) = 4 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('discovery_prospect_alias', 'discovery_observation'))
+      AND NOT has_table_privilege(current_user, 'public.discovery_prospect_alias', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.discovery_observation', 'UPDATE,DELETE,TRUNCATE')
       AND (SELECT count(*) = 1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

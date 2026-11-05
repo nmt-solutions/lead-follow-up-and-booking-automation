@@ -31,6 +31,7 @@ export type DiscoveryRepository = {
     operationId: string,
     prospect: Omit<DiscoveryProspect, "id"> | null,
     at: Date,
+    details?: { returnedResults?: number; sourceUrl?: string },
   ): Promise<void>;
   progress(work: DiscoveryWork, at: Date): Promise<void>;
   failOperation(work: DiscoveryWork, operationId: string): Promise<void>;

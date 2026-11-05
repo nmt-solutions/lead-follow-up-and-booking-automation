@@ -10,18 +10,19 @@ Use this mapping whenever a skill names a triage role.
 | ready-for-human | `ready-for-human` | Human implementation required            |
 | wontfix         | `wontfix`         | Will not be actioned                     |
 
-## Implementation lifecycle
+## Implementation lifecycle and human testing
 
-These statuses supplement the five triage roles; they do not replace them. Use at most one lifecycle label per issue.
+These labels supplement the five triage roles. Implementation completion and human verification are separate.
 
-| Label     | Issue state | Set by                                          | Meaning                                                                               |
-| --------- | ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `in-test` | Open        | Agent after implementation and automated checks | AI implementation complete; dependent work may proceed while human testing is pending |
-| `rework`  | Open        | User                                            | Testing found changes needed; record failing steps and expected/actual results        |
-| `done`    | Closed      | User                                            | Implementation accepted after testing                                                 |
+| Label     | Issue state                                      | Set by                                              | Meaning                                                                                        |
+| --------- | ------------------------------------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `done`    | Closed as completed                              | Agent after implementation, checks, review and push | AI implementation complete; human testing may still be pending                                 |
+| `tested`  | Usually closed                                   | User after testing                                  | The current implementation passed human verification; automated checks do not grant this label |
+| `rework`  | Open or closed when reported; reopen for the fix | User                                                | Changes needed; record failed steps and expected/actual results                                |
+| `in-test` | Legacy                                           | Agent migrates to `done` and closed                 | Previous AI-complete status; human testing is now tracked by `tested`                          |
 
-Flow: `ready-for-agent` → `in-test` → `done`, or `in-test` → `rework` → `in-test` after an authorized fix round. Remove `ready-for-agent` at handoff and clear the previous lifecycle label on each transition. Preserve unrelated topic labels. Updating a label does not automatically change GitHub's open/closed state or authorize an unrequested implementation round. Within an authorized round, `in-test` satisfies a prerequisite; apply the [dependency readiness rules](issue-tracker.md#dependency-readiness).
+Flow: `ready-for-agent` → `done` and closed, initially without `tested`. The user then adds `tested` after successful testing, or `rework` if changes are needed. During an authorized fix round, reopen the issue, clear `done` and stale `tested`, then return it to closed `done` after correction. It awaits fresh human testing again.
 
-Preserve native blocking relationships and any prerequisite mentions in issue descriptions. GitHub may still display Blocked for an open `in-test` prerequisite; use [dependency readiness](issue-tracker.md#dependency-readiness) to decide whether implementation can proceed.
+`done` and `tested` may coexist. `rework` takes precedence over completion labels and closed state, so inspect rework issues across all states. Preserve unrelated topic labels, native blocking relationships and prerequisite mentions. Pending human testing never blocks dependent implementation; apply the [dependency readiness rules](issue-tracker.md#dependency-readiness).
 
 Follow [the implementation handoff](issue-tracker.md#implementation-handoff-and-user-acceptance) for evidence, acceptance criteria and ownership.

@@ -115,17 +115,24 @@ export const contactCandidateSchema = z.strictObject({
   route: contactRouteSchema.nullable(),
 });
 export const contactEvidenceSchema = contactCandidateSchema.extend({
+  id: z.string().optional(),
   url: evidenceUrlSchema,
   checkedAt: z.iso.datetime(),
 });
 export type ContactEvidence = z.infer<typeof contactEvidenceSchema>;
 export type SearchResult = z.infer<typeof searchResultSchema>;
+export const companyEvidenceSchema = z.strictObject({
+  name: text,
+  website: evidenceUrlSchema.refine((value) => new URL(value).pathname === "/"),
+  quote: quoteSchema,
+});
 export const reviewResultSchema = z.strictObject({
   relevant: z.boolean(),
   reason: z.string().trim().min(1).max(1000),
   evidenceQuote: z.string().trim().min(1).max(500),
   uncertainty: z.string().trim().min(1).max(1000),
   contacts: z.array(z.unknown()).max(5).default([]),
+  company: companyEvidenceSchema.nullable().default(null),
   request: z
     .strictObject({
       quote: z.string().trim().min(1).max(500),
@@ -135,6 +142,10 @@ export const reviewResultSchema = z.strictObject({
       statusQuote: z.string().trim().min(1).max(500).nullable().default(null),
       expiresAt: z.iso.datetime().nullable().default(null),
       expiryQuote: quoteSchema.nullable().default(null),
+      reference: z
+        .strictObject({ url: evidenceUrlSchema, quote: quoteSchema })
+        .nullable()
+        .default(null),
     })
     .nullable(),
 });
@@ -194,7 +205,9 @@ export const persistedProspectSchema = z.strictObject({
   relationship: z.literal("potential_buyer"),
   matchReason: z.string().trim().min(1).max(1000),
   uncertainty: z.string().trim().min(1).max(1000),
+  company: companyEvidenceSchema.nullable().default(null),
   request: reviewResultSchema.shape.request,
+  identityConflict: z.boolean().default(false),
   contacts: z.array(contactEvidenceSchema).max(5).default([]),
   evidence: z
     .array(
@@ -213,7 +226,41 @@ export type DiscoveryProspect = z.infer<typeof persistedProspectSchema> & {
 export type ProspectView = DiscoveryProspect & {
   contactStatus: "buyer_contact" | "general_business_contact" | "missing";
   requestState: "open" | "expired" | "undated" | "uncertain" | null;
+  companyId: string | null;
+  firstCheckedAt: string;
+  lastCheckedAt: string;
+  reviewReasons: string[];
+  history: ObservationView[];
+  sourceChecks: SourceCheck[];
 };
+export const sourceCheckSchema = z.strictObject({
+  runId: z.uuid(),
+  url: evidenceUrlSchema,
+  checkedAt: z.iso.datetime(),
+});
+export type SourceCheck = z.infer<typeof sourceCheckSchema>;
+export const observationOutcomeSchema = z.enum([
+  "created",
+  "refreshed",
+  "duplicate",
+  "legacy",
+]);
+export type ObservationOutcome = z.infer<typeof observationOutcomeSchema>;
+export type ObservationView = {
+  id: string;
+  runId: string;
+  checkedAt: string;
+  outcome: ObservationOutcome;
+  current: boolean;
+  data: z.infer<typeof persistedProspectSchema>;
+};
+const consolidationSchema = z.strictObject({
+  rawResults: z.number().int().nonnegative().nullable(),
+  matchedObservations: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  refreshed: z.number().int().nonnegative(),
+  duplicates: z.number().int().nonnegative(),
+});
 const countsSchema = z.strictObject({
   evidenceBacked: z.number().int().nonnegative(),
   potentialBuyers: z.number().int().nonnegative(),
@@ -228,6 +275,7 @@ export type DiscoveryUsage = {
   outcome: "reserved" | "succeeded" | "failed" | "uncertain";
   query: string | null;
   at: string;
+  returnedResults: number | null;
 };
 export type DiscoveryRun = {
   id: string;
@@ -261,6 +309,7 @@ export type RunView = Omit<
   prospects: ProspectView[];
   counts: z.infer<typeof countsSchema>;
   usage: DiscoveryUsage[];
+  consolidation: z.infer<typeof consolidationSchema>;
 };
 export type DiscoveryWorkspace = {
   canRun: boolean;
@@ -270,7 +319,36 @@ export type DiscoveryWorkspace = {
   offering: string;
   brief: DiscoveryBrief | null;
   runs: RunView[];
+  prospects: ProspectView[];
+  counts: z.infer<typeof countsSchema>;
 };
+
+const prospectViewSchema = persistedProspectSchema.extend({
+  contacts: z.array(contactEvidenceSchema),
+  evidence: z.array(persistedProspectSchema.shape.evidence.element).min(1),
+  id: z.uuid(),
+  contactStatus: z.enum([
+    "buyer_contact",
+    "general_business_contact",
+    "missing",
+  ]),
+  requestState: z.enum(["open", "expired", "undated", "uncertain"]).nullable(),
+  companyId: z.string().nullable(),
+  firstCheckedAt: z.iso.datetime(),
+  lastCheckedAt: z.iso.datetime(),
+  reviewReasons: z.array(z.string()),
+  history: z.array(
+    z.strictObject({
+      id: z.string(),
+      runId: z.uuid(),
+      checkedAt: z.iso.datetime(),
+      outcome: observationOutcomeSchema,
+      current: z.boolean(),
+      data: persistedProspectSchema,
+    }),
+  ),
+  sourceChecks: z.array(sourceCheckSchema),
+});
 
 const briefSchema = z.strictObject({
   offering: z.string().max(4000),
@@ -308,6 +386,8 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
     availableMarkets: z.array(text),
     offering: z.string(),
     brief: briefSchema.nullable(),
+    prospects: z.array(prospectViewSchema),
+    counts: countsSchema,
     runs: z.array(
       z.strictObject({
         id: z.uuid(),
@@ -323,19 +403,8 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
         createdAt: z.iso.datetime(),
         updatedAt: z.iso.datetime(),
         counts: countsSchema,
-        prospects: z.array(
-          persistedProspectSchema.extend({
-            id: z.uuid(),
-            contactStatus: z.enum([
-              "buyer_contact",
-              "general_business_contact",
-              "missing",
-            ]),
-            requestState: z
-              .enum(["open", "expired", "undated", "uncertain"])
-              .nullable(),
-          }),
-        ),
+        consolidation: consolidationSchema,
+        prospects: z.array(prospectViewSchema),
         usage: z.array(
           z.strictObject({
             id: z.uuid(),
@@ -344,6 +413,7 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
             outcome: z.enum(["reserved", "succeeded", "failed", "uncertain"]),
             query: z.string().nullable(),
             at: z.iso.datetime(),
+            returnedResults: z.number().int().nonnegative().nullable(),
           }),
         ),
       }),

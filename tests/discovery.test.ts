@@ -158,6 +158,673 @@ describe("Bounded discovery at the primary application seam", () => {
     expect(reviews).toHaveLength(1);
     expect(harness.invitations.sent).toEqual([]);
   });
+  it("consolidates evidenced company overlaps across runs while charging new work and retaining observations", async () => {
+    const { owner, business } = await setup();
+    const company = {
+      name: "Hudson Fabrication",
+      website: "https://fabricator.example/",
+      quote: "Hudson Fabrication: https://fabricator.example/",
+    };
+    behavior.search = async (input) =>
+      ["about", "suppliers", "about"].map((page) => ({
+        name: company.name,
+        market: input.market,
+        url: `https://fabricator.example/${page}`,
+        excerpt: `We fabricate galvanized steel sheet to ASTM A653. ${company.quote}`,
+      }));
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Fits steel supply",
+      evidenceQuote: "fabricate galvanized steel sheet to ASTM A653",
+      uncertainty: "Purchase timing unknown",
+      company,
+      request: null,
+    });
+    const firstRequest = request();
+    const first = await application.start(owner, business.id, firstRequest);
+    await execute();
+    const before = await application.workspace(owner, business.id);
+    expect(before.runs[0]).toMatchObject({
+      used: 4,
+      consolidation: {
+        rawResults: 3,
+        matchedObservations: 2,
+        created: 1,
+        refreshed: 0,
+        duplicates: 1,
+      },
+      counts: { evidenceBacked: 1 },
+    });
+    const retainedId = before.runs[0].prospects[0].id;
+    await application.start(owner, business.id, firstRequest);
+    await application.execute(queued[0]);
+    expect(searches).toHaveLength(1);
+    expect(await application.workspace(owner, business.id)).toEqual(before);
+    harness.clock.set("2026-11-05T10:00:00Z");
+    await application.start(owner, business.id, request());
+    await execute();
+    const after = await application.workspace(owner, business.id);
+    expect(after.prospects).toHaveLength(1);
+    expect(after.prospects[0]).toMatchObject({
+      id: retainedId,
+      history: expect.arrayContaining([
+        expect.objectContaining({ runId: first.id }),
+      ]),
+      lastCheckedAt: "2026-11-05T10:00:00.000Z",
+    });
+    expect(after.prospects[0].history).toHaveLength(4);
+    expect(after.runs[0]).toMatchObject({
+      used: 4,
+      consolidation: { created: 0, refreshed: 1, duplicates: 1 },
+    });
+    expect(after.runs[1]).toEqual(before.runs[0]);
+    expect(searches).toHaveLength(2);
+    expect(reviews).toHaveLength(4);
+    expect(discoveryWorkspaceSchema.safeParse(after).success).toBe(true);
+  });
+  it("refreshes changed roles and uncertain request facts without carrying historical certainty forward", async () => {
+    const { owner, business } = await setup();
+    let status = "open";
+    let role = "Head of procurement";
+    const route = {
+      kind: "email",
+      value: "mira@fabricator.example",
+      quote: "Mira Shah: mira@fabricator.example",
+    };
+    behavior.search = async (input) => [
+      {
+        name: "Hudson Fabrication",
+        market: input.market,
+        url: "https://fabricator.example/request",
+        excerpt: `We need galvanized steel sheet. Posted 2026-11-04. Status: ${status}. Closes 2026-11-05T12:00:00Z. Mira Shah: ${role}. ${route.quote}`,
+      },
+    ];
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Declared sheet need",
+      evidenceQuote: "need galvanized steel sheet",
+      uncertainty: "Contact role and status require checking",
+      request: {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status,
+        statusQuote: status === "unknown" ? null : `Status: ${status}`,
+        expiresAt: "2026-11-05T12:00:00Z",
+        expiryQuote: "Closes 2026-11-05T12:00:00Z",
+      },
+      contacts: [
+        {
+          name: "Mira Shah",
+          nameQuote: `Mira Shah: ${role}`,
+          roleEvidence: { role: "purchasing", quote: `Mira Shah: ${role}` },
+          route,
+        },
+      ],
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    const original = (await application.workspace(owner, business.id))
+      .prospects[0];
+    expect(original).toMatchObject({
+      requestState: "open",
+      contactStatus: "buyer_contact",
+    });
+    status = "unknown";
+    role = "Engineer";
+    harness.clock.set("2026-11-05T10:00:00Z");
+    await application.start(owner, business.id, request());
+    await execute();
+    const refreshed = (await application.workspace(owner, business.id))
+      .prospects[0];
+    expect(refreshed).toMatchObject({
+      id: original.id,
+      requestState: "uncertain",
+      contactStatus: "general_business_contact",
+      contacts: [{ id: original.contacts[0].id, roleEvidence: null }],
+    });
+    expect(refreshed.history).toHaveLength(2);
+    expect(refreshed.history[0]).toMatchObject({
+      current: false,
+      data: {
+        contacts: [{ roleEvidence: { role: "purchasing" } }],
+        request: { status: "open" },
+      },
+    });
+    harness.clock.set("2026-11-05T12:00:00Z");
+    const expired = await application.workspace(owner, business.id);
+    expect(expired.prospects[0].requestState).toBe("expired");
+    expect(expired.counts).toMatchObject({
+      openBuyingRequests: 0,
+      namedBuyers: 0,
+      contactable: 1,
+    });
+    expect(searches).toHaveLength(2);
+    expect(reviews).toHaveLength(2);
+  });
+  it("surfaces conflicting current sources without presenting a certain buyer role or open demand", async () => {
+    const { owner, business } = await setup();
+    const company = {
+      name: "Hudson Fabrication",
+      website: "https://fabricator.example/",
+      quote: "Hudson Fabrication: https://fabricator.example/",
+    };
+    const reference = {
+      url: "https://fabricator.example/rfq/101",
+      quote: "Request URL: https://fabricator.example/rfq/101",
+    };
+    behavior.search = async (input) =>
+      ["open", "expired"].map((status) => ({
+        name: company.name,
+        market: input.market,
+        url: `https://${status}.example/request`,
+        excerpt: `${company.quote}. ${reference.quote}. We need galvanized steel sheet. Posted 2026-11-04. Status: ${status}. Mira Shah: ${status === "open" ? "Head of procurement" : "Owner"}. Mira Shah: mira@fabricator.example`,
+      }));
+    behavior.review = async (input) => {
+      const status = new URL(input.source.url).hostname.split(".")[0];
+      return {
+        relevant: true,
+        reason: "Sheet need",
+        evidenceQuote: "need galvanized steel sheet",
+        uncertainty: "Conflicting source claims need review",
+        company,
+        request: {
+          quote: "We need galvanized steel sheet.",
+          publishedAt: "2026-11-04",
+          dateQuote: "Posted 2026-11-04",
+          status,
+          statusQuote: `Status: ${status}`,
+          reference,
+        },
+        contacts: [
+          {
+            name: "Mira Shah",
+            nameQuote: `Mira Shah: ${status === "open" ? "Head of procurement" : "Owner"}`,
+            roleEvidence: {
+              role: status === "open" ? "purchasing" : "owner",
+              quote: `Mira Shah: ${status === "open" ? "Head of procurement" : "Owner"}`,
+            },
+            route: {
+              kind: "email",
+              value: "mira@fabricator.example",
+              quote: "Mira Shah: mira@fabricator.example",
+            },
+          },
+        ],
+      };
+    };
+    await application.start(owner, business.id, request());
+    await execute();
+    const state = await application.workspace(owner, business.id);
+    expect(state.prospects).toHaveLength(1);
+    expect(state.prospects[0]).toMatchObject({
+      requestState: "uncertain",
+      contactStatus: "general_business_contact",
+    });
+    expect(state.prospects[0].contacts).toHaveLength(1);
+    expect(state.prospects[0].reviewReasons).toHaveLength(2);
+    expect(state.prospects[0].history).toHaveLength(2);
+    expect(state.counts).toMatchObject({
+      evidenceBacked: 1,
+      openBuyingRequests: 0,
+      namedBuyers: 0,
+    });
+    expect(state.runs[0].consolidation).toEqual({
+      rawResults: 2,
+      matchedObservations: 2,
+      created: 1,
+      refreshed: 0,
+      duplicates: 1,
+    });
+  });
+  it("keeps distinct purchasing needs on the same source separate instead of discarding a second result", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) =>
+      [
+        "We need galvanized steel sheet.",
+        "We need coated steel for a new roof.",
+      ].map((quote) => ({
+        name: "Hudson Fabrication",
+        market: input.market,
+        url: "https://fabricator.example/requests",
+        excerpt: `${quote} Posted 2026-11-04. Status: open`,
+      }));
+    behavior.review = async (input) => ({
+      relevant: true,
+      reason: "Explicit steel need",
+      evidenceQuote: input.source.excerpt.split(".")[0],
+      uncertainty: "No contact established",
+      request: {
+        quote: `${input.source.excerpt.split(".")[0]}.`,
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+      },
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    const state = await application.workspace(owner, business.id);
+    expect(state.prospects).toHaveLength(2);
+    expect(new Set(state.prospects.map((p) => p.id)).size).toBe(2);
+    expect(state.runs[0]).toMatchObject({
+      used: 4,
+      counts: { openBuyingRequests: 2 },
+      consolidation: { rawResults: 2, created: 2, duplicates: 0 },
+    });
+    expect(reviews).toHaveLength(2);
+  });
+  it("withdraws current consumer demand when a later source check cannot establish the explicit request", async () => {
+    const { owner, business } = await setup({
+      buyerCategories: [
+        {
+          label: "Personal buyers",
+          identity: "individual",
+          use: "personal_use",
+          requiresBuyingRequest: true,
+        },
+      ],
+    });
+    let declaresNeed = true;
+    behavior.search = async (input) => [
+      {
+        name: "Public requester",
+        market: input.market,
+        url: "https://requests.example/sheet",
+        excerpt: declaresNeed
+          ? "I need galvanized steel sheet. Posted 2026-11-04. Status: open"
+          : "This page no longer declares a buying request.",
+      },
+    ];
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Sheet source",
+      evidenceQuote: declaresNeed
+        ? "need galvanized steel sheet"
+        : "no longer declares a buying request",
+      uncertainty: "Only explicit public requests establish consumer scope",
+      request: declaresNeed
+        ? {
+            quote: "I need galvanized steel sheet.",
+            publishedAt: "2026-11-04",
+            dateQuote: "Posted 2026-11-04",
+            status: "open",
+            statusQuote: "Status: open",
+          }
+        : null,
+    });
+    const initialRun = await application.start(owner, business.id, request());
+    await execute();
+    const original = (await application.workspace(owner, business.id))
+      .prospects[0];
+    declaresNeed = false;
+    // Equal clock values must not make a superseded observation current again.
+    const latestRun = await application.start(owner, business.id, request());
+    await execute();
+    const state = await application.workspace(owner, business.id);
+    expect(state.prospects).toHaveLength(1);
+    expect(state.prospects[0]).toMatchObject({
+      id: original.id,
+      requestState: "uncertain",
+      lastCheckedAt: "2026-11-05T09:00:00.000Z",
+    });
+    expect(state.prospects[0].history).toHaveLength(1);
+    expect(state.runs.find((r) => r.id === latestRun.id)).toMatchObject({
+      used: 3,
+      counts: { evidenceBacked: 0, openBuyingRequests: 0 },
+    });
+    expect(
+      state.runs.find((r) => r.id === initialRun.id)?.counts.openBuyingRequests,
+    ).toBe(1);
+    expect(state.counts.openBuyingRequests).toBe(0);
+  });
+  it("serializes concurrent consolidation and keeps company/contact identities private to each Business", async () => {
+    const a = await setup();
+    const b = await setup();
+    const company = {
+      name: "Hudson Fabrication",
+      website: "https://fabricator.example/",
+      quote: "Hudson Fabrication: https://fabricator.example/",
+    };
+    behavior.search = async (input) => [
+      {
+        name: company.name,
+        market: input.market,
+        url: "https://fabricator.example/about",
+        excerpt: `${company.quote}. We fabricate galvanized steel sheet. Mira Shah: Owner. Mira Shah: mira@fabricator.example`,
+      },
+    ];
+    let release!: () => void;
+    const bothEntered = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    behavior.review = async () => {
+      if (reviews.length === 2) release();
+      await bothEntered;
+      return {
+        relevant: true,
+        reason: "Sheet fit",
+        evidenceQuote: "fabricate galvanized steel sheet",
+        uncertainty: "Timing unknown",
+        company,
+        request: null,
+        contacts: [
+          {
+            name: "Mira Shah",
+            nameQuote: "Mira Shah: Owner",
+            roleEvidence: { role: "owner", quote: "Mira Shah: Owner" },
+            route: {
+              kind: "email",
+              value: "mira@fabricator.example",
+              quote: "Mira Shah: mira@fabricator.example",
+            },
+          },
+        ],
+      };
+    };
+    await Promise.all([
+      application.start(a.owner, a.business.id, request()),
+      application.start(a.owner, a.business.id, request()),
+    ]);
+    await Promise.all(queued.map((work) => application.execute(work)));
+    const first = await application.workspace(a.owner, a.business.id);
+    expect(first.prospects).toHaveLength(1);
+    expect(first.prospects[0].history).toHaveLength(2);
+    expect(first.runs.map((r) => r.prospects[0].id)).toEqual([
+      first.prospects[0].id,
+      first.prospects[0].id,
+    ]);
+    expect(first.runs.reduce((sum, r) => sum + r.used, 0)).toBe(6);
+    expect(
+      first.runs.reduce((sum, r) => sum + r.consolidation.created, 0),
+    ).toBe(1);
+    expect(
+      first.runs.reduce((sum, r) => sum + r.consolidation.refreshed, 0),
+    ).toBe(1);
+    await application.start(b.owner, b.business.id, request());
+    await execute();
+    const second = await application.workspace(b.owner, b.business.id);
+    expect(second.prospects).toHaveLength(1);
+    expect(second.prospects[0].id).not.toBe(first.prospects[0].id);
+    expect(second.prospects[0].companyId).not.toBe(
+      first.prospects[0].companyId,
+    );
+    expect(second.prospects[0].contacts[0].id).not.toBe(
+      first.prospects[0].contacts[0].id,
+    );
+    await expect(
+      application.workspace(b.owner, a.business.id),
+    ).rejects.toHaveProperty("code", "NOT_FOUND");
+    const calls = searches.length + reviews.length;
+    await application.execute({ ...queued[0], businessId: b.business.id });
+    expect(searches.length + reviews.length).toBe(calls);
+    expect(await application.workspace(a.owner, a.business.id)).toEqual(first);
+    expect(harness.invitations.sent).toEqual([]);
+  });
+  it("does not use unverified company assertions or a shared page to merge unrelated companies", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) =>
+      ["Hudson Fabrication", "Harbor Fabrication"].map((name) => ({
+        name,
+        market: input.market,
+        url: "https://directory.example/fabricators",
+        excerpt: `${name}. We fabricate galvanized steel sheet. Directory team: directory@directory.example`,
+      }));
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Sheet fit",
+      evidenceQuote: "fabricate galvanized steel sheet",
+      uncertainty: "Company identity unverified",
+      request: null,
+      company: {
+        name: "Invented common company",
+        website: "https://invented.example/",
+        quote: "Invented common company: https://invented.example/",
+      },
+      contacts: [
+        {
+          name: "Directory team",
+          nameQuote: "Directory team: directory@directory.example",
+          roleEvidence: null,
+          route: {
+            kind: "email",
+            value: "directory@directory.example",
+            quote: "Directory team: directory@directory.example",
+          },
+        },
+      ],
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    const state = await application.workspace(owner, business.id);
+    expect(state.prospects).toHaveLength(2);
+    expect(
+      state.prospects.every((p) => p.company === null && p.companyId === null),
+    ).toBe(true);
+    expect(JSON.stringify(state)).not.toContain("invented.example");
+    expect(state.prospects[0].contacts[0].id).not.toBe(
+      state.prospects[1].contacts[0].id,
+    );
+  });
+  it("adopts legacy source identities without rewriting historical evidence or inventing old consolidation metrics", async () => {
+    const { owner, business } = await setup();
+    await application.start(owner, business.id, request());
+    await execute();
+    const original = (await application.workspace(owner, business.id))
+      .prospects[0];
+    // Simulate a persisted #10 document and the absence of #12 observation rows.
+    await harness.admin.query(
+      "delete from discovery_observation where business_id = $1",
+      [business.id],
+    );
+    await harness.admin.query(
+      "delete from discovery_prospect_alias where business_id = $1",
+      [business.id],
+    );
+    await harness.admin.query(
+      "update discovery_result set data = data - 'contacts' - 'company' - 'identityConflict' where business_id = $1",
+      [business.id],
+    );
+    await harness.admin.query(
+      "update discovery_usage set returned_results = null, source_url = null, checked_at = null where business_id = $1",
+      [business.id],
+    );
+    await harness.reapplySchema();
+    const legacy = await application.workspace(owner, business.id);
+    expect(legacy.prospects[0]).toMatchObject({
+      id: original.id,
+      contacts: [],
+      history: [{ outcome: "legacy" }],
+    });
+    expect(legacy.runs[0].consolidation).toEqual({
+      rawResults: null,
+      matchedObservations: 1,
+      created: 0,
+      refreshed: 0,
+      duplicates: 0,
+    });
+    harness.clock.set("2026-11-05T10:00:00Z");
+    await application.start(owner, business.id, request());
+    await execute();
+    const refreshed = await application.workspace(owner, business.id);
+    expect(refreshed.prospects).toHaveLength(1);
+    expect(refreshed.prospects[0]).toMatchObject({
+      id: original.id,
+      history: [
+        { outcome: "legacy", current: false },
+        { outcome: "refreshed", current: true },
+      ],
+    });
+    expect(discoveryWorkspaceSchema.safeParse(refreshed).success).toBe(true);
+  });
+  it("does not infer one purchasing need from identical request wording and dates on distinct sources", async () => {
+    const { owner, business } = await setup();
+    const company = {
+      name: "Hudson Fabrication",
+      website: "https://fabricator.example/",
+      quote: "Hudson Fabrication: https://fabricator.example/",
+    };
+    behavior.search = async (input) =>
+      ["project-a", "project-b"].map((page) => ({
+        name: company.name,
+        market: input.market,
+        url: `https://fabricator.example/${page}`,
+        excerpt: `${company.quote}. We need galvanized steel sheet. Posted 2026-11-04. Status: open`,
+      }));
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Steel request",
+      evidenceQuote: "need galvanized steel sheet",
+      uncertainty: "No evidence that these projects are one need",
+      company,
+      request: {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+        reference: {
+          url: "https://fabricator.example/unproven-reference",
+          quote: "Request URL: https://fabricator.example/unproven-reference",
+        },
+      },
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    const state = await application.workspace(owner, business.id);
+    expect(state.prospects).toHaveLength(2);
+    expect(state.prospects[0].id).not.toBe(state.prospects[1].id);
+    expect(state.prospects[0].companyId).toBe(state.prospects[1].companyId);
+    expect(state.runs[0].consolidation).toMatchObject({
+      created: 2,
+      duplicates: 0,
+    });
+    expect(state.prospects.every((p) => p.request?.reference === null)).toBe(
+      true,
+    );
+  });
+  it("keeps distinct evidenced request references separate even on the same source page", async () => {
+    const { owner, business } = await setup();
+    const company = {
+      name: "Hudson Fabrication",
+      website: "https://fabricator.example/",
+      quote: "Hudson Fabrication: https://fabricator.example/",
+    };
+    behavior.search = async (input) =>
+      ["101", "102"].map((id) => ({
+        name: company.name,
+        market: input.market,
+        url: "https://fabricator.example/rfqs",
+        excerpt: `${company.quote}. We need galvanized steel sheet. Posted 2026-11-04. Status: open. Request URL: https://fabricator.example/rfq/${id}`,
+      }));
+    behavior.review = async (input) => {
+      const url = input.source.excerpt.slice(
+        input.source.excerpt.lastIndexOf("https://"),
+      );
+      return {
+        relevant: true,
+        reason: "Steel request",
+        evidenceQuote: "need galvanized steel sheet",
+        uncertainty: "Separate project requests",
+        company,
+        request: {
+          quote: "We need galvanized steel sheet.",
+          publishedAt: "2026-11-04",
+          dateQuote: "Posted 2026-11-04",
+          status: "open",
+          statusQuote: "Status: open",
+          reference: { url, quote: `Request URL: ${url}` },
+        },
+      };
+    };
+    await application.start(owner, business.id, request());
+    await execute();
+    const state = await application.workspace(owner, business.id);
+    expect(state.prospects).toHaveLength(2);
+    expect(state.runs[0]).toMatchObject({
+      used: 4,
+      counts: { openBuyingRequests: 2 },
+      consolidation: { created: 2, duplicates: 0 },
+    });
+    const ids = state.prospects.map((p) => p.id).sort();
+    await application.start(owner, business.id, request());
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).prospects
+        .map((p) => p.id)
+        .sort(),
+    ).toEqual(ids);
+  });
+  it("keeps retained prospect/contact identity when company evidence is established and separates contradictory identities", async () => {
+    const { owner, business } = await setup();
+    let company: { name: string; website: string; quote: string } | null = null;
+    const contact = {
+      name: "Mira Shah",
+      nameQuote: "Mira Shah: Owner",
+      roleEvidence: { role: "owner", quote: "Mira Shah: Owner" },
+      route: {
+        kind: "email",
+        value: "mira@fabricator.example",
+        quote: "Mira Shah: mira@fabricator.example",
+      },
+    };
+    behavior.search = async (input) => [
+      {
+        name: "Hudson Fabrication",
+        market: input.market,
+        url: "https://fabricator.example/about",
+        excerpt: `We fabricate galvanized steel sheet. Mira Shah: Owner. Mira Shah: mira@fabricator.example. ${company?.quote ?? ""}`,
+      },
+    ];
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Sheet fit",
+      evidenceQuote: "fabricate galvanized steel sheet",
+      uncertainty: "Identity evidence can change",
+      company,
+      request: null,
+      contacts: [contact],
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    const original = (await application.workspace(owner, business.id))
+      .prospects[0];
+    company = {
+      name: "Hudson Fabrication",
+      website: "https://fabricator.example/",
+      quote: "Hudson Fabrication: https://fabricator.example/",
+    };
+    harness.clock.set("2026-11-05T10:00:00Z");
+    await application.start(owner, business.id, request());
+    await execute();
+    const enriched = await application.workspace(owner, business.id);
+    expect(enriched.prospects).toHaveLength(1);
+    expect(enriched.prospects[0]).toMatchObject({
+      id: original.id,
+      contacts: [{ id: original.contacts[0].id }],
+    });
+    expect(enriched.runs[0].consolidation).toMatchObject({
+      created: 0,
+      refreshed: 1,
+    });
+    company = {
+      name: "Unrelated Fabrication",
+      website: "https://unrelated.example/",
+      quote: "Unrelated Fabrication: https://unrelated.example/",
+    };
+    harness.clock.set("2026-11-05T11:00:00Z");
+    await application.start(owner, business.id, request());
+    await execute();
+    const conflicting = await application.workspace(owner, business.id);
+    expect(conflicting.prospects).toHaveLength(2);
+    const separate = conflicting.prospects.find((p) => p.id !== original.id)!;
+    expect(
+      separate.reviewReasons.some((reason) =>
+        reason.includes("Identity evidence"),
+      ),
+    ).toBe(true);
+    expect(separate.contactStatus).toBe("general_business_contact");
+  });
   it("retains general and employee contacts without inflating evidence-backed named-buyer coverage", async () => {
     const { owner, business } = await setup({}, { maxResults: 5 });
     const contacts = [

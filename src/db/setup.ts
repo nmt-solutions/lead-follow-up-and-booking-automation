@@ -19,6 +19,8 @@ import {
   discoveryProspect,
   discoveryResult,
   discoveryUsage,
+  discoveryProspectAlias,
+  discoveryObservation,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -183,6 +185,10 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES (status, stop_reason, used, completed_steps, updated_at) ON public.discovery_run FROM app_runtime;
         REVOKE ALL PRIVILEGES (outcome) ON public.discovery_usage FROM app_runtime;
       END IF;
+      IF to_regclass('public.discovery_observation') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.discovery_observation, public.discovery_prospect_alias FROM app_runtime;
+        REVOKE ALL PRIVILEGES (returned_results, source_url, checked_at, check_order) ON public.discovery_usage FROM app_runtime;
+      END IF;
     END $$;
   `);
 }
@@ -221,6 +227,8 @@ export async function secureDatabase(pool: Pool) {
       discoveryProspect,
       discoveryResult,
       discoveryUsage,
+      discoveryProspectAlias,
+      discoveryObservation,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -266,11 +274,16 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON discovery_run, discovery_prospect, discovery_result, discovery_usage TO app_runtime;
       GRANT UPDATE (status, stop_reason, used, completed_steps, updated_at) ON discovery_run TO app_runtime;
       GRANT UPDATE (outcome) ON discovery_usage TO app_runtime;
+      GRANT UPDATE (returned_results, source_url, checked_at, check_order) ON discovery_usage TO app_runtime;
+      REVOKE ALL PRIVILEGES ON discovery_prospect_alias, discovery_observation FROM app_runtime;
+      GRANT SELECT, INSERT ON discovery_prospect_alias, discovery_observation TO app_runtime;
       ALTER TABLE discovery_configuration FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_run FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_prospect FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_result FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_usage FORCE ROW LEVEL SECURITY;
+      ALTER TABLE discovery_prospect_alias FORCE ROW LEVEL SECURITY;
+      ALTER TABLE discovery_observation FORCE ROW LEVEL SECURITY;
       SET LOCAL ROLE app_runtime;
     `);
     await verifyRuntimeRole(client);

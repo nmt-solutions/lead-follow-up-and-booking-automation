@@ -124,7 +124,7 @@ export function contactClassification(
 export function prospectView(
   prospect: DiscoveryProspect,
   at: Date,
-): ProspectView {
+): DiscoveryProspect & Pick<ProspectView, "contactStatus" | "requestState"> {
   const request = prospect.request;
   const requestState = !request
     ? null

@@ -26,6 +26,7 @@ import type {
   RunStatus,
   StopReason,
   DiscoveryProspect,
+  ObservationOutcome,
 } from "../models/discovery";
 
 export const appRuntime = pgRole("app_runtime").existing();
@@ -661,10 +662,7 @@ export const discoveryProspect = pgTable(
     canonicalUrl: text("canonical_url").notNull(),
   },
   (table) => [
-    uniqueIndex("discovery_prospect_identity").on(
-      table.businessId,
-      table.canonicalUrl,
-    ),
+    index("discovery_prospect_source").on(table.businessId, table.canonicalUrl),
     pgPolicy("discovery_prospect_read", {
       for: "select",
       to: appRuntime,
@@ -674,6 +672,71 @@ export const discoveryProspect = pgTable(
       for: "insert",
       to: appRuntime,
       withCheck: discoveryWrite,
+    }),
+  ],
+).enableRLS();
+
+// Immutable aliases and observations share the Business lock with run reservations.
+export const discoveryProspectAlias = pgTable(
+  "discovery_prospect_alias",
+  {
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    key: text("key").notNull(),
+    prospectId: uuid("prospect_id")
+      .notNull()
+      .references(() => discoveryProspect.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.businessId, table.key] }),
+    pgPolicy("discovery_alias_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_alias_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${discoveryWrite}) and exists (select 1 from public.discovery_prospect p where p.id = prospect_id and p.business_id = ${table.businessId})`,
+    }),
+  ],
+).enableRLS();
+
+export const discoveryObservation = pgTable(
+  "discovery_observation",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .references(() => discoveryUsage.id),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => discoveryRun.id),
+    prospectId: uuid("prospect_id")
+      .notNull()
+      .references(() => discoveryProspect.id),
+    data: jsonb("data").$type<Omit<DiscoveryProspect, "id">>().notNull(),
+    outcome: text("outcome").$type<ObservationOutcome>().notNull(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("discovery_observation_history").on(
+      table.businessId,
+      table.prospectId,
+      table.checkedAt,
+    ),
+    pgPolicy("discovery_observation_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_observation_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${discoveryWrite}) and exists (select 1 from public.discovery_run r where r.id = run_id and r.business_id = ${table.businessId}) and exists (select 1 from public.discovery_prospect p where p.id = prospect_id and p.business_id = ${table.businessId}) and exists (select 1 from public.discovery_usage u where u.id = ${table.id} and u.run_id = ${table.runId} and u.business_id = ${table.businessId} and u.kind = 'review' and u.outcome = 'reserved')`,
     }),
   ],
 ).enableRLS();
@@ -724,11 +787,20 @@ export const discoveryUsage = pgTable(
       .$type<"reserved" | "succeeded" | "failed" | "uncertain">()
       .notNull(),
     query: text("query"),
+    returnedResults: integer("returned_results"),
+    sourceUrl: text("source_url"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    checkOrder: bigint("check_order", { mode: "number" }),
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (table) => [
     index("discovery_usage_run_idx").on(table.businessId, table.runId),
+    uniqueIndex("discovery_check_order").on(table.businessId, table.checkOrder),
     check("discovery_usage_positive", sql`${table.units} > 0`),
+    check(
+      "discovery_returned_results_nonnegative",
+      sql`${table.returnedResults} >= 0`,
+    ),
     pgPolicy("discovery_usage_read", {
       for: "select",
       to: appRuntime,

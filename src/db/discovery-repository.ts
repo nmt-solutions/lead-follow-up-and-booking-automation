@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import {
@@ -10,12 +10,17 @@ import {
   discoveryProspect,
   discoveryResult,
   discoveryUsage,
+  discoveryProspectAlias,
+  discoveryObservation,
   session,
 } from "./schema";
 import { ApplicationError } from "../models/application-error";
 import {
   discoveryPolicySchema,
   persistedProspectSchema,
+  observationOutcomeSchema,
+  sourceCheckSchema,
+  evidenceUrlSchema,
   type DiscoveryRun,
   type DiscoveryWork,
   type DiscoveryBrief,
@@ -28,7 +33,74 @@ import {
 import type { BusinessProfile, Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import { hasMfa } from "../auth/access";
-import { coverageCounts, prospectView } from "../discovery/evidence";
+import { coverageCounts } from "../discovery/evidence";
+import {
+  consolidateViews,
+  contactIdentities,
+  companyIdentity,
+  identityKeys,
+  type RetainedObservation,
+} from "../discovery/consolidation";
+
+async function observationsFor(
+  tx: Transaction,
+  businessId: string,
+): Promise<RetainedObservation[]> {
+  const savedObservations = await tx
+    .select({
+      observation: discoveryObservation,
+      order: discoveryUsage.checkOrder,
+    })
+    .from(discoveryObservation)
+    .innerJoin(
+      discoveryUsage,
+      and(
+        eq(discoveryUsage.id, discoveryObservation.id),
+        eq(discoveryUsage.businessId, businessId),
+      ),
+    )
+    .where(eq(discoveryObservation.businessId, businessId));
+  const observations = savedObservations.map(({ observation, order }) => ({
+    ...observation,
+    order: order ?? 0,
+  }));
+  const represented = new Set(
+    observations.map((o) => `${o.runId}:${o.prospectId}`),
+  );
+  const saved = await tx
+    .select()
+    .from(discoveryResult)
+    .where(eq(discoveryResult.businessId, businessId));
+  const results = saved.map((result) => ({
+    ...result,
+    data: persistedProspectSchema.parse(result.data),
+  }));
+  return [
+    ...observations.map((o) => ({
+      id: o.id,
+      runId: o.runId,
+      prospectId: o.prospectId,
+      checkedAt: o.checkedAt.toISOString(),
+      outcome: observationOutcomeSchema.parse(o.outcome),
+      data: persistedProspectSchema.parse(o.data),
+      order: o.order,
+    })),
+    ...results
+      .filter((r) => !represented.has(`${r.runId}:${r.prospectId}`))
+      .map((r) => {
+        const data = persistedProspectSchema.parse(r.data);
+        return {
+          id: `legacy:${r.runId}:${r.prospectId}`,
+          runId: r.runId,
+          prospectId: r.prospectId,
+          checkedAt: data.evidence[0].checkedAt,
+          outcome: "legacy" as const,
+          order: 0,
+          data,
+        };
+      }),
+  ];
+}
 
 async function requireWorkSession(
   tx: Transaction,
@@ -149,16 +221,38 @@ export function createDiscoveryRepository(
           .orderBy(desc(discoveryRun.createdAt), desc(discoveryRun.id))
           .limit(50);
         const runs: RunView[] = [];
+        const observations = await observationsFor(tx, businessId);
+        const checked = await tx
+          .select()
+          .from(discoveryUsage)
+          .where(
+            and(
+              eq(discoveryUsage.businessId, businessId),
+              eq(discoveryUsage.kind, "review"),
+              eq(discoveryUsage.outcome, "succeeded"),
+            ),
+          );
+        const checks = checked.flatMap((u) =>
+          u.sourceUrl && u.checkedAt
+            ? [
+                {
+                  ...sourceCheckSchema.parse({
+                    runId: u.runId,
+                    url: u.sourceUrl,
+                    checkedAt: u.checkedAt.toISOString(),
+                  }),
+                  order: u.checkOrder ?? 0,
+                },
+              ]
+            : [],
+        );
+        const retained = consolidateViews(
+          observations,
+          businessId,
+          clock.now(),
+          checks,
+        );
         for (const row of rows) {
-          const results = await tx
-            .select()
-            .from(discoveryResult)
-            .where(
-              and(
-                eq(discoveryResult.businessId, businessId),
-                eq(discoveryResult.runId, row.id),
-              ),
-            );
           const usage = await tx
             .select()
             .from(discoveryUsage)
@@ -170,14 +264,14 @@ export function createDiscoveryRepository(
             )
             .orderBy(asc(discoveryUsage.position));
           // Explicit public projection excludes worker capabilities and session IDs.
-          const prospects = results.map((result) =>
-            prospectView(
-              {
-                ...persistedProspectSchema.parse(result.data),
-                id: result.prospectId,
-              },
-              clock.now(),
-            ),
+          const runObservations = observations.filter(
+            (o) => o.runId === row.id,
+          );
+          const prospects = consolidateViews(
+            runObservations,
+            businessId,
+            clock.now(),
+            checks.filter((c) => c.runId === row.id),
           );
           runs.push({
             id: row.id,
@@ -194,14 +288,33 @@ export function createDiscoveryRepository(
             updatedAt: row.updatedAt.toISOString(),
             prospects,
             counts: coverageCounts(prospects),
-            usage: usage.map(({ id, kind, units, outcome, query, at }) => ({
-              id,
-              kind,
-              units,
-              outcome,
-              query,
-              at: at.toISOString(),
-            })),
+            consolidation: {
+              rawResults: usage.some(
+                (u) => u.kind === "search" && u.returnedResults === null,
+              )
+                ? null
+                : usage.reduce((n, u) => n + (u.returnedResults ?? 0), 0),
+              matchedObservations: runObservations.length,
+              created: runObservations.filter((o) => o.outcome === "created")
+                .length,
+              refreshed: runObservations.filter(
+                (o) => o.outcome === "refreshed",
+              ).length,
+              duplicates: runObservations.filter(
+                (o) => o.outcome === "duplicate",
+              ).length,
+            },
+            usage: usage.map(
+              ({ id, kind, units, outcome, query, at, returnedResults }) => ({
+                id,
+                kind,
+                units,
+                outcome,
+                query,
+                at: at.toISOString(),
+                returnedResults,
+              }),
+            ),
           });
         }
         return {
@@ -225,6 +338,8 @@ export function createDiscoveryRepository(
               ? briefFor(profile, markets, "")
               : null,
           runs,
+          prospects: retained,
+          counts: coverageCounts(retained),
         };
       });
     },
@@ -361,7 +476,7 @@ export function createDiscoveryRepository(
         { lock: true },
       );
     },
-    record(work, operationId, prospect, at) {
+    record(work, operationId, prospect, at, details) {
       return scoped(
         database,
         work,
@@ -379,33 +494,164 @@ export function createDiscoveryRepository(
                 eq(discoveryUsage.businessId, work.businessId),
               ),
             );
+          if (usage?.outcome === "succeeded") return;
           if (!usage || usage.outcome !== "reserved")
             throw new ApplicationError("CONFLICT");
+          const [lastCheck] = await tx
+            .select({
+              order:
+                sql<number>`coalesce(max(${discoveryUsage.checkOrder}), 0)`.mapWith(
+                  Number,
+                ),
+            })
+            .from(discoveryUsage)
+            .where(eq(discoveryUsage.businessId, work.businessId));
+          const checkOrder =
+            usage.kind === "review" ? lastCheck.order + 1 : null;
           if (prospect) {
-            const data = persistedProspectSchema.parse(prospect);
+            let data = persistedProspectSchema.parse(prospect);
             const url = data.evidence[0].url;
-            await tx
-              .insert(discoveryProspect)
-              .values({
-                id: randomUUID(),
-                businessId: work.businessId,
-                canonicalUrl: url,
-              })
-              .onConflictDoNothing();
-            const [identity] = await tx
+            const keys = identityKeys(data, run.brief);
+            const aliases = await tx
               .select()
-              .from(discoveryProspect)
+              .from(discoveryProspectAlias)
               .where(
                 and(
-                  eq(discoveryProspect.businessId, work.businessId),
-                  eq(discoveryProspect.canonicalUrl, url),
+                  eq(discoveryProspectAlias.businessId, work.businessId),
+                  inArray(discoveryProspectAlias.key, keys),
                 ),
               );
+            const prior = await observationsFor(tx, work.businessId);
+            const contradictsIdentity = (id: string) =>
+              prior.some(
+                (o) =>
+                  o.prospectId === id &&
+                  ((data.company !== null &&
+                    o.data.company !== null &&
+                    companyIdentity(o.data) !== companyIdentity(data)) ||
+                    (data.request?.reference &&
+                      o.data.request?.reference &&
+                      data.request.reference.url !==
+                        o.data.request.reference.url)),
+              );
+            let prospectId: string | undefined = keys.flatMap((key) =>
+              aliases
+                .filter(
+                  (a) => a.key === key && !contradictsIdentity(a.prospectId),
+                )
+                .map((a) => a.prospectId),
+            )[0];
+            // Adopt exact legacy observations without rewriting their identity/history.
+            if (!prospectId) {
+              const legacy = await tx
+                .select({ result: discoveryResult, brief: discoveryRun.brief })
+                .from(discoveryResult)
+                .innerJoin(
+                  discoveryRun,
+                  and(
+                    eq(discoveryRun.id, discoveryResult.runId),
+                    eq(discoveryRun.businessId, work.businessId),
+                  ),
+                )
+                .where(eq(discoveryResult.businessId, work.businessId));
+              prospectId = legacy.find(
+                ({ result, brief }) =>
+                  !contradictsIdentity(result.prospectId) &&
+                  identityKeys(
+                    persistedProspectSchema.parse(result.data),
+                    brief,
+                  ).some((key) => keys.includes(key)),
+              )?.result.prospectId;
+            }
+            const created = !prospectId;
+            if (!prospectId) {
+              prospectId = randomUUID();
+              await tx.insert(discoveryProspect).values({
+                id: prospectId,
+                businessId: work.businessId,
+                canonicalUrl: url,
+              });
+            }
+            const previousContacts = prior
+              .filter((o) => o.prospectId === prospectId)
+              .flatMap(
+                (o) => contactIdentities(o.data, work.businessId).contacts,
+              );
+            data = contactIdentities(
+              {
+                ...data,
+                contacts: data.contacts.map((contact) => {
+                  const previous = previousContacts.find(
+                    (c) =>
+                      c.name?.toLowerCase() === contact.name?.toLowerCase() &&
+                      isDeepStrictEqual(
+                        c.route && { kind: c.route.kind, value: c.route.value },
+                        contact.route && {
+                          kind: contact.route.kind,
+                          value: contact.route.value,
+                        },
+                      ),
+                  );
+                  return previous?.id
+                    ? { ...contact, id: previous.id }
+                    : contact;
+                }),
+              },
+              work.businessId,
+            );
+            data = {
+              ...data,
+              identityConflict: aliases.some(
+                (a) =>
+                  a.prospectId !== prospectId &&
+                  !prior.some(
+                    (o) =>
+                      o.prospectId === a.prospectId &&
+                      data.request?.reference &&
+                      o.data.request?.reference &&
+                      data.request.reference.url !==
+                        o.data.request.reference.url,
+                  ),
+              ),
+            };
+            await tx
+              .insert(discoveryProspectAlias)
+              .values(
+                keys.map((key) => ({
+                  businessId: work.businessId,
+                  key,
+                  prospectId,
+                })),
+              )
+              .onConflictDoNothing();
+            const [sameRun] = await tx
+              .select({ id: discoveryResult.prospectId })
+              .from(discoveryResult)
+              .where(
+                and(
+                  eq(discoveryResult.businessId, work.businessId),
+                  eq(discoveryResult.runId, run.id),
+                  eq(discoveryResult.prospectId, prospectId),
+                ),
+              );
+            await tx.insert(discoveryObservation).values({
+              id: operationId,
+              businessId: work.businessId,
+              runId: run.id,
+              prospectId,
+              data,
+              checkedAt: new Date(data.evidence[0].checkedAt),
+              outcome: created
+                ? "created"
+                : sameRun
+                  ? "duplicate"
+                  : "refreshed",
+            });
             await tx
               .insert(discoveryResult)
               .values({
                 runId: run.id,
-                prospectId: identity.id,
+                prospectId,
                 businessId: work.businessId,
                 data,
               })
@@ -413,7 +659,18 @@ export function createDiscoveryRepository(
           }
           await tx
             .update(discoveryUsage)
-            .set({ outcome: "succeeded" })
+            .set({
+              outcome: "succeeded",
+              ...(usage.kind === "search"
+                ? { returnedResults: details?.returnedResults ?? null }
+                : {
+                    sourceUrl: details?.sourceUrl
+                      ? evidenceUrlSchema.parse(details.sourceUrl)
+                      : null,
+                    checkedAt: at,
+                    checkOrder,
+                  }),
+            })
             .where(eq(discoveryUsage.id, operationId));
           await tx
             .update(discoveryRun)
