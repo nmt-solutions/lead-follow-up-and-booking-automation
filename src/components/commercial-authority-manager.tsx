@@ -27,6 +27,11 @@ import { NativeSelect } from "./ui/native-select";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
 
+const workspaceResponseSchema = z.object({
+  success: z.literal(true),
+  data: commercialWorkspaceSchema,
+});
+
 const ruleFormSchema = z
   .object({
     mode: z.enum(["disabled", "approval", "automatic"]),
@@ -249,9 +254,9 @@ export function CommercialAuthorityManager({
     setError("");
     setMessage("");
     try {
-      const result = z
-        .object({ success: z.literal(true), data: commercialWorkspaceSchema })
-        .parse(await requestPolicy(endpoint, "GET"));
+      const result = workspaceResponseSchema.parse(
+        await requestPolicy(endpoint, "GET"),
+      );
       setState(result.data);
       setConflict(false);
       setNeedsMfa(false);
@@ -277,9 +282,9 @@ export function CommercialAuthorityManager({
     setError("");
     setMessage("");
     try {
-      const result = z
-        .object({ success: z.literal(true), data: commercialWorkspaceSchema })
-        .parse(await requestPolicy(endpoint, "PUT", parsedChange.data));
+      const result = workspaceResponseSchema.parse(
+        await requestPolicy(endpoint, "PUT", parsedChange.data),
+      );
       setState(result.data);
       setDraft(draftPolicy(result.data.policy));
       setDirty(false);

@@ -141,18 +141,17 @@ export const commercialRevisionSchema = z.object({
   at: z.iso.datetime(),
   note: z.string(),
 });
+const commercialApproverSchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+  role: z.enum(["owner", "admin"]),
+});
 export const commercialWorkspaceSchema = z.object({
   version: z.number().int().nonnegative(),
   policy: commercialPolicySchema,
   history: z.array(commercialRevisionSchema),
   canManage: z.boolean(),
-  approvers: z.array(
-    z.object({
-      userId: z.string(),
-      name: z.string(),
-      role: z.enum(["owner", "admin"]),
-    }),
-  ),
+  approvers: z.array(commercialApproverSchema),
 });
 export type CommercialWorkspace = z.infer<typeof commercialWorkspaceSchema>;
 export const commercialEvaluationSchema = z.strictObject({
@@ -179,13 +178,7 @@ export const commercialEvaluationResultSchema = z.object({
   evaluatedAt: z.iso.datetime(),
   action: commercialActionSchema,
   checkedAction: commercialActionSchema,
-  escalationOwner: z
-    .object({
-      userId: z.string(),
-      name: z.string(),
-      role: z.enum(["owner", "admin"]),
-    })
-    .nullable(),
+  escalationOwner: commercialApproverSchema.nullable(),
   nextAction: z.string(),
 });
 
