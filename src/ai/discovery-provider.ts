@@ -6,12 +6,14 @@ import {
 
 /** Exa retains sole ownership of retrieval and its rights/configuration. */
 export function createProfiledDiscoveryProvider(
-  retrieval: Pick<DiscoveryProvider, "id" | "search">,
+  retrieval: Pick<DiscoveryProvider, "id" | "setup" | "search" | "contents">,
   ai: Pick<ReturnType<typeof createAiApplication>, "executeWorkflow">,
 ): DiscoveryProvider {
   return {
     id: retrieval.id,
+    setup: retrieval.setup,
     search: (input) => retrieval.search(input),
+    contents: retrieval.contents,
     async review(input) {
       if (!input.identity || !input.authorize)
         throw new DiscoveryProviderFailure("permission_denied");
@@ -22,7 +24,7 @@ export function createProfiledDiscoveryProvider(
           requestKey: input.operationId,
           sample: {
             task: "extraction",
-            label: input.source.name,
+            label: input.source.name.slice(0, 120),
             text: input.source.excerpt,
           },
           context: {

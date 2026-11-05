@@ -37,7 +37,10 @@ export function privilegedRoles(database: Database, userId: string) {
         ({ role }) => role === "owner" || role === "admin",
       ),
       operator: Boolean(
-        operator?.tax || operator?.reconciliation || operator?.ai,
+        operator?.tax ||
+        operator?.reconciliation ||
+        operator?.ai ||
+        operator?.discovery,
       ),
     };
   });

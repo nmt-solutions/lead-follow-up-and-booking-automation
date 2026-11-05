@@ -33,6 +33,7 @@ import { createAiHttp } from "../http/ai";
 import { configuredAi } from "../ai/configuration";
 import {
   configuredDiscoveryProvider,
+  configuredExaRetrieval,
   configuredDiscoveryQueue,
 } from "../discovery/configuration";
 
@@ -124,7 +125,10 @@ async function composeServices() {
       now: () => new Date(),
     }),
     clock: { now: () => new Date() },
-    provider: configuredDiscoveryProvider(ai),
+    provider: configuredDiscoveryProvider(
+      ai,
+      configuredExaRetrieval(process.env),
+    ),
     queue: configuredDiscoveryQueue(process.env),
     reportFailure: ({ businessId, runId, code }) =>
       console.error(

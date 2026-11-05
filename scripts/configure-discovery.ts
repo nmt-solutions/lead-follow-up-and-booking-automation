@@ -1,17 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
-import { z } from "zod";
 import { databaseAdminUrl } from "./database-environment";
-import { discoveryPolicySchema } from "../src/models/discovery";
+import { createDiscoverySetup } from "../src/application/discovery-setup";
+import { runtimeDatabase } from "../src/db/runtime";
 
 // Operator-only provisioning through the schema-owner connection. Business
 // request bodies and the restricted runtime cannot grant reach or allowances.
 async function main() {
   const path = process.argv[2];
   if (!path) throw new Error("Missing configuration file");
-  const input = z
-    .strictObject({ businessId: z.uuid(), policy: discoveryPolicySchema })
-    .parse(JSON.parse(await readFile(path, "utf8")));
+  const input: unknown = JSON.parse(await readFile(path, "utf8"));
   const pool = new Pool({
     connectionString: databaseAdminUrl(),
     max: 1,
@@ -25,13 +23,11 @@ async function main() {
       JSON.stringify({
         event: "discovery_configuration_target",
         ...target.rows[0],
-        businessId: input.businessId,
       }),
     );
-    await pool.query(
-      "insert into discovery_configuration (business_id, policy) values ($1, $2) on conflict (business_id) do update set policy=excluded.policy",
-      [input.businessId, input.policy],
-    );
+    await createDiscoverySetup(runtimeDatabase(pool), {
+      now: () => new Date(),
+    })(input);
     console.log(
       "Discovery policy saved. Provider/worker activation remains a separate gate.",
     );

@@ -69,6 +69,7 @@ export function owned<A>(
               rate_limited: "provider_rate_limited",
               permission_denied: "provider_permission_denied",
               invalid_response: "invalid_provider_response",
+              uncertain: "provider_uncertain",
             } satisfies Record<DiscoveryProviderFailure["reason"], StopReason>;
             resume(Effect.fail(new DiscoveryFailure(reasons[error.reason])));
             return;
@@ -170,7 +171,8 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
     ) =>
       operation.pipe(
         Effect.tapError((error) =>
-          error instanceof DiscoveryFailure
+          error instanceof DiscoveryFailure &&
+          error.reason !== "provider_uncertain"
             ? Effect.uninterruptible(
                 owned(() => repository.failOperation(work, id)),
               )
@@ -179,11 +181,17 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
       );
     let exhausted = false;
     const reserve = (
-      kind: "search" | "review",
+      kind: "search" | "contents" | "review",
       query: string | null,
       stepKey: string,
     ) =>
       Effect.gen(function* () {
+        if (
+          run.attemptStartedAt &&
+          clock.now().getTime() - run.attemptStartedAt.getTime() >=
+            run.policy.deadlineMs
+        )
+          return yield* Effect.fail(new DiscoveryFailure("interrupted"));
         yield* owned(() => authorize());
         const reservation = yield* owned(() =>
           repository.reserve(work, kind, query, clock.now(), stepKey),
@@ -221,6 +229,7 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
                   const raw = yield* owned((signal) =>
                     provider.search({
                       businessId: work.businessId,
+                      policy: run.policy,
                       runId: work.runId,
                       operationId: search.id,
                       offering: run.brief.publicOffering,
@@ -250,10 +259,67 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
           );
           const seen = new Set<string>();
           let allReviewed = true;
-          for (const [sourceIndex, source] of sources.entries()) {
+          const shortlisted = provider.contents
+            ? sources
+                .filter(
+                  (source, index) =>
+                    sources.findIndex(
+                      (candidate) => candidate.url === source.url,
+                    ) === index,
+                )
+                .slice(0, run.policy.exa?.maxContentsPerSearch ?? 0)
+            : sources;
+          for (const [sourceIndex, candidate] of shortlisted.entries()) {
+            let source = candidate;
             const sourceKey = JSON.stringify(source);
             if (seen.has(sourceKey)) continue;
             seen.add(sourceKey);
+            if (provider.contents) {
+              const retrieve = provider.contents;
+              const contents = yield* reserve(
+                "contents",
+                null,
+                `contents:${searchKey}:${sourceIndex}`,
+              );
+              if (!contents) {
+                allReviewed = false;
+                break;
+              }
+              const retrieved = contents.completed
+                ? yield* parse(
+                    z.array(searchResultSchema).length(1),
+                    contents.sources,
+                  )
+                : [
+                    yield* account(
+                      contents.id,
+                      owned((signal) =>
+                        retrieve({
+                          policy: run.policy,
+                          source: candidate,
+                          signal,
+                        }),
+                      ).pipe(
+                        Effect.flatMap((value) =>
+                          parse(searchResultSchema, value),
+                        ),
+                      ),
+                    ),
+                  ];
+              source = retrieved[0];
+              if (
+                source.url !== candidate.url ||
+                source.market !== candidate.market
+              )
+                yield* Effect.fail(
+                  new DiscoveryFailure("invalid_provider_response"),
+                );
+              yield* owned(() =>
+                repository.record(work, contents.id, null, clock.now(), {
+                  sources: [source],
+                }),
+              );
+            }
             const review = yield* reserve(
               "review",
               null,
@@ -297,13 +363,27 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
                   yield* Effect.fail(
                     new DiscoveryFailure("invalid_provider_response"),
                   );
+                let request = verifiedRequest(
+                  parsedReview.request,
+                  source.excerpt,
+                  clock.now(),
+                );
+                // Search metadata and cached/disconnected excerpts cannot establish
+                // that the underlying source still shows a request as open now.
+                if (
+                  request?.status === "open" &&
+                  source.retrieval &&
+                  (source.retrieval.contentSource !== "crawled" ||
+                    source.retrieval.contentType !== "text")
+                )
+                  request = {
+                    ...request,
+                    status: "unknown",
+                    statusQuote: null,
+                  };
                 return {
                   ...parsedReview,
-                  request: verifiedRequest(
-                    parsedReview.request,
-                    source.excerpt,
-                    clock.now(),
-                  ),
+                  request,
                 };
               }),
             );
@@ -346,6 +426,9 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
                           url: source.url,
                           quote: result.evidenceQuote,
                           checkedAt: clock.now().toISOString(),
+                          ...(source.retrieval
+                            ? { retrieval: source.retrieval }
+                            : {}),
                         },
                       ],
                     }

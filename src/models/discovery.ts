@@ -5,6 +5,7 @@ import {
   type SavedScheduleView,
 } from "./discovery-timing";
 import { buyerCategorySchema } from "./configuration";
+import { exaPolicySchema, retrievalProvenanceSchema } from "./exa";
 
 const text = z.string().trim().min(1).max(200);
 const units = z.number().int().min(1).max(1_000_000);
@@ -22,6 +23,7 @@ export const discoveryPolicySchema = z.strictObject({
   concurrency: z.number().int().min(1).max(4),
   maxResults: z.number().int().min(1).max(10),
   deadlineMs: z.number().int().min(100).max(120_000),
+  exa: exaPolicySchema.optional(),
   permissions: z.strictObject({
     retainEvidence: z.literal(true),
     retainQueries: z.boolean(),
@@ -70,6 +72,7 @@ const stopReasonSchema = z.enum([
   "completed",
   "budget_exhausted",
   "provider_unavailable",
+  "provider_uncertain",
   "provider_rate_limited",
   "provider_permission_denied",
   "invalid_provider_response",
@@ -138,6 +141,7 @@ export const searchResultSchema = z.strictObject({
   market: text,
   url: evidenceUrlSchema,
   excerpt: z.string().trim().min(1).max(4000),
+  retrieval: retrievalProvenanceSchema.optional(),
 });
 const quoteSchema = z.string().trim().min(1).max(500);
 const contactRouteSchema = z.discriminatedUnion("kind", [
@@ -202,6 +206,7 @@ export const reviewResultSchema = z.strictObject({
 });
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
 export type SearchInput = {
+  policy: DiscoveryPolicy;
   businessId: string;
   runId: string;
   operationId: string;
@@ -225,13 +230,24 @@ export type ReviewInput = {
 };
 export type DiscoveryProvider = {
   id: string;
+  setup?(policy: DiscoveryPolicy, brief?: DiscoveryBrief): string[];
   search(input: SearchInput): Promise<unknown>;
+  contents?(input: ContentsInput): Promise<unknown>;
   review(input: ReviewInput): Promise<unknown>;
+};
+export type ContentsInput = {
+  policy: DiscoveryPolicy;
+  source: SearchResult;
+  signal: AbortSignal;
 };
 export class DiscoveryProviderFailure extends Error {
   constructor(
     readonly reason:
-      "unavailable" | "rate_limited" | "permission_denied" | "invalid_response",
+      | "unavailable"
+      | "rate_limited"
+      | "permission_denied"
+      | "invalid_response"
+      | "uncertain",
   ) {
     super(reason);
   }
@@ -241,6 +257,7 @@ export type StopReason =
   | "completed"
   | "budget_exhausted"
   | "provider_unavailable"
+  | "provider_uncertain"
   | "provider_rate_limited"
   | "provider_permission_denied"
   | "invalid_provider_response"
@@ -269,6 +286,7 @@ export const persistedProspectSchema = z.strictObject({
         url: evidenceUrlSchema,
         quote: quoteSchema,
         checkedAt: z.iso.datetime(),
+        retrieval: retrievalProvenanceSchema.optional(),
       }),
     )
     .min(1)
@@ -324,7 +342,7 @@ const countsSchema = z.strictObject({
 });
 export type DiscoveryUsage = {
   id: string;
-  kind: "search" | "review";
+  kind: "search" | "contents" | "review";
   units: number;
   outcome: "reserved" | "succeeded" | "failed" | "uncertain";
   query: string | null;
@@ -470,7 +488,7 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
         usage: z.array(
           z.strictObject({
             id: z.uuid(),
-            kind: z.enum(["search", "review"]),
+            kind: z.enum(["search", "contents", "review"]),
             units,
             outcome: z.enum(["reserved", "succeeded", "failed", "uncertain"]),
             query: z.string().nullable(),

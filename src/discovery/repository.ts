@@ -43,7 +43,7 @@ export type DiscoveryRepository = ReturnType<
   ): Promise<DiscoveryRun | null>;
   reserve(
     work: DiscoveryWork,
-    kind: "search" | "review",
+    kind: "search" | "contents" | "review",
     query: string | null,
     at: Date,
     stepKey: string,

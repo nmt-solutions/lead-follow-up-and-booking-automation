@@ -15,6 +15,7 @@ import {
 } from "@/models/discovery";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { NativeSelect } from "./ui/native-select";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -26,6 +27,8 @@ const reasons: Record<StopReason, string> = {
   cancelled: "Cancelled by an Owner or Admin",
   budget_exhausted: "Authorized allowance reached",
   provider_unavailable: "Source provider unavailable",
+  provider_uncertain:
+    "Source call outcome is uncertain; its allowance remains consumed",
   provider_rate_limited: "Provider rate limit reached",
   provider_permission_denied: "Provider permission denied",
   invalid_provider_response: "Provider response could not be verified",
@@ -464,7 +467,11 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
         <ul className="mt-4 space-y-2 text-sm">
           {run.usage.map((usage) => (
             <li key={usage.id} className="wrap-anywhere">
-              {usage.kind === "search" ? "Public search" : "AI evidence review"}
+              {usage.kind === "search"
+                ? "Public search"
+                : usage.kind === "contents"
+                  ? "Shortlisted source content"
+                  : "AI evidence review"}
               : {usage.units} {run.allowanceUnit} · {usage.outcome}
               {usage.query ? ` · Query: ${usage.query}` : ""}
             </li>
@@ -550,7 +557,8 @@ export function DiscoveryManager({
 }) {
   const [state, setState] = useState(initialState);
   const [publicOffering, setPublicOffering] = useState(
-    initialState.offering.slice(0, 400),
+    initialState.policy?.exa?.publicOfferings[0] ??
+      initialState.offering.slice(0, 400),
   );
   const [markets, setMarkets] = useState(
     initialState.availableMarkets.slice(0, 1),
@@ -672,6 +680,20 @@ export function DiscoveryManager({
             {state.policy.searchUnits}; AI review: {state.policy.reviewUnits}{" "}
             {state.policy.allowanceUnit} per call. At most{" "}
             {state.policy.maxResults} results per search.
+            {state.policy.exa && (
+              <>
+                {" "}
+                Exa retrieves at most {
+                  state.policy.exa.maxContentsPerSearch
+                }{" "}
+                shortlisted URLs per search as {state.policy.exa.contentsType}{" "}
+                excerpts, at {state.policy.exa.contentsUnits}{" "}
+                {state.policy.allowanceUnit} per URL. The whole run allows at
+                most {state.policy.exa.maxCalls} Exa calls and{" "}
+                {state.policy.exa.maxAttemptsPerStep} attempts per step,
+                including explicit resumes. No automatic source retries.
+              </>
+            )}
           </p>
         )}
         {!state.canRun ? (
@@ -717,17 +739,36 @@ export function DiscoveryManager({
           >
             <div className="space-y-2">
               <Label htmlFor="public-offering">Public offering phrase</Label>
-              <Input
-                id="public-offering"
-                value={publicOffering}
-                maxLength={400}
-                required
-                onChange={(event) => {
-                  edit();
-                  setPublicOffering(event.target.value);
-                  setConfirmed(false);
-                }}
-              />
+              {state.policy?.exa ? (
+                <NativeSelect
+                  id="public-offering"
+                  value={publicOffering}
+                  required
+                  onChange={(event) => {
+                    edit();
+                    setPublicOffering(event.target.value);
+                    setConfirmed(false);
+                  }}
+                >
+                  {state.policy.exa.publicOfferings.map((phrase) => (
+                    <option key={phrase} value={phrase}>
+                      {phrase}
+                    </option>
+                  ))}
+                </NativeSelect>
+              ) : (
+                <Input
+                  id="public-offering"
+                  value={publicOffering}
+                  maxLength={400}
+                  required
+                  onChange={(event) => {
+                    edit();
+                    setPublicOffering(event.target.value);
+                    setConfirmed(false);
+                  }}
+                />
+              )}
               <p className="text-sm text-muted-foreground">
                 Review this phrase for public search. Omit private requirements
                 or personal information.

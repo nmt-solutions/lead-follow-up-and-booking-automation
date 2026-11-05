@@ -110,6 +110,8 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
         state.policy?.adapterId !== dependencies.provider.id
       )
         throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
+      if (state.policy && dependencies.provider.setup?.(state.policy).length)
+        throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
     }
     const result = await repository.command(
       actor,
@@ -140,6 +142,13 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
       );
     if (!dependencies.queue)
       state.setup.push("Durable discovery worker is not configured.");
+    if (state.policy)
+      state.setup.push(
+        ...(dependencies.provider?.setup?.(
+          state.policy,
+          state.brief ?? undefined,
+        ) ?? []),
+      );
     if (!dependencies.queue?.schedule)
       state.setup.push(
         "Saved-search scheduling and dispatch recovery are not configured.",
@@ -150,10 +159,22 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
     async saveSchedule(credentials: Credentials, id: unknown, input: unknown) {
       const actor = await dependencies.authenticateForWork(credentials);
       const businessId = validate(businessIdSchema, id);
+      const request = validate(saveScheduleSchema, input);
+      const state = await repository.workspace(actor, businessId);
+      if (
+        state.policy?.exa &&
+        state.brief &&
+        dependencies.provider?.setup?.(state.policy, {
+          ...state.brief,
+          publicOffering: request.search.publicOffering,
+          markets: request.search.markets,
+        }).length
+      )
+        throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
       const result = await repository.saveSchedule(
         actor,
         businessId,
-        validate(saveScheduleSchema, input),
+        request,
         clock.now(),
       );
       await publish(actor, businessId);
@@ -240,6 +261,18 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
         state.policy?.adapterId !== dependencies.provider.id
       )
         throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
+      if (state.policy && dependencies.provider.setup?.(state.policy).length)
+        throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
+      if (
+        state.policy &&
+        state.brief &&
+        dependencies.provider.setup?.(state.policy, {
+          ...state.brief,
+          publicOffering: request.publicOffering,
+          markets: request.markets,
+        }).length
+      )
+        throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
       const exit = await Effect.runPromiseExit(
         owned(() => repository.create(actor, businessId, request, clock.now())),
       );
@@ -275,7 +308,11 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
       }
       if (!run) return { outcome: "already_claimed" };
       const provider = dependencies.provider;
-      if (!provider || provider.id !== run.policy.adapterId) {
+      if (
+        !provider ||
+        provider.id !== run.policy.adapterId ||
+        provider.setup?.(run.policy, run.brief).length
+      ) {
         await repository.finish(work, "configuration_changed", clock.now());
         return { outcome: "configuration_changed" };
       }

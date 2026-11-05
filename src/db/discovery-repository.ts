@@ -260,7 +260,7 @@ export function createDiscoveryRepository(
               usage.every(
                 (u) =>
                   u.stepKey !== null &&
-                  (u.kind !== "search" ||
+                  (u.kind === "review" ||
                     u.outcome !== "succeeded" ||
                     u.sources !== null),
               ),
@@ -550,7 +550,7 @@ export function createDiscoveryRepository(
                   (u) =>
                     u.stepKey === null ||
                     u.outcome === "reserved" ||
-                    (u.kind === "search" &&
+                    (u.kind !== "review" &&
                       u.outcome === "succeeded" &&
                       u.sources === null),
                 )
@@ -749,8 +749,31 @@ export function createDiscoveryRepository(
             )
           )
             throw new ApplicationError("CONFLICT");
+          if (run.policy.exa) {
+            // Shared across resumes and durable deliveries under the same lock.
+            if (previous.length >= run.policy.exa.maxAttemptsPerStep)
+              return null;
+            if (kind !== "review") {
+              const calls = await tx
+                .select({ id: discoveryUsage.id })
+                .from(discoveryUsage)
+                .where(
+                  and(
+                    eq(discoveryUsage.runId, run.id),
+                    eq(discoveryUsage.businessId, work.businessId),
+                    inArray(discoveryUsage.kind, ["search", "contents"]),
+                  ),
+                );
+              if (calls.length >= run.policy.exa.maxCalls) return null;
+            }
+          }
           const units =
-            kind === "search" ? run.policy.searchUnits : run.policy.reviewUnits;
+            kind === "search"
+              ? run.policy.searchUnits
+              : kind === "contents"
+                ? run.policy.exa?.contentsUnits
+                : run.policy.reviewUnits;
+          if (!units) throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
           if (run.used + units > run.budget) return null;
           const id = randomUUID();
           await tx
@@ -960,7 +983,7 @@ export function createDiscoveryRepository(
             .update(discoveryUsage)
             .set({
               outcome: "succeeded",
-              ...(usage.kind === "search"
+              ...(usage.kind !== "review"
                 ? {
                     returnedResults: details?.returnedResults ?? null,
                     sources: details?.sources

@@ -21,6 +21,8 @@ import { createDiscoveryRepository } from "../src/db/discovery-repository";
 import type { DiscoveryWork } from "../src/models/discovery";
 import { scoped } from "../src/db/scope";
 import { aiActivationAudit } from "../src/db/schema";
+import { createExaRetrieval } from "../src/discovery/exa";
+import { exaActivation, exaPolicy, exaScope } from "./support/exa";
 
 describe("AI profiles at the authorized application seam", () => {
   let harness: Awaited<ReturnType<typeof createHarness>>;
@@ -858,7 +860,7 @@ describe("AI profiles at the authorized application seam", () => {
       exclusions: [],
     });
     const policy = {
-      adapterId: "fixture-exa-contract",
+      adapterId: "exa-search-contents-v1",
       activeMarkets: ["US"],
       coverage: [{ market: "US", source: "public_web" }],
       allowanceUnit: "fixture units",
@@ -868,6 +870,7 @@ describe("AI profiles at the authorized application seam", () => {
       concurrency: 1,
       maxResults: 1,
       deadlineMs: 30000,
+      exa: { ...exaPolicy, publicOfferings: ["Steel"] },
       permissions: {
         retainEvidence: true,
         retainQueries: false,
@@ -881,7 +884,7 @@ describe("AI profiles at the authorized application seam", () => {
       "INSERT INTO discovery_configuration (business_id, policy) VALUES ($1, $2)",
       [f.business.id, policy],
     );
-    const searches: { offering: string; market: string; limit: number }[] = [];
+    const requests: { endpoint: string; body: unknown }[] = [];
     const queued: DiscoveryWork[] = [];
     const discovery = createDiscoveryApplication({
       authenticate: harness.authenticate,
@@ -898,24 +901,28 @@ describe("AI profiles at the authorized application seam", () => {
         },
       },
       provider: createProfiledDiscoveryProvider(
-        {
-          id: policy.adapterId,
-          async search(input) {
-            searches.push({
-              offering: input.offering,
-              market: input.market,
-              limit: input.limit,
+        createExaRetrieval({
+          activation: exaActivation,
+          apiKey: "fixture-only-key",
+          clock: harness.clock,
+          fetch: async (endpoint, init) => {
+            requests.push({
+              endpoint: String(endpoint),
+              body: JSON.parse(String(init?.body)),
             });
-            return [
-              {
-                name: "Fabricator",
-                market: "US",
-                url: "https://fabricator.example/needs",
-                excerpt: "Need 500 kg steel",
-              },
-            ];
+            const url = "https://fabricator.example/needs";
+            return Response.json(
+              String(endpoint).endsWith("/search")
+                ? { results: [{ title: "Fabricator", url }] }
+                : {
+                    results: [{ url, text: "Need 500 kg steel" }],
+                    statuses: [
+                      { id: url, status: "success", source: "crawled" },
+                    ],
+                  },
+            );
           },
-        },
+        }),
         f.ai,
       ),
     });
@@ -934,7 +941,7 @@ describe("AI profiles at the authorized application seam", () => {
         markets: ["US"],
         publicOffering: "Steel",
         confirmPublicQuery: true,
-        budget: 2,
+        budget: 3,
         requestKey: randomUUID(),
       });
       const work = queued.at(-1)!;
@@ -943,10 +950,16 @@ describe("AI profiles at the authorized application seam", () => {
       await discovery.execute(work);
       expect(models).toHaveLength(beforeReplay);
       const state = await discovery.workspace(f.headers, f.business.id);
+      if (second) {
+        await harness.reapplySchema();
+        expect(await discovery.workspace(f.headers, f.business.id)).toEqual(
+          state,
+        );
+      }
       expect(state.policy).toEqual(policy);
       expect(state.runs.find((run) => run.id === started.id)).toMatchObject({
         status: "completed",
-        consumed: 2,
+        consumed: 3,
         remaining: 0,
         counts: { evidenceBacked: 1, contactable: 0 },
         prospects: [
@@ -955,6 +968,11 @@ describe("AI profiles at the authorized application seam", () => {
               {
                 quote: "Need 500 kg steel",
                 url: "https://fabricator.example/needs",
+                retrieval: {
+                  provider: "exa",
+                  scopeRef: exaScope,
+                  contentType: "text",
+                },
               },
             ],
           },
@@ -977,10 +995,17 @@ describe("AI profiles at the authorized application seam", () => {
         output: { draft: "Collection only." },
       });
     }
-    expect(searches).toEqual([
-      { offering: "Steel", market: "US", limit: 1 },
-      { offering: "Steel", market: "US", limit: 1 },
+    expect(
+      requests
+        .filter((call) => call.endpoint.endsWith("/search"))
+        .map((call) => call.body),
+    ).toEqual([
+      { query: "Steel | Fabricators | US", type: "auto", numResults: 1 },
+      { query: "Steel | Fabricators | US", type: "auto", numResults: 1 },
     ]);
+    expect(
+      requests.filter((call) => call.endpoint.endsWith("/contents")),
+    ).toHaveLength(2);
     expect(models.slice(-2)).toEqual([
       "openai/fixture-model-2",
       "openai/fixture-model-2",
@@ -1003,7 +1028,7 @@ describe("AI profiles at the authorized application seam", () => {
       markets: ["US"],
       publicOffering: "Steel",
       confirmPublicQuery: true,
-      budget: 2,
+      budget: 3,
       requestKey: randomUUID(),
     });
     expect(await discovery.execute(queued.at(-1)!)).toEqual({
@@ -1017,7 +1042,7 @@ describe("AI profiles at the authorized application seam", () => {
     ).toMatchObject({
       status: "stopped",
       stopReason: "authorization_revoked",
-      consumed: 2,
+      consumed: 3,
       prospects: [],
     });
   });

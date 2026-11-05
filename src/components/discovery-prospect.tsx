@@ -130,6 +130,26 @@ export function DiscoveryProspectCard({
               <p className="text-muted-foreground">
                 Source checked {new Date(evidence.checkedAt).toLocaleString()}
               </p>
+              {evidence.retrieval && (
+                <p className="text-muted-foreground wrap-anywhere">
+                  Source: Exa {evidence.retrieval.contentType} ·{" "}
+                  {evidence.retrieval.contentSource ??
+                    "fetch origin unreported"}
+                  .
+                  {evidence.retrieval.publishedAt && (
+                    <>
+                      {" "}
+                      Provider publication date:{" "}
+                      {new Date(
+                        evidence.retrieval.publishedAt,
+                      ).toLocaleString()}
+                      .
+                    </>
+                  )}{" "}
+                  A publication date does not establish a current buying
+                  request.
+                </p>
+              )}
             </div>
           ))}
           {prospect.contacts.length === 0 && (

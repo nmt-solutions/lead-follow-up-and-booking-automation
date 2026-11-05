@@ -11,6 +11,7 @@ import {
 import type { DiscoveryWorkspace } from "@/models/discovery";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { NativeSelect } from "./ui/native-select";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -95,7 +96,9 @@ function ScheduleEditor({
   const [localTime, setLocalTime] = useState(saved?.localTime ?? "");
   const [days, setDays] = useState<number[]>(saved?.weekdays ?? []);
   const [publicOffering, setPublicOffering] = useState(
-    saved?.publicOffering ?? state.offering.slice(0, 400),
+    saved?.publicOffering ??
+      state.policy?.exa?.publicOfferings[0] ??
+      state.offering.slice(0, 400),
   );
   const [markets, setMarkets] = useState<string[]>(saved?.markets ?? []);
   const [budget, setBudget] = useState(saved ? String(saved.budget) : "");
@@ -187,16 +190,39 @@ function ScheduleEditor({
           <Label htmlFor={`schedule-offering-${formId}`}>
             Public offering phrase
           </Label>
-          <Input
-            id={`schedule-offering-${formId}`}
-            value={publicOffering}
-            maxLength={400}
-            required
-            onChange={(e) => {
-              edit();
-              setPublicOffering(e.target.value);
-            }}
-          />
+          {state.policy?.exa ? (
+            <NativeSelect
+              id={`schedule-offering-${formId}`}
+              value={publicOffering}
+              required
+              onChange={(e) => {
+                edit();
+                setPublicOffering(e.target.value);
+              }}
+            >
+              {!state.policy.exa.publicOfferings.includes(publicOffering) && (
+                <option value={publicOffering} disabled>
+                  {publicOffering} (no longer approved)
+                </option>
+              )}
+              {state.policy.exa.publicOfferings.map((phrase) => (
+                <option key={phrase} value={phrase}>
+                  {phrase}
+                </option>
+              ))}
+            </NativeSelect>
+          ) : (
+            <Input
+              id={`schedule-offering-${formId}`}
+              value={publicOffering}
+              maxLength={400}
+              required
+              onChange={(e) => {
+                edit();
+                setPublicOffering(e.target.value);
+              }}
+            />
+          )}
         </div>
         <fieldset className="space-y-2">
           <legend className="mb-2 text-sm font-medium">

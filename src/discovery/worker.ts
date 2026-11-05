@@ -10,6 +10,7 @@ import { createAiRepository } from "../db/ai-repository";
 import { configuredAi } from "../ai/configuration";
 import {
   configuredDiscoveryProvider,
+  configuredExaRetrieval,
   configuredDiscoveryQueue,
 } from "./configuration";
 
@@ -58,7 +59,10 @@ export async function withDiscoveryWorker<T>(
           authenticateQueuedActor(database, clock, identity),
         repository: createDiscoveryRepository(database, clock),
         clock,
-        provider: configuredDiscoveryProvider(ai),
+        provider: configuredDiscoveryProvider(
+          ai,
+          configuredExaRetrieval(process.env),
+        ),
         queue: configuredDiscoveryQueue(process.env),
         reportFailure: (diagnostic) =>
           console.error(

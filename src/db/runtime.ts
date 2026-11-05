@@ -33,6 +33,10 @@ export async function verifyRuntimeRole(
       AND NOT has_column_privilege(current_user, 'public.ai_execution', 'business_id', 'UPDATE')
       AND NOT has_column_privilege(current_user, 'public.ai_attempt', 'route', 'UPDATE')
       AND NOT has_column_privilege(current_user, 'public.platform_operator', 'ai', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.platform_operator', 'discovery', 'UPDATE')
+      AND (SELECT count(*) = 2 AND bool_and(convalidated) FROM pg_constraint
+        WHERE conname IN ('ai_attempt_execution_scope', 'ai_review_execution_scope')
+        AND contype = 'f' AND confrelid = 'public.ai_execution'::regclass)
       AND (SELECT count(*) = 5 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

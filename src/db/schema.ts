@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  ForeignKey,
   foreignKey,
   index,
   integer,
@@ -14,7 +15,6 @@ import {
   text,
   timestamp,
   uniqueIndex,
-  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 import type { BusinessRole, Invitation } from "../models/team";
@@ -452,6 +452,7 @@ export const platformOperator = pgTable(
     tax: boolean("tax").notNull().default(false),
     reconciliation: boolean("reconciliation").notNull().default(false),
     ai: boolean("ai").notNull().default(false),
+    discovery: boolean("discovery").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {
@@ -587,7 +588,7 @@ export const aiExecution = pgTable(
   },
   (table) => [
     uniqueIndex("ai_execution_request").on(table.businessId, table.requestKey),
-    unique("ai_execution_scope").on(table.id, table.businessId),
+    uniqueIndex("ai_execution_scope").on(table.id, table.businessId),
     check(
       "ai_execution_values",
       sql`${table.task} in ('extraction','drafting') and ${table.kind} in ('preview','workflow') and ${table.status} in ('running','succeeded','failed','uncertain','setup_required') and ${table.knowledgeVersion} > 0`,
@@ -639,11 +640,6 @@ export const aiAttempt = pgTable(
   (table) => [
     index("ai_attempt_execution").on(table.businessId, table.executionId),
     uniqueIndex("ai_attempt_number").on(table.executionId, table.number),
-    foreignKey({
-      name: "ai_attempt_execution_scope",
-      columns: [table.executionId, table.businessId],
-      foreignColumns: [aiExecution.id, aiExecution.businessId],
-    }),
     check(
       "ai_attempt_values",
       sql`${table.number} > 0 and ${table.route} in ('operator_byok','gateway_system') and ${table.outcome} in ('succeeded','failed','uncertain') and (${table.latencyMs} is null or ${table.latencyMs} >= 0)`,
@@ -685,11 +681,6 @@ export const aiReview = pgTable(
   },
   (table) => [
     uniqueIndex("ai_review_execution").on(table.executionId),
-    foreignKey({
-      name: "ai_review_execution_scope",
-      columns: [table.executionId, table.businessId],
-      foreignColumns: [aiExecution.id, aiExecution.businessId],
-    }),
     pgPolicy("ai_review_read", {
       for: "select",
       to: appRuntime,
@@ -702,6 +693,28 @@ export const aiReview = pgTable(
     }),
   ],
 ).enableRLS();
+
+// The pinned push orders composite foreign keys before unique indexes on fresh
+// databases. Keep their typed declarations here; secureDatabase installs and
+// validates them after index creation, before restoring restricted access.
+export const aiExecutionScopeForeignKeys = [
+  new ForeignKey(
+    aiAttempt,
+    foreignKey({
+      name: "ai_attempt_execution_scope",
+      columns: [aiAttempt.executionId, aiAttempt.businessId],
+      foreignColumns: [aiExecution.id, aiExecution.businessId],
+    }),
+  ),
+  new ForeignKey(
+    aiReview,
+    foreignKey({
+      name: "ai_review_execution_scope",
+      columns: [aiReview.executionId, aiReview.businessId],
+      foreignColumns: [aiExecution.id, aiExecution.businessId],
+    }),
+  ),
+];
 
 const fileBusinessScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
 const fileOwnerScope = sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.business_file'::regclass)`;
@@ -1058,7 +1071,7 @@ export const discoveryUsage = pgTable(
     businessId: uuid("business_id")
       .notNull()
       .references(() => business.id),
-    kind: text("kind").$type<"search" | "review">().notNull(),
+    kind: text("kind").$type<"search" | "contents" | "review">().notNull(),
     units: integer("units").notNull(),
     position: integer("position").notNull(),
     outcome: text("outcome")

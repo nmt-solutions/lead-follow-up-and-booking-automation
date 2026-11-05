@@ -30,6 +30,7 @@ import {
   aiExecution,
   aiAttempt,
   aiReview,
+  aiExecutionScopeForeignKeys,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -131,7 +132,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     CREATE OR REPLACE FUNCTION public.finish_discovery(run uuid, scope uuid, execution uuid, reason text, at_time timestamptz)
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
     BEGIN
-      IF reason NOT IN ('completed', 'budget_exhausted', 'provider_unavailable', 'provider_rate_limited', 'provider_permission_denied', 'invalid_provider_response', 'interrupted', 'defect', 'authorization_revoked', 'configuration_changed', 'queue_unavailable', 'worker_lost', 'cancelled') THEN RAISE EXCEPTION 'Invalid stop reason'; END IF;
+      IF reason NOT IN ('completed', 'budget_exhausted', 'provider_unavailable', 'provider_uncertain', 'provider_rate_limited', 'provider_permission_denied', 'invalid_provider_response', 'interrupted', 'defect', 'authorization_revoked', 'configuration_changed', 'queue_unavailable', 'worker_lost', 'cancelled') THEN RAISE EXCEPTION 'Invalid stop reason'; END IF;
       UPDATE public.discovery_run r SET status = CASE WHEN reason = 'completed' THEN 'completed' ELSE 'stopped' END,
         stop_reason = reason, updated_at = at_time
         WHERE r.id = run AND r.business_id = scope AND r.execution_id = execution AND r.status IN ('queued', 'running');
@@ -240,6 +241,16 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.ai_activation_audit') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.ai_activation_audit FROM app_runtime;
       END IF;
+      -- The pinned push can replace ai_execution_scope before dropping its
+      -- dependents. Access above is paused; remove only these named FKs so push
+      -- can reconcile that unique constraint. secureDatabase validates/restores
+      -- them from the schema before runtime access is restored.
+      IF to_regclass('public.ai_attempt') IS NOT NULL THEN
+        ALTER TABLE public.ai_attempt DROP CONSTRAINT IF EXISTS ai_attempt_execution_scope;
+      END IF;
+      IF to_regclass('public.ai_review') IS NOT NULL THEN
+        ALTER TABLE public.ai_review DROP CONSTRAINT IF EXISTS ai_review_execution_scope;
+      END IF;
     END $$;
   `);
 }
@@ -250,6 +261,30 @@ export async function secureDatabase(pool: Pool) {
   try {
     await client.query("BEGIN");
     const database = drizzle(client);
+    // An equivalent unique index avoids the pinned push's composite-UNIQUE
+    // replacement order bug. Reconcile it before restoring the scoped FKs;
+    // IF NOT EXISTS also recognizes the old constraint's supporting index.
+    await client.query(
+      "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
+    );
+    for (const key of aiExecutionScopeForeignKeys) {
+      const table = key.table;
+      const reference = key.reference();
+      await database.execute(
+        sql`alter table ${table} drop constraint if exists ${sql.identifier(key.getName())}`,
+      );
+      await database.execute(sql`alter table ${table} add constraint ${sql.identifier(key.getName())}
+          foreign key (${sql.join(
+            reference.columns.map((column) => sql.identifier(column.name)),
+            sql`, `,
+          )})
+          references ${reference.foreignTable} (${sql.join(
+            reference.foreignColumns.map((column) =>
+              sql.identifier(column.name),
+            ),
+            sql`, `,
+          )})`);
+    }
     // The pinned push also misses changes to an existing CHECK expression.
     // Upgrade the original owner-only role check from the schema's definition.
     for (const constraint of getTableConfig(membership).checks) {

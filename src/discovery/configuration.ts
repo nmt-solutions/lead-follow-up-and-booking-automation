@@ -3,12 +3,31 @@ import type { ScheduleWork } from "../models/discovery-schedules";
 import type { DiscoveryProvider, DiscoveryWork } from "../models/discovery";
 import type { createAiApplication } from "../application/ai";
 import { createProfiledDiscoveryProvider } from "../ai/discovery-provider";
+import { createExaRetrieval } from "./exa";
 
-// #16 supplies the selected Exa/AI adapter. No environment flag can accidentally
-// activate fixtures, an unsigned contract, another product or a hidden fallback.
+export function configuredExaRetrieval(environment: NodeJS.ProcessEnv) {
+  let activation: unknown = null;
+  try {
+    activation = JSON.parse(environment.EXA_ACTIVATION_JSON ?? "null");
+  } catch {
+    /* Missing setup is public; raw environment values never are. */
+  }
+  return createExaRetrieval({
+    activation,
+    apiKey:
+      environment.EXA_LIVE_ENABLED === "true"
+        ? environment.OPERATOR_EXA_API_KEY
+        : undefined,
+    fetch,
+    clock: { now: () => new Date() },
+  });
+}
 export function configuredDiscoveryProvider(
   ai: Pick<ReturnType<typeof createAiApplication>, "executeWorkflow">,
-  retrieval: Pick<DiscoveryProvider, "id" | "search"> | null = null,
+  retrieval: Pick<
+    DiscoveryProvider,
+    "id" | "setup" | "search" | "contents"
+  > | null = null,
 ): DiscoveryProvider | null {
   return retrieval ? createProfiledDiscoveryProvider(retrieval, ai) : null;
 }
