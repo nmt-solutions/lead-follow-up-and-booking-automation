@@ -110,6 +110,7 @@ export function InboxImport({
     const parsed = inboxConnectionSchema.safeParse({
       label: form.get("label"),
       channel: form.get("channel"),
+      manualRepliesObservable: form.has("manualRepliesObservable"),
       conversationRefs: String(form.get("conversationRefs") ?? "")
         .split("\n")
         .map((value) => value.trim())
@@ -296,6 +297,15 @@ export function InboxImport({
               correspondence is not imported.
             </p>
           </div>
+          <label className="flex min-h-11 items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              name="manualRepliesObservable"
+              className="mt-1 size-5 accent-primary"
+            />
+            Allow authenticated manual-reply records for this import. This does
+            not enable live mailbox or WhatsApp monitoring.
+          </label>
           <Button disabled={pending}>
             {pending ? "Saving…" : "Add import connection"}
           </Button>

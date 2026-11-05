@@ -1,4 +1,8 @@
 import Link from "next/link";
+import {
+  OpportunityControl,
+  ManualReplyRecord,
+} from "@/components/opportunity-control";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -16,16 +20,23 @@ export default async function ConversationPage({
   params,
 }: PageProps<"/businesses/[businessId]/inbox/[conversationId]">) {
   const { businessId, conversationId } = await params;
-  const { conversation, workspace } = await (async () => {
+  const { conversation, workspace, controls } = await (async () => {
     try {
       const services = await getServices();
       const credentials = await headers();
-      return {
-        conversation: await services.inbox.conversation(
-          credentials,
-          businessId,
-          conversationId,
+      const conversation = await services.inbox.conversation(
+        credentials,
+        businessId,
+        conversationId,
+      );
+      const controls = await Promise.all(
+        conversation.opportunities.map((need) =>
+          services.opportunities.read(credentials, businessId, need.id),
         ),
+      );
+      return {
+        conversation,
+        controls,
         workspace: await services.inbox.workspace(credentials, businessId),
       };
     } catch (error: unknown) {
@@ -137,6 +148,15 @@ export default async function ConversationPage({
                 </p>
                 <OpportunityHistory entries={need.history} />
                 <DiscoverySources sources={need.sources} />
+                {controls
+                  .filter((control) => control.id === need.id)
+                  .map((control) => (
+                    <OpportunityControl
+                      key={control.id}
+                      businessId={businessId}
+                      control={control}
+                    />
+                  ))}
               </CardContent>
             </Card>
           ))}
@@ -156,6 +176,7 @@ export default async function ConversationPage({
           ))}
         </ul>
       </section>
+      <ManualReplyRecord businessId={businessId} conversation={conversation} />
       <InboxAssociation
         businessId={businessId}
         conversation={conversation}

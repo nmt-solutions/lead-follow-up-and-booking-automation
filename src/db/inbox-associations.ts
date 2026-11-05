@@ -40,6 +40,7 @@ export function connectionView(
     channel: row.channel,
     conversationRefs: row.conversationRefs,
     active: row.active,
+    manualRepliesObservable: row.manualRepliesObservable,
     mode: "normalized_import",
     createdAt: row.createdAt.toISOString(),
   };

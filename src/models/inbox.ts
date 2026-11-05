@@ -18,6 +18,8 @@ export const inboxConnectionSchema = z.strictObject({
   channel: z.enum(["email", "whatsapp"]),
   // Empty means the entire explicitly selected import connection, never every mailbox.
   conversationRefs: z.array(reference).max(100),
+  // Explicit normalized activity, not a live synchronization claim.
+  manualRepliesObservable: z.boolean().default(false),
 });
 export const incomingInquirySchema = z
   .strictObject({

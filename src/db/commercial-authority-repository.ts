@@ -11,7 +11,11 @@ import type { Database } from "./runtime";
 import { commercialAuthorityRevision, user } from "./schema";
 import { requireCapability, scoped, type Transaction } from "./scope";
 
-async function read(tx: Transaction, businessId: string, canManage: boolean) {
+export async function readCommercialPolicy(
+  tx: Transaction,
+  businessId: string,
+  canManage: boolean,
+) {
   const rows = await tx
     .select()
     .from(commercialAuthorityRevision)
@@ -45,7 +49,7 @@ export function createCommercialAuthorityRepository(
             businessId,
             "profile.read",
           );
-          return read(tx, businessId, role !== "salesperson");
+          return readCommercialPolicy(tx, businessId, role !== "salesperson");
         },
         { lock: true },
       );
@@ -62,7 +66,7 @@ export function createCommercialAuthorityRepository(
             businessId,
             "commercial-authority.manage",
           );
-          const state = await read(tx, businessId, true);
+          const state = await readCommercialPolicy(tx, businessId, true);
           if (state.version !== input.expectedVersion)
             throw new ApplicationError("CONFLICT");
           for (const action of commercialActions) {
@@ -85,7 +89,7 @@ export function createCommercialAuthorityRepository(
             at,
             note: input.note,
           });
-          return read(tx, businessId, true);
+          return readCommercialPolicy(tx, businessId, true);
         },
         { lock: true },
       );

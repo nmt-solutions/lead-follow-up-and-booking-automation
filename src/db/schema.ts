@@ -31,6 +31,13 @@ import type {
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { CommercialPolicy } from "../models/commercial-authority";
 import type {
+  ControlSnapshot,
+  PolicyReview,
+  ControlHistory,
+  QueueOpportunityAction,
+  DueAction,
+} from "../models/opportunity-control";
+import type {
   AddInboxConnection,
   IncomingInquiry,
   AssociationChange,
@@ -1304,6 +1311,9 @@ export const inboxConnection = pgTable(
     channel: text("channel").$type<AddInboxConnection["channel"]>().notNull(),
     conversationRefs: jsonb("conversation_refs").$type<string[]>().notNull(),
     active: boolean("active").notNull(),
+    manualRepliesObservable: boolean("manual_replies_observable")
+      .notNull()
+      .default(false),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id),
@@ -1381,6 +1391,12 @@ export const inboxOpportunity = pgTable(
     ownerId: text("owner_id").references(() => user.id),
     handoffReason: text("handoff_reason").notNull(),
     nextAction: text("next_action").notNull(),
+    controlState: text("control_state")
+      .$type<ControlSnapshot["state"]>()
+      .notNull()
+      .default("human"),
+    controlVersion: integer("control_version").notNull().default(0),
+    policyVersion: integer("policy_version"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (table) => [
@@ -1390,7 +1406,17 @@ export const inboxOpportunity = pgTable(
       table.businessId,
     ),
     check("inbox_initial_stage", sql`${table.stage} = 'inquiry'`),
+    check(
+      "opportunity_control_state",
+      sql`${table.controlState} in ('human','automation') and ${table.controlVersion} >= 0`,
+    ),
     ...inboxPolicies("inbox_opportunity"),
+    pgPolicy("inbox_opportunity_control_update", {
+      for: "update",
+      to: appRuntime,
+      using: inboxScope,
+      withCheck: inboxScope,
+    }),
   ],
 ).enableRLS();
 
@@ -1720,6 +1746,183 @@ export const inboxScopeForeignKeys = [
         inboxConversation.id,
         inboxConversation.businessId,
         inboxConversation.connectionId,
+      ],
+    }),
+  ),
+];
+
+export const opportunityControlHistory = pgTable(
+  "opportunity_control_history",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    command: text("command").$type<ControlHistory["command"]>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    before: jsonb("before").$type<ControlSnapshot>().notNull(),
+    after: jsonb("after").$type<ControlSnapshot>().notNull(),
+    sourceRef: text("source_ref"),
+    policy: jsonb("policy").$type<PolicyReview>(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("opportunity_control_history_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("opportunity_control_history_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+export const opportunityManualEvent = pgTable(
+  "opportunity_manual_event",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    eventRef: text("event_ref").notNull(),
+    messageRef: text("message_ref").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("opportunity_manual_event_identity").on(
+      t.connectionId,
+      t.eventRef,
+    ),
+    uniqueIndex("opportunity_manual_message_identity").on(
+      t.connectionId,
+      t.messageRef,
+    ),
+    pgPolicy("opportunity_manual_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("opportunity_manual_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+export const opportunityDueAction = pgTable(
+  "opportunity_due_action",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    controlVersion: integer("control_version").notNull(),
+    associationVersion: integer("association_version").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    evaluation: jsonb("evaluation")
+      .$type<QueueOpportunityAction["evaluation"]>()
+      .notNull(),
+    state: text("state").$type<DueAction["state"]>().notNull(),
+    reason: text("reason"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("opportunity_due_action_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("opportunity_due_action_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("opportunity_due_action_update", {
+      for: "update",
+      to: appRuntime,
+      using: inboxScope,
+      withCheck: inboxScope,
+    }),
+  ],
+).enableRLS();
+
+export const opportunityScopeForeignKeys = [
+  new ForeignKey(
+    opportunityControlHistory,
+    foreignKey({
+      columns: [
+        opportunityControlHistory.opportunityId,
+        opportunityControlHistory.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityManualEvent,
+    foreignKey({
+      columns: [
+        opportunityManualEvent.connectionId,
+        opportunityManualEvent.businessId,
+      ],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityManualEvent,
+    foreignKey({
+      columns: [
+        opportunityManualEvent.opportunityId,
+        opportunityManualEvent.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityDueAction,
+    foreignKey({
+      columns: [
+        opportunityDueAction.opportunityId,
+        opportunityDueAction.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityDueAction,
+    foreignKey({
+      columns: [
+        opportunityDueAction.connectionId,
+        opportunityDueAction.businessId,
+      ],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityDueAction,
+    foreignKey({
+      columns: [
+        opportunityDueAction.messageId,
+        opportunityDueAction.businessId,
+        opportunityDueAction.conversationId,
+      ],
+      foreignColumns: [
+        inboxMessage.id,
+        inboxMessage.businessId,
+        inboxMessage.conversationId,
       ],
     }),
   ),

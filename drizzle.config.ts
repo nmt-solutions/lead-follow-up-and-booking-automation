@@ -7,6 +7,9 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "opportunity_control_history",
+    "opportunity_manual_event",
+    "opportunity_due_action",
     "inbox_connection",
     "inbox_buyer",
     "inbox_conversation",
