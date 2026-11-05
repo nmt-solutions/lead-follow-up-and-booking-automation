@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "./ui/button";
 
-export function SignOut() {
+export function SignOut({ stayOnPage = false }: { stayOnPage?: boolean }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
@@ -22,6 +22,10 @@ export function SignOut() {
               setError("Could not sign out. Try again.");
               return;
             }
+            if (stayOnPage) {
+              window.location.reload();
+              return;
+            }
             router.push("/sign-in");
             router.refresh();
           } catch {
@@ -31,7 +35,11 @@ export function SignOut() {
           }
         }}
       >
-        {pending ? "Signing out…" : "Sign out"}
+        {pending
+          ? "Signing out…"
+          : stayOnPage
+            ? "Sign out to switch email"
+            : "Sign out"}
       </Button>
       <p
         role="alert"

@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function SignInForm({ linkFailed }: { linkFailed: boolean }) {
+export function SignInForm({
+  linkFailed,
+  callbackURL = "/businesses",
+}: {
+  linkFailed: boolean;
+  callbackURL?: string;
+}) {
   const [pending, setPending] = useState(false);
   const [sentTo, setSentTo] = useState("");
   const [error, setError] = useState(
@@ -29,8 +35,8 @@ export function SignInForm({ linkFailed }: { linkFailed: boolean }) {
         try {
           const result = await authClient.signIn.magicLink({
             email,
-            callbackURL: "/businesses",
-            newUserCallbackURL: "/businesses",
+            callbackURL,
+            newUserCallbackURL: callbackURL,
             errorCallbackURL: "/sign-in",
           });
           if (result.error) {

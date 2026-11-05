@@ -9,6 +9,11 @@ import { createBusinessHttp } from "../http/business";
 import type { FailureDiagnostic } from "../http/respond";
 import { ApplicationError } from "../models/application-error";
 import { readEnvironment } from "./environment";
+import { createTeamApplication } from "../application/team";
+import { createTeamRepository } from "../db/team-repository";
+import { createTeamHttp } from "../http/team";
+import { createInvitationMailer } from "../auth/invitation-mailer";
+import { invitationTokens } from "../auth/invitation-tokens";
 
 export function reportFailure(diagnostic: FailureDiagnostic) {
   console.error(JSON.stringify({ event: "request_failed", ...diagnostic }));
@@ -41,18 +46,42 @@ async function composeServices() {
       from: environment.AUTH_EMAIL_FROM,
     }),
   });
+  const authenticate = async (headers: Headers) => {
+    const session = await auth.api.getSession({ headers });
+    if (!session) throw new ApplicationError("UNAUTHENTICATED");
+    return { userId: session.user.id };
+  };
   const application = createBusinessApplication({
-    authenticate: async (headers: Headers) => {
-      const session = await auth.api.getSession({ headers });
-      if (!session) throw new ApplicationError("UNAUTHENTICATED");
-      return { userId: session.user.id };
-    },
+    authenticate,
     repository: createBusinessRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
+  });
+  const team = createTeamApplication({
+    authenticate,
+    // ADR 0002 requires MFA before privileged production access. No Business
+    // role or magic-link session can stand in for that separate adapter.
+    authenticatePlatform: async (headers: Headers) => {
+      await authenticate(headers);
+      throw new ApplicationError("SETUP_REQUIRED");
+    },
+    repository: createTeamRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    tokens: invitationTokens(environment.BETTER_AUTH_SECRET),
+    mailer: createInvitationMailer({
+      apiKey: environment.RESEND_API_KEY,
+      from: environment.AUTH_EMAIL_FROM,
+    }),
+    origin: environment.BETTER_AUTH_URL,
   });
   return {
     auth,
     application,
+    team,
+    teamHttp: createTeamHttp({
+      application: team,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     http: createBusinessHttp({
       application,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

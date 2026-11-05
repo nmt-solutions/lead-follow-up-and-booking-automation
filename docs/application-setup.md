@@ -1,6 +1,7 @@
-# Business profile application
+# Business profile and team application
 
-Implements [issue #3](https://github.com/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/3).
+Implements [issue #3](https://github.com/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/3)
+and team access from [issue #4](https://github.com/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/4).
 
 ## Local setup
 
@@ -23,7 +24,8 @@ Copy `.env.example` to `.env` (or `.env.local`) and supply the following private
 | `AUTH_EMAIL_FROM`    | Verified sender email address                                                               |
 
 Run `pnpm db-push`. This prepares the restricted role, runs `drizzle-kit push`, then
-reapplies and verifies policy conditions, grants, forced RLS and the deferred membership constraint.
+reapplies and verifies policy conditions, grants, forced RLS, the membership role
+check and the deferred membership constraint.
 Always use this command for schema changes; do not generate or apply migrations.
 Push compares the live database with `src/db/schema.ts`, including its RLS policies.
 It does not use `--force`; review any destructive-change prompt before proceeding.
@@ -49,8 +51,22 @@ process variables first, then `.env.local`, then `.env`.
 
 Run `pnpm dev`, open `/sign-in`, and request an email link. A successful sign-in
 opens `/businesses`; the first visit presents the creation form. Subsequent visits
-list only the owner's Businesses. Open one to edit its name, offering, Home market
-and website. Optional fields may be empty. No industry or geography is preselected.
+list only the member's Businesses. Open one to edit its name, offering, Home market
+and website. Salespeople receive a read-only profile. Optional fields may be empty.
+No industry or geography is preselected.
+
+Owners and Admins can open **Manage team access** from a Business profile. Invite
+a teammate by email, choose a role and an expiry of 1–30 days (default seven),
+review delivery status, revoke pending invitations and remove access. Only an
+Owner can grant or change Admin access; Admins manage Salespeople. The Owner
+cannot be demoted or removed through team management. Ownership transfer is not
+part of this flow.
+
+The invitation email links to `/invitations` with its token in the URL fragment.
+The recipient signs in with the invited email, reviews the Business and role and
+explicitly accepts. The sign-in email preserves the invitation in its callback;
+switching email signs out on the same page without discarding the invitation.
+Accepted links cannot be reused. Expired or revoked invitations grant no access.
 
 Missing email/database/auth configuration visibly disables sign-in. There is no
 console-token fallback and no fake successful email delivery. Configure a real
@@ -65,29 +81,87 @@ and never contact Resend. No cloud resources are provisioned by these scripts.
 - Every application command authenticates through an injected identity adapter.
   HTTP passes request headers to Better Auth; it never accepts a caller-supplied
   actor. A URL's Business ID is a lookup request, not proof of access.
-- The repository rechecks owner membership inside each protected transaction.
+- The repository rechecks current membership and the required capability inside
+  each protected transaction, including profile writes and team/audit reads.
   `set_config(..., true)` binds actor and Business context to that same connection
   and transaction. `FORCE ROW LEVEL SECURITY` additionally checks both actor
   membership and Business ID. Missing context denies access. The runtime startup
   check refuses an owner, superuser, RLS-bypass role or disabled row security.
 - Business creation inserts owner membership and profile in one transaction. The
   membership foreign key is deferred; its unique owner constraint prevents an
-  insertion from joining an existing owned Business. Runtime grants permit neither
-  membership updates/deletes nor profile ID changes. Policies live in `src/db/schema.ts`;
+  insertion from joining an existing owned Business. Runtime grants permit only
+  role updates and authorized non-Owner removal, never membership identity or
+  profile ID changes. Policies live in `src/db/schema.ts`;
   `src/db/setup.ts` owns the grants, forced RLS and deferred constraint. Both are
   applied by `db-push` and by the test harness.
-- Membership supports the Owner role in this slice. Team invitations, other roles,
-  ownership transfers and privileged Platform Operator access are later work.
+- Owner and Admin capabilities include Business billing reads/management,
+  integrations and Commercial authority; Salespeople receive profile reads and
+  sales work. The capability service is an authorization boundary, not an
+  implementation of the later billing, integration or sales modules. Those
+  modules must check their capability inside the transaction that accesses data,
+  using `requireCapability`, rather than treating an earlier access response as a
+  reusable grant.
+- Membership policies use two narrow security-definer helpers with an empty
+  search path. A schema-owner-only SELECT policy lets those helpers read forced
+  RLS membership even when that owner has no superuser/BYPASSRLS privileges.
+  The runtime cannot assume the owner role; the helpers expose only the current
+  actor's Business role and a boolean invitation-authority check. Public execution
+  of the helpers is revoked. The security step also updates the existing
+  owner-only membership CHECK because the pinned Drizzle push does not update its
+  expression. Schema definitions remain the source of truth for these policies
+  and checks.
+- Team writes, invitation acceptance and notification claims use a PostgreSQL
+  transaction advisory lock per Business. An accepted invitation inserts one
+  membership and consumes the invitation atomically. Acceptance requires the
+  token hash, a matching verified email, unexpired pending status and a currently
+  authorized inviter. Removing/demoting an inviter revokes their outstanding
+  invitations, including across later re-promotion.
+- `team_audit` is append-only for the runtime and readable only by that Business's
+  current Owner/Admin. Invitations, acceptance, expiration, revocation, notification
+  outcomes and membership changes retain actor, subject, time and role-change
+  details. Removed teammates lose audit access while their audit records remain.
+- Platform grants live separately in `platform_operator`. The runtime has no
+  write privileges for these grants, and Business invitations/roles cannot confer
+  them. Authorization separately requires an MFA-verified identity adapter and
+  the current persisted tax/reconciliation capability. A platform grant never
+  grants ordinary Business access. Live platform access returns `SETUP_REQUIRED`
+  until a real privileged MFA adapter is configured, per ADR 0002; the tests use
+  explicit trusted MFA fixtures. No global financial operations are activated here.
 - Web and worker code share `createBusinessApplication` and the same repository.
   A future Trigger task must obtain its actor from verified, persisted job ownership,
   validate its payload, and invoke these commands with current membership. A job's
-  arbitrary `userId` is never authentication. This flow queues no jobs and accepts
-  no provider events. It adds no discovery runtime or alternative durable scheduler.
+  arbitrary `userId` is never authentication. `createTeamApplication` also supports
+  trusted worker composition; delivery attempts recheck current membership and
+  invitation state instead of trusting a stale job's original authorization.
+  This flow sends invitations synchronously and queues no jobs or provider events.
+  Future durable scheduling still belongs to Trigger.dev.
 - JSON commands require the configured same origin, bounded JSON bodies and
   validated profile fields. Missing and inaccessible Businesses have the same
   public error. Diagnostics contain an allowlisted failure code and server-generated
   request ID; credentials, email links, private profiles and raw provider errors
   are never serialized to application logs or public failures.
+
+## Invitation notification delivery
+
+Invitation state commits before contacting Resend. Tokens are HMAC-derived from
+the server secret and invitation ID; only SHA-256 token hashes are persisted.
+Recipient, role, Business name and expiry are fixed at invitation creation so
+retries preserve the same provider payload. Renaming a Business does not change
+an already issued invitation's email content.
+
+The Resend adapter uses a stable `Idempotency-Key` per invitation and a ten-second
+deadline, checks HTTP status and validates the provider response. Delivery failures
+remain `unconfirmed`; saving an invitation does not claim the email was sent.
+Explicit retries recheck membership, inviter authority, pending status and expiry.
+Concurrent attempts are leased in PostgreSQL; interrupted attempts may be reclaimed
+after a minute. Retries stop after 24 hours from invitation creation, within
+[Resend's documented idempotency window](https://resend.com/changelog/idempotency-keys).
+After that, revoke the invitation and create a new one. Provider errors, tokens
+and credentials never enter the public response or diagnostics.
+
+Revocation cannot retract an email already accepted by a provider. It prevents
+accepting the link and prevents subsequent dispatch claims. There is no assumed
+distributed transaction between PostgreSQL and Resend.
 
 ## Tests and checks
 
@@ -98,6 +172,15 @@ with a restricted runtime login. No internal repository or domain module is mock
 The external email adapter records sign-in deliveries, and the controlled clock
 drives profile timestamps and authentication expiry. Worker composition is exercised
 at the same application seam with a trusted actor derived from a real session.
+
+`tests/team.test.ts` exercises team lifecycle, verified-recipient previews,
+role permissions, protected Owner/Admin boundaries, cross-Business isolation,
+revocation with stale web/worker identities, immutable audit access, expired links,
+concurrent invitation/acceptance, deterministic provider idempotency with ambiguous
+acceptance, platform/MFA fixtures, and upgrade from the owner-only role check.
+It also exercises a schema owner without superuser/BYPASSRLS privileges. Tests
+assert application-visible state and captured external deliveries; raw owner SQL
+is used only for infrastructure and operator-grant fixtures.
 
 `pnpm test` starts an isolated PostgreSQL 17 cluster on a loopback port, applies the
 same schema and security setup, and stops/removes that temporary cluster afterwards. It needs no

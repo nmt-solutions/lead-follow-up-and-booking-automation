@@ -8,7 +8,11 @@ import { reportFailure } from "./services";
 export function pageFailure(error: unknown): never {
   if (error instanceof ApplicationError) {
     if (error.code === "UNAUTHENTICATED") redirect("/sign-in");
-    if (error.code === "NOT_FOUND" || error.code === "INVALID_INPUT")
+    if (
+      error.code === "NOT_FOUND" ||
+      error.code === "INVALID_INPUT" ||
+      error.code === "FORBIDDEN"
+    )
       notFound();
     if (error.code === "SETUP_REQUIRED") redirect("/sign-in");
   }

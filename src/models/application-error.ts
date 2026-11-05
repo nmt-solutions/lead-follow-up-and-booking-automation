@@ -3,6 +3,8 @@ export type ApplicationErrorCode =
   | "UNAUTHENTICATED"
   | "FORBIDDEN"
   | "NOT_FOUND"
+  | "CONFLICT"
+  | "INVITATION_UNAVAILABLE"
   | "PROVIDER_UNAVAILABLE"
   | "SETUP_REQUIRED";
 

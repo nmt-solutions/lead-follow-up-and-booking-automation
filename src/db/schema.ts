@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { BusinessRole, Invitation } from "../models/team";
 
 export const appRuntime = pgRole("app_runtime").existing();
 
@@ -130,11 +131,9 @@ export const business = pgTable(
       for: "all",
       to: appRuntime,
       using: sql`${table.id} = nullif(current_setting('app.business_id', true), '')::uuid
-        and exists (select 1 from public.membership m where m.business_id = ${table.id}
-          and m.user_id = nullif(current_setting('app.actor_id', true), '') and m.role = 'owner')`,
+        and public.current_business_role() is not null`,
       withCheck: sql`${table.id} = nullif(current_setting('app.business_id', true), '')::uuid
-        and exists (select 1 from public.membership m where m.business_id = ${table.id}
-          and m.user_id = nullif(current_setting('app.actor_id', true), '') and m.role = 'owner')`,
+        and public.current_business_role() in ('owner', 'admin')`,
     }),
   ],
 ).enableRLS();
@@ -148,7 +147,7 @@ export const membership = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id),
-    role: text("role").notNull().default("owner"),
+    role: text("role").$type<BusinessRole>().notNull().default("owner"),
   },
   (table) => [
     primaryKey({ columns: [table.businessId, table.userId] }),
@@ -156,18 +155,172 @@ export const membership = pgTable(
       .on(table.businessId)
       .where(sql`${table.role} = 'owner'`),
     index("membership_user_idx").on(table.userId),
-    check("membership_role", sql`${table.role} = 'owner'`),
+    check(
+      "membership_role",
+      sql`${table.role} in ('owner', 'admin', 'salesperson')`,
+    ),
     pgPolicy("membership_read", {
       for: "select",
       to: appRuntime,
-      using: sql`${table.userId} = nullif(current_setting('app.actor_id', true), '')`,
+      using: sql`${table.userId} = nullif(current_setting('app.actor_id', true), '')
+        or (${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+          and public.current_business_role() in ('owner', 'admin'))`,
+    }),
+    // Only the table owner can use this policy. Definer helpers filter their
+    // reads themselves; the non-owner runtime cannot use it or assume that role.
+    pgPolicy("membership_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.membership'::regclass)`,
     }),
     pgPolicy("membership_create", {
       for: "insert",
       to: appRuntime,
       withCheck: sql`${table.userId} = nullif(current_setting('app.actor_id', true), '')
         and ${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
-        and ${table.role} = 'owner'`,
+        and (${table.role} = 'owner' or exists (
+          select 1 from public.invitation i where i.business_id = ${table.businessId}
+          and i.token_hash = current_setting('app.invitation_hash', true)
+          and i.status = 'pending' and i.role = ${table.role}
+          and i.expires_at > nullif(current_setting('app.at', true), '')::timestamptz
+          and public.inviter_authorized(i.created_by, i.role)
+        ))`,
+    }),
+    pgPolicy("membership_change", {
+      for: "update",
+      to: appRuntime,
+      using: sql`${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+        and ${table.role} <> 'owner' and (public.current_business_role() = 'owner'
+          or (public.current_business_role() = 'admin' and ${table.role} = 'salesperson'))`,
+      withCheck: sql`${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+        and ${table.role} <> 'owner' and (public.current_business_role() = 'owner'
+          or (public.current_business_role() = 'admin' and ${table.role} = 'salesperson'))`,
+    }),
+    pgPolicy("membership_remove", {
+      for: "delete",
+      to: appRuntime,
+      using: sql`${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+        and ${table.role} <> 'owner' and (public.current_business_role() = 'owner'
+          or (public.current_business_role() = 'admin' and ${table.role} = 'salesperson'))`,
+    }),
+  ],
+).enableRLS();
+
+const managerScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid
+  and public.current_business_role() in ('owner', 'admin')`;
+const recipientScope = sql`token_hash = current_setting('app.invitation_hash', true)
+  and email = (select lower(u.email) from public."user" u
+    where u.id = current_setting('app.actor_id', true) and u.email_verified)`;
+
+export const invitation = pgTable(
+  "invitation",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    email: text("email").notNull(),
+    businessName: text("business_name").notNull(),
+    role: text("role").$type<Invitation["role"]>().notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    status: text("status")
+      .$type<Invitation["status"]>()
+      .notNull()
+      .default("pending"),
+    delivery: text("delivery")
+      .$type<Invitation["delivery"]>()
+      .notNull()
+      .default("pending"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedBy: text("accepted_by").references(() => user.id),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    deliveryStartedAt: timestamp("delivery_started_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("invitation_business_idx").on(table.businessId),
+    uniqueIndex("one_pending_invitation")
+      .on(table.businessId, table.email)
+      .where(sql`${table.status} = 'pending'`),
+    check("invitation_role", sql`${table.role} in ('admin', 'salesperson')`),
+    check(
+      "invitation_status",
+      sql`${table.status} in ('pending', 'accepted', 'revoked', 'expired')`,
+    ),
+    check(
+      "invitation_delivery",
+      sql`${table.delivery} in ('pending', 'sending', 'sent', 'unconfirmed')`,
+    ),
+    pgPolicy("invitation_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${recipientScope})`,
+    }),
+    pgPolicy("invitation_create", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope})
+    and ${table.createdBy} = current_setting('app.actor_id', true)
+    and (public.current_business_role() = 'owner' or ${table.role} = 'salesperson')`,
+    }),
+    pgPolicy("invitation_change", {
+      for: "update",
+      to: appRuntime,
+      using: sql`((${managerScope}) and (public.current_business_role() = 'owner' or ${table.role} = 'salesperson')) or (${recipientScope})`,
+      withCheck: sql`((${managerScope}) and (public.current_business_role() = 'owner' or ${table.role} = 'salesperson')) or (${recipientScope})`,
+    }),
+  ],
+).enableRLS();
+
+export const teamAudit = pgTable(
+  "team_audit",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    action: text("action").notNull(),
+    subjectId: text("subject_id").notNull(),
+    detail: text("detail").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("team_audit_business_idx").on(table.businessId, table.at),
+    pgPolicy("team_audit_read", {
+      for: "select",
+      to: appRuntime,
+      using: managerScope,
+    }),
+    pgPolicy("team_audit_create", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+      and ${table.actorId} = current_setting('app.actor_id', true) and public.current_business_role() is not null`,
+    }),
+  ],
+).enableRLS();
+
+// Provisioned by a trusted operator with the schema-owner connection; Business admins cannot grant this.
+export const platformOperator = pgTable(
+  "platform_operator",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id),
+    tax: boolean("tax").notNull().default(false),
+    reconciliation: boolean("reconciliation").notNull().default(false),
+  },
+  (table) => [
+    pgPolicy("operator_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`${table.userId} = current_setting('app.actor_id', true)`,
     }),
   ],
 ).enableRLS();
