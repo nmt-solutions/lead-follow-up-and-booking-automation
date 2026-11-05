@@ -110,13 +110,9 @@ function ScheduleEditor({
     setRecurringApproved(false);
     setPublicApproved(false);
   }
-  function input() {
-    identity.current ??= {
-      id: saved?.id ?? crypto.randomUUID(),
-      requestKey: crypto.randomUUID(),
-    };
+  function payloadFor(identity: { id: string; requestKey: string }) {
     return {
-      scheduleId: identity.current.id,
+      scheduleId: identity.id,
       expectedRevision: saved?.revision ?? 0,
       name,
       timeZone,
@@ -129,7 +125,7 @@ function ScheduleEditor({
         publicOffering,
         markets,
         budget: Number(budget),
-        requestKey: identity.current.requestKey,
+        requestKey: identity.requestKey,
         confirmPublicQuery: publicApproved,
       },
       confirmRecurring: recurringApproved,
@@ -139,25 +135,12 @@ function ScheduleEditor({
     timeZone.length > 0 &&
     !saveScheduleSchema.shape.timeZone.safeParse(timeZone).success;
   const eligible =
-    saveScheduleSchema.safeParse({
-      scheduleId: saved?.id ?? "00000000-0000-4000-8000-000000000000",
-      expectedRevision: saved?.revision ?? 0,
-      name,
-      timeZone,
-      localTime,
-      weekdays: days,
-      missed: "skip",
-      overlap: "skip",
-      dst: "compatible",
-      search: {
-        publicOffering,
-        markets,
-        budget: Number(budget),
+    saveScheduleSchema.safeParse(
+      payloadFor({
+        id: saved?.id ?? "00000000-0000-4000-8000-000000000000",
         requestKey: "00000000-0000-4000-8000-000000000000",
-        confirmPublicQuery: publicApproved,
-      },
-      confirmRecurring: recurringApproved,
-    }).success &&
+      }),
+    ).success &&
     Number(budget) <= (state.policy?.maxRunBudget ?? 0) &&
     markets.every((market) => state.availableMarkets.includes(market));
   return (
@@ -168,7 +151,11 @@ function ScheduleEditor({
         if (busy) return;
         setBusy(true);
         setError("");
-        void save(saveScheduleSchema.parse(input()))
+        identity.current ??= {
+          id: saved?.id ?? crypto.randomUUID(),
+          requestKey: crypto.randomUUID(),
+        };
+        void save(saveScheduleSchema.parse(payloadFor(identity.current)))
           .catch((failure: unknown) =>
             setError(
               failure instanceof ScheduleRequestError
@@ -264,7 +251,7 @@ function ScheduleEditor({
           />
           <p className="text-sm text-muted-foreground">
             Configured maximum: {state.policy?.maxRunBudget ?? "not configured"}
-            . Each new occurrence has this allowance. Recovery retains that
+            . Each new occurrence has this allowance. Recovery retains the
             consumed and reserved units for that run; extra usage requires
             separate approval.
           </p>
@@ -384,8 +371,13 @@ function ScheduleEditor({
         <Alert variant="destructive">
           <AlertDescription>
             {error}{" "}
-            <Link className="underline" href="/security">
-              Security
+            <Link
+              className="underline"
+              href="/security"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open Security in a new tab
             </Link>
           </AlertDescription>
         </Alert>
@@ -572,8 +564,13 @@ function SavedSearch({
         <Alert variant="destructive">
           <AlertDescription>
             {error}{" "}
-            <Link href="/security" className="underline">
-              Security
+            <Link
+              href="/security"
+              className="underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open Security in a new tab
             </Link>
           </AlertDescription>
         </Alert>

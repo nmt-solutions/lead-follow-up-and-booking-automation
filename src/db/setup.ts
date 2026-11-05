@@ -104,10 +104,12 @@ export async function prepareDatabaseRole(pool: Pool) {
       attempts = d.attempts + 1, state = CASE WHEN accepted THEN 'enqueued' ELSE 'pending' END,
       failure = CASE WHEN accepted THEN NULL ELSE 'queue_unavailable' END
       WHERE d.id = dispatch AND d.state = 'pending';
+      IF FOUND THEN
       UPDATE public.discovery_run r SET stop_reason = CASE WHEN accepted THEN NULL ELSE 'queue_unavailable' END
         FROM public.discovery_dispatch d WHERE d.id = dispatch AND d.payload->>'kind' = 'discovery'
         AND r.id = (d.payload->'work'->>'runId')::uuid AND r.business_id = d.business_id
         AND r.execution_id = (d.payload->'work'->>'executionKey')::uuid AND r.status = 'queued';
+      END IF;
       END $$;
     CREATE OR REPLACE FUNCTION public.fail_discovery_schedule(schedule uuid, scope uuid, revision integer, capability uuid, reason text, at_time timestamptz, due_time timestamptz)
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$

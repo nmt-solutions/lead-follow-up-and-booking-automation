@@ -73,6 +73,7 @@ describe("Bounded discovery at the primary application seam", () => {
   let application: ReturnType<typeof createDiscoveryApplication<Headers>>;
   let behavior: Partial<DiscoveryProvider> = {};
   let queueFailure = false;
+  let enqueueBehavior: (() => Promise<void>) | undefined;
   let afterWorkAuthorization: (() => Promise<void>) | undefined;
   const request = (budget = 5) => ({
     markets: [configuration.homeMarket],
@@ -85,6 +86,7 @@ describe("Bounded discovery at the primary application seam", () => {
   beforeEach(() => {
     behavior = {};
     queueFailure = false;
+    enqueueBehavior = undefined;
     harness.invitations.sent.length = 0;
     afterWorkAuthorization = undefined;
     searches.length = 0;
@@ -133,6 +135,7 @@ describe("Bounded discovery at the primary application seam", () => {
           )
             queued.push(job);
           if (queueFailure) throw new Error("sensitive-queue-timeout");
+          await enqueueBehavior?.();
         },
       },
       provider: {
@@ -772,6 +775,39 @@ describe("Bounded discovery at the primary application seam", () => {
       attempt: 1,
       counts: { evidenceBacked: 1 },
     });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+  });
+  it("keeps a successful persisted queue acknowledgement when a concurrent publisher later times out", async () => {
+    const { owner, business } = await setup();
+    let entered!: () => void;
+    const firstEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let rejectFirst!: () => void;
+    let calls = 0;
+    enqueueBehavior = async () => {
+      if (++calls !== 1) return;
+      entered();
+      await new Promise<void>((_, reject) => {
+        rejectFirst = () => reject(new Error("sensitive-late-acknowledgement"));
+      });
+    };
+    const starting = application
+      .start(owner, business.id, request())
+      .catch((error: unknown) => error);
+    await firstEntered;
+    await newApplication().recoverDispatches();
+    rejectFirst();
+    expect(await starting).toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      status: "queued",
+      queueState: "enqueued",
+      stopReason: null,
+    });
+    await execute();
     expect(searches).toHaveLength(1);
     expect(reviews).toHaveLength(1);
   });
