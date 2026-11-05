@@ -66,9 +66,63 @@ export function createBusinessRepository(
         businessId,
         async (tx) => {
           await requireCapability(tx, actor, businessId, "profile.manage");
+          const [previous] = await tx
+            .select()
+            .from(business)
+            .where(eq(business.id, businessId));
+          if (!previous) throw new ApplicationError("NOT_FOUND");
+          const configuration = previous.configuration
+            ? {
+                ...previous.configuration,
+                homeMarketConfirmedAt:
+                  previous.homeMarket === profile.homeMarket
+                    ? previous.configuration.homeMarketConfirmedAt
+                    : null,
+                buyersReviewedAt:
+                  previous.offering === profile.offering
+                    ? previous.configuration.buyersReviewedAt
+                    : null,
+              }
+            : null;
           const [updated] = await tx
             .update(business)
-            .set({ ...profile, updatedAt: at })
+            .set({ ...profile, configuration, updatedAt: at })
+            .where(eq(business.id, businessId))
+            .returning();
+          if (!updated) throw new ApplicationError("NOT_FOUND");
+          return updated;
+        },
+        { lock: true },
+      );
+    },
+    configure(actor, businessId, input, at) {
+      return scoped(
+        database,
+        actor,
+        businessId,
+        async (tx) => {
+          await requireCapability(tx, actor, businessId, "profile.manage");
+          const {
+            offering,
+            homeMarket,
+            homeMarketConfirmed,
+            buyersReviewed,
+            ...details
+          } = input;
+          const [updated] = await tx
+            .update(business)
+            .set({
+              offering,
+              homeMarket,
+              updatedAt: at,
+              configuration: {
+                ...details,
+                homeMarketConfirmedAt: homeMarketConfirmed
+                  ? at.toISOString()
+                  : null,
+                buyersReviewedAt: buyersReviewed ? at.toISOString() : null,
+              },
+            })
             .where(eq(business.id, businessId))
             .returning();
           if (!updated) throw new ApplicationError("NOT_FOUND");

@@ -41,6 +41,7 @@ export async function startPostgres() {
     user: "postgres",
     password,
     persistent: false,
+    initdbFlags: ["--encoding=UTF8"],
     postgresFlags: ["-h", "127.0.0.1"],
     onLog: () => {},
     onError: () => {},

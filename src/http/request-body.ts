@@ -1,6 +1,6 @@
 import { ApplicationError } from "../models/application-error";
 
-export function createJsonBodyReader(origin: string) {
+export function createJsonBodyReader(origin: string, maxBytes = 32768) {
   return async function body(request: Request): Promise<unknown> {
     if (request.headers.get("origin") !== origin)
       throw new ApplicationError("FORBIDDEN");
@@ -18,7 +18,7 @@ export function createJsonBodyReader(origin: string) {
         const chunk = await reader.read();
         if (chunk.done) break;
         length += chunk.value.byteLength;
-        if (length > 32768) {
+        if (length > maxBytes) {
           await reader.cancel();
           throw new ApplicationError("INVALID_INPUT");
         }

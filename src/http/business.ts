@@ -15,6 +15,8 @@ export function createBusinessHttp(options: {
   const respond = createResponder(options.reportFailure);
 
   const body = createJsonBodyReader(options.origin);
+  // The bounded configuration lists and multilingual fields can exceed 32 KiB.
+  const configurationBody = createJsonBodyReader(options.origin, 256 * 1024);
 
   return {
     list: (request: Request) =>
@@ -41,6 +43,26 @@ export function createBusinessHttp(options: {
       respond(async () =>
         dataResponse(
           await options.application.updateProfile(
+            request.headers,
+            businessId,
+            await body(request),
+          ),
+        ),
+      ),
+    configure: (request: Request, businessId: string) =>
+      respond(async () =>
+        dataResponse(
+          await options.application.saveConfiguration(
+            request.headers,
+            businessId,
+            await configurationBody(request),
+          ),
+        ),
+      ),
+    suggestHomeMarket: (request: Request, businessId: string) =>
+      respond(async () =>
+        dataResponse(
+          await options.application.suggestHomeMarket(
             request.headers,
             businessId,
             await body(request),

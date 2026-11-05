@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SavedConfiguration } from "./configuration";
 
 export const businessIdSchema = z.uuid();
 export const profileSchema = z.strictObject({
@@ -13,6 +14,7 @@ export type BusinessProfile = BusinessProfileInput & {
   id: string;
   createdAt: Date;
   updatedAt: Date;
+  configuration: SavedConfiguration | null;
 };
 
 // Created by a trusted identity adapter, never by parsing an HTTP body.

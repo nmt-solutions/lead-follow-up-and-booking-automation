@@ -7,6 +7,12 @@ import type {
 import { businessIdSchema, profileSchema } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import type { z } from "zod";
+import {
+  addressSchema,
+  configurationInputSchema,
+  suggestHomeMarket,
+  type ConfigurationInput,
+} from "../models/configuration";
 
 function validate<T>(schema: z.ZodType<T>, input: unknown): T {
   const parsed = schema.safeParse(input);
@@ -26,6 +32,12 @@ export type BusinessRepository = {
     actor: Actor,
     businessId: string,
     profile: BusinessProfileInput,
+    at: Date,
+  ): Promise<BusinessProfile>;
+  configure(
+    actor: Actor,
+    businessId: string,
+    configuration: ConfigurationInput,
     at: Date,
   ): Promise<BusinessProfile>;
 };
@@ -65,6 +77,28 @@ export function createBusinessApplication<Credentials>(dependencies: {
         validate(profileSchema, input),
         dependencies.clock.now(),
       );
+    },
+    async saveConfiguration(
+      credentials: Credentials,
+      id: unknown,
+      input: unknown,
+    ) {
+      const actor = await dependencies.authenticate(credentials);
+      return dependencies.repository.configure(
+        actor,
+        validate(businessIdSchema, id),
+        validate(configurationInputSchema, input),
+        dependencies.clock.now(),
+      );
+    },
+    async suggestHomeMarket(
+      credentials: Credentials,
+      id: unknown,
+      input: unknown,
+    ) {
+      const actor = await dependencies.authenticate(credentials);
+      await dependencies.repository.get(actor, validate(businessIdSchema, id));
+      return { homeMarket: suggestHomeMarket(validate(addressSchema, input)) };
     },
   };
 }

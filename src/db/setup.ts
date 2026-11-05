@@ -56,6 +56,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.business') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.business FROM app_runtime;
         REVOKE ALL PRIVILEGES (name, offering, home_market, website, updated_at) ON public.business FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'business' AND column_name = 'configuration') THEN
+          REVOKE ALL PRIVILEGES (configuration) ON public.business FROM app_runtime;
+        END IF;
       END IF;
       IF to_regclass('public.membership') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.membership FROM app_runtime;
@@ -116,7 +119,7 @@ export async function secureDatabase(pool: Pool) {
       GRANT UPDATE (role) ON membership TO app_runtime;
       GRANT DELETE ON membership TO app_runtime;
       GRANT UPDATE (status, accepted_by, accepted_at, delivery, delivery_started_at) ON invitation TO app_runtime;
-      GRANT UPDATE (name, offering, home_market, website, updated_at) ON business TO app_runtime;
+      GRANT UPDATE (name, offering, home_market, website, configuration, updated_at) ON business TO app_runtime;
       ALTER TABLE membership ALTER CONSTRAINT membership_business_id_business_id_fk DEFERRABLE INITIALLY DEFERRED;
       ALTER TABLE business FORCE ROW LEVEL SECURITY;
       ALTER TABLE membership FORCE ROW LEVEL SECURITY;

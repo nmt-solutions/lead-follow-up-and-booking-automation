@@ -57,6 +57,12 @@ export default async function BusinessPage({
             : "Keep the details of what you offer up to date."}
         </p>
       </div>
+      <Link
+        href={`/businesses/${businessId}/configuration`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Offerings, buyers and geography
+      </Link>
       {access.role !== "salesperson" && (
         <Link
           href={`/businesses/${businessId}/team`}

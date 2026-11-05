@@ -5,6 +5,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgPolicy,
   pgRole,
   pgTable,
@@ -15,6 +16,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { BusinessRole, Invitation } from "../models/team";
+import type { SavedConfiguration } from "../models/configuration";
 
 export const appRuntime = pgRole("app_runtime").existing();
 
@@ -134,6 +136,7 @@ export const business = pgTable(
     offering: text("offering").notNull(),
     homeMarket: text("home_market").notNull(),
     website: text("website").notNull(),
+    configuration: jsonb("configuration").$type<SavedConfiguration>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },

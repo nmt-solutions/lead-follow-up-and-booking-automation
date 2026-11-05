@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { Check, LockKeyhole } from "lucide-react";
 import { profileSchema, type BusinessProfileInput } from "@/models/business";
+import { savedConfigurationSchema } from "@/models/configuration";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
@@ -17,6 +18,7 @@ const responseSchema = z.object({
     id: z.uuid(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
+    configuration: savedConfigurationSchema.nullable(),
   }),
 });
 const emptyProfile: BusinessProfileInput = {
@@ -233,7 +235,8 @@ export function ProfileForm({
             className="text-sm leading-relaxed text-muted-foreground"
           >
             The city, region or country where you operate or provide your
-            services.
+            services. Confirm it in Offerings, buyers and geography. Changing it
+            here requires a new confirmation there.
           </p>
           <p
             id="market-error"
