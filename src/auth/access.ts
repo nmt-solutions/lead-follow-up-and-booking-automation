@@ -36,7 +36,9 @@ export function privilegedRoles(database: Database, userId: string) {
       business: members.some(
         ({ role }) => role === "owner" || role === "admin",
       ),
-      operator: Boolean(operator?.tax || operator?.reconciliation),
+      operator: Boolean(
+        operator?.tax || operator?.reconciliation || operator?.ai,
+      ),
     };
   });
 }

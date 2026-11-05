@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -13,11 +14,20 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 import type { BusinessRole, Invitation } from "../models/team";
 import type { SavedConfiguration } from "../models/configuration";
 import type { FileState } from "../models/files";
+import type {
+  AiProfile,
+  AiSample,
+  AiOutput,
+  AiFailure,
+  AiRoute,
+  AiMetrics,
+} from "../models/ai";
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { CommercialPolicy } from "../models/commercial-authority";
 import type {
@@ -441,12 +451,254 @@ export const platformOperator = pgTable(
       .references(() => user.id),
     tax: boolean("tax").notNull().default(false),
     reconciliation: boolean("reconciliation").notNull().default(false),
+    ai: boolean("ai").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {
       for: "select",
       to: appRuntime,
       using: sql`${table.userId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+const aiOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.ai)`;
+const aiMemberScope = sql`public.current_business_role() is not null`;
+const aiBusinessScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and (${aiMemberScope})`;
+export const aiProfile = pgTable(
+  "ai_profile",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    profile: jsonb("profile").$type<AiProfile>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+    usedAttempts: integer("used_attempts").notNull().default(0),
+    usedFallbackAttempts: integer("used_fallback_attempts")
+      .notNull()
+      .default(0),
+  },
+  (table) => [
+    uniqueIndex("ai_profile_version").on(table.version),
+    check(
+      "ai_profile_counters",
+      sql`${table.version} > 0 and ${table.usedAttempts} >= 0 and ${table.usedFallbackAttempts} >= 0 and ${table.usedFallbackAttempts} <= ${table.usedAttempts}`,
+    ),
+    pgPolicy("ai_profile_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${aiOperatorScope}) or (${aiMemberScope})`,
+    }),
+    pgPolicy("ai_profile_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${aiOperatorScope}) and public.current_business_role() in ('owner','admin') and actor_id = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("ai_profile_update", {
+      for: "update",
+      to: appRuntime,
+      using: aiMemberScope,
+      withCheck: aiMemberScope,
+    }),
+  ],
+).enableRLS();
+export const aiActivation = pgTable(
+  "ai_activation",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => aiProfile.id),
+  },
+  (table) => [
+    uniqueIndex("ai_activation_version").on(table.version),
+    pgPolicy("ai_activation_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${aiOperatorScope}) or (${aiMemberScope})`,
+    }),
+    pgPolicy("ai_activation_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${aiOperatorScope}) and public.current_business_role() in ('owner','admin')`,
+    }),
+  ],
+).enableRLS();
+export const aiActivationAudit = pgTable(
+  "ai_activation_audit",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .references(() => aiActivation.id),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  () => [
+    pgPolicy("ai_activation_audit_read", {
+      for: "select",
+      to: appRuntime,
+      using: aiBusinessScope,
+    }),
+    pgPolicy("ai_activation_audit_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${aiBusinessScope}) and (${aiOperatorScope}) and public.current_business_role() in ('owner','admin') and actor_id = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+export const aiExecution = pgTable(
+  "ai_execution",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => aiProfile.id),
+    requestKey: uuid("request_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    task: text("task").$type<"extraction" | "drafting">().notNull(),
+    kind: text("kind").$type<"preview" | "workflow">().notNull(),
+    knowledgeVersion: integer("knowledge_version").notNull(),
+    sample: jsonb("sample").$type<AiSample>().notNull(),
+    input: text("input").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    status: text("status")
+      .$type<
+        "running" | "succeeded" | "failed" | "uncertain" | "setup_required"
+      >()
+      .notNull(),
+    failure: text("failure").$type<AiFailure>(),
+    output: jsonb("output").$type<AiOutput>(),
+  },
+  (table) => [
+    uniqueIndex("ai_execution_request").on(table.businessId, table.requestKey),
+    unique("ai_execution_scope").on(table.id, table.businessId),
+    check(
+      "ai_execution_values",
+      sql`${table.task} in ('extraction','drafting') and ${table.kind} in ('preview','workflow') and ${table.status} in ('running','succeeded','failed','uncertain','setup_required') and ${table.knowledgeVersion} > 0`,
+    ),
+    pgPolicy("ai_execution_read", {
+      for: "select",
+      to: appRuntime,
+      using: aiBusinessScope,
+    }),
+    pgPolicy("ai_execution_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${aiBusinessScope}) and actor_id = current_setting('app.actor_id', true) and (kind = 'workflow' or (${aiOperatorScope}))`,
+    }),
+    pgPolicy("ai_execution_update", {
+      for: "update",
+      to: appRuntime,
+      using: aiBusinessScope,
+      withCheck: aiBusinessScope,
+    }),
+  ],
+).enableRLS();
+export const aiAttempt = pgTable(
+  "ai_attempt",
+  {
+    id: uuid("id").primaryKey(),
+    executionId: uuid("execution_id")
+      .notNull()
+      .references(() => aiExecution.id),
+    number: integer("number").notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    route: text("route").$type<AiRoute>().notNull(),
+    outcome: text("outcome")
+      .$type<"succeeded" | "failed" | "uncertain">()
+      .notNull(),
+    failure: text("failure").$type<AiFailure>(),
+    metrics: jsonb("metrics").$type<AiMetrics>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    latencyMs: integer("latency_ms"),
+    fundingSource: text("funding_source")
+      .$type<
+        "linked_api_credits" | "purchased_api_credits" | "gateway_credits"
+      >()
+      .notNull(),
+    fundingReference: text("funding_reference").notNull(),
+  },
+  (table) => [
+    index("ai_attempt_execution").on(table.businessId, table.executionId),
+    uniqueIndex("ai_attempt_number").on(table.executionId, table.number),
+    foreignKey({
+      name: "ai_attempt_execution_scope",
+      columns: [table.executionId, table.businessId],
+      foreignColumns: [aiExecution.id, aiExecution.businessId],
+    }),
+    check(
+      "ai_attempt_values",
+      sql`${table.number} > 0 and ${table.route} in ('operator_byok','gateway_system') and ${table.outcome} in ('succeeded','failed','uncertain') and (${table.latencyMs} is null or ${table.latencyMs} >= 0)`,
+    ),
+    pgPolicy("ai_attempt_read", {
+      for: "select",
+      to: appRuntime,
+      using: aiBusinessScope,
+    }),
+    pgPolicy("ai_attempt_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: aiBusinessScope,
+    }),
+    pgPolicy("ai_attempt_update", {
+      for: "update",
+      to: appRuntime,
+      using: aiBusinessScope,
+      withCheck: aiBusinessScope,
+    }),
+  ],
+).enableRLS();
+export const aiReview = pgTable(
+  "ai_review",
+  {
+    id: uuid("id").primaryKey(),
+    executionId: uuid("execution_id")
+      .notNull()
+      .references(() => aiExecution.id),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    accepted: boolean("accepted").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_review_execution").on(table.executionId),
+    foreignKey({
+      name: "ai_review_execution_scope",
+      columns: [table.executionId, table.businessId],
+      foreignColumns: [aiExecution.id, aiExecution.businessId],
+    }),
+    pgPolicy("ai_review_read", {
+      for: "select",
+      to: appRuntime,
+      using: aiBusinessScope,
+    }),
+    pgPolicy("ai_review_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${aiBusinessScope}) and (${aiOperatorScope}) and public.current_business_role() in ('owner','admin') and actor_id = current_setting('app.actor_id', true)`,
     }),
   ],
 ).enableRLS();

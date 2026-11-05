@@ -4,6 +4,21 @@ import {
 } from "./application-error";
 
 const failures = {
+  AI_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "AI needs approved model settings, reviewed Business context, operator API credentials, funding evidence and an explicit allowance. Ask the platform operator to review AI setup.",
+  },
+  AI_VALIDATION_REQUIRED: {
+    status: 409,
+    message:
+      "Review successful representative extraction and drafting previews for this exact profile and current Business knowledge before activation.",
+  },
+  AI_ALLOWANCE_EXHAUSTED: {
+    status: 409,
+    message:
+      "The approved AI attempt or fallback allowance is exhausted. Review usage before approving another profile.",
+  },
   DISCOVERY_SETUP_REQUIRED: {
     status: 503,
     message:

@@ -269,6 +269,11 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
               Effect.gen(function* () {
                 const rawReview = yield* owned((signal) =>
                   provider.review({
+                    identity: work,
+                    authorize: async () => {
+                      await authorize();
+                      await repository.guard(work, clock.now());
+                    },
                     businessId: work.businessId,
                     runId: work.runId,
                     operationId: review.id,

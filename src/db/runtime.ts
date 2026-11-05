@@ -15,6 +15,24 @@ export async function verifyRuntimeRole(
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
       AND current_setting('row_security') = 'on'
+      AND (SELECT count(*) = 6 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('ai_profile','ai_activation','ai_activation_audit','ai_execution','ai_attempt','ai_review'))
+      AND (SELECT count(*) = 15 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
+        WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL
+        ELSE false END) FROM pg_policies WHERE schemaname = 'public'
+        AND tablename IN ('ai_profile','ai_activation','ai_activation_audit','ai_execution','ai_attempt','ai_review'))
+      AND NOT has_table_privilege(current_user, 'public.ai_profile', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.ai_activation', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.ai_activation_audit', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.ai_review', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.ai_execution', 'input', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.ai_execution', 'business_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.ai_attempt', 'route', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.platform_operator', 'ai', 'UPDATE')
       AND (SELECT count(*) = 5 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

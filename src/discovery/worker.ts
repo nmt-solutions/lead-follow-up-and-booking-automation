@@ -5,6 +5,9 @@ import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { databaseConnectionUrl } from "../db/connection";
 import { ApplicationError } from "../models/application-error";
 import { authenticateQueuedActor } from "../auth/access";
+import { createAiApplication } from "../application/ai";
+import { createAiRepository } from "../db/ai-repository";
+import { configuredAi } from "../ai/configuration";
 import {
   configuredDiscoveryProvider,
   configuredDiscoveryQueue,
@@ -30,6 +33,19 @@ export async function withDiscoveryWorker<T>(
     await verifyRuntimeRole(pool);
     const database = runtimeDatabase(pool);
     const clock = { now: () => new Date() };
+    const ai = createAiApplication<void>({
+      authenticate: async () => {
+        throw new ApplicationError("FORBIDDEN");
+      },
+      authenticatePlatform: async () => {
+        throw new ApplicationError("FORBIDDEN");
+      },
+      authenticateWork: (identity) =>
+        authenticateQueuedActor(database, clock, identity),
+      repository: createAiRepository(database),
+      clock,
+      ...configuredAi(process.env),
+    });
     return await operation(
       createDiscoveryApplication<void>({
         authenticate: async () => {
@@ -42,7 +58,7 @@ export async function withDiscoveryWorker<T>(
           authenticateQueuedActor(database, clock, identity),
         repository: createDiscoveryRepository(database, clock),
         clock,
-        provider: configuredDiscoveryProvider(),
+        provider: configuredDiscoveryProvider(ai),
         queue: configuredDiscoveryQueue(process.env),
         reportFailure: (diagnostic) =>
           console.error(

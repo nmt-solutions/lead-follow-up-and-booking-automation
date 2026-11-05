@@ -1,11 +1,16 @@
 import { tasks, idempotencyKeys } from "@trigger.dev/sdk";
 import type { ScheduleWork } from "../models/discovery-schedules";
 import type { DiscoveryProvider, DiscoveryWork } from "../models/discovery";
+import type { createAiApplication } from "../application/ai";
+import { createProfiledDiscoveryProvider } from "../ai/discovery-provider";
 
 // #16 supplies the selected Exa/AI adapter. No environment flag can accidentally
 // activate fixtures, an unsigned contract, another product or a hidden fallback.
-export function configuredDiscoveryProvider(): DiscoveryProvider | null {
-  return null;
+export function configuredDiscoveryProvider(
+  ai: Pick<ReturnType<typeof createAiApplication>, "executeWorkflow">,
+  retrieval: Pick<DiscoveryProvider, "id" | "search"> | null = null,
+): DiscoveryProvider | null {
+  return retrieval ? createProfiledDiscoveryProvider(retrieval, ai) : null;
 }
 export function configuredDiscoveryQueue(environment: NodeJS.ProcessEnv) {
   if (

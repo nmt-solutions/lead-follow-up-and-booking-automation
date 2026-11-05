@@ -12,7 +12,7 @@ Business assurance lasts at most 12 hours and never outlives its session. Securi
 
 Session enumeration and revocation also require MFA within 15 minutes for privileged or enrolled actors. Primary identity/status and signing out the current session stay available. Assurance includes a fingerprint of the attempted encrypted factor secret, so concurrent replacement of a pending setup cannot make an old challenge verify a newer secret, even when Better Auth reuses the factor row ID.
 
-An operator must have a current explicit `platform_operator` grant provisioned through the schema-owner connection, plus MFA within 15 minutes. Tax and reconciliation grants are independent and checked on each operation. Business Owner/Admin roles cannot confer these grants. Operator status never grants Business membership or bypasses RLS. Revocation takes effect on the next request; session revocation prevents further verification and access.
+An operator must have a current explicit `platform_operator` grant provisioned through the schema-owner connection, plus MFA within 15 minutes. Tax, reconciliation and AI-profile grants are independent and checked on each operation. AI previews also require current Owner/Admin membership and explicit authorization to use the selected Business context. Business Owner/Admin roles cannot confer these grants. Operator status never grants Business membership or bypasses RLS. Revocation takes effect on the next request; session revocation prevents further verification and access.
 
 ## Recovery and readiness
 

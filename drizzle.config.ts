@@ -33,5 +33,11 @@ export default defineConfig({
     "discovery_command",
     "discovery_schedule",
     "discovery_dispatch",
+    "ai_profile",
+    "ai_activation",
+    "ai_activation_audit",
+    "ai_execution",
+    "ai_attempt",
+    "ai_review",
   ],
 });

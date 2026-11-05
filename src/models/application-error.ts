@@ -13,7 +13,10 @@ export type ApplicationErrorCode =
   | "FILE_UNAVAILABLE"
   | "DISCOVERY_SETUP_REQUIRED"
   | "DISCOVERY_SCOPE_INVALID"
-  | "DISCOVERY_INTERRUPTED";
+  | "DISCOVERY_INTERRUPTED"
+  | "AI_SETUP_REQUIRED"
+  | "AI_VALIDATION_REQUIRED"
+  | "AI_ALLOWANCE_EXHAUSTED";
 
 export class ApplicationError extends Error {
   constructor(

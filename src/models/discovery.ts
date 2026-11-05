@@ -212,6 +212,8 @@ export type SearchInput = {
   signal: AbortSignal;
 };
 export type ReviewInput = {
+  identity?: WorkIdentity;
+  authorize?: () => Promise<void>;
   businessId: string;
   runId: string;
   operationId: string;

@@ -24,6 +24,12 @@ import {
   discoveryCommand,
   discoverySchedule,
   discoveryDispatch,
+  aiProfile,
+  aiActivation,
+  aiActivationAudit,
+  aiExecution,
+  aiAttempt,
+  aiReview,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -225,6 +231,15 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.discovery_observation, public.discovery_prospect_alias FROM app_runtime;
         REVOKE ALL PRIVILEGES (returned_results, source_url, checked_at, check_order) ON public.discovery_usage FROM app_runtime;
       END IF;
+      IF to_regclass('public.ai_profile') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.ai_profile, public.ai_activation, public.ai_execution, public.ai_attempt, public.ai_review FROM app_runtime;
+        REVOKE ALL PRIVILEGES (used_attempts, used_fallback_attempts) ON public.ai_profile FROM app_runtime;
+        REVOKE ALL PRIVILEGES (status, failure, output) ON public.ai_execution FROM app_runtime;
+        REVOKE ALL PRIVILEGES (outcome, failure, metrics, latency_ms) ON public.ai_attempt FROM app_runtime;
+      END IF;
+      IF to_regclass('public.ai_activation_audit') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.ai_activation_audit FROM app_runtime;
+      END IF;
     END $$;
   `);
 }
@@ -268,6 +283,12 @@ export async function secureDatabase(pool: Pool) {
       discoveryCommand,
       discoverySchedule,
       discoveryDispatch,
+      aiProfile,
+      aiActivation,
+      aiActivationAudit,
+      aiExecution,
+      aiAttempt,
+      aiReview,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -278,6 +299,17 @@ export async function secureDatabase(pool: Pool) {
     }
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON ai_profile, ai_activation, ai_activation_audit, ai_execution, ai_attempt, ai_review FROM app_runtime;
+      GRANT SELECT, INSERT ON ai_profile, ai_activation, ai_activation_audit, ai_execution, ai_attempt, ai_review TO app_runtime;
+      GRANT UPDATE (used_attempts, used_fallback_attempts) ON ai_profile TO app_runtime;
+      GRANT UPDATE (status, failure, output) ON ai_execution TO app_runtime;
+      GRANT UPDATE (outcome, failure, metrics, latency_ms) ON ai_attempt TO app_runtime;
+      ALTER TABLE ai_profile FORCE ROW LEVEL SECURITY;
+      ALTER TABLE ai_activation FORCE ROW LEVEL SECURITY;
+      ALTER TABLE ai_activation_audit FORCE ROW LEVEL SECURITY;
+      ALTER TABLE ai_execution FORCE ROW LEVEL SECURITY;
+      ALTER TABLE ai_attempt FORCE ROW LEVEL SECURITY;
+      ALTER TABLE ai_review FORCE ROW LEVEL SECURITY;
       GRANT USAGE ON SCHEMA public TO app_runtime;
       GRANT SELECT, INSERT, UPDATE, DELETE ON "user", session, account, verification, rate_limit, two_factor TO app_runtime;
       REVOKE ALL PRIVILEGES ON business, membership, invitation, team_audit, platform_operator FROM app_runtime;

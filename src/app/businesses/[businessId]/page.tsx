@@ -36,6 +36,14 @@ export default async function BusinessPage({
       return pageFailure(error);
     }
   })();
+  const canManageAi = await (async () => {
+    try {
+      await (await getServices()).ai.workspace(await headers(), businessId);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <div>
@@ -77,6 +85,14 @@ export default async function BusinessPage({
       >
         Approved answers and qualification
       </Link>
+      {canManageAi && (
+        <Link
+          href={`/businesses/${businessId}/ai`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          AI profiles and previews
+        </Link>
+      )}
       <Link
         href={`/businesses/${businessId}/discovery`}
         className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"

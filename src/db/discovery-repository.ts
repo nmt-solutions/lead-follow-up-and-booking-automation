@@ -138,6 +138,16 @@ export function createDiscoveryRepository(
   const schedules = createDiscoveryScheduleRepository(database, clock);
   return {
     ...schedules,
+    guard(work, at) {
+      return scoped(database, work, work.businessId, async (tx) => {
+        const run = await ownedRun(tx, work);
+        await requireWorkSession(tx, work, at);
+        await schedules.checkScheduleForRun(tx, run);
+        await checkCurrent(tx, run);
+        if (run.status !== "running")
+          throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+      });
+    },
     workspace(actor, businessId) {
       return scoped(database, actor, businessId, async (tx) => {
         const role = await requireCapability(

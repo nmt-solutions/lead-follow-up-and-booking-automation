@@ -27,6 +27,10 @@ import { createCommercialAuthorityHttp } from "../http/commercial-authority";
 import { createDiscoveryApplication } from "../application/discovery";
 import { createDiscoveryRepository } from "../db/discovery-repository";
 import { createDiscoveryHttp } from "../http/discovery";
+import { createAiApplication } from "../application/ai";
+import { createAiRepository } from "../db/ai-repository";
+import { createAiHttp } from "../http/ai";
+import { configuredAi } from "../ai/configuration";
 import {
   configuredDiscoveryProvider,
   configuredDiscoveryQueue,
@@ -104,6 +108,14 @@ async function composeServices() {
     repository: createCommercialAuthorityRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
   });
+  const ai = createAiApplication({
+    authenticate,
+    authenticatePlatform,
+    authenticateWork: access.authenticateWork,
+    repository: createAiRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    ...configuredAi(process.env),
+  });
   const discovery = createDiscoveryApplication({
     authenticate,
     authenticateForWork: access.authenticateForWork,
@@ -112,7 +124,7 @@ async function composeServices() {
       now: () => new Date(),
     }),
     clock: { now: () => new Date() },
-    provider: configuredDiscoveryProvider(),
+    provider: configuredDiscoveryProvider(ai),
     queue: configuredDiscoveryQueue(process.env),
     reportFailure: ({ businessId, runId, code }) =>
       console.error(
@@ -128,6 +140,12 @@ async function composeServices() {
     knowledge,
     commercialAuthority,
     discovery,
+    ai,
+    aiHttp: createAiHttp({
+      application: ai,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     discoveryHttp: createDiscoveryHttp({
       application: discovery,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

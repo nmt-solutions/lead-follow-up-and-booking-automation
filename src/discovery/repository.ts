@@ -65,6 +65,7 @@ export type DiscoveryRepository = ReturnType<
     },
   ): Promise<void>;
   progress(work: DiscoveryWork, at: Date, searchKey: string): Promise<void>;
+  guard(work: DiscoveryWork, at: Date): Promise<void>;
   failOperation(work: DiscoveryWork, operationId: string): Promise<void>;
   finish(work: DiscoveryWork, reason: StopReason, at: Date): Promise<void>;
 };
