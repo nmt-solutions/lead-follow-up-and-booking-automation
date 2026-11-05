@@ -31,5 +31,7 @@ export default defineConfig({
     "discovery_prospect_alias",
     "discovery_observation",
     "discovery_command",
+    "discovery_schedule",
+    "discovery_dispatch",
   ],
 });

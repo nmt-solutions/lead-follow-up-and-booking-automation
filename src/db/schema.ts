@@ -31,6 +31,12 @@ import type {
   SearchResult,
 } from "../models/discovery";
 
+import type {
+  Dispatch,
+  SaveSchedule,
+  ScheduleFailure,
+} from "../models/discovery-schedules";
+
 export const appRuntime = pgRole("app_runtime").existing();
 
 export const user = pgTable("user", {
@@ -616,6 +622,12 @@ export const discoveryRun = pgTable(
     executionId: uuid("execution_id").notNull(),
     executionUserId: text("execution_user_id"),
     attempt: integer("attempt").notNull().default(0),
+    scheduleId: uuid("schedule_id"),
+    scheduleRevision: integer("schedule_revision"),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+    durableRunId: text("durable_run_id"),
+    durableAttempt: integer("durable_attempt").notNull().default(0),
+    attemptStartedAt: timestamp("attempt_started_at", { withTimezone: true }),
     completedSearchKeys: jsonb("completed_search_keys")
       .$type<string[]>()
       .notNull()
@@ -630,6 +642,12 @@ export const discoveryRun = pgTable(
   },
   (table) => [
     uniqueIndex("discovery_request_key").on(table.businessId, table.requestKey),
+    uniqueIndex("discovery_schedule_occurrence").on(
+      table.businessId,
+      table.scheduleId,
+      table.scheduleRevision,
+      table.scheduledFor,
+    ),
     index("discovery_run_business_idx").on(table.businessId, table.createdAt),
     check(
       "discovery_budget_bound",
@@ -877,6 +895,87 @@ export const discoveryCommand = pgTable(
       for: "insert",
       to: appRuntime,
       withCheck: sql`(${discoveryWrite}) and actor_id = current_setting('app.actor_id', true) and exists (select 1 from public.discovery_run r where r.id = run_id and r.business_id = ${table.businessId})`,
+    }),
+  ],
+).enableRLS();
+
+export const discoverySchedule = pgTable(
+  "discovery_schedule",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    revision: integer("revision").notNull(),
+    dispatchKey: uuid("dispatch_key").notNull(),
+    input: jsonb("input").$type<SaveSchedule>().notNull(),
+    brief: jsonb("brief").$type<DiscoveryBrief>().notNull(),
+    policy: jsonb("policy").$type<DiscoveryPolicy>().notNull(),
+    lastCommand: jsonb("last_command").$type<unknown>().notNull(),
+    status: text("status").$type<"active" | "paused">().notNull(),
+    nextDueAt: timestamp("next_due_at", { withTimezone: true }),
+    failure: text("failure").$type<ScheduleFailure>(),
+    lastRunId: uuid("last_run_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("discovery_schedule_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_schedule_write", {
+      for: "all",
+      to: appRuntime,
+      using: discoveryWrite,
+      withCheck: discoveryWrite,
+    }),
+    pgPolicy("discovery_schedule_system", {
+      for: "all",
+      to: "public",
+      using: discoveryOwner,
+      withCheck: discoveryOwner,
+    }),
+  ],
+).enableRLS();
+
+// Transactional outbox: identifiers and scoped capabilities only, never briefs.
+export const discoveryDispatch = pgTable(
+  "discovery_dispatch",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    payload: jsonb("payload").$type<Dispatch>().notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    state: text("state")
+      .$type<"pending" | "enqueued">()
+      .notNull()
+      .default("pending"),
+    failure: text("failure").$type<"queue_unavailable">(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("discovery_dispatch_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_dispatch_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${discoveryWrite}) and payload->'work'->>'businessId' = business_id::text and payload->'work'->>'userId' = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("discovery_dispatch_system", {
+      for: "all",
+      to: "public",
+      using: discoveryOwner,
+      withCheck: discoveryOwner,
     }),
   ],
 ).enableRLS();

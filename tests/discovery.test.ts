@@ -1,3 +1,4 @@
+import type { ScheduleWork } from "../src/models/discovery-schedules";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
 import { createDiscoveryApplication } from "../src/application/discovery";
@@ -21,6 +22,7 @@ describe("Bounded discovery at the primary application seam", () => {
   const searches: SearchInput[] = [];
   const reviews: ReviewInput[] = [];
   const queued: DiscoveryWork[] = [];
+  const scheduled: ScheduleWork[] = [];
   const policy = {
     adapterId: "deterministic-contract-fixture",
     activeMarkets: ["New Jersey, United States"],
@@ -88,11 +90,15 @@ describe("Bounded discovery at the primary application seam", () => {
     searches.length = 0;
     reviews.length = 0;
     queued.length = 0;
+    scheduled.length = 0;
     harness.clock.set("2026-11-05T09:00:00Z");
   });
   beforeAll(async () => {
     harness = await createHarness();
-    application = createDiscoveryApplication({
+    application = newApplication();
+  });
+  function newApplication() {
+    return createDiscoveryApplication({
       authenticate: harness.authenticate,
       authenticateForWork: harness.access.authenticateForWork,
       authenticateWork: async (identity) => {
@@ -106,8 +112,26 @@ describe("Bounded discovery at the primary application seam", () => {
       ),
       clock: harness.clock,
       queue: {
+        async schedule(job) {
+          if (
+            !scheduled.some(
+              (w) =>
+                w.scheduleId === job.scheduleId &&
+                w.revision === job.revision &&
+                w.dueAt === job.dueAt,
+            )
+          )
+            scheduled.push(job);
+          if (queueFailure) throw new Error("sensitive-queue-timeout");
+        },
         async enqueue(job) {
-          queued.push(job);
+          if (
+            !queued.some(
+              (w) =>
+                w.executionKey === job.executionKey && w.runId === job.runId,
+            )
+          )
+            queued.push(job);
           if (queueFailure) throw new Error("sensitive-queue-timeout");
         },
       },
@@ -138,6 +162,618 @@ describe("Bounded discovery at the primary application seam", () => {
         },
       },
     });
+  }
+  it("saves and reloads an explicitly zoned recurring brief without running research", async () => {
+    const { owner, business } = await setup();
+    const saved = await application.saveSchedule(owner, business.id, {
+      scheduleId: crypto.randomUUID(),
+      expectedRevision: 0,
+      name: "Morning fabricators",
+      timeZone: "America/New_York",
+      localTime: "09:30",
+      weekdays: [1, 2, 3, 4, 5],
+      missed: "skip",
+      overlap: "skip",
+      dst: "compatible",
+      search: request(),
+      confirmRecurring: true,
+    });
+    const state = await application.workspace(owner, business.id);
+    expect(state.schedules).toMatchObject([
+      {
+        id: saved.id,
+        revision: 1,
+        name: "Morning fabricators",
+        status: "active",
+        timeZone: "America/New_York",
+        localTime: "09:30",
+        nextDueAt: "2026-11-05T14:30:00.000Z",
+        queueState: "enqueued",
+        budget: 5,
+      },
+    ]);
+    expect(scheduled).toHaveLength(1);
+    expect(searches).toEqual([]);
+    expect(discoveryWorkspaceSchema.safeParse(state).success).toBe(true);
+  });
+  const scheduleInput = (overrides = {}) => ({
+    scheduleId: crypto.randomUUID(),
+    expectedRevision: 0,
+    name: "Daily steel",
+    timeZone: "America/New_York",
+    localTime: "09:30",
+    weekdays: [1, 2, 3, 4, 5, 6, 7],
+    missed: "skip",
+    overlap: "skip",
+    dst: "compatible",
+    search: request(7),
+    confirmRecurring: true,
+    ...overrides,
+  });
+  it("skips an expired Business-local day rather than backfilling yesterday's allowance", async () => {
+    harness.clock.set("2026-11-05T20:00:00Z");
+    const { owner, business } = await setup();
+    await application.saveSchedule(
+      owner,
+      business.id,
+      scheduleInput({ localTime: "23:30" }),
+    );
+    const event = scheduled[0];
+    harness.clock.set("2026-11-06T05:01:00Z");
+    await application.dispatchScheduled(event);
+    expect((await application.workspace(owner, business.id)).runs).toEqual([]);
+    expect(queued).toEqual([]);
+  });
+  it("edits, pauses and reauthorizes a saved schedule, fences old revisions and arbitrates competing edits", async () => {
+    const { owner, business } = await setup();
+    const input = scheduleInput();
+    const first = await application.saveSchedule(owner, business.id, input);
+    const old = scheduled[0];
+    expect(await application.saveSchedule(owner, business.id, input)).toEqual(
+      first,
+    );
+    const edited = await application.saveSchedule(owner, business.id, {
+      ...input,
+      expectedRevision: 1,
+      name: "Afternoon",
+      localTime: "10:00",
+    });
+    const pause = {
+      action: "pause",
+      scheduleId: edited.id,
+      expectedRevision: 2,
+      requestKey: crypto.randomUUID(),
+    };
+    await application.scheduleCommand(owner, business.id, pause);
+    await application.scheduleCommand(owner, business.id, pause);
+    harness.clock.set("2026-11-05T15:00:00Z");
+    await application.dispatchScheduled(old);
+    await application.dispatchScheduled(scheduled[1]);
+    expect(queued).toEqual([]);
+    expect(
+      (await application.workspace(owner, business.id)).schedules[0],
+    ).toMatchObject({
+      status: "paused",
+      revision: 3,
+      queueState: "paused",
+      nextDueAt: null,
+    });
+    const resumed = await application.scheduleCommand(owner, business.id, {
+      ...pause,
+      action: "resume",
+      expectedRevision: 3,
+      requestKey: crypto.randomUUID(),
+      confirmRecurring: true,
+    });
+    expect(resumed.revision).toBe(4);
+    const edits = await Promise.allSettled(
+      ["One", "Two"].map((name) =>
+        application.saveSchedule(owner, business.id, {
+          ...input,
+          name,
+          expectedRevision: 4,
+        }),
+      ),
+    );
+    expect(edits.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(edits.filter((r) => r.status === "rejected")).toMatchObject([
+      { reason: { code: "CONFLICT" } },
+    ]);
+    expect(
+      (await application.workspace(owner, business.id)).schedules[0].revision,
+    ).toBe(5);
+  });
+  it("creates one authorized run from concurrent repeated deliveries and fences a later pause before provider effects", async () => {
+    const { owner, business } = await setup();
+    const saved = await application.saveSchedule(
+      owner,
+      business.id,
+      scheduleInput(),
+    );
+    const event = scheduled[0];
+    harness.clock.set("2026-11-05T14:30:00Z");
+    await Promise.all([
+      application.dispatchScheduled(event),
+      application.dispatchScheduled(event),
+      application.dispatchScheduled(event),
+    ]);
+    expect(queued).toHaveLength(1);
+    expect((await application.workspace(owner, business.id)).runs).toHaveLength(
+      1,
+    );
+    await application.scheduleCommand(owner, business.id, {
+      action: "pause",
+      scheduleId: saved.id,
+      expectedRevision: 1,
+      requestKey: crypto.randomUUID(),
+    });
+    await execute();
+    const state = await application.workspace(owner, business.id);
+    expect(state.runs[0]).toMatchObject({
+      status: "stopped",
+      stopReason: "configuration_changed",
+      used: 0,
+      budget: 7,
+      scheduleId: saved.id,
+      scheduledFor: "2026-11-05T14:30:00.000Z",
+    });
+    expect(searches).toEqual([]);
+    expect(reviews).toEqual([]);
+  });
+  it("runs one occurrence with evidence and advances the local calendar across a DST fold", async () => {
+    harness.clock.set("2026-11-01T04:00:00Z");
+    const { owner, business } = await setup();
+    await application.saveSchedule(
+      owner,
+      business.id,
+      scheduleInput({ localTime: "01:30" }),
+    );
+    expect(scheduled[0].dueAt).toBe("2026-11-01T05:30:00.000Z");
+    harness.clock.set("2026-11-01T05:30:00Z");
+    await application.dispatchScheduled(scheduled[0]);
+    await execute();
+    harness.clock.set("2026-11-01T06:30:00Z");
+    await application.dispatchScheduled(scheduled[0]);
+    const state = await application.workspace(owner, business.id);
+    expect(state.schedules[0].nextDueAt).toBe("2026-11-02T06:30:00.000Z");
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]).toMatchObject({
+      status: "completed",
+      used: 3,
+      counts: { evidenceBacked: 1 },
+    });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+  });
+  it("moves a nonexistent Business-local time forward and respects selected weekdays", async () => {
+    harness.clock.set("2026-03-08T05:00:00Z");
+    const { owner, business } = await setup();
+    await application.saveSchedule(
+      owner,
+      business.id,
+      scheduleInput({ localTime: "02:30", weekdays: [7] }),
+    );
+    expect(scheduled[0].dueAt).toBe("2026-03-08T07:30:00.000Z");
+    harness.clock.set("2026-03-08T07:30:00Z");
+    await application.dispatchScheduled(scheduled[0]);
+    expect(
+      (await application.workspace(owner, business.id)).schedules[0].nextDueAt,
+    ).toBe("2026-03-15T06:30:00.000Z");
+  });
+  it("rechecks reach, approved policy, budget and saved brief before creating a scheduled run", async () => {
+    for (const change of ["reach", "budget", "capability", "brief"]) {
+      harness.clock.set("2026-11-05T09:00:00Z");
+      const { owner, business } = await setup();
+      await application.saveSchedule(owner, business.id, scheduleInput());
+      const event = scheduled.at(-1);
+      if (change === "brief")
+        await harness.application.saveConfiguration(owner, business.id, {
+          ...configuration,
+          exclusions: ["Changed exclusions"],
+        });
+      else
+        await harness.admin.query(
+          "update discovery_configuration set policy = $1 where business_id = $2",
+          [
+            {
+              ...policy,
+              ...(change === "reach"
+                ? { activeMarkets: [] }
+                : change === "budget"
+                  ? { maxRunBudget: 2 }
+                  : { adapterId: "new-adapter" }),
+            },
+            business.id,
+          ],
+        );
+      harness.clock.set("2026-11-05T14:30:00Z");
+      await application.dispatchScheduled(event);
+      const state = await application.workspace(owner, business.id);
+      expect(state.runs).toEqual([]);
+      expect(state.schedules[0]).toMatchObject({
+        status: "paused",
+        failure:
+          change === "reach" ? "setup_required" : "configuration_changed",
+      });
+    }
+    expect(searches).toEqual([]);
+    expect(queued).toEqual([]);
+  });
+  it("expires scheduled MFA without bypassing it and lets a verified session reauthorize the saved schedule", async () => {
+    const { owner, business } = await setup();
+    const input = scheduleInput({ localTime: "23:30" });
+    await application.saveSchedule(owner, business.id, input);
+    const old = scheduled[0];
+    harness.clock.set("2026-11-06T04:30:00Z");
+    expect(await application.dispatchScheduled(old)).toEqual({
+      outcome: "authorization_revoked",
+    });
+    await expect(
+      application.workspace(owner, business.id),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    const primary = await harness.auth.api.getSession({ headers: owner });
+    const verified = await harness.signIn(primary!.user.email);
+    expect(
+      (await application.workspace(verified, business.id)).schedules[0],
+    ).toMatchObject({ status: "paused", failure: "authorization_revoked" });
+    await application.scheduleCommand(verified, business.id, {
+      action: "resume",
+      scheduleId: input.scheduleId,
+      expectedRevision: 1,
+      requestKey: crypto.randomUUID(),
+      confirmRecurring: true,
+    });
+    await application.dispatchScheduled(old);
+    expect(queued).toEqual([]);
+    expect(
+      (await application.workspace(verified, business.id)).schedules[0],
+    ).toMatchObject({ status: "active", revision: 2 });
+  });
+  it("recovers persisted enqueue intent after restart and uncertain acceptance without duplicate research", async () => {
+    const { owner, business } = await setup();
+    queueFailure = true;
+    await application.saveSchedule(owner, business.id, scheduleInput());
+    expect(
+      (await application.workspace(owner, business.id)).schedules[0],
+    ).toMatchObject({ queueState: "pending", failure: "queue_unavailable" });
+    queueFailure = false;
+    const restarted = newApplication();
+    await restarted.recoverDispatches();
+    expect(scheduled).toHaveLength(1);
+    expect(
+      (await restarted.workspace(owner, business.id)).schedules[0],
+    ).toMatchObject({ queueState: "enqueued", failure: null });
+    harness.clock.set("2026-11-05T14:30:00Z");
+    queueFailure = true;
+    await restarted.dispatchScheduled(scheduled[0]);
+    expect(
+      (await restarted.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      status: "queued",
+      stopReason: "queue_unavailable",
+      used: 0,
+    });
+    queueFailure = false;
+    await restarted.recoverDispatches();
+    await Promise.all([
+      restarted.execute(queued[0]),
+      restarted.execute(queued[0]),
+    ]);
+    const state = await restarted.workspace(owner, business.id);
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]).toMatchObject({ status: "completed", used: 3 });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+  });
+  it("re-enters durable successful checkpoints after a terminal-write crash with the original allowance and deadline", async () => {
+    const { owner, business } = await setup();
+    await application.start(owner, business.id, request(7));
+    const durable = { runId: "fixture-durable-run", number: 1 };
+    await harness.admin.query(
+      "revoke execute on function public.finish_discovery(uuid, uuid, uuid, text, timestamptz) from app_runtime",
+    );
+    try {
+      await expect(
+        application.execute(queued[0], { durable }),
+      ).rejects.toThrow();
+    } finally {
+      await harness.admin.query(
+        "grant execute on function public.finish_discovery(uuid, uuid, uuid, text, timestamptz) to app_runtime",
+      );
+    }
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({ status: "running", used: 3 });
+    await newApplication().execute(queued[0], {
+      durable: { ...durable, number: 2 },
+    });
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({ status: "completed", used: 3, attempt: 0 });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+  });
+  it("stops uncertain crash recovery without repeating provider effects or resetting the allowance", async () => {
+    const { owner, business } = await setup();
+    await application.start(owner, business.id, request(7));
+    behavior.search = async () => {
+      throw new DiscoveryProviderFailure("unavailable");
+    };
+    const durable = { runId: "fixture-uncertain-run", number: 1 };
+    await harness.admin.query(
+      "revoke execute on function public.finish_discovery(uuid, uuid, uuid, text, timestamptz) from app_runtime",
+    );
+    try {
+      await expect(
+        application.execute(queued[0], { durable }),
+      ).rejects.toThrow();
+    } finally {
+      await harness.admin.query(
+        "grant execute on function public.finish_discovery(uuid, uuid, uuid, text, timestamptz) to app_runtime",
+      );
+    }
+    behavior = {};
+    await newApplication().execute(queued[0], {
+      durable: { ...durable, number: 2 },
+    });
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      status: "stopped",
+      stopReason: "worker_lost",
+      used: 2,
+      remaining: 5,
+    });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(0);
+  });
+  it("rejects malformed jobs and cross-Business schedule operations without accepting page-supplied policy", async () => {
+    const { owner, business } = await setup();
+    const other = await setup();
+    const input = scheduleInput();
+    await application.saveSchedule(owner, business.id, input);
+    const event = scheduled[0];
+    await expect(
+      application.saveSchedule(other.owner, business.id, input),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      application.scheduleCommand(other.owner, other.business.id, {
+        action: "pause",
+        scheduleId: input.scheduleId,
+        expectedRevision: 1,
+        requestKey: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      application.saveSchedule(owner, business.id, {
+        ...input,
+        timeZone: "Untrusted/Zone",
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(
+      application.saveSchedule(owner, business.id, {
+        ...input,
+        search: { ...input.search, budget: -1 },
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(
+      application.dispatchScheduled({ ...event, budget: 900000 }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(
+      application.dispatchScheduled({ ...event, dueAt: "tomorrow" }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    harness.clock.set("2026-11-05T14:30:00Z");
+    await application.dispatchScheduled({
+      ...event,
+      businessId: other.business.id,
+    });
+    expect(
+      (await application.workspace(owner, business.id)).schedules[0],
+    ).toMatchObject({ status: "active", revision: 1 });
+    expect(queued).toEqual([]);
+    expect(
+      JSON.stringify(await application.workspace(owner, business.id)),
+    ).not.toMatch(/dispatchKey|executionKey|sessionId|sensitive-/);
+  });
+  it("exposes validated scoped schedule commands and truthful queue readiness over HTTP", async () => {
+    const { owner, business } = await setup();
+    const http = createDiscoveryHttp({
+      application,
+      origin: "http://localhost:3000",
+      reportFailure: (d) => harness.diagnostics.push(d),
+    });
+    const post = (
+      input: unknown,
+      origin = "http://localhost:3000",
+      headers = owner,
+    ) =>
+      new Request("http://localhost:3000/api/schedules", {
+        method: "POST",
+        headers: new Headers([
+          ...headers,
+          ["origin", origin],
+          ["content-type", "application/json"],
+        ]),
+        body: JSON.stringify(input),
+      });
+    const input = scheduleInput();
+    expect(
+      (
+        await http.saveSchedule(
+          post(input, "https://untrusted.example"),
+          business.id,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await http.saveSchedule(
+          post({ ...input, businessId: business.id }),
+          business.id,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await http.saveSchedule(
+          post(input, undefined, new Headers()),
+          business.id,
+        )
+      ).status,
+    ).toBe(401);
+    queueFailure = true;
+    expect((await http.saveSchedule(post(input), business.id)).status).toBe(
+      200,
+    );
+    const workspace = await http.get(
+      new Request("http://localhost:3000", { headers: owner }),
+      business.id,
+    );
+    const state = discoveryWorkspaceSchema.parse((await workspace.json()).data);
+    expect(state.schedules[0]).toMatchObject({
+      queueState: "pending",
+      failure: "queue_unavailable",
+    });
+    expect(
+      (
+        await http.scheduleCommand(
+          post({
+            action: "pause",
+            scheduleId: input.scheduleId,
+            expectedRevision: 1,
+            requestKey: crypto.randomUUID(),
+          }),
+          business.id,
+        )
+      ).status,
+    ).toBe(200);
+    expect(JSON.stringify(harness.diagnostics)).not.toContain(
+      "sensitive-queue",
+    );
+  });
+  it("skips overlap without multiplying allowances and keeps the earlier queued run visible", async () => {
+    const { owner, business } = await setup();
+    await application.saveSchedule(owner, business.id, scheduleInput());
+    harness.clock.set("2026-11-05T14:30:00Z");
+    await application.dispatchScheduled(scheduled[0]);
+    const tomorrow = scheduled.at(-1)!;
+    harness.clock.set(tomorrow.dueAt);
+    await harness.reverifyAuthenticator(owner);
+    await application.dispatchScheduled(tomorrow);
+    const state = await application.workspace(owner, business.id);
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]).toMatchObject({
+      status: "queued",
+      budget: 7,
+      used: 0,
+    });
+    expect(state.schedules[0]).toMatchObject({
+      status: "active",
+      failure: "overlap_skipped",
+      nextDueAt: "2026-11-07T14:30:00.000Z",
+    });
+    expect(queued).toHaveLength(1);
+  });
+  it("rechecks access and policy on durable re-entry and keeps the original execution deadline", async () => {
+    const { owner, business } = await setup();
+    await application.start(owner, business.id, request(7));
+    const durable = { runId: "fixture-deadline-run", number: 1 };
+    await harness.admin.query(
+      "revoke execute on function public.finish_discovery(uuid, uuid, uuid, text, timestamptz) from app_runtime",
+    );
+    try {
+      await expect(
+        application.execute(queued[0], { durable }),
+      ).rejects.toThrow();
+    } finally {
+      await harness.admin.query(
+        "grant execute on function public.finish_discovery(uuid, uuid, uuid, text, timestamptz) to app_runtime",
+      );
+    }
+    harness.clock.set("2026-11-05T09:00:11Z");
+    expect(
+      await newApplication().execute(queued[0], {
+        durable: { ...durable, number: 2 },
+      }),
+    ).toEqual({ outcome: "interrupted" });
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({ stopReason: "interrupted", used: 3, remaining: 4 });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+  });
+  it("blocks a revoked schedule authorizer before creating or queueing a run", async () => {
+    const { owner, business } = await setup();
+    const email = `scheduler-${business.id}@example.com`;
+    await harness.team.invite(owner, business.id, { email, role: "admin" });
+    const invitation = harness.invitations.sent.at(-1)!;
+    const admin = await harness.signIn(email);
+    await harness.team.accept(admin, {
+      token: new URLSearchParams(new URL(invitation.url).hash.slice(1)).get(
+        "token",
+      ),
+    });
+    await application.saveSchedule(admin, business.id, scheduleInput());
+    const event = scheduled.at(-1)!;
+    const actor = await harness.authenticate(admin);
+    await harness.team.removeMember(owner, business.id, {
+      userId: actor.userId,
+    });
+    harness.clock.set("2026-11-05T14:30:00Z");
+    await application.dispatchScheduled(event);
+    expect(
+      (await application.workspace(owner, business.id)).schedules[0],
+    ).toMatchObject({ status: "paused", failure: "authorization_revoked" });
+    expect((await application.workspace(owner, business.id)).runs).toEqual([]);
+    expect(queued).toEqual([]);
+  });
+  it("continues a scheduled run's #13 checkpoints after explicit schedule and run reauthorization", async () => {
+    const { owner, business } = await setup();
+    const input = scheduleInput({ search: request(2) });
+    await application.saveSchedule(owner, business.id, input);
+    harness.clock.set("2026-11-05T14:30:00Z");
+    await application.dispatchScheduled(scheduled[0]);
+    await execute();
+    const first = (await application.workspace(owner, business.id)).runs[0];
+    expect(first).toMatchObject({ stopReason: "budget_exhausted", used: 2 });
+    await application.scheduleCommand(owner, business.id, {
+      action: "pause",
+      scheduleId: input.scheduleId,
+      expectedRevision: 1,
+      requestKey: crypto.randomUUID(),
+    });
+    await application.scheduleCommand(owner, business.id, {
+      action: "resume",
+      scheduleId: input.scheduleId,
+      expectedRevision: 2,
+      requestKey: crypto.randomUUID(),
+      confirmRecurring: true,
+    });
+    await application.approveAllowance(owner, business.id, {
+      runId: first.id,
+      expectedBudget: 2,
+      budget: 5,
+      requestKey: crypto.randomUUID(),
+      confirmExtraUsage: true,
+    });
+    await application.resume(owner, business.id, {
+      runId: first.id,
+      expectedAttempt: 0,
+      requestKey: crypto.randomUUID(),
+      confirmResume: true,
+    });
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      status: "completed",
+      budget: 5,
+      used: 3,
+      attempt: 1,
+      counts: { evidenceBacked: 1 },
+    });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
   });
   it("reloads strong matches without contact details with distinct coverage counts", async () => {
     const { owner, business } = await setup();
@@ -2201,24 +2837,13 @@ describe("Bounded discovery at the primary application seam", () => {
       remaining: 5,
     });
     queueFailure = false;
-    await application.start(owner, business.id, input);
+    await newApplication().recoverDispatches();
     expect(queued).toHaveLength(1);
-    const resume = {
-      runId: before.id,
-      expectedAttempt: 0,
-      confirmResume: true,
-      requestKey: crypto.randomUUID(),
-    };
-    await application.resume(owner, business.id, resume);
-    await application.execute(queued[0]);
-    await execute();
+    await Promise.all([application.execute(queued[0]), execute()]);
     const run = (await application.workspace(owner, business.id)).runs[0];
-    expect(run).toMatchObject({ status: "completed", consumed: 3, attempt: 1 });
+    expect(run).toMatchObject({ status: "completed", consumed: 3, attempt: 0 });
     expect(searches).toHaveLength(1);
     expect(reviews).toHaveLength(1);
-    await expect(
-      application.resume(owner, business.id, { ...resume, expectedAttempt: 1 }),
-    ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(JSON.stringify(run)).not.toMatch(
       /executionKey|sessionId|sensitive-queue/,
     );

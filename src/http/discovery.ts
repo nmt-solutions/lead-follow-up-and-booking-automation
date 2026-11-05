@@ -11,7 +11,15 @@ export function createDiscoveryHttp(options: {
   const respond = createResponder(options.reportFailure);
   const body = createJsonBodyReader(options.origin, 16384);
   const command =
-    (action: "approveAllowance" | "resume" | "cancel", status: number) =>
+    (
+      action:
+        | "approveAllowance"
+        | "resume"
+        | "cancel"
+        | "saveSchedule"
+        | "scheduleCommand",
+      status: number,
+    ) =>
     (request: Request, id: string) =>
       respond(async () =>
         dataResponse(
@@ -24,6 +32,8 @@ export function createDiscoveryHttp(options: {
         ),
       );
   return {
+    saveSchedule: command("saveSchedule", 200),
+    scheduleCommand: command("scheduleCommand", 200),
     approveAllowance: command("approveAllowance", 200),
     resume: command("resume", 202),
     cancel: command("cancel", 200),

@@ -1,4 +1,9 @@
 import { z } from "zod";
+import { briefSchema } from "./discovery-brief";
+import {
+  savedScheduleViewSchema,
+  type SavedScheduleView,
+} from "./discovery-timing";
 import { buyerCategorySchema } from "./configuration";
 
 const text = z.string().trim().min(1).max(200);
@@ -335,6 +340,12 @@ export type DiscoveryRun = {
   executionId: string | null;
   executionUserId: string | null;
   attempt: number;
+  scheduleId: string | null;
+  scheduleRevision: number | null;
+  scheduledFor: Date | null;
+  durableRunId: string | null;
+  durableAttempt: number;
+  attemptStartedAt: Date | null;
   completedSearchKeys: string[];
   status: RunStatus;
   stopReason: StopReason | null;
@@ -349,6 +360,10 @@ export type RunView = Omit<
   | "sessionId"
   | "executionUserId"
   | "completedSearchKeys"
+  | "durableRunId"
+  | "durableAttempt"
+  | "attemptStartedAt"
+  | "scheduledFor"
   | "executionId"
   | "requestKey"
   | "policy"
@@ -357,6 +372,8 @@ export type RunView = Omit<
 > & {
   createdAt: string;
   updatedAt: string;
+  queueState: "pending" | "enqueued" | "inactive";
+  scheduledFor: string | null;
   allowanceUnit: string;
   consumed: number;
   reserved: number;
@@ -370,6 +387,7 @@ export type RunView = Omit<
   consolidation: z.infer<typeof consolidationSchema>;
 };
 export type DiscoveryWorkspace = {
+  schedules: SavedScheduleView[];
   canRun: boolean;
   setup: string[];
   policy: DiscoveryPolicy | null;
@@ -408,23 +426,9 @@ const prospectViewSchema = persistedProspectSchema.extend({
   sourceChecks: z.array(sourceCheckSchema),
 });
 
-const briefSchema = z.strictObject({
-  offering: z.string().max(4000),
-  publicOffering: z.string().max(400),
-  requirements: z.strictObject({
-    specifications: z.string().max(4000),
-    minimumOrder: z.string().max(500),
-    deliveryConstraints: z.string().max(2000),
-    serviceConstraints: z.string().max(2000),
-  }),
-  buyers: z.array(buyerCategorySchema).max(30),
-  markets: z.array(text).max(30),
-  exclusions: z.array(z.string().max(300)).max(50),
-  homeMarket: z.string().max(200),
-});
-
 export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
   z.strictObject({
+    schedules: z.array(savedScheduleViewSchema),
     canRun: z.boolean(),
     setup: z.array(z.string()),
     policy: discoveryPolicySchema.nullable(),
@@ -437,6 +441,10 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
       z.strictObject({
         id: z.uuid(),
         businessId: z.uuid(),
+        queueState: z.enum(["pending", "enqueued", "inactive"]),
+        scheduleId: z.uuid().nullable(),
+        scheduleRevision: z.number().int().positive().nullable(),
+        scheduledFor: z.iso.datetime().nullable(),
         brief: briefSchema,
         createdBy: z.string(),
         status: z.enum(["queued", "running", "completed", "stopped"]),

@@ -204,6 +204,22 @@ export async function createHarness() {
       if (updates.length) headers.set("cookie", updates.join("; "));
       return headers;
     },
+    async reverifyAuthenticator(headers: Headers) {
+      const identity = await auth.api.getSession({ headers });
+      const uri = identity && authenticators.get(identity.user.email);
+      if (!uri) throw new Error("Missing fixture authenticator");
+      const response = await auth.api.verifyTOTP({
+        headers,
+        body: { code: authenticatorCode(uri, clock.now()) },
+        asResponse: true,
+      });
+      if (!response.ok) throw new Error("Authenticator reverification failed");
+      const updates = response.headers
+        .getSetCookie()
+        .map((value) => value.split(";")[0]);
+      if (updates.length) headers.set("cookie", updates.join("; "));
+      return headers;
+    },
     async signOut(headers: Headers) {
       await auth.api.signOut({ headers });
     },

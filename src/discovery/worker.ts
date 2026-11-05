@@ -5,7 +5,10 @@ import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { databaseConnectionUrl } from "../db/connection";
 import { ApplicationError } from "../models/application-error";
 import { authenticateQueuedActor } from "../auth/access";
-import { configuredDiscoveryProvider } from "./configuration";
+import {
+  configuredDiscoveryProvider,
+  configuredDiscoveryQueue,
+} from "./configuration";
 
 export async function withDiscoveryWorker<T>(
   operation: (
@@ -40,7 +43,7 @@ export async function withDiscoveryWorker<T>(
         repository: createDiscoveryRepository(database, clock),
         clock,
         provider: configuredDiscoveryProvider(),
-        queue: null,
+        queue: configuredDiscoveryQueue(process.env),
         reportFailure: (diagnostic) =>
           console.error(
             JSON.stringify({ event: "discovery_failed", ...diagnostic }),

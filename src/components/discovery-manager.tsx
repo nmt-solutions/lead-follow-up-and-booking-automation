@@ -18,6 +18,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
+import { DiscoverySchedules } from "./discovery-schedules";
 import { DiscoveryProspectCard } from "./discovery-prospect";
 
 const reasons: Record<StopReason, string> = {
@@ -304,7 +305,10 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
     (p) => p.requestState !== "open",
   );
   return (
-    <article className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
+    <article
+      id={`run-${run.id}`}
+      className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-semibold wrap-anywhere">
           {run.brief.publicOffering}
@@ -313,14 +317,22 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
           {run.stopReason
             ? reasons[run.stopReason]
             : run.status === "queued"
-              ? "Queued"
+              ? run.queueState === "pending"
+                ? "Dispatch pending"
+                : "Queued with worker"
               : "Running"}
         </Badge>
       </div>
       <p className="text-sm text-muted-foreground">
-        Started {new Date(run.createdAt).toLocaleString()} ·{" "}
+        Created {new Date(run.createdAt).toLocaleString()} ·{" "}
         {run.brief.markets.join("; ")}
       </p>
+      {run.scheduledFor && (
+        <p className="text-sm text-muted-foreground">
+          Scheduled occurrence: {new Date(run.scheduledFor).toLocaleString()}.
+          See Saved searches for its Business time zone and timing rules.
+        </p>
+      )}
       <dl className="grid gap-4 sm:grid-cols-3">
         <div>
           <dt className="text-sm text-muted-foreground">
@@ -824,6 +836,11 @@ export function DiscoveryManager({
           {message}
         </p>
       )}
+      <DiscoverySchedules
+        businessId={businessId}
+        state={state}
+        refresh={refresh}
+      />
       <section className="space-y-5" aria-labelledby="retained-prospects">
         <h2 id="retained-prospects" className="text-lg font-semibold">
           Retained prospects ({state.counts.evidenceBacked})

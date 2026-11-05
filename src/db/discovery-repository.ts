@@ -1,3 +1,7 @@
+import {
+  createDiscoveryScheduleRepository,
+  persistDispatch,
+} from "./discovery-schedule-repository";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -5,37 +9,37 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import {
-  business,
-  discoveryConfiguration,
   discoveryRun,
+  discoveryDispatch,
+  discoverySchedule,
   discoveryProspect,
   discoveryResult,
   discoveryUsage,
   discoveryProspectAlias,
   discoveryObservation,
   discoveryCommand,
-  session,
 } from "./schema";
 import { ApplicationError } from "../models/application-error";
 import {
-  discoveryPolicySchema,
   persistedProspectSchema,
   observationOutcomeSchema,
   sourceCheckSchema,
   evidenceUrlSchema,
   searchResultSchema,
-  type DiscoveryRun,
   type DiscoveryWork,
-  type DiscoveryBrief,
   type RunView,
 } from "../models/discovery";
 import {
   availableMarkets,
   type DiscoveryRepository,
 } from "../discovery/repository";
-import type { BusinessProfile, Clock } from "../models/business";
-import type { WorkIdentity } from "../models/discovery";
-import { hasMfa } from "../auth/access";
+import type { Clock } from "../models/business";
+import {
+  requireWorkSession,
+  briefFor,
+  settings,
+  checkCurrent,
+} from "./discovery-state";
 import { coverageCounts } from "../discovery/evidence";
 import {
   consolidateViews,
@@ -105,65 +109,6 @@ async function observationsFor(
   ];
 }
 
-async function requireWorkSession(
-  tx: Transaction,
-  identity: WorkIdentity,
-  at: Date,
-) {
-  const [current] = await tx
-    .select({ token: session.token, expiresAt: session.expiresAt })
-    .from(session)
-    .where(
-      and(
-        eq(session.id, identity.sessionId),
-        eq(session.userId, identity.userId),
-      ),
-    );
-  if (!current || current.expiresAt <= at)
-    throw new ApplicationError("UNAUTHENTICATED");
-  // Run authorizers are Owners/Admins, so queued spend always requires MFA.
-  if (!(await hasMfa(tx, current.token, at)))
-    throw new ApplicationError("MFA_REQUIRED");
-}
-
-function briefFor(
-  profile: BusinessProfile,
-  markets: string[],
-  publicOffering: string,
-): DiscoveryBrief {
-  const configuration = profile.configuration;
-  if (!configuration?.homeMarketConfirmedAt || !configuration.buyersReviewedAt)
-    throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
-  return {
-    offering: profile.offering,
-    publicOffering,
-    requirements: {
-      specifications: configuration.specifications,
-      minimumOrder: configuration.minimumOrder,
-      deliveryConstraints: configuration.deliveryConstraints,
-      serviceConstraints: configuration.serviceConstraints,
-    },
-    buyers: configuration.buyerCategories,
-    markets,
-    exclusions: configuration.exclusions,
-    homeMarket: profile.homeMarket,
-  };
-}
-
-async function settings(tx: Transaction, businessId: string) {
-  const [profile] = await tx
-    .select()
-    .from(business)
-    .where(eq(business.id, businessId));
-  if (!profile) throw new ApplicationError("NOT_FOUND");
-  const [configuration] = await tx
-    .select()
-    .from(discoveryConfiguration)
-    .where(eq(discoveryConfiguration.businessId, businessId));
-  const parsed = discoveryPolicySchema.safeParse(configuration?.policy);
-  return { profile, policy: parsed.success ? parsed.data : null };
-}
-
 async function ownedRun(tx: Transaction, work: DiscoveryWork) {
   await requireCapability(tx, work, work.businessId, "profile.manage");
   const [run] = await tx
@@ -186,27 +131,13 @@ async function ownedRun(tx: Transaction, work: DiscoveryWork) {
   return run;
 }
 
-async function checkCurrent(tx: Transaction, run: DiscoveryRun) {
-  const { profile, policy } = await settings(tx, run.businessId);
-  if (
-    !policy ||
-    !isDeepStrictEqual(policy, run.policy) ||
-    !run.brief.markets.every((market) =>
-      availableMarkets(profile, policy).includes(market),
-    ) ||
-    !isDeepStrictEqual(
-      briefFor(profile, run.brief.markets, run.brief.publicOffering),
-      run.brief,
-    )
-  )
-    throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
-}
-
 export function createDiscoveryRepository(
   database: Database,
   clock: Clock,
 ): DiscoveryRepository {
+  const schedules = createDiscoveryScheduleRepository(database, clock);
   return {
+    ...schedules,
     workspace(actor, businessId) {
       return scoped(database, actor, businessId, async (tx) => {
         const role = await requireCapability(
@@ -223,6 +154,10 @@ export function createDiscoveryRepository(
           .where(eq(discoveryRun.businessId, businessId))
           .orderBy(desc(discoveryRun.createdAt), desc(discoveryRun.id))
           .limit(50);
+        const outgoing = await tx
+          .select()
+          .from(discoveryDispatch)
+          .where(eq(discoveryDispatch.businessId, businessId));
         const runs: RunView[] = [];
         const observations = await observationsFor(tx, businessId);
         const checked = await tx
@@ -279,6 +214,21 @@ export function createDiscoveryRepository(
           runs.push({
             id: row.id,
             businessId,
+            queueState:
+              row.status !== "queued"
+                ? "inactive"
+                : outgoing.some(
+                      (d) =>
+                        d.payload.kind === "discovery" &&
+                        d.payload.work.runId === row.id &&
+                        d.payload.work.executionKey === row.executionId &&
+                        d.state === "enqueued",
+                    )
+                  ? "enqueued"
+                  : "pending",
+            scheduleId: row.scheduleId,
+            scheduleRevision: row.scheduleRevision,
+            scheduledFor: row.scheduledFor?.toISOString() ?? null,
             brief: row.brief,
             createdBy: row.createdBy,
             status: row.status,
@@ -359,6 +309,7 @@ export function createDiscoveryRepository(
           });
         }
         return {
+          schedules: [],
           canRun: role !== "salesperson",
           setup: [
             ...(!policy
@@ -464,6 +415,19 @@ export function createDiscoveryRepository(
               updatedAt: at,
             })
             .returning();
+          await persistDispatch(
+            tx,
+            {
+              kind: "discovery",
+              work: {
+                businessId,
+                runId: id,
+                ...actor,
+                executionKey: executionId,
+              },
+            },
+            at,
+          );
           return {
             run,
             work: {
@@ -582,17 +546,38 @@ export function createDiscoveryRepository(
                 )
               )
                 throw new ApplicationError("CONFLICT");
+              // Explicit run reauthorization binds the remaining checkpoint work
+              // to the CURRENT active schedule revision, never a stale event.
+              let scheduleRevision = run.scheduleRevision;
+              if (run.scheduleId) {
+                const [schedule] = await tx
+                  .select()
+                  .from(discoverySchedule)
+                  .where(
+                    and(
+                      eq(discoverySchedule.id, run.scheduleId),
+                      eq(discoverySchedule.businessId, businessId),
+                    ),
+                  );
+                if (!schedule || schedule.status !== "active")
+                  throw new ApplicationError("CONFLICT");
+                scheduleRevision = schedule.revision;
+              }
               executionId = randomUUID();
               status = "queued";
               await tx
                 .update(discoveryRun)
                 .set({
                   executionId,
+                  scheduleRevision,
                   executionUserId: actor.userId,
                   sessionId: actor.sessionId,
                   status,
                   stopReason: null,
                   attempt: run.attempt + 1,
+                  attemptStartedAt: null,
+                  durableRunId: null,
+                  durableAttempt: 0,
                   updatedAt: at,
                 })
                 .where(eq(discoveryRun.id, run.id));
@@ -621,6 +606,20 @@ export function createDiscoveryRepository(
             stopReason: run.stopReason,
             at,
           });
+          if (input.action === "resume")
+            await persistDispatch(
+              tx,
+              {
+                kind: "discovery",
+                work: {
+                  businessId,
+                  runId: run.id,
+                  ...actor,
+                  executionKey: executionId,
+                },
+              },
+              at,
+            );
           return {
             id: run.id,
             status,
@@ -638,7 +637,7 @@ export function createDiscoveryRepository(
         { lock: true },
       );
     },
-    claim(work, at) {
+    claim(work, at, durable) {
       return scoped(
         database,
         work,
@@ -646,13 +645,52 @@ export function createDiscoveryRepository(
         async (tx) => {
           const run = await ownedRun(tx, work);
           await requireWorkSession(tx, work, clock.now());
-          if (run.status !== "queued") return null;
+          await schedules.checkScheduleForRun(tx, run);
+          if (
+            run.status === "running" &&
+            durable &&
+            run.durableRunId === durable.runId &&
+            durable.number > run.durableAttempt
+          ) {
+            const [uncertain] = await tx
+              .select({ id: discoveryUsage.id })
+              .from(discoveryUsage)
+              .where(
+                and(
+                  eq(discoveryUsage.runId, run.id),
+                  eq(discoveryUsage.businessId, work.businessId),
+                  inArray(discoveryUsage.outcome, [
+                    "reserved",
+                    "failed",
+                    "uncertain",
+                  ]),
+                ),
+              )
+              .limit(1);
+            if (uncertain) {
+              await tx.execute(
+                sql`select public.finish_discovery(${run.id}::uuid, ${work.businessId}::uuid, ${work.executionKey}::uuid, 'worker_lost', ${at.toISOString()}::timestamptz)`,
+              );
+              return null;
+            }
+          } else if (run.status !== "queued") return null;
           await checkCurrent(tx, run);
           await tx
             .update(discoveryRun)
-            .set({ status: "running", updatedAt: at })
+            .set({
+              status: "running",
+              updatedAt: at,
+              stopReason: null,
+              durableRunId: durable?.runId ?? null,
+              durableAttempt: durable?.number ?? 0,
+              attemptStartedAt: run.attemptStartedAt ?? at,
+            })
             .where(eq(discoveryRun.id, run.id));
-          return { ...run, status: "running" };
+          return {
+            ...run,
+            status: "running",
+            attemptStartedAt: run.attemptStartedAt ?? at,
+          };
         },
         { lock: true },
       );
@@ -667,6 +705,7 @@ export function createDiscoveryRepository(
           await requireWorkSession(tx, work, clock.now());
           if (run.status !== "running") return null;
           await checkCurrent(tx, run);
+          await schedules.checkScheduleForRun(tx, run);
           const previous = await tx
             .select()
             .from(discoveryUsage)

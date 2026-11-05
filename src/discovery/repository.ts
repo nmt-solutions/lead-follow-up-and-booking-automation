@@ -13,7 +13,12 @@ import type {
   SearchResult,
 } from "../models/discovery";
 
-export type DiscoveryRepository = {
+import type { createDiscoveryScheduleRepository } from "../db/discovery-schedule-repository";
+import type { DurableAttempt } from "../models/discovery-schedules";
+
+export type DiscoveryRepository = ReturnType<
+  typeof createDiscoveryScheduleRepository
+> & {
   workspace(actor: Actor, businessId: string): Promise<DiscoveryWorkspace>;
   create(
     actor: WorkIdentity,
@@ -31,7 +36,11 @@ export type DiscoveryRepository = {
     status: DiscoveryRun["status"];
     work: DiscoveryWork | null;
   }>;
-  claim(work: DiscoveryWork, at: Date): Promise<DiscoveryRun | null>;
+  claim(
+    work: DiscoveryWork,
+    at: Date,
+    durable?: DurableAttempt,
+  ): Promise<DiscoveryRun | null>;
   reserve(
     work: DiscoveryWork,
     kind: "search" | "review",

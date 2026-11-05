@@ -1,3 +1,10 @@
+import {
+  saveScheduleSchema,
+  scheduleCommandSchema,
+  scheduleWorkSchema,
+  type ScheduleWork,
+  type DurableAttempt,
+} from "../models/discovery-schedules";
 import { Cause, Effect, Exit } from "effect";
 import { businessIdSchema, type Actor, type Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
@@ -37,7 +44,10 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   repository: DiscoveryRepository;
   clock: Clock;
   provider: DiscoveryProvider | null;
-  queue: { enqueue(work: DiscoveryWork): Promise<void> } | null;
+  queue: {
+    enqueue(work: DiscoveryWork): Promise<void>;
+    schedule?(work: ScheduleWork): Promise<void>;
+  } | null;
   reportFailure?(diagnostic: {
     businessId: string;
     runId: string;
@@ -45,6 +55,45 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   }): void;
 }) {
   const { repository, clock } = dependencies;
+  async function publish(actor?: Actor, businessId?: string) {
+    const pending = await repository.pendingDispatches(actor, businessId);
+    let failed = false;
+    for (const item of pending) {
+      let accepted = false;
+      try {
+        await dependencies.authenticateWork(item.payload.work);
+        if (!(await repository.dispatchable(item.payload))) {
+          await repository.dispatchResult(item.id, true);
+          continue;
+        }
+        if (!dependencies.queue) throw new Error("Worker not configured");
+        if (item.payload.kind === "schedule") {
+          if (!dependencies.queue.schedule)
+            throw new Error("Scheduler not configured");
+          await dependencies.queue.schedule(item.payload.work);
+        } else await dependencies.queue.enqueue(item.payload.work);
+        accepted = true;
+      } catch (error: unknown) {
+        if (error instanceof ApplicationError) {
+          const reason =
+            error.code === "DISCOVERY_SCOPE_INVALID" ||
+            error.code === "DISCOVERY_SETUP_REQUIRED"
+              ? "configuration_changed"
+              : "authorization_revoked";
+          if (item.payload.kind === "schedule")
+            await repository.failSchedule(
+              item.payload.work,
+              reason,
+              clock.now(),
+            );
+          else await repository.finish(item.payload.work, reason, clock.now());
+          accepted = true;
+        } else failed = true;
+      }
+      await repository.dispatchResult(item.id, accepted);
+    }
+    return { failed, processed: pending.length };
+  }
   async function command(
     credentials: Credentials,
     id: unknown,
@@ -68,19 +117,17 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
       input,
       clock.now(),
     );
-    if (result.work) {
-      try {
-        await dependencies.queue!.enqueue(result.work);
-      } catch {
-        await repository.finish(result.work, "queue_unavailable", clock.now());
-        throw new ApplicationError("PROVIDER_UNAVAILABLE");
-      }
-    }
+    if (result.work && (await publish(actor, businessId)).failed)
+      throw new ApplicationError("PROVIDER_UNAVAILABLE");
     return { id: result.id, status: result.status };
   }
   async function workspace(credentials: Credentials, id: unknown) {
     const actor = await dependencies.authenticate(credentials);
     const state = await repository.workspace(
+      actor,
+      validate(businessIdSchema, id),
+    );
+    state.schedules = await repository.schedules(
       actor,
       validate(businessIdSchema, id),
     );
@@ -93,9 +140,75 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
       );
     if (!dependencies.queue)
       state.setup.push("Durable discovery worker is not configured.");
+    if (!dependencies.queue?.schedule)
+      state.setup.push(
+        "Saved-search scheduling and dispatch recovery are not configured.",
+      );
     return state;
   }
   return {
+    async saveSchedule(credentials: Credentials, id: unknown, input: unknown) {
+      const actor = await dependencies.authenticateForWork(credentials);
+      const businessId = validate(businessIdSchema, id);
+      const result = await repository.saveSchedule(
+        actor,
+        businessId,
+        validate(saveScheduleSchema, input),
+        clock.now(),
+      );
+      await publish(actor, businessId);
+      return result;
+    },
+    async scheduleCommand(
+      credentials: Credentials,
+      id: unknown,
+      input: unknown,
+    ) {
+      const actor = await dependencies.authenticateForWork(credentials);
+      const businessId = validate(businessIdSchema, id);
+      const result = await repository.scheduleCommand(
+        actor,
+        businessId,
+        validate(scheduleCommandSchema, input),
+        clock.now(),
+      );
+      await publish(actor, businessId);
+      return result;
+    },
+    async dispatchScheduled(payload: unknown) {
+      const work = validate(scheduleWorkSchema, payload);
+      try {
+        await dependencies.authenticateWork(work);
+        if (!dependencies.provider || !dependencies.queue) {
+          await repository.failSchedule(work, "setup_required", clock.now());
+          return { outcome: "setup_required" };
+        }
+        const result = await repository.due(
+          work,
+          clock.now(),
+          dependencies.provider.id,
+        );
+        if (result.outcome === "queued" || result.outcome.endsWith("skipped"))
+          await publish(work, work.businessId);
+        return result;
+      } catch (error: unknown) {
+        if (!(error instanceof ApplicationError))
+          throw new Error("Scheduled discovery dispatch failed");
+        const reason =
+          error.code === "DISCOVERY_SCOPE_INVALID"
+            ? "configuration_changed"
+            : error.code === "DISCOVERY_SETUP_REQUIRED"
+              ? "setup_required"
+              : "authorization_revoked";
+        await repository.failSchedule(work, reason, clock.now());
+        return { outcome: reason };
+      }
+    },
+    recoverDispatches: () => publish(),
+    async stopSchedule(payload: unknown) {
+      const work = validate(scheduleWorkSchema, payload);
+      await repository.failSchedule(work, "worker_lost", clock.now());
+    },
     workspace,
     approveAllowance(credentials: Credentials, id: unknown, input: unknown) {
       return command(credentials, id, {
@@ -135,23 +248,20 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
         if (failure._tag === "Some") throw failure.value;
         throw new Error("Discovery creation failed");
       }
-      const { run, work } = exit.value;
-      if (run.status === "queued") {
-        try {
-          await dependencies.queue.enqueue(work);
-        } catch {
-          await repository.finish(work, "queue_unavailable", clock.now());
-          throw new ApplicationError("PROVIDER_UNAVAILABLE");
-        }
-      }
+      const { run } = exit.value;
+      if (run.status === "queued" && (await publish(actor, businessId)).failed)
+        throw new ApplicationError("PROVIDER_UNAVAILABLE");
       return { id: run.id, status: run.status };
     },
-    async execute(payload: unknown, options: { signal?: AbortSignal } = {}) {
+    async execute(
+      payload: unknown,
+      options: { signal?: AbortSignal; durable?: DurableAttempt } = {},
+    ) {
       const work = validate(workSchema, payload);
       let run;
       try {
         await dependencies.authenticateWork(work);
-        run = await repository.claim(work, clock.now());
+        run = await repository.claim(work, clock.now(), options.durable);
       } catch (error: unknown) {
         const reason: StopReason =
           error instanceof ApplicationError
@@ -170,7 +280,15 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
         return { outcome: "configuration_changed" };
       }
       const deadline = new AbortController();
-      const timer = setTimeout(() => deadline.abort(), run.policy.deadlineMs);
+      const remaining =
+        run.policy.deadlineMs -
+        (clock.now().getTime() -
+          (run.attemptStartedAt ?? clock.now()).getTime());
+      if (remaining <= 0) {
+        await repository.finish(work, "interrupted", clock.now());
+        return { outcome: "interrupted" };
+      }
+      const timer = setTimeout(() => deadline.abort(), remaining);
       const signal = options.signal
         ? AbortSignal.any([options.signal, deadline.signal])
         : deadline.signal;

@@ -22,6 +22,8 @@ import {
   discoveryProspectAlias,
   discoveryObservation,
   discoveryCommand,
+  discoverySchedule,
+  discoveryDispatch,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -91,6 +93,32 @@ export async function prepareDatabaseRole(pool: Pool) {
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
   await prepareFileCleanup(pool);
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION public.pending_discovery_dispatches()
+    RETURNS TABLE(id uuid, payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN RETURN QUERY SELECT d.id, d.payload FROM public.discovery_dispatch d
+      WHERE d.state = 'pending' ORDER BY d.attempts, d.created_at, d.id LIMIT 50; END $$;
+    CREATE OR REPLACE FUNCTION public.finish_discovery_dispatch(dispatch uuid, accepted boolean)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN UPDATE public.discovery_dispatch d SET
+      attempts = d.attempts + 1, state = CASE WHEN accepted THEN 'enqueued' ELSE 'pending' END,
+      failure = CASE WHEN accepted THEN NULL ELSE 'queue_unavailable' END
+      WHERE d.id = dispatch AND d.state = 'pending';
+      UPDATE public.discovery_run r SET stop_reason = CASE WHEN accepted THEN NULL ELSE 'queue_unavailable' END
+        FROM public.discovery_dispatch d WHERE d.id = dispatch AND d.payload->>'kind' = 'discovery'
+        AND r.id = (d.payload->'work'->>'runId')::uuid AND r.business_id = d.business_id
+        AND r.execution_id = (d.payload->'work'->>'executionKey')::uuid AND r.status = 'queued';
+      END $$;
+    CREATE OR REPLACE FUNCTION public.fail_discovery_schedule(schedule uuid, scope uuid, revision integer, capability uuid, reason text, at_time timestamptz, due_time timestamptz)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      IF reason NOT IN ('authorization_revoked', 'configuration_changed', 'setup_required', 'worker_lost') THEN RAISE EXCEPTION 'Invalid schedule failure'; END IF;
+      UPDATE public.discovery_schedule s SET failure = reason, status = 'paused', next_due_at = NULL, updated_at = at_time
+        WHERE s.id = schedule AND s.business_id = scope AND s.revision = fail_discovery_schedule.revision AND s.dispatch_key = capability AND s.next_due_at = due_time;
+    END $$;
+    REVOKE ALL ON FUNCTION public.pending_discovery_dispatches(), public.finish_discovery_dispatch(uuid, boolean), public.fail_discovery_schedule(uuid, uuid, integer, uuid, text, timestamptz, timestamptz) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.pending_discovery_dispatches(), public.finish_discovery_dispatch(uuid, boolean), public.fail_discovery_schedule(uuid, uuid, integer, uuid, text, timestamptz, timestamptz) TO app_runtime;
+  `);
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.finish_discovery(run uuid, scope uuid, execution uuid, reason text, at_time timestamptz)
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
@@ -236,6 +264,8 @@ export async function secureDatabase(pool: Pool) {
       discoveryProspectAlias,
       discoveryObservation,
       discoveryCommand,
+      discoverySchedule,
+      discoveryDispatch,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -296,6 +326,12 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE discovery_command FORCE ROW LEVEL SECURITY;
       GRANT UPDATE (budget, execution_id, execution_user_id, session_id, attempt, completed_search_keys) ON discovery_run TO app_runtime;
       GRANT UPDATE (sources) ON discovery_usage TO app_runtime;
+      REVOKE ALL PRIVILEGES ON discovery_schedule, discovery_dispatch FROM app_runtime;
+      GRANT SELECT, INSERT, UPDATE ON discovery_schedule TO app_runtime;
+      GRANT SELECT, INSERT ON discovery_dispatch TO app_runtime;
+      ALTER TABLE discovery_schedule FORCE ROW LEVEL SECURITY;
+      ALTER TABLE discovery_dispatch FORCE ROW LEVEL SECURITY;
+      GRANT UPDATE (durable_run_id, durable_attempt, attempt_started_at, schedule_revision) ON discovery_run TO app_runtime;
       SET LOCAL ROLE app_runtime;
     `);
     await verifyRuntimeRole(client);
