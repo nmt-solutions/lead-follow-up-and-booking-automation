@@ -1,0 +1,100 @@
+"use client";
+
+import { useState } from "react";
+import { Mail } from "lucide-react";
+import { authClient } from "@/lib/auth-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+export function SignInForm({ linkFailed }: { linkFailed: boolean }) {
+  const [pending, setPending] = useState(false);
+  const [sentTo, setSentTo] = useState("");
+  const [error, setError] = useState(
+    linkFailed
+      ? "This sign-in link is no longer valid. Request a new one below."
+      : "",
+  );
+  return (
+    <form
+      className="space-y-6"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const email = String(
+          new FormData(event.currentTarget).get("email") ?? "",
+        ).trim();
+        setPending(true);
+        setError("");
+        setSentTo("");
+        try {
+          const result = await authClient.signIn.magicLink({
+            email,
+            callbackURL: "/businesses",
+            newUserCallbackURL: "/businesses",
+            errorCallbackURL: "/sign-in",
+          });
+          if (result.error) {
+            setError(
+              result.error.status === 429
+                ? "Please wait a minute before requesting another link."
+                : "We could not send your sign-in link. Please try again.",
+            );
+            return;
+          }
+          setSentTo(email);
+        } catch {
+          setError("Check your connection and try again.");
+        } finally {
+          setPending(false);
+        }
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="email">Your email</Label>
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          maxLength={254}
+          aria-describedby="email-hint"
+          placeholder="you@yourbusiness.com"
+          disabled={pending}
+        />
+        <p
+          id="email-hint"
+          className="text-sm leading-relaxed text-muted-foreground"
+        >
+          We’ll email you a secure link. No password to remember.
+        </p>
+      </div>
+      <p
+        role="alert"
+        className="empty:hidden text-sm leading-relaxed text-destructive"
+      >
+        {error}
+      </p>
+      <div
+        role="status"
+        className="empty:hidden rounded-lg bg-muted text-sm leading-relaxed"
+      >
+        {sentTo && (
+          <p className="p-4">
+            <strong>Check your email.</strong> We sent a sign-in link to{" "}
+            <span className="break-all">{sentTo}</span>. It is valid for 10
+            minutes. Check your spam folder if it does not arrive.
+          </p>
+        )}
+      </div>
+      <Button className="w-full" type="submit" disabled={pending}>
+        <Mail aria-hidden="true" />
+        {pending
+          ? "Sending link…"
+          : sentTo
+            ? "Send another link"
+            : "Send sign-in link"}
+      </Button>
+    </form>
+  );
+}
