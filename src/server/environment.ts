@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { ApplicationError } from "../models/application-error";
+import { databaseConnectionUrl } from "../db/connection";
 
 const environmentSchema = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
@@ -18,5 +19,8 @@ export function readEnvironment() {
     !parsed.data.BETTER_AUTH_URL.startsWith("https://")
   )
     throw new ApplicationError("SETUP_REQUIRED");
-  return parsed.data;
+  return {
+    ...parsed.data,
+    DATABASE_URL: databaseConnectionUrl(parsed.data.DATABASE_URL),
+  };
 }

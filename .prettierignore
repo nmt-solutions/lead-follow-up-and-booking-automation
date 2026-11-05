@@ -4,7 +4,6 @@ node_modules
 .scratch
 coverage
 pnpm-lock.yaml
-drizzle/meta
 output
 .agents
 skills-lock.json

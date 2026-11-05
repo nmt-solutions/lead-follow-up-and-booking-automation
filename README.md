@@ -12,7 +12,7 @@ Created in [T3 Code](https://t3.codes).
 
 The first flow supports email sign-in, private Business creation and profile editing.
 See [local setup and deployment](docs/application-setup.md) for environment variables,
-database roles, migrations, tests and the remaining production activation requirements.
+database roles, schema push, tests and the remaining production activation requirements.
 
 ```sh
 pnpm install --frozen-lockfile

@@ -36,6 +36,8 @@ describe("private Business setup", () => {
       website: "https://steel.example.com",
     });
 
+    // Subsequent schema pushes preserve the owner's saved state and RLS access.
+    await harness.reapplySchema();
     await harness.signOut(owner);
     await expect(
       harness.application.listBusinesses(owner),

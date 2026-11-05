@@ -1,7 +1,18 @@
 import { defineConfig } from "drizzle-kit";
+import { databaseAdminUrl } from "./scripts/database-environment";
 
 export default defineConfig({
   dialect: "postgresql",
   schema: "./src/db/schema.ts",
-  out: "./drizzle",
+  dbCredentials: { url: databaseAdminUrl() },
+  schemaFilter: ["public"],
+  tablesFilter: [
+    "user",
+    "session",
+    "account",
+    "verification",
+    "rate_limit",
+    "business",
+    "membership",
+  ],
 });

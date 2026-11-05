@@ -11,25 +11,41 @@ On another supported platform, approve its `@embedded-postgres/<platform>` insta
 script with `pnpm approve-builds <package> --yes` if pnpm requests it. Only esbuild
 and the Windows PostgreSQL package need install scripts on the current platform.
 
-Copy `.env.example` to `.env.local` and supply the following privately:
+Copy `.env.example` to `.env` (or `.env.local`) and supply the following privately:
 
-| Variable                 | Purpose                                                                  |
-| ------------------------ | ------------------------------------------------------------------------ |
-| `DATABASE_URL`           | Neon pooled connection using `app_runtime`                               |
-| `DATABASE_MIGRATION_URL` | Neon direct connection using the schema owner, for migrations only       |
-| `BETTER_AUTH_URL`        | Exact application origin; localhost for development, HTTPS in production |
-| `BETTER_AUTH_SECRET`     | Independently generated random secret, at least 32 characters            |
-| `RESEND_API_KEY`         | Transactional email API key                                              |
-| `AUTH_EMAIL_FROM`        | Verified sender email address                                            |
+| Variable             | Purpose                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`       | Neon pooled connection using `app_runtime`                                                  |
+| `DATABASE_ADMIN_URL` | Database owner connection, used only by `db-push`; Neon pooled URLs are converted to direct |
+| `BETTER_AUTH_URL`    | Exact application origin; localhost for development, HTTPS in production                    |
+| `BETTER_AUTH_SECRET` | Independently generated random secret, at least 32 characters                               |
+| `RESEND_API_KEY`     | Transactional email API key                                                                 |
+| `AUTH_EMAIL_FROM`    | Verified sender email address                                                               |
 
-Run `pnpm db:migrate` using the direct migration connection. The migration owner
-must be able to create a PostgreSQL role. Migrations create `app_runtime` with
+Run `pnpm db-push`. This prepares the restricted role, runs `drizzle-kit push`, then
+reapplies and verifies policy conditions, grants, forced RLS and the deferred membership constraint.
+Always use this command for schema changes; do not generate or apply migrations.
+Push compares the live database with `src/db/schema.ts`, including its RLS policies.
+It does not use `--force`; review any destructive-change prompt before proceeding.
+The pinned Drizzle push omits policy `USING` / `WITH CHECK` expressions, so the
+security step reapplies them directly from the schema. Protected Business access
+is paused during the push and restored only after that transaction succeeds. If a
+push fails or is cancelled, fix the cause and rerun `pnpm db-push` to restore access.
+
+The schema owner must be able to create a PostgreSQL role. Setup creates `app_runtime` with
 `NOLOGIN`, no schema ownership, no superuser privileges and no RLS bypass. Enable
 login and set its password privately through the database administration interface,
 then use that role's pooled URL as `DATABASE_URL`. Do not grant it membership in
-the migration role, `neon_superuser`, or any bypass role. In a shared PostgreSQL
+the schema owner role, `neon_superuser`, or any bypass role. In a shared PostgreSQL
 cluster, provision a dedicated application database and review the pre-existing
-`app_runtime` role before applying these migrations.
+`app_runtime` role before pushing. Keep `DATABASE_ADMIN_URL` out of the deployed
+application environment; only the schema-management environment needs it.
+
+Both URLs use `sslmode=verify-full` on Neon. The shared connection normalizer also
+converts `prefer`, `require` and `verify-ca` to explicit full certificate and hostname
+verification, avoiding pg's SSL-alias warning and preserving verification after a
+future pg upgrade. It never disables certificate validation. The command loads
+process variables first, then `.env.local`, then `.env`.
 
 Run `pnpm dev`, open `/sign-in`, and request an email link. A successful sign-in
 opens `/businesses`; the first visit presents the creation form. Subsequent visits
@@ -57,9 +73,9 @@ and never contact Resend. No cloud resources are provisioned by these scripts.
 - Business creation inserts owner membership and profile in one transaction. The
   membership foreign key is deferred; its unique owner constraint prevents an
   insertion from joining an existing owned Business. Runtime grants permit neither
-  membership updates/deletes nor profile ID changes. Migration `0001` contains the
-  handwritten RLS policies, grants and deferred constraint; preserve them when
-  generating future schema changes.
+  membership updates/deletes nor profile ID changes. Policies live in `src/db/schema.ts`;
+  `src/db/setup.ts` owns the grants, forced RLS and deferred constraint. Both are
+  applied by `db-push` and by the test harness.
 - Membership supports the Owner role in this slice. Team invitations, other roles,
   ownership transfers and privileged Platform Operator access are later work.
 - Web and worker code share `createBusinessApplication` and the same repository.
@@ -77,14 +93,14 @@ and never contact Resend. No cloud resources are provisioned by these scripts.
 
 The confirmed primary seam from issue #1 is the public application workflow:
 commands, queries, authentication and their HTTP adapter. `tests/business.test.ts`
-uses the real application, Better Auth, Drizzle migrations and native PostgreSQL,
+uses the real application, Better Auth, Drizzle schema push and native PostgreSQL,
 with a restricted runtime login. No internal repository or domain module is mocked.
 The external email adapter records sign-in deliveries, and the controlled clock
 drives profile timestamps and authentication expiry. Worker composition is exercised
 at the same application seam with a trusted actor derived from a real session.
 
 `pnpm test` starts an isolated PostgreSQL 17 cluster on a loopback port, applies the
-same migrations, and stops/removes that temporary cluster afterwards. It needs no
+same schema and security setup, and stops/removes that temporary cluster afterwards. It needs no
 Docker, Neon credentials or external services. Run a focused file with
 `pnpm test tests/business.test.ts`. `pnpm typecheck` generates Next route types before
 checking TypeScript, so it also works before the first build.

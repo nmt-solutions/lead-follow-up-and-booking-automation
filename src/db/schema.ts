@@ -5,6 +5,8 @@ import {
   check,
   index,
   integer,
+  pgPolicy,
+  pgRole,
   pgTable,
   primaryKey,
   text,
@@ -12,6 +14,8 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+export const appRuntime = pgRole("app_runtime").existing();
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -122,6 +126,16 @@ export const business = pgTable(
       "business_offering_length",
       sql`char_length(btrim(${table.offering})) between 1 and 4000`,
     ),
+    pgPolicy("business_access", {
+      for: "all",
+      to: appRuntime,
+      using: sql`${table.id} = nullif(current_setting('app.business_id', true), '')::uuid
+        and exists (select 1 from public.membership m where m.business_id = ${table.id}
+          and m.user_id = nullif(current_setting('app.actor_id', true), '') and m.role = 'owner')`,
+      withCheck: sql`${table.id} = nullif(current_setting('app.business_id', true), '')::uuid
+        and exists (select 1 from public.membership m where m.business_id = ${table.id}
+          and m.user_id = nullif(current_setting('app.actor_id', true), '') and m.role = 'owner')`,
+    }),
   ],
 ).enableRLS();
 
@@ -143,5 +157,17 @@ export const membership = pgTable(
       .where(sql`${table.role} = 'owner'`),
     index("membership_user_idx").on(table.userId),
     check("membership_role", sql`${table.role} = 'owner'`),
+    pgPolicy("membership_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`${table.userId} = nullif(current_setting('app.actor_id', true), '')`,
+    }),
+    pgPolicy("membership_create", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${table.userId} = nullif(current_setting('app.actor_id', true), '')
+        and ${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+        and ${table.role} = 'owner'`,
+    }),
   ],
 ).enableRLS();

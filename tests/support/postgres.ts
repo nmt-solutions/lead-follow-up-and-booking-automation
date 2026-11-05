@@ -1,12 +1,20 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
+import { promisify } from "node:util";
 import EmbeddedPostgres from "embedded-postgres";
 import { Pool } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { prepareDatabaseRole, secureDatabase } from "../../src/db/setup";
+
+const run = promisify(execFile);
+const drizzleCli = join(
+  dirname(createRequire(import.meta.url).resolve("drizzle-kit/api")),
+  "bin.cjs",
+);
 
 async function availablePort() {
   const server = createServer();
@@ -52,15 +60,28 @@ export async function startPostgres() {
     database: "postgres",
     max: 2,
   });
+  async function reapplySchema() {
+    await prepareDatabaseRole(admin);
+    await run(process.execPath, [drizzleCli, "push"], {
+      env: {
+        ...process.env,
+        DATABASE_ADMIN_URL: `postgresql://postgres:${password}@127.0.0.1:${port}/postgres`,
+      },
+      windowsHide: true,
+      timeout: 30000,
+    });
+    await secureDatabase(admin);
+  }
   try {
     await postgres.initialise();
     await postgres.start();
-    await migrate(drizzle(admin), { migrationsFolder: "./drizzle" });
+    await reapplySchema();
     // A random hex password in an isolated, disposable local cluster, never a production credential.
     await admin.query(`ALTER ROLE app_runtime LOGIN PASSWORD '${password}'`);
     return {
       admin,
       runtime,
+      reapplySchema,
       async close() {
         await runtime.end();
         await admin.end();
