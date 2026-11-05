@@ -12,6 +12,7 @@ import {
   businessFile,
   fileAccess,
   fileUsage,
+  knowledgeRevision,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -124,6 +125,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.business_file') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.business_file, public.file_access, public.file_usage FROM app_runtime;
       END IF;
+      IF to_regclass('public.knowledge_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.knowledge_revision FROM app_runtime;
+      END IF;
     END $$;
   `);
 }
@@ -155,6 +159,7 @@ export async function secureDatabase(pool: Pool) {
       businessFile,
       fileAccess,
       fileUsage,
+      knowledgeRevision,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -189,6 +194,9 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE business_file FORCE ROW LEVEL SECURITY;
       ALTER TABLE file_access FORCE ROW LEVEL SECURITY;
       ALTER TABLE file_usage FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON knowledge_revision FROM app_runtime;
+      GRANT SELECT, INSERT ON knowledge_revision TO app_runtime;
+      ALTER TABLE knowledge_revision FORCE ROW LEVEL SECURITY;
       SET LOCAL ROLE app_runtime;
     `);
     await verifyRuntimeRole(client);

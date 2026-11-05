@@ -72,6 +72,12 @@ export default async function BusinessPage({
         </Link>
       )}
       <Link
+        href={`/businesses/${businessId}/knowledge`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Approved answers and qualification
+      </Link>
+      <Link
         href={`/businesses/${businessId}/files`}
         className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
       >

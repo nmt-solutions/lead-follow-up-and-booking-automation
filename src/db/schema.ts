@@ -18,6 +18,7 @@ import {
 import type { BusinessRole, Invitation } from "../models/team";
 import type { SavedConfiguration } from "../models/configuration";
 import type { FileState } from "../models/files";
+import type { KnowledgeConfiguration } from "../models/knowledge";
 
 export const appRuntime = pgRole("app_runtime").existing();
 
@@ -231,6 +232,47 @@ export const membership = pgTable(
 
 const managerScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid
   and public.current_business_role() in ('owner', 'admin')`;
+export const knowledgeRevision = pgTable(
+  "knowledge_revision",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    version: integer("version").notNull(),
+    action: text("action").$type<"draft" | "approved" | "retired">().notNull(),
+    configuration: jsonb("configuration")
+      .$type<KnowledgeConfiguration>()
+      .notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check("knowledge_version_positive", sql`${table.version} > 0`),
+    check(
+      "knowledge_action",
+      sql`${table.action} in ('draft', 'approved', 'retired')`,
+    ),
+    pgPolicy("knowledge_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`,
+    }),
+    pgPolicy("knowledge_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${table.actorId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
 const recipientScope = sql`token_hash = current_setting('app.invitation_hash', true)
   and email = (select lower(u.email) from public."user" u
     where u.id = current_setting('app.actor_id', true) and u.email_verified)`;

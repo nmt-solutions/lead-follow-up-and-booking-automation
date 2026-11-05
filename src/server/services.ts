@@ -18,6 +18,9 @@ import { createFileApplication } from "../application/files";
 import { createFileRepository } from "../db/file-repository";
 import { createFilesHttp } from "../http/files";
 import { filesConfiguration } from "./files-configuration";
+import { createKnowledgeApplication } from "../application/knowledge";
+import { createKnowledgeRepository } from "../db/knowledge-repository";
+import { createKnowledgeHttp } from "../http/knowledge";
 
 export function reportFailure(diagnostic: FailureDiagnostic) {
   console.error(JSON.stringify({ event: "request_failed", ...diagnostic }));
@@ -80,12 +83,23 @@ async function composeServices() {
     clock: { now: () => new Date() },
     ...filesConfiguration(),
   });
+  const knowledge = createKnowledgeApplication({
+    authenticate,
+    repository: createKnowledgeRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+  });
   return {
     auth,
     access,
     application,
     team,
     files,
+    knowledge,
+    knowledgeHttp: createKnowledgeHttp({
+      application: knowledge,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     filesHttp: createFilesHttp({
       application: files,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

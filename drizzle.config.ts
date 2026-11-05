@@ -21,5 +21,6 @@ export default defineConfig({
     "business_file",
     "file_access",
     "file_usage",
+    "knowledge_revision",
   ],
 });
