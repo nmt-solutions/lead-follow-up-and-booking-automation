@@ -46,6 +46,8 @@ import {
   opportunityManualEvent,
   opportunityDueAction,
   inquiryRun,
+  rfqRequest,
+  rfqRevision,
   opportunityScopeForeignKeys,
 } from "./schema";
 
@@ -184,6 +186,16 @@ export async function prepareDatabaseRole(pool: Pool) {
     END $$;
     REVOKE ALL ON FUNCTION public.commercial_approvers() FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.commercial_approvers() TO app_runtime;
+    CREATE OR REPLACE FUNCTION public.rfq_owner_is_current(owner_id text) RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      IF public.current_business_role() IS NULL THEN RETURN false; END IF;
+      RETURN EXISTS (SELECT 1 FROM public.membership m
+        WHERE m.business_id = nullif(current_setting('app.business_id', true), '')::uuid
+          AND m.user_id = owner_id);
+    END $$;
+    REVOKE ALL ON FUNCTION public.rfq_owner_is_current(text) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.rfq_owner_is_current(text) TO app_runtime;
   `);
   // Narrow definer helpers avoid recursive membership RLS. PL/pgSQL resolves
   // tables at execution, so they can be installed before the first schema push.
@@ -275,6 +287,12 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.inquiry_run') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.inquiry_run FROM app_runtime;
         REVOKE ALL PRIVILEGES (result, execution_id) ON public.inquiry_run FROM app_runtime;
+      END IF;
+      IF to_regclass('public.rfq_request') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.rfq_request FROM app_runtime;
+      END IF;
+      IF to_regclass('public.rfq_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.rfq_revision FROM app_runtime;
       END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
@@ -372,6 +390,8 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      rfqRequest,
+      rfqRevision,
       inquiryRun,
       opportunityControlHistory,
       opportunityManualEvent,
@@ -422,6 +442,10 @@ export async function secureDatabase(pool: Pool) {
     }
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON rfq_request, rfq_revision FROM app_runtime;
+      GRANT SELECT, INSERT ON rfq_request, rfq_revision TO app_runtime;
+      ALTER TABLE rfq_request FORCE ROW LEVEL SECURITY;
+      ALTER TABLE rfq_revision FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON inbox_connection, inbox_buyer, inbox_conversation, inbox_opportunity, inbox_message, inbox_event FROM app_runtime;
       GRANT SELECT, INSERT ON inbox_connection, inbox_buyer, inbox_conversation, inbox_opportunity, inbox_message, inbox_event TO app_runtime;
       GRANT UPDATE (active) ON inbox_connection TO app_runtime;

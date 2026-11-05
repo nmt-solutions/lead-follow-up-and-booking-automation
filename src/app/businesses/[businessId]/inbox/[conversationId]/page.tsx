@@ -14,6 +14,7 @@ import type {
 } from "@/models/inbox";
 import { InboxAssociation } from "@/components/inbox-association";
 import { InquiryHandling } from "@/components/inquiry-handling";
+import { RfqManager } from "@/components/rfq-manager";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Incoming conversation" };
@@ -21,39 +22,46 @@ export default async function ConversationPage({
   params,
 }: PageProps<"/businesses/[businessId]/inbox/[conversationId]">) {
   const { businessId, conversationId } = await params;
-  const { conversation, workspace, controls, inquiries } = await (async () => {
-    try {
-      const services = await getServices();
-      const credentials = await headers();
-      const conversation = await services.inbox.conversation(
-        credentials,
-        businessId,
-        conversationId,
-      );
-      const controls = await Promise.all(
-        conversation.opportunities.map((need) =>
-          services.opportunities.read(credentials, businessId, need.id),
-        ),
-      );
-      return {
-        conversation,
-        controls,
-        inquiries: await Promise.all(
-          conversation.opportunities.map(async (need) => ({
-            id: need.id,
-            state: await services.inquiries.read(
-              credentials,
-              businessId,
-              need.id,
-            ),
-          })),
-        ),
-        workspace: await services.inbox.workspace(credentials, businessId),
-      };
-    } catch (error: unknown) {
-      return pageFailure(error);
-    }
-  })();
+  const { conversation, workspace, controls, inquiries, rfqs } =
+    await (async () => {
+      try {
+        const services = await getServices();
+        const credentials = await headers();
+        const conversation = await services.inbox.conversation(
+          credentials,
+          businessId,
+          conversationId,
+        );
+        const controls = await Promise.all(
+          conversation.opportunities.map((need) =>
+            services.opportunities.read(credentials, businessId, need.id),
+          ),
+        );
+        return {
+          conversation,
+          controls,
+          rfqs: await Promise.all(
+            conversation.opportunities.map(async (need) => ({
+              id: need.id,
+              state: await services.rfqs.read(credentials, businessId, need.id),
+            })),
+          ),
+          inquiries: await Promise.all(
+            conversation.opportunities.map(async (need) => ({
+              id: need.id,
+              state: await services.inquiries.read(
+                credentials,
+                businessId,
+                need.id,
+              ),
+            })),
+          ),
+          workspace: await services.inbox.workspace(credentials, businessId),
+        };
+      } catch (error: unknown) {
+        return pageFailure(error);
+      }
+    })();
   return (
     <div className="mx-auto max-w-4xl space-y-8 wrap-anywhere">
       <header>
@@ -173,6 +181,16 @@ export default async function ConversationPage({
                   .map((item) => (
                     <InquiryHandling
                       key={item.id}
+                      businessId={businessId}
+                      opportunityId={need.id}
+                      state={item.state}
+                    />
+                  ))}
+                {rfqs
+                  .filter((item) => item.id === need.id)
+                  .map((item) => (
+                    <RfqManager
+                      key={`${item.id}-${item.state.current?.version ?? 0}-${item.state.contextKey}`}
                       businessId={businessId}
                       opportunityId={need.id}
                       state={item.state}

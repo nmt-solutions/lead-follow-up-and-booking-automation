@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   informationalReplyTemplates,
+  validQualificationValue,
   type KnowledgeConfiguration,
 } from "./knowledge";
 
@@ -115,18 +116,6 @@ export const initialInquiryResult: InquiryResult = {
 // #22 owns structured amounts/limits. Neither a model classification nor an answer citation grants that authority.
 const commercial =
   /(?:\b(?:price|pricing|cost|quote|quotation|discount|order|payment|pay|charge|free|complimentary|guarantee|confirm(?:ed)?|booked|reserved|refund|deposit|rate|fee|rupees?|dollars?|usd|inr|eur|gbp)\b|[$€£₹]|\d\s*%)/i;
-function validQualificationValue(
-  type: KnowledgeConfiguration["qualification"][number]["type"],
-  value: string,
-) {
-  if (type === "email") return z.email().safeParse(value).success;
-  if (type === "number")
-    return (
-      /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) &&
-      Number.isFinite(Number(value))
-    );
-  return true;
-}
 export function inquiryDecision(input: {
   configuration: KnowledgeConfiguration;
   messages: { id: string; text: string }[];

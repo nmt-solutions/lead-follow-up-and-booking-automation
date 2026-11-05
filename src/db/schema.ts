@@ -30,6 +30,7 @@ import type {
 } from "../models/ai";
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { InquirySnapshot, InquiryResult } from "../models/inquiries";
+import type { RfqRecord } from "../models/rfq";
 import type { CommercialPolicy } from "../models/commercial-authority";
 import type {
   ControlSnapshot,
@@ -1472,7 +1473,12 @@ function associationPolicies(name: string, mutable = false) {
     pgPolicy(`${name}_insert`, {
       for: "insert",
       to: appRuntime,
-      withCheck: ["inbox_association_history", "inquiry_run"].includes(name)
+      withCheck: [
+        "inbox_association_history",
+        "inquiry_run",
+        "rfq_request",
+        "rfq_revision",
+      ].includes(name)
         ? sql`(${inboxScope}) and actor_id = current_setting('app.actor_id', true)`
         : inboxScope,
     }),
@@ -1886,7 +1892,71 @@ export const inquiryRun = pgTable(
   ],
 ).enableRLS();
 
+export const rfqRequest = pgTable(
+  "rfq_request",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("rfq_request_need").on(t.businessId, t.opportunityId),
+    uniqueIndex("rfq_request_scope").on(t.id, t.businessId, t.opportunityId),
+    ...associationPolicies("rfq_request"),
+  ],
+).enableRLS();
+
+export const rfqRevision = pgTable(
+  "rfq_revision",
+  {
+    ...inboxColumns(),
+    requestId: uuid("request_id").notNull(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    version: integer("version").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    record: jsonb("record").$type<RfqRecord>().notNull(),
+    note: text("note").notNull(),
+    nextAction: text("next_action").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("rfq_revision_version").on(t.requestId, t.version),
+    uniqueIndex("rfq_revision_command").on(t.businessId, t.requestKey),
+    check("rfq_revision_positive", sql`${t.version} > 0`),
+    ...associationPolicies("rfq_revision"),
+  ],
+).enableRLS();
+
 export const opportunityScopeForeignKeys = [
+  new ForeignKey(
+    rfqRequest,
+    foreignKey({
+      columns: [rfqRequest.opportunityId, rfqRequest.businessId],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    rfqRevision,
+    foreignKey({
+      columns: [
+        rfqRevision.requestId,
+        rfqRevision.businessId,
+        rfqRevision.opportunityId,
+      ],
+      foreignColumns: [
+        rfqRequest.id,
+        rfqRequest.businessId,
+        rfqRequest.opportunityId,
+      ],
+    }),
+  ),
   new ForeignKey(
     inquiryRun,
     foreignKey({

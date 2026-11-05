@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "rfq_request",
+    "rfq_revision",
     "inquiry_run",
     "opportunity_control_history",
     "opportunity_manual_event",

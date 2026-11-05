@@ -95,6 +95,18 @@ export const knowledgeWorkspaceSchema = z.object({
 export type KnowledgeConfiguration = z.infer<
   typeof knowledgeConfigurationSchema
 >;
+export function validQualificationValue(
+  type: KnowledgeConfiguration["qualification"][number]["type"],
+  value: string,
+) {
+  if (type === "email") return z.email().safeParse(value).success;
+  if (type === "number")
+    return (
+      /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) &&
+      Number.isFinite(Number(value))
+    );
+  return true;
+}
 export type KnowledgeRevision = z.infer<typeof knowledgeRevisionSchema>;
 export type KnowledgeWorkspace = z.infer<typeof knowledgeWorkspaceSchema>;
 export type KnowledgeDecision = z.infer<typeof knowledgeDecisionSchema>;
@@ -152,13 +164,7 @@ export function evaluateKnowledge(
     .filter((field) => {
       const value = valueFor(field.key);
       if (!value) return false;
-      if (field.type === "email") return !z.email().safeParse(value).success;
-      if (field.type === "number")
-        return (
-          !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ||
-          !Number.isFinite(Number(value))
-        );
-      return false;
+      return !validQualificationValue(field.type, value);
     })
     .map(({ key }) => key);
   return {

@@ -14,6 +14,8 @@ import { createOpportunityApplication } from "../src/application/opportunity-con
 import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
 import { createInquiryApplication } from "../src/application/inquiries";
 import { createInquiryRepository } from "../src/db/inquiry-repository";
+import { createRfqApplication } from "../src/application/rfq";
+import { createRfqRepository } from "../src/db/rfq-repository";
 import {
   unknownAiMetrics,
   type AiConfiguration,
@@ -285,6 +287,11 @@ describe("Inquiry handling at the persisted application seam", () => {
       first,
       need,
       app,
+      rfqs: createRfqApplication({
+        authenticate: h.authenticate,
+        authenticateForWork: h.access.authenticateForWork,
+        repository: createRfqRepository(database, h.clock),
+      }),
       opportunities,
       effects,
       calls,
@@ -346,6 +353,78 @@ describe("Inquiry handling at the persisted application seam", () => {
     });
     expect(f.calls).toEqual([]);
     expect(f.effects).toEqual([]);
+  });
+  it("captures accumulated sourced qualification into a real RFQ and pauses drafts without sending or granting commercial authority", async () => {
+    const f = await fixture("rfq-capture");
+    await handback(f);
+    await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    const second = await f.capture("email", "Email: buyer@example.net");
+    f.setAnswer({
+      kind: "inquiry",
+      answerIndexes: [],
+      offeringIndexes: [],
+      facts: [],
+      unsupported: false,
+    });
+    const qualified = await f.app.process(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      { messageId: second.id },
+    );
+    expect(qualified.qualification).toBe("qualified");
+    const before = await f.rfqs.read(f.credentials, f.business.id, f.need.id);
+    expect(before.current).toBeNull();
+    expect(before.suggestions).toEqual([
+      {
+        key: "quantity",
+        value: "500",
+        messageId: f.first.id,
+        quote: "Quantity: 500",
+      },
+      {
+        key: "email",
+        value: "buyer@example.net",
+        messageId: second.id,
+        quote: "Email: buyer@example.net",
+      },
+    ]);
+    const saved = await f.rfqs.save(f.credentials, f.business.id, f.need.id, {
+      expectedVersion: 0,
+      expectedKnowledgeVersion: 2,
+      expectedControlVersion: before.controlVersion,
+      expectedContextKey: before.contextKey,
+      requestKey: randomUUID(),
+      offering: "Steel",
+      fields: before.suggestions,
+      note: "Reviewed accumulated buyer requirements",
+      nextAction: "Prepare quotation for separate approval",
+    });
+    expect(saved.current).toMatchObject({
+      version: 1,
+      status: "complete",
+      fields: before.suggestions,
+      missing: [],
+    });
+    expect(await f.rfqs.read(f.credentials, f.business.id, f.need.id)).toEqual(
+      saved,
+    );
+    const control = await f.opportunities.read(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+    );
+    expect(control.state).toBe("human");
+    expect(control.actions.every((a) => a.state === "cancelled")).toBe(true);
+    await expect(
+      f.app.process(f.credentials, f.business.id, f.need.id, {
+        messageId: second.id,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(f.effects).toEqual([]);
+    expect(f.calls).toHaveLength(2);
   });
   it("answers from current approved knowledge, accumulates sourced facts, asks only missing requirements and dispatches once", async () => {
     const f = await fixture("happy");

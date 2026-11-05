@@ -1,4 +1,7 @@
 import "server-only";
+import { createRfqApplication } from "../application/rfq";
+import { createRfqRepository } from "../db/rfq-repository";
+import { createRfqHttp } from "../http/rfq";
 import { createInquiryApplication } from "../application/inquiries";
 import { createInquiryRepository } from "../db/inquiry-repository";
 import { createInquiryHttp } from "../http/inquiries";
@@ -178,8 +181,21 @@ async function composeServices() {
     ai,
     opportunities,
   });
+  const rfqs = createRfqApplication({
+    authenticate,
+    authenticateForWork: access.authenticateForWork,
+    repository: createRfqRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+  });
   return {
     inquiries,
+    rfqs,
+    rfqsHttp: createRfqHttp({
+      application: rfqs,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     inquiriesHttp: createInquiryHttp({
       application: inquiries,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
