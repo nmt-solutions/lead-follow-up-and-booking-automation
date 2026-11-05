@@ -30,7 +30,14 @@ const captureSchema = z.object({
   status: z.enum(["captured", "duplicate", "ignored"]),
   conversationId: z.uuid().nullable(),
 });
-class ImportFailure extends Error {}
+class ImportFailure extends Error {
+  constructor(
+    message: string,
+    readonly recovery: "/security" | "/sign-in" | null = null,
+  ) {
+    super(message);
+  }
+}
 
 export function InboxImport({
   businessId,
@@ -43,6 +50,9 @@ export function InboxImport({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [recovery, setRecovery] = useState<"/security" | "/sign-in" | null>(
+    null,
+  );
   const root = `/api/businesses/${businessId}/inbox/connections`;
   async function command(path: string, method: string, input: unknown) {
     const response = await fetch(path, {
@@ -60,9 +70,16 @@ export function InboxImport({
       throw new ImportFailure(
         code === "MFA_REQUIRED"
           ? "Verify your session in Security, then try again. Your entries are still here."
-          : code === "CONFLICT"
-            ? "These source references conflict with an existing message. Check the original record before retrying."
-            : "The import could not be saved. Check your access, connection, source references and fields, then try again.",
+          : code === "UNAUTHENTICATED"
+            ? "Sign in again in a new tab, then retry. Your entries are still here."
+            : code === "CONFLICT"
+              ? "These source references conflict with an existing message. Check the original record before retrying."
+              : "The import could not be saved. Check your access, connection, source references and fields, then try again.",
+        code === "MFA_REQUIRED"
+          ? "/security"
+          : code === "UNAUTHENTICATED"
+            ? "/sign-in"
+            : null,
       );
     }
     return result.data.data;
@@ -71,10 +88,12 @@ export function InboxImport({
     setPending(true);
     setError("");
     setNotice("");
+    setRecovery(null);
     try {
       await operation();
       router.refresh();
     } catch (failure: unknown) {
+      setRecovery(failure instanceof ImportFailure ? failure.recovery : null);
       setError(
         failure instanceof ImportFailure
           ? failure.message
@@ -86,6 +105,7 @@ export function InboxImport({
   }
   function add(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setRecovery(null);
     const form = new FormData(event.currentTarget);
     const parsed = inboxConnectionSchema.safeParse({
       label: form.get("label"),
@@ -110,6 +130,7 @@ export function InboxImport({
   }
   function capture(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setRecovery(null);
     const form = new FormData(event.currentTarget);
     const parsed = incomingInquirySchema.safeParse({
       eventId: form.get("eventId"),
@@ -176,9 +197,18 @@ export function InboxImport({
         <Alert variant="destructive">
           <AlertDescription>
             {error}{" "}
-            <Link href="/security" className="underline">
-              Security
-            </Link>
+            {recovery && (
+              <Link
+                href={recovery}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center underline"
+              >
+                {recovery === "/security"
+                  ? "Open Security in a new tab"
+                  : "Open sign-in in a new tab"}
+              </Link>
+            )}
           </AlertDescription>
         </Alert>
       )}

@@ -248,17 +248,15 @@ export function createInboxRepository(database: Database): InboxRepository {
             return { status: "duplicate", conversationId: seen.conversationId };
           }
           const recordEvent = async (conversationId: string | null) => {
-            await tx
-              .insert(inboxEvent)
-              .values({
-                id: randomUUID(),
-                businessId,
-                connectionId,
-                eventRef: event.eventId,
-                fingerprint: eventFingerprint,
-                conversationId,
-                receivedAt: at,
-              });
+            await tx.insert(inboxEvent).values({
+              id: randomUUID(),
+              businessId,
+              connectionId,
+              eventRef: event.eventId,
+              fingerprint: eventFingerprint,
+              conversationId,
+              receivedAt: at,
+            });
           };
           if (event.kind === "public_signal" || event.kind === "other_reply") {
             await recordEvent(null);
@@ -294,17 +292,15 @@ export function createInboxRepository(database: Database): InboxRepository {
             );
           const buyerId = existingBuyer?.id ?? randomUUID();
           if (!existingBuyer)
-            await tx
-              .insert(inboxBuyer)
-              .values({
-                id: buyerId,
-                businessId,
-                connectionId,
-                senderRef: event.senderRef,
-                name: event.senderName,
-                geography: event.geography,
-                engagedAt: at,
-              });
+            await tx.insert(inboxBuyer).values({
+              id: buyerId,
+              businessId,
+              connectionId,
+              senderRef: event.senderRef,
+              name: event.senderName,
+              geography: event.geography,
+              engagedAt: at,
+            });
           const [conversation] = await tx
             .select()
             .from(inboxConversation)
@@ -318,49 +314,43 @@ export function createInboxRepository(database: Database): InboxRepository {
             throw new ApplicationError("CONFLICT");
           const conversationId = conversation?.id ?? randomUUID();
           if (!conversation) {
-            await tx
-              .insert(inboxConversation)
-              .values({
-                id: conversationId,
-                businessId,
-                connectionId,
-                buyerId,
-                providerRef: event.conversationRef,
-                subject: event.subject,
-                lastReceivedAt: at,
-              });
-            await tx
-              .insert(inboxOpportunity)
-              .values({
-                id: randomUUID(),
-                businessId,
-                connectionId,
-                conversationId,
-                stage: "inquiry",
-                ownerId: null,
-                handoffReason:
-                  "Human review required; intake grants no action authority",
-                nextAction: "Review incoming inquiry",
-                createdAt: at,
-              });
+            await tx.insert(inboxConversation).values({
+              id: conversationId,
+              businessId,
+              connectionId,
+              buyerId,
+              providerRef: event.conversationRef,
+              subject: event.subject,
+              lastReceivedAt: at,
+            });
+            await tx.insert(inboxOpportunity).values({
+              id: randomUUID(),
+              businessId,
+              connectionId,
+              conversationId,
+              stage: "inquiry",
+              ownerId: null,
+              handoffReason:
+                "Human review required; intake grants no action authority",
+              nextAction: "Review incoming inquiry",
+              createdAt: at,
+            });
           } else {
             await tx
               .update(inboxConversation)
               .set({ lastReceivedAt: at })
               .where(eq(inboxConversation.id, conversationId));
           }
-          await tx
-            .insert(inboxMessage)
-            .values({
-              id: randomUUID(),
-              businessId,
-              connectionId,
-              conversationId,
-              messageRef: event.messageRef,
-              content: event,
-              fingerprint: messageFingerprint,
-              receivedAt: at,
-            });
+          await tx.insert(inboxMessage).values({
+            id: randomUUID(),
+            businessId,
+            connectionId,
+            conversationId,
+            messageRef: event.messageRef,
+            content: event,
+            fingerprint: messageFingerprint,
+            receivedAt: at,
+          });
           await recordEvent(conversationId);
           return { status: "captured", conversationId };
         },
