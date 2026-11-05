@@ -21,6 +21,7 @@ import type {
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { readCommercialPolicy } from "./commercial-authority-repository";
+import { inquiryDispatchContext, lockInquiryProfile } from "./inquiry-context";
 import {
   membership,
   session,
@@ -37,7 +38,7 @@ import {
 
 // Recheck persisted session/factor on this same transaction connection. No nested
 // authentication transaction while holding the dispatch lock (which could exhaust the pool).
-async function requireSalesSession(
+export async function requireSalesSession(
   tx: Transaction,
   identity: WorkIdentity,
   at: Date,
@@ -178,7 +179,7 @@ async function reviewPolicy(
     activeConnections: connections.length,
   };
 }
-async function writeControl(
+export async function writeControl(
   tx: Transaction,
   actor: Actor,
   businessId: string,
@@ -188,15 +189,17 @@ async function writeControl(
   at: Date,
   policy: PolicyReview | null = null,
   sourceRef: string | null = null,
+  ownerId?: string,
 ) {
   const before = snapshot(need);
   const after: ControlSnapshot = {
     state: command === "handback" ? "automation" : "human",
     version: before.version + 1,
     ownerId:
-      command === "update" || command === "handback"
+      ownerId ??
+      (command === "update" || command === "handback"
         ? before.ownerId
-        : actor.userId,
+        : actor.userId),
     reason: input.reason,
     nextAction: input.nextAction,
     policyVersion: policy?.version ?? before.policyVersion,
@@ -592,7 +595,7 @@ export function createOpportunityRepository(
             };
           const ctx = await messageContext(tx, businessId, row.messageId);
           if (!provider.channels.includes(ctx.connection.channel))
-            throw new ApplicationError("SETUP_REQUIRED");
+            throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
           // Durable commitment prevents retries after a timeout/crash following an external effect.
           // Unconfirmed includes a crash before the adapter starts; it is never proof of sending.
           const [committed] = await tx
@@ -627,12 +630,19 @@ export function createOpportunityRepository(
             };
           const need = await needAt(tx, businessId, action.opportunityId);
           const ctx = await messageContext(tx, businessId, action.messageId);
+          if (action.inquiryRunId) await lockInquiryProfile(tx);
+          const inquiry = action.inquiryRunId
+            ? await inquiryDispatchContext(
+                tx,
+                businessId,
+                action.inquiryRunId,
+                need.id,
+              )
+            : null;
           const policy = await readCommercialPolicy(tx, businessId, false);
-          const decision = evaluateCommercialAuthority(
-            policy,
-            action.evaluation,
-            now(),
-          );
+          const decision = action.evaluation
+            ? evaluateCommercialAuthority(policy, action.evaluation, now())
+            : null;
           const reason =
             need.controlState !== "automation" ||
             need.controlVersion !== action.controlVersion ||
@@ -645,9 +655,12 @@ export function createOpportunityRepository(
                   ? "connection_revoked"
                   : policy.version !== action.policyVersion
                     ? "policy_changed"
-                    : decision.status !== "permitted"
-                      ? decision.reason
-                      : null;
+                    : (inquiry?.reason ??
+                      (decision && decision.status !== "permitted"
+                        ? decision.reason
+                        : !decision && !inquiry
+                          ? "missing_authority"
+                          : null));
           if (reason)
             return { action: await cancel(tx, reason), failure: null };
           // Reviewed exception to external-I/O-outside-transactions: the shared lock is held
@@ -662,6 +675,7 @@ export function createOpportunityRepository(
                 connectionId: ctx.connection.id,
                 channel: ctx.connection.channel,
                 evaluation: action.evaluation,
+                ...(inquiry?.reply ? { reply: inquiry.reply } : {}),
               },
               signal,
             ),

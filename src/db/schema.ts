@@ -29,6 +29,7 @@ import type {
   AiMetrics,
 } from "../models/ai";
 import type { KnowledgeConfiguration } from "../models/knowledge";
+import type { InquirySnapshot, InquiryResult } from "../models/inquiries";
 import type { CommercialPolicy } from "../models/commercial-authority";
 import type {
   ControlSnapshot,
@@ -1471,10 +1472,9 @@ function associationPolicies(name: string, mutable = false) {
     pgPolicy(`${name}_insert`, {
       for: "insert",
       to: appRuntime,
-      withCheck:
-        name === "inbox_association_history"
-          ? sql`(${inboxScope}) and actor_id = current_setting('app.actor_id', true)`
-          : inboxScope,
+      withCheck: ["inbox_association_history", "inquiry_run"].includes(name)
+        ? sql`(${inboxScope}) and actor_id = current_setting('app.actor_id', true)`
+        : inboxScope,
     }),
     ...(mutable
       ? [
@@ -1832,9 +1832,10 @@ export const opportunityDueAction = pgTable(
     controlVersion: integer("control_version").notNull(),
     associationVersion: integer("association_version").notNull(),
     policyVersion: integer("policy_version").notNull(),
-    evaluation: jsonb("evaluation")
-      .$type<QueueOpportunityAction["evaluation"]>()
-      .notNull(),
+    inquiryRunId: uuid("inquiry_run_id"),
+    evaluation: jsonb("evaluation").$type<
+      QueueOpportunityAction["evaluation"] | null
+    >(),
     state: text("state").$type<DueAction["state"]>().notNull(),
     reason: text("reason"),
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
@@ -1860,7 +1861,71 @@ export const opportunityDueAction = pgTable(
   ],
 ).enableRLS();
 
+export const inquiryRun = pgTable(
+  "inquiry_run",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    requestKey: text("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    snapshot: jsonb("snapshot").$type<InquirySnapshot>().notNull(),
+    result: jsonb("result").$type<InquiryResult>().notNull(),
+    executionId: uuid("execution_id"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("inquiry_run_scope").on(t.id, t.businessId),
+    uniqueIndex("inquiry_run_request").on(t.businessId, t.requestKey),
+    ...associationPolicies("inquiry_run", true),
+  ],
+).enableRLS();
+
 export const opportunityScopeForeignKeys = [
+  new ForeignKey(
+    inquiryRun,
+    foreignKey({
+      columns: [
+        inquiryRun.messageId,
+        inquiryRun.businessId,
+        inquiryRun.conversationId,
+      ],
+      foreignColumns: [
+        inboxMessage.id,
+        inboxMessage.businessId,
+        inboxMessage.conversationId,
+      ],
+    }),
+  ),
+  new ForeignKey(
+    inquiryRun,
+    foreignKey({
+      columns: [inquiryRun.opportunityId, inquiryRun.businessId],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inquiryRun,
+    foreignKey({
+      columns: [inquiryRun.executionId, inquiryRun.businessId],
+      foreignColumns: [aiExecution.id, aiExecution.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityDueAction,
+    foreignKey({
+      columns: [
+        opportunityDueAction.inquiryRunId,
+        opportunityDueAction.businessId,
+      ],
+      foreignColumns: [inquiryRun.id, inquiryRun.businessId],
+    }),
+  ),
   new ForeignKey(
     opportunityControlHistory,
     foreignKey({

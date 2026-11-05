@@ -13,6 +13,7 @@ import type {
   InboxDiscoverySource,
 } from "@/models/inbox";
 import { InboxAssociation } from "@/components/inbox-association";
+import { InquiryHandling } from "@/components/inquiry-handling";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Incoming conversation" };
@@ -20,7 +21,7 @@ export default async function ConversationPage({
   params,
 }: PageProps<"/businesses/[businessId]/inbox/[conversationId]">) {
   const { businessId, conversationId } = await params;
-  const { conversation, workspace, controls } = await (async () => {
+  const { conversation, workspace, controls, inquiries } = await (async () => {
     try {
       const services = await getServices();
       const credentials = await headers();
@@ -37,6 +38,16 @@ export default async function ConversationPage({
       return {
         conversation,
         controls,
+        inquiries: await Promise.all(
+          conversation.opportunities.map(async (need) => ({
+            id: need.id,
+            state: await services.inquiries.read(
+              credentials,
+              businessId,
+              need.id,
+            ),
+          })),
+        ),
         workspace: await services.inbox.workspace(credentials, businessId),
       };
     } catch (error: unknown) {
@@ -155,6 +166,16 @@ export default async function ConversationPage({
                       key={control.id}
                       businessId={businessId}
                       control={control}
+                    />
+                  ))}
+                {inquiries
+                  .filter((item) => item.id === need.id)
+                  .map((item) => (
+                    <InquiryHandling
+                      key={item.id}
+                      businessId={businessId}
+                      opportunityId={need.id}
+                      state={item.state}
                     />
                   ))}
               </CardContent>

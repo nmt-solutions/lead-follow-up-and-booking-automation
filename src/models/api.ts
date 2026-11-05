@@ -4,6 +4,11 @@ import {
 } from "./application-error";
 
 const failures = {
+  CHANNEL_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "Channel delivery is not configured. The response remains unsent; ask an Admin to review channel setup or reply manually.",
+  },
   AI_SETUP_REQUIRED: {
     status: 503,
     message:

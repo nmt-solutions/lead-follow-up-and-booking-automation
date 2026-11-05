@@ -48,6 +48,20 @@ export async function verifyRuntimeRole(
       AND NOT has_table_privilege(current_user, 'public.opportunity_control_history', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_table_privilege(current_user, 'public.opportunity_manual_event', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'evaluation', 'UPDATE')
+      AND (SELECT count(*) = 1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'inquiry_run')
+      AND (SELECT count(*) = 3 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
+        WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL
+        ELSE false END) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'inquiry_run')
+      AND has_table_privilege(current_user, 'public.inquiry_run', 'SELECT,INSERT')
+      AND NOT has_table_privilege(current_user, 'public.inquiry_run', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.inquiry_run', 'snapshot', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.inquiry_run', 'actor_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.inquiry_run', 'business_id', 'UPDATE')
       AND (SELECT count(*) = 6 AND bool_and(convalidated) FROM pg_constraint
         WHERE conname IN ('inbox_buyer_connection_scope','inbox_conversation_buyer_scope','inbox_opportunity_conversation_scope','inbox_message_conversation_scope','inbox_event_connection_scope','inbox_event_conversation_scope') AND contype = 'f')
       AND (SELECT count(*) = 6 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity

@@ -684,6 +684,11 @@ function ExecutionResult({ execution }: { execution: AiExecutionView }) {
       {execution.output &&
         ("draft" in execution.output ? (
           <p className="whitespace-pre-wrap">{execution.output.draft}</p>
+        ) : "kind" in execution.output ? (
+          <p>
+            Inquiry answer selections and qualification proposals are available
+            in the associated inbox Opportunity.
+          </p>
         ) : (
           <dl className="space-y-3">
             <div>

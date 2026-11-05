@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   knowledgeDraftSchema,
   knowledgeWorkspaceSchema,
+  informationalReplyTemplates,
   type KnowledgeConfiguration,
   type KnowledgeWorkspace,
 } from "@/models/knowledge";
@@ -39,6 +40,52 @@ const empty: KnowledgeConfiguration = {
   escalation: { name: "", email: "" },
 };
 
+function InquiryReplyUse({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: "human_review" | "informational" | undefined;
+  onChange(value: "human_review" | "informational"): void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>Inquiry reply use</Label>
+      <NativeSelect
+        id={id}
+        value={value ?? "human_review"}
+        onChange={(event) => {
+          const parsed = z
+            .enum(["human_review", "informational"])
+            .safeParse(event.target.value);
+          if (parsed.success) onChange(parsed.data);
+        }}
+      >
+        <option value="human_review">Require human review</option>
+        <option value="informational">
+          Allow a supported informational reply
+        </option>
+      </NativeSelect>
+      <p className="text-sm text-muted-foreground">
+        Automatic replies must match a supported phrase verbatim. Other approved
+        wording requires human review. This setting takes effect on approval and
+        grants no commercial authority.
+      </p>
+      <details className="text-sm">
+        <summary className="min-h-11 cursor-pointer py-3">
+          Supported automatic phrases
+        </summary>
+        <ul className="list-inside list-disc space-y-2">
+          {informationalReplyTemplates.map((text) => (
+            <li key={text}>{text}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
 export function KnowledgeSummary({
   configuration,
 }: {
@@ -61,6 +108,15 @@ export function KnowledgeSummary({
                 <dt className="font-medium">{entry.name}</dt>
                 <dd className="whitespace-pre-wrap text-muted-foreground">
                   {entry.details}
+                  <span className="mt-1 block text-sm">
+                    Inquiry replies:{" "}
+                    {entry.inquiryReply === "informational" &&
+                    informationalReplyTemplates.some(
+                      (text) => text === entry.details,
+                    )
+                      ? "Supported informational reply enabled"
+                      : "Human review required"}
+                  </span>
                 </dd>
               </div>
             ))}
@@ -80,6 +136,15 @@ export function KnowledgeSummary({
                 <dt className="font-medium">{entry.question}</dt>
                 <dd className="whitespace-pre-wrap text-muted-foreground">
                   {entry.answer}
+                  <span className="mt-1 block text-sm">
+                    Inquiry replies:{" "}
+                    {entry.inquiryReply === "informational" &&
+                    informationalReplyTemplates.some(
+                      (text) => text === entry.answer,
+                    )
+                      ? "Supported informational reply enabled"
+                      : "Human review required"}
+                  </span>
                 </dd>
               </div>
             ))}
@@ -356,6 +421,18 @@ export function KnowledgeManager({
                   >
                     Remove offering {index + 1} from draft
                   </Button>
+                  <InquiryReplyUse
+                    id={`offering-use-${index}`}
+                    value={entry.inquiryReply}
+                    onChange={(inquiryReply) =>
+                      change({
+                        ...draft,
+                        offerings: draft.offerings.map((item, i) =>
+                          i === index ? { ...item, inquiryReply } : item,
+                        ),
+                      })
+                    }
+                  />
                 </div>
               ))}
               <Button
@@ -425,6 +502,18 @@ export function KnowledgeManager({
                   >
                     Remove answer {index + 1} from draft
                   </Button>
+                  <InquiryReplyUse
+                    id={`answer-use-${index}`}
+                    value={entry.inquiryReply}
+                    onChange={(inquiryReply) =>
+                      change({
+                        ...draft,
+                        answers: draft.answers.map((item, i) =>
+                          i === index ? { ...item, inquiryReply } : item,
+                        ),
+                      })
+                    }
+                  />
                 </div>
               ))}
               <Button

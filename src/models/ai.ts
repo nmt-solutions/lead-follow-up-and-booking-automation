@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { contactCandidateSchema, reviewResultSchema } from "./discovery";
+import { inquiryOutputSchema } from "./inquiries";
 
 export const aiTaskSchema = z.enum(["extraction", "drafting"]);
 export type AiTask = z.infer<typeof aiTaskSchema>;
@@ -81,6 +82,7 @@ export const aiSampleSchema = z.discriminatedUnion("task", [
   }),
   z.strictObject({
     task: z.literal("drafting"),
+    purpose: z.literal("inquiry").optional(),
     label: z.string().trim().min(1).max(120),
     text: z.string().trim().min(1).max(40_000),
   }),
@@ -115,6 +117,7 @@ export const draftingOutputSchema = z.strictObject({
   needsHumanReview: z.literal(true),
 });
 export const aiOutputSchema = z.union([
+  inquiryOutputSchema,
   extractionOutputSchema,
   draftingOutputSchema,
 ]);
@@ -174,6 +177,7 @@ export type AiProvider = {
   generate(input: {
     route: AiRoute;
     task: AiTask;
+    purpose?: "inquiry";
     model: string;
     profile: AiProfile;
     system: string;

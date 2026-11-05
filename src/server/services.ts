@@ -1,4 +1,7 @@
 import "server-only";
+import { createInquiryApplication } from "../application/inquiries";
+import { createInquiryRepository } from "../db/inquiry-repository";
+import { createInquiryHttp } from "../http/inquiries";
 import { createOpportunityApplication } from "../application/opportunity-control";
 import { createOpportunityRepository } from "../db/opportunity-control-repository";
 import { createOpportunityHttp } from "../http/opportunity-control";
@@ -156,16 +159,32 @@ async function composeServices() {
       now: () => new Date(),
     }),
     clock: { now: () => new Date() },
-    // #19 supplies the real control/dispatch boundary. Live response generation and
-    // channel sending belong to later integration work and remain unavailable.
+    // Response generation uses the shared approved AI service. Live channel
+    // transports remain unavailable until separately configured integration work.
     provider: {
       channels: [],
       async dispatch() {
-        throw new ApplicationError("SETUP_REQUIRED");
+        throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
       },
     },
   });
+  const inquiries = createInquiryApplication({
+    authenticate,
+    authenticateForWork: access.authenticateForWork,
+    repository: createInquiryRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    clock: { now: () => new Date() },
+    ai,
+    opportunities,
+  });
   return {
+    inquiries,
+    inquiriesHttp: createInquiryHttp({
+      application: inquiries,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     opportunities,
     opportunitiesHttp: createOpportunityHttp({
       application: opportunities,

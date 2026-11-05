@@ -45,6 +45,7 @@ import {
   opportunityControlHistory,
   opportunityManualEvent,
   opportunityDueAction,
+  inquiryRun,
   opportunityScopeForeignKeys,
 } from "./schema";
 
@@ -271,6 +272,10 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES (state, reason) ON public.opportunity_due_action FROM app_runtime;
         REVOKE ALL PRIVILEGES (owner_id, handoff_reason, next_action, control_state, control_version, policy_version) ON public.inbox_opportunity FROM app_runtime;
       END IF;
+      IF to_regclass('public.inquiry_run') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.inquiry_run FROM app_runtime;
+        REVOKE ALL PRIVILEGES (result, execution_id) ON public.inquiry_run FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -367,6 +372,7 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      inquiryRun,
       opportunityControlHistory,
       opportunityManualEvent,
       opportunityDueAction,
@@ -424,6 +430,10 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON opportunity_control_history, opportunity_manual_event, opportunity_due_action FROM app_runtime;
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
       GRANT UPDATE (state, reason) ON opportunity_due_action TO app_runtime;
+      REVOKE ALL PRIVILEGES ON inquiry_run FROM app_runtime;
+      GRANT SELECT, INSERT ON inquiry_run TO app_runtime;
+      GRANT UPDATE (result, execution_id) ON inquiry_run TO app_runtime;
+      ALTER TABLE inquiry_run FORCE ROW LEVEL SECURITY;
       ALTER TABLE opportunity_control_history FORCE ROW LEVEL SECURITY;
       ALTER TABLE opportunity_manual_event FORCE ROW LEVEL SECURITY;
       ALTER TABLE opportunity_due_action FORCE ROW LEVEL SECURITY;

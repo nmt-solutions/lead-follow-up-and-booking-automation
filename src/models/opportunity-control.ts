@@ -46,7 +46,7 @@ export type PolicyReview = {
 };
 export type ControlHistory = {
   id: string;
-  command: ControlChange["command"] | "manual_reply";
+  command: ControlChange["command"] | "manual_reply" | "inquiry_handoff";
   actorId: string;
   at: string;
   before: ControlSnapshot;
@@ -80,7 +80,14 @@ export type OpportunityDispatch = {
   opportunityId: string;
   connectionId: string;
   channel: "email" | "whatsapp";
-  evaluation: QueueOpportunityAction["evaluation"];
+  evaluation: QueueOpportunityAction["evaluation"] | null;
+  reply?: {
+    text: string;
+    recipientRef: string;
+    conversationRef: string;
+    replyToMessageRef: string;
+    inquiryRunId: string;
+  };
 };
 /** Concrete future-send adapter seam. No live channel transport is activated by #19.
  * A throw after invocation is ambiguous: committed work is never automatically retried.

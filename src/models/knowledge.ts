@@ -10,11 +10,26 @@ const label = z
   .trim()
   .min(1, "Enter a name, question or field label.")
   .max(200);
+// Omitted on legacy revisions: content approval alone never enables an automated reply.
+const inquiryReply = z.enum(["human_review", "informational"]).optional();
+/** Only constrained, non-commercial phrases can enter automatic dispatch. Each
+ * must also be present verbatim and explicitly enabled in current approved knowledge.
+ * Other approved wording stays available to a person in the handoff context.
+ */
+export const informationalReplyTemplates = [
+  "Collection only.",
+  "Delivery is available by arrangement.",
+  "Appointments are available by arrangement.",
+  "Please contact our team for more information.",
+  "Availability needs to be checked with our team.",
+] as const;
 export const knowledgeConfigurationSchema = z
   .strictObject({
-    offerings: z.array(z.strictObject({ name: label, details: text })).max(50),
+    offerings: z
+      .array(z.strictObject({ name: label, details: text, inquiryReply }))
+      .max(50),
     answers: z
-      .array(z.strictObject({ question: label, answer: text }))
+      .array(z.strictObject({ question: label, answer: text, inquiryReply }))
       .max(100),
     missingInformation: z.array(label).max(100),
     goal: z.enum(["booking", "rfq"]),

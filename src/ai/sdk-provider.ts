@@ -12,6 +12,7 @@ import {
   type GatewayProviderOptions,
 } from "@ai-sdk/gateway";
 import { z } from "zod";
+import { inquiryOutputSchema } from "../models/inquiries";
 import {
   AiProviderFailure,
   draftingOutputSchema,
@@ -122,9 +123,11 @@ export function createSdkAiProvider(options: {
           prompt: input.input,
           output: Output.object({
             schema:
-              input.task === "extraction"
-                ? extractionOutputSchema
-                : draftingOutputSchema,
+              input.purpose === "inquiry"
+                ? inquiryOutputSchema
+                : input.task === "extraction"
+                  ? extractionOutputSchema
+                  : draftingOutputSchema,
           }),
           maxOutputTokens: input.profile.limits.maxOutputTokens,
           maxRetries: 0,
