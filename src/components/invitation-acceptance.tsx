@@ -6,6 +6,7 @@ import { z } from "zod";
 import { acceptSchema, assignableRoleSchema } from "@/models/team";
 import { Button } from "./ui/button";
 import { SignInForm } from "./sign-in-form";
+import { Alert, AlertDescription } from "./ui/alert";
 
 const previewSchema = z.object({
   success: z.literal(true),
@@ -20,6 +21,7 @@ const acceptedSchema = z.object({
   success: z.literal(true),
   data: z.object({ businessId: z.uuid() }),
 });
+const mfaFailureSchema = z.object({ code: z.literal("MFA_REQUIRED") });
 function subscribeHash(callback: () => void) {
   window.addEventListener("hashchange", callback);
   return () => window.removeEventListener("hashchange", callback);
@@ -49,6 +51,7 @@ export function InvitationAcceptance({
   const preview = loaded?.token === token ? loaded.data : null;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   useEffect(() => {
     if (!token || !signedIn) return;
     const controller = new AbortController();
@@ -63,15 +66,21 @@ export function InvitationAcceptance({
         const json: unknown = await response.json();
         const parsed = previewSchema.safeParse(json);
         if (!response.ok || !parsed.success) {
-          if (!controller.signal.aborted)
+          if (!controller.signal.aborted) {
+            const needsMfa = mfaFailureSchema.safeParse(json).success;
+            setMfaRequired(needsMfa);
             setError(
-              "This invitation is unavailable. Sign in with the invited email, or ask for a new invitation.",
+              needsMfa
+                ? "Verify your account security, then check this invitation again."
+                : "This invitation is unavailable. Sign in with the invited email, or ask for a new invitation.",
             );
+          }
           return;
         }
         if (!controller.signal.aborted && token) {
           setLoaded({ token, data: parsed.data.data });
           setError("");
+          setMfaRequired(false);
         }
       } catch {
         if (!controller.signal.aborted)
@@ -136,10 +145,24 @@ export function InvitationAcceptance({
       ) : (
         !error && <p role="status">Checking your invitation…</p>
       )}
-      <p role="alert" className="text-sm text-destructive empty:hidden">
-        {error}
-      </p>
       {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {error && mfaRequired && (
+        <div className="flex flex-wrap gap-3">
+          <Button asChild variant="outline">
+            <a href="/security" target="_blank" rel="noopener noreferrer">
+              Verify security in a new tab
+            </a>
+          </Button>
+          <Button variant="outline" onClick={() => window.location.reload()}>
+            Check invitation again
+          </Button>
+        </div>
+      )}
+      {error && !mfaRequired && (
         <p className="text-sm leading-relaxed text-muted-foreground">
           Use “Sign out to switch email” above to sign in with the invited
           address. You can reopen the original invitation email to return here.
@@ -160,8 +183,12 @@ export function InvitationAcceptance({
               const json: unknown = await response.json();
               const parsed = acceptedSchema.safeParse(json);
               if (!response.ok || !parsed.success) {
+                const needsMfa = mfaFailureSchema.safeParse(json).success;
+                setMfaRequired(needsMfa);
                 setError(
-                  "This invitation could not be accepted. It may have expired or been revoked. Check your Businesses before trying again.",
+                  needsMfa
+                    ? "Verify your account security, then check this invitation again."
+                    : "This invitation could not be accepted. It may have expired or been revoked. Check your Businesses before trying again.",
                 );
                 return;
               }

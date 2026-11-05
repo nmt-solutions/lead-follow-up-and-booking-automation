@@ -32,6 +32,7 @@ export type BusinessRepository = {
 
 export function createBusinessApplication<Credentials>(dependencies: {
   authenticate(credentials: Credentials): Promise<Actor>;
+  authenticatePrivileged(credentials: Credentials): Promise<Actor>;
   repository: BusinessRepository;
   clock: Clock;
 }) {
@@ -40,7 +41,7 @@ export function createBusinessApplication<Credentials>(dependencies: {
       credentials: Credentials,
       input: unknown,
     ): Promise<BusinessProfile> {
-      const actor = await dependencies.authenticate(credentials);
+      const actor = await dependencies.authenticatePrivileged(credentials);
       return dependencies.repository.create(
         actor,
         validate(profileSchema, input),

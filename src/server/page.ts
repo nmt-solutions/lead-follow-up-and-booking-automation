@@ -8,6 +8,7 @@ import { reportFailure } from "./services";
 export function pageFailure(error: unknown): never {
   if (error instanceof ApplicationError) {
     if (error.code === "UNAUTHENTICATED") redirect("/sign-in");
+    if (error.code === "MFA_REQUIRED") redirect("/security");
     if (
       error.code === "NOT_FOUND" ||
       error.code === "INVALID_INPUT" ||

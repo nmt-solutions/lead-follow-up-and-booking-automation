@@ -9,6 +9,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
+import { Alert, AlertDescription } from "./ui/alert";
 
 const responseSchema = z.object({
   success: z.literal(true),
@@ -113,6 +114,12 @@ export function ProfileForm({
             setSessionExpired(true);
             setError(
               "Your session has ended. Sign in again in another tab, then save your changes here.",
+            );
+            return;
+          }
+          if (response.status === 403) {
+            setError(
+              "Verify your authenticator in Security, then return here to save. Your changes are still here.",
             );
             return;
           }
@@ -263,12 +270,21 @@ export function ProfileForm({
         </div>
       </fieldset>
       <div className="space-y-4 border-t border-border px-6 py-5 sm:px-8">
-        <p
-          role="alert"
-          className="text-sm leading-relaxed text-destructive empty:hidden"
-        >
-          {error}
-        </p>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {error && (
+          <a
+            href="/security"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4"
+          >
+            Open Security in a new tab
+          </a>
+        )}
         {sessionExpired && (
           <a
             href="/sign-in"

@@ -14,5 +14,9 @@ export default defineConfig({
     "rate_limit",
     "business",
     "membership",
+    "invitation",
+    "team_audit",
+    "platform_operator",
+    "two_factor",
   ],
 });

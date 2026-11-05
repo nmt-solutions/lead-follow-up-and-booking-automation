@@ -109,7 +109,7 @@ export async function secureDatabase(pool: Pool) {
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
       GRANT USAGE ON SCHEMA public TO app_runtime;
-      GRANT SELECT, INSERT, UPDATE, DELETE ON "user", session, account, verification, rate_limit TO app_runtime;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON "user", session, account, verification, rate_limit, two_factor TO app_runtime;
       REVOKE ALL PRIVILEGES ON business, membership, invitation, team_audit, platform_operator FROM app_runtime;
       GRANT SELECT, INSERT ON membership, business, invitation, team_audit TO app_runtime;
       GRANT SELECT ON platform_operator TO app_runtime;

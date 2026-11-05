@@ -55,7 +55,12 @@ export type Invitation = {
   createdAt: Date;
   expiresAt: Date;
 };
-export type TeamMember = { userId: string; email: string; role: BusinessRole };
+export type TeamMember = {
+  userId: string;
+  email: string;
+  role: BusinessRole;
+  mfaEnrolled: boolean;
+};
 export type Team = {
   actorId: string;
   role: BusinessRole;

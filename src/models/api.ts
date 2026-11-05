@@ -9,6 +9,11 @@ const failures = {
     message: "Check the request fields and try again.",
   },
   UNAUTHENTICATED: { status: 401, message: "Sign in to continue." },
+  MFA_REQUIRED: {
+    status: 403,
+    message:
+      "Verify your authenticator or recovery code in Security to continue.",
+  },
   FORBIDDEN: { status: 403, message: "This action is not allowed." },
   NOT_FOUND: { status: 404, message: "Business not found." },
   CONFLICT: {

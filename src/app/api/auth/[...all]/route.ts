@@ -16,7 +16,7 @@ const handle = (request: Request) =>
         code,
         message:
           response.status === 429
-            ? "Please wait a minute before trying again."
+            ? "Too many attempts. Please wait before trying again."
             : "Unable to sign in. Please try again.",
         requestId,
       },

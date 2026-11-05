@@ -6,10 +6,11 @@ import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 
 export function SignInForm({
   linkFailed,
-  callbackURL = "/businesses",
+  callbackURL = "/security",
 }: {
   linkFailed: boolean;
   callbackURL?: string;
@@ -75,24 +76,21 @@ export function SignInForm({
           We’ll email you a secure link. No password to remember.
         </p>
       </div>
-      <p
-        role="alert"
-        className="empty:hidden text-sm leading-relaxed text-destructive"
-      >
-        {error}
-      </p>
-      <div
-        role="status"
-        className="empty:hidden rounded-lg bg-muted text-sm leading-relaxed"
-      >
-        {sentTo && (
-          <p className="p-4">
-            <strong>Check your email.</strong> We sent a sign-in link to{" "}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {sentTo && (
+        <Alert variant="success">
+          <AlertTitle>Check your email</AlertTitle>
+          <AlertDescription>
+            We sent a sign-in link to{" "}
             <span className="break-all">{sentTo}</span>. It is valid for 10
             minutes. Check your spam folder if it does not arrive.
-          </p>
-        )}
-      </div>
+          </AlertDescription>
+        </Alert>
+      )}
       <Button className="w-full" type="submit" disabled={pending}>
         <Mail aria-hidden="true" />
         {pending

@@ -1,6 +1,7 @@
 export type ApplicationErrorCode =
   | "INVALID_INPUT"
   | "UNAUTHENTICATED"
+  | "MFA_REQUIRED"
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"

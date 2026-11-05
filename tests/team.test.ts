@@ -255,6 +255,18 @@ describe("Business team access", () => {
     });
     const expiredToken = tokenFor("links-recipient@example.com");
     h.clock.set("2026-11-06T12:00:00Z");
+    recipient.set(
+      "cookie",
+      (await h.signIn("links-recipient@example.com")).get("cookie")!,
+    );
+    owner.set(
+      "cookie",
+      (await h.signIn("links-owner@example.com")).get("cookie")!,
+    );
+    thief.set(
+      "cookie",
+      (await h.signIn("links-thief@example.com")).get("cookie")!,
+    );
     await expect(
       h.team.accept(recipient, { token: expiredToken }),
     ).rejects.toMatchObject({ code: "INVITATION_UNAVAILABLE" });
@@ -432,6 +444,10 @@ describe("Business team access", () => {
     });
     h.invitations.fail = false;
     h.clock.set("2026-11-06T15:00:00Z");
+    owner.set(
+      "cookie",
+      (await h.signIn("notification-owner@example.com")).get("cookie")!,
+    );
     await expect(
       h.team.deliverInvitation(owner, business.id, { invitationId: failed.id }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
@@ -489,14 +505,17 @@ describe("Business team access", () => {
     const owner = await h.signIn("operator-owner@example.com");
     const operator = await h.signIn("operator@example.com");
     const business = await h.application.createBusiness(owner, profile);
-    const verifiedPlatform = h.platformFor(true);
+    const verifiedPlatform = h.team;
     await expect(
       verifiedPlatform.requirePlatformCapability(owner, "tax.manage"),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await h.provisionOperator(operator, { tax: true, reconciliation: false });
     await expect(
-      h.platformFor(false).requirePlatformCapability(operator, "tax.manage"),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      h.team.requirePlatformCapability(
+        await h.signIn("operator@example.com", false),
+        "tax.manage",
+      ),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
     expect(
       await verifiedPlatform.requirePlatformCapability(operator, "tax.manage"),
     ).toEqual({ capability: "tax.manage" });
@@ -599,6 +618,14 @@ describe("Business team access", () => {
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     h.clock.set("2026-11-06T20:00:00Z");
+    admin.set(
+      "cookie",
+      (await h.signIn("admin-expiry-admin@example.com")).get("cookie")!,
+    );
+    owner.set(
+      "cookie",
+      (await h.signIn("admin-expiry-owner@example.com")).get("cookie")!,
+    );
     expect(
       (await h.team.getTeam(admin, business.id)).invitations,
     ).toContainEqual(

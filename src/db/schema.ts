@@ -24,6 +24,7 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -46,12 +47,30 @@ export const session = pgTable(
       .defaultNow(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
+    mfaVerifiedAt: timestamp("mfa_verified_at", { withTimezone: true }),
+    mfaFactorId: text("mfa_factor_id"),
+    mfaFactorVersion: text("mfa_factor_version"),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
   },
   (table) => [index("session_user_idx").on(table.userId)],
 );
+
+export const twoFactor = pgTable("two_factor", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  secret: text("secret").notNull(),
+  backupCodes: text("backup_codes").notNull(),
+  verified: boolean("verified").notNull().default(false),
+  failedVerificationCount: integer("failed_verification_count")
+    .notNull()
+    .default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+});
 
 export const account = pgTable(
   "account",

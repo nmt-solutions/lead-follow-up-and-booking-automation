@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Business profile", template: "%s · Business profile" },
-  description: "Keep your Business profile private and ready to return to.",
+  title: {
+    default: "Business operations",
+    template: "%s · Business operations",
+  },
+  description: "Manage your Business profile, team and secure access.",
   robots: { index: false, follow: false },
 };
 

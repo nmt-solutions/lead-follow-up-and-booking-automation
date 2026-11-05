@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Create a Business" };
 export default async function NewBusinessPage() {
   try {
-    await (await getServices()).application.listBusinesses(await headers());
+    await (await getServices()).access.authenticatePrivileged(await headers());
   } catch (error: unknown) {
     pageFailure(error);
   }

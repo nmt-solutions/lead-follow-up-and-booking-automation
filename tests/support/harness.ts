@@ -13,6 +13,8 @@ import { createTeamRepository } from "../../src/db/team-repository";
 import { invitationTokens } from "../../src/auth/invitation-tokens";
 import type { InvitationMail } from "../../src/models/team";
 import { createTeamHttp } from "../../src/http/team";
+import { createSessionAccess } from "../../src/auth/access";
+import { authenticatorCode } from "./totp";
 
 export async function createHarness() {
   const postgres = await startPostgres();
@@ -36,20 +38,20 @@ export async function createHarness() {
     },
   };
   const baseURL = "http://localhost:3000";
+  const authenticators = new Map<string, string>();
+  let signInRequests = 0;
   const auth = createAuth({
     database,
     baseURL,
     secret: "test-only-secret-for-isolated-business-database",
     mailer: mail,
   });
-  const authenticate = async (headers: Headers) => {
-    const session = await auth.api.getSession({ headers });
-    if (!session) throw new ApplicationError("UNAUTHENTICATED");
-    return { userId: session.user.id };
-  };
+  const access = createSessionAccess({ auth, database, clock });
+  const { authenticate, authenticatePrivileged } = access;
   const repository = createBusinessRepository(database);
   const application = createBusinessApplication({
     authenticate,
+    authenticatePrivileged,
     repository,
     clock,
   });
@@ -83,9 +85,7 @@ export async function createHarness() {
   const team = createTeamApplication({
     ...teamDependencies,
     authenticate,
-    authenticatePlatform: async (): Promise<Actor> => {
-      throw new ApplicationError("FORBIDDEN");
-    },
+    authenticatePlatform: access.authenticatePlatform,
   });
   const http = createBusinessHttp({
     application,
@@ -96,6 +96,7 @@ export async function createHarness() {
     ...postgres,
     application,
     auth,
+    access,
     mail,
     clock,
     authenticate,
@@ -119,16 +120,6 @@ export async function createHarness() {
         [actor.userId, grants.tax, grants.reconciliation],
       );
     },
-    platformFor(mfaVerified: boolean) {
-      return createTeamApplication({
-        ...teamDependencies,
-        authenticate,
-        authenticatePlatform: async (headers: Headers) => {
-          if (!mfaVerified) throw new ApplicationError("FORBIDDEN");
-          return authenticate(headers);
-        },
-      });
-    },
     teamWorkerFor(actor: Actor) {
       return createTeamApplication<void>({
         ...teamDependencies,
@@ -142,6 +133,7 @@ export async function createHarness() {
     workerFor(actor: Actor) {
       return createBusinessApplication<void>({
         authenticate: async () => actor,
+        authenticatePrivileged: async () => actor,
         repository,
         clock,
       });
@@ -153,11 +145,15 @@ export async function createHarness() {
         vi.useRealTimers();
       }
     },
-    async signIn(email: string) {
+    async signIn(email: string, mfa = true) {
       const response = await auth.handler(
         new Request(`${baseURL}/api/auth/sign-in/magic-link`, {
           method: "POST",
-          headers: { "content-type": "application/json", origin: baseURL },
+          headers: {
+            "content-type": "application/json",
+            origin: baseURL,
+            "x-forwarded-for": `198.51.100.${++signInRequests}`,
+          },
           body: JSON.stringify({
             email,
             callbackURL: "/businesses",
@@ -169,13 +165,44 @@ export async function createHarness() {
       const message = mail.sent.at(-1);
       if (!message || message.email !== email)
         throw new Error("Sign-in email missing");
-      const verified = await auth.handler(new Request(message.url));
+      const verified = await auth.handler(
+        new Request(message.url, {
+          headers: { "x-forwarded-for": `198.51.100.${signInRequests}` },
+        }),
+      );
       const cookie = verified.headers
         .getSetCookie()
         .map((value) => value.split(";")[0])
         .join("; ");
       if (!cookie) throw new Error(`Verification failed (${verified.status})`);
-      return new Headers({ cookie });
+      const headers = new Headers({ cookie });
+      if (!mfa) return headers;
+      // Existing scenario fixtures use real authenticator enrollment/challenge,
+      // never injected MFA booleans. New security scenarios opt into primary-only.
+      const identity = await auth.api.getSession({ headers });
+      let uri = authenticators.get(email);
+      if (!identity?.user.twoFactorEnabled) {
+        const enrollment = await auth.api.enableTwoFactor({
+          headers,
+          body: {},
+        });
+        if (enrollment.method !== "totp") throw new Error("Missing TOTP setup");
+        uri = enrollment.totpURI;
+        authenticators.set(email, uri);
+      }
+      if (!uri) throw new Error("Missing fixture authenticator");
+      const verifiedMfa = await auth.api.verifyTOTP({
+        headers,
+        body: { code: authenticatorCode(uri, clock.now()) },
+        asResponse: true,
+      });
+      if (!verifiedMfa.ok)
+        throw new Error(`MFA fixture failed (${verifiedMfa.status})`);
+      const updates = verifiedMfa.headers
+        .getSetCookie()
+        .map((value) => value.split(";")[0]);
+      if (updates.length) headers.set("cookie", updates.join("; "));
+      return headers;
     },
     async signOut(headers: Headers) {
       await auth.api.signOut({ headers });

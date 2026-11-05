@@ -7,7 +7,7 @@ import { createBusinessRepository } from "../db/business-repository";
 import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { createBusinessHttp } from "../http/business";
 import type { FailureDiagnostic } from "../http/respond";
-import { ApplicationError } from "../models/application-error";
+import { createSessionAccess } from "../auth/access";
 import { readEnvironment } from "./environment";
 import { createTeamApplication } from "../application/team";
 import { createTeamRepository } from "../db/team-repository";
@@ -46,24 +46,21 @@ async function composeServices() {
       from: environment.AUTH_EMAIL_FROM,
     }),
   });
-  const authenticate = async (headers: Headers) => {
-    const session = await auth.api.getSession({ headers });
-    if (!session) throw new ApplicationError("UNAUTHENTICATED");
-    return { userId: session.user.id };
-  };
+  const access = createSessionAccess({
+    auth,
+    database: runtimeDatabase(pool),
+    clock: { now: () => new Date() },
+  });
+  const { authenticate, authenticatePrivileged, authenticatePlatform } = access;
   const application = createBusinessApplication({
     authenticate,
+    authenticatePrivileged,
     repository: createBusinessRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
   });
   const team = createTeamApplication({
     authenticate,
-    // ADR 0002 requires MFA before privileged production access. No Business
-    // role or magic-link session can stand in for that separate adapter.
-    authenticatePlatform: async (headers: Headers) => {
-      await authenticate(headers);
-      throw new ApplicationError("SETUP_REQUIRED");
-    },
+    authenticatePlatform,
     repository: createTeamRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
     tokens: invitationTokens(environment.BETTER_AUTH_SECRET),
@@ -75,6 +72,7 @@ async function composeServices() {
   });
   return {
     auth,
+    access,
     application,
     team,
     teamHttp: createTeamHttp({

@@ -2,6 +2,8 @@
 
 ## Required stack
 
+Theme and component conventions: read [the UI theme](../ui-theme.md) before frontend changes. Extend its centralized semantic tokens and shared primitives for new flows.
+
 Use Next.js/React with **Tailwind CSS and shadcn/ui** for all website UI, including marketing pages and the application. Use Tailwind utilities, variants and shared theme tokens for styling, and compose/customize shadcn/ui components for controls and interaction primitives. Keep Tailwind's stylesheet entry point and shared token definitions centralized; use this styling system consistently rather than adding CSS Modules, CSS-in-JS, another CSS framework or another component kit.
 
 Use semantic HTML and Tailwind for layout/content that does not need a shadcn component. Maintain shadcn's keyboard, focus, labeling and interaction behavior when customizing its components. Exact package versions and scaffold configuration are pinned when the application is created. [Tailwind with Next.js](https://tailwindcss.com/docs/installation/framework-guides/nextjs), [shadcn/ui with Next.js](https://ui.shadcn.com/docs/installation/next).

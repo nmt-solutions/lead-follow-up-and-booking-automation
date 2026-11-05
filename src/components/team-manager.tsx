@@ -9,6 +9,8 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { NativeSelect } from "./ui/native-select";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Badge } from "./ui/badge";
 
 const resultSchema = z.object({ success: z.literal(true) });
 const roleNames = {
@@ -46,6 +48,9 @@ export function TeamManager({
   const [removing, setRemoving] = useState<string | null>(null);
   const focusAfterCommand = useRef<HTMLElement | null>(null);
   const base = `/api/businesses/${businessId}/team`;
+  const mfaReady = team.members.every(
+    (member) => member.role === "salesperson" || member.mfaEnrolled,
+  );
   useEffect(() => {
     if (removing)
       document.getElementById(`confirm-remove-${removing}`)?.focus();
@@ -109,6 +114,16 @@ export function TeamManager({
 
   return (
     <div className="space-y-8" aria-busy={pending}>
+      <Alert variant={mfaReady ? "success" : "warning"}>
+        <AlertTitle>
+          {mfaReady ? "Required MFA is enrolled" : "MFA setup is incomplete"}
+        </AlertTitle>
+        <AlertDescription>
+          Every Owner and Admin must enroll an authenticator before protected
+          access. Session verification is checked separately. Other production
+          prerequisites may still be incomplete.
+        </AlertDescription>
+      </Alert>
       <section
         className="rounded-2xl border border-border bg-card p-5 sm:p-8"
         aria-labelledby="invite-title"
@@ -201,9 +216,11 @@ export function TeamManager({
         </form>
       </section>
       <div className="space-y-3">
-        <p role="alert" className="text-sm text-destructive empty:hidden">
-          {error}
-        </p>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         {error && (
           <div className="flex flex-wrap gap-4">
             <Button
@@ -220,6 +237,14 @@ export function TeamManager({
               rel="noopener noreferrer"
             >
               Sign in in a new tab
+            </a>
+            <a
+              href="/security"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center text-sm text-primary underline"
+            >
+              Verify account security in a new tab
             </a>
           </div>
         )}
@@ -251,6 +276,13 @@ export function TeamManager({
                     <p className="mt-1 text-sm text-muted-foreground">
                       {roleNames[member.role]}
                     </p>
+                    <Badge className="mt-2">
+                      {member.mfaEnrolled
+                        ? "MFA enrolled"
+                        : member.role === "salesperson"
+                          ? "MFA optional"
+                          : "MFA required · setup missing"}
+                    </Badge>
                   </div>
                   {editable && (
                     <Button

@@ -1,7 +1,7 @@
 # Business profile and team application
 
 Implements [issue #3](https://github.com/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/3)
-and team access from [issue #4](https://github.com/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/4).
+and team access from [issue #4](https://github.com/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/4), plus privileged MFA from [issue #5](https://github.com/Tauqeer-Ahmed-99/lead-follow-up-and-booking-automation/issues/5).
 
 ## Local setup
 
@@ -50,7 +50,7 @@ future pg upgrade. It never disables certificate validation. The command loads
 process variables first, then `.env.local`, then `.env`.
 
 Run `pnpm dev`, open `/sign-in`, and request an email link. A successful sign-in
-opens `/businesses`; the first visit presents the creation form. Subsequent visits
+opens `/security` to enroll or verify an authenticator. Business creation requires MFA. Subsequent visits to `/businesses`
 list only the member's Businesses. Open one to edit its name, offering, Home market
 and website. Salespeople receive a read-only profile. Optional fields may be empty.
 No industry or geography is preselected.
@@ -127,9 +127,9 @@ and never contact Resend. No cloud resources are provisioned by these scripts.
   write privileges for these grants, and Business invitations/roles cannot confer
   them. Authorization separately requires an MFA-verified identity adapter and
   the current persisted tax/reconciliation capability. A platform grant never
-  grants ordinary Business access. Live platform access returns `SETUP_REQUIRED`
-  until a real privileged MFA adapter is configured, per ADR 0002; the tests use
-  explicit trusted MFA fixtures. No global financial operations are activated here.
+  grants ordinary Business access. Live platform access checks a real persisted MFA
+  proof and current grants. See [the access policy](mfa-access-policy.md) for freshness,
+  recovery and readiness. No global financial operations are activated here.
 - Web and worker code share `createBusinessApplication` and the same repository.
   A future Trigger task must obtain its actor from verified, persisted job ownership,
   validate its payload, and invoke these commands with current membership. A job's
@@ -180,7 +180,7 @@ at the same application seam with a trusted actor derived from a real session.
 role permissions, protected Owner/Admin boundaries, cross-Business isolation,
 revocation with stale web/worker identities, immutable audit access, expired links,
 concurrent invitation/acceptance, deterministic provider idempotency with ambiguous
-acceptance, platform/MFA fixtures, and upgrade from the owner-only role check.
+acceptance, persisted platform grants with real MFA, and upgrade from the owner-only role check.
 It also exercises a schema owner without superuser/BYPASSRLS privileges. Tests
 assert application-visible state and captured external deliveries; raw owner SQL
 is used only for infrastructure and operator-grant fixtures.
@@ -200,8 +200,7 @@ rewriting unrelated planning documents.
 This implements the first private profile flow, not the whole parent product.
 Live Neon and Resend credentials are deployment inputs. Production hosting must
 preserve Better Auth's trusted origin, secure cookies, shared database rate limiting
-and trusted proxy/IP headers. Privileged production access still requires the MFA
-work selected in ADR 0002 before that access is introduced. Discovery, outreach,
+and trusted proxy/IP headers. Privileged production access follows [the MFA policy](mfa-access-policy.md). Discovery, outreach,
 commercial actions, paid plans and scheduled work are not enabled by saving a profile.
 
 Integration references: [Better Auth magic links](https://better-auth.com/docs/plugins/magic-link),

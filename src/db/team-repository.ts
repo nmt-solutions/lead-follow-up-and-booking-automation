@@ -221,6 +221,7 @@ export function createTeamRepository(database: Database): TeamRepository {
             userId: membership.userId,
             email: user.email,
             role: membership.role,
+            mfaEnrolled: user.twoFactorEnabled,
           })
           .from(membership)
           .innerJoin(user, eq(user.id, membership.userId))
