@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
 import type { AuditEntry, Team } from "@/models/team";
@@ -44,11 +44,18 @@ export function TeamManager({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
+  const focusAfterCommand = useRef<HTMLElement | null>(null);
   const base = `/api/businesses/${businessId}/team`;
   useEffect(() => {
     if (removing)
       document.getElementById(`confirm-remove-${removing}`)?.focus();
   }, [removing]);
+  useEffect(() => {
+    if (!pending && focusAfterCommand.current?.isConnected) {
+      focusAfterCommand.current.focus();
+      focusAfterCommand.current = null;
+    }
+  }, [pending]);
 
   async function command(
     path: string,
@@ -56,6 +63,10 @@ export function TeamManager({
     input: unknown,
     success: string,
   ) {
+    focusAfterCommand.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     setPending(true);
     setError("");
     setMessage("");
@@ -83,7 +94,7 @@ export function TeamManager({
       setMessage(success);
       setRemoving(null);
       if (method === "DELETE" && path === base)
-        document.getElementById("members-title")?.focus();
+        focusAfterCommand.current = document.getElementById("members-title");
       router.refresh();
       return true;
     } catch {
@@ -230,10 +241,7 @@ export function TeamManager({
               member.role !== "owner" &&
               (team.role === "owner" || member.role === "salesperson");
             return (
-              <li
-                key={`${member.userId}:${member.role}`}
-                className="space-y-4 p-5 sm:p-6"
-              >
+              <li key={member.userId} className="space-y-4 p-5 sm:p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium wrap-anywhere">
@@ -283,6 +291,7 @@ export function TeamManager({
                           Role for {member.email}
                         </Label>
                         <NativeSelect
+                          key={member.role}
                           id={`role-${member.userId}`}
                           name="role"
                           defaultValue={member.role}

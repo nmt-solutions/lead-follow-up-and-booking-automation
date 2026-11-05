@@ -272,6 +272,16 @@ export const invitation = pgTable(
       using: sql`((${managerScope}) and (public.current_business_role() = 'owner' or ${table.role} = 'salesperson')) or (${recipientScope})`,
       withCheck: sql`((${managerScope}) and (public.current_business_role() = 'owner' or ${table.role} = 'salesperson')) or (${recipientScope})`,
     }),
+    // Expiration grants no access. Admins may persist it for every invitation
+    // without gaining authority to grant or revoke an unexpired Admin invitation.
+    pgPolicy("invitation_expire", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${managerScope}) and ${table.status} = 'pending'
+        and ${table.expiresAt} <= nullif(current_setting('app.at', true), '')::timestamptz`,
+      withCheck: sql`(${managerScope}) and ${table.status} = 'expired'
+        and ${table.expiresAt} <= nullif(current_setting('app.at', true), '')::timestamptz`,
+    }),
   ],
 ).enableRLS();
 

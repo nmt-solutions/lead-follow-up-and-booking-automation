@@ -116,6 +116,9 @@ and never contact Resend. No cloud resources are provisioned by these scripts.
   token hash, a matching verified email, unexpired pending status and a currently
   authorized inviter. Removing/demoting an inviter revokes their outstanding
   invitations, including across later re-promotion.
+  Expiration is an access-removing transition: Admins can persist expiration of
+  Admin invitations and reinvite the recipient as Salesperson, while creating or
+  revoking an unexpired Admin invitation remains restricted to the Owner.
 - `team_audit` is append-only for the runtime and readable only by that Business's
   current Owner/Admin. Invitations, acceptance, expiration, revocation, notification
   outcomes and membership changes retain actor, subject, time and role-change

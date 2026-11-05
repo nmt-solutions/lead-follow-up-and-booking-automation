@@ -43,17 +43,15 @@ async function audit(
   at: Date,
   detail = "",
 ) {
-  await tx
-    .insert(teamAudit)
-    .values({
-      id: randomUUID(),
-      businessId,
-      actorId: actor.userId,
-      action,
-      subjectId,
-      detail,
-      at,
-    });
+  await tx.insert(teamAudit).values({
+    id: randomUUID(),
+    businessId,
+    actorId: actor.userId,
+    action,
+    subjectId,
+    detail,
+    at,
+  });
 }
 
 function mayManage(role: BusinessRole, targetRole: BusinessRole) {
@@ -83,6 +81,28 @@ async function expire(
     .returning();
   for (const row of expired)
     await audit(tx, actor, businessId, "invitation.expired", row.id, at);
+}
+
+async function revokePendingInvitations(
+  tx: Transaction,
+  actor: Actor,
+  businessId: string,
+  inviterId: string,
+  at: Date,
+) {
+  const revoked = await tx
+    .update(invitation)
+    .set({ status: "revoked" })
+    .where(
+      and(
+        eq(invitation.businessId, businessId),
+        eq(invitation.createdBy, inviterId),
+        eq(invitation.status, "pending"),
+      ),
+    )
+    .returning();
+  for (const row of revoked)
+    await audit(tx, actor, businessId, "invitation.revoked", row.id, at);
 }
 
 export function createTeamRepository(database: Database): TeamRepository {
@@ -236,13 +256,11 @@ export function createTeamRepository(database: Database): TeamRepository {
               ),
             );
           if (existing) throw new ApplicationError("CONFLICT");
-          await tx
-            .insert(membership)
-            .values({
-              businessId: row.businessId,
-              userId: actor.userId,
-              role: row.role,
-            });
+          await tx.insert(membership).values({
+            businessId: row.businessId,
+            userId: actor.userId,
+            role: row.role,
+          });
           await tx
             .update(invitation)
             .set({
@@ -298,19 +316,7 @@ export function createTeamRepository(database: Database): TeamRepository {
             ),
           );
         // Demotion invalidates outstanding grants immediately, even after a later promotion.
-        const revoked = await tx
-          .update(invitation)
-          .set({ status: "revoked" })
-          .where(
-            and(
-              eq(invitation.businessId, id),
-              eq(invitation.createdBy, input.userId),
-              eq(invitation.status, "pending"),
-            ),
-          )
-          .returning();
-        for (const row of revoked)
-          await audit(tx, actor, id, "invitation.revoked", row.id, at);
+        await revokePendingInvitations(tx, actor, id, input.userId, at);
         await audit(
           tx,
           actor,
@@ -326,19 +332,7 @@ export function createTeamRepository(database: Database): TeamRepository {
       return managed(actor, id, at, async (tx, role) => {
         const target = await findMember(tx, id, userId);
         mayManage(role, target.role);
-        const revoked = await tx
-          .update(invitation)
-          .set({ status: "revoked" })
-          .where(
-            and(
-              eq(invitation.businessId, id),
-              eq(invitation.createdBy, userId),
-              eq(invitation.status, "pending"),
-            ),
-          )
-          .returning();
-        for (const row of revoked)
-          await audit(tx, actor, id, "invitation.revoked", row.id, at);
+        await revokePendingInvitations(tx, actor, id, userId, at);
         await tx
           .delete(membership)
           .where(

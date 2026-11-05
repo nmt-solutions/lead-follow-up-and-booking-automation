@@ -20,7 +20,7 @@ export async function verifyRuntimeRole(
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER')
       ) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relname IN ('business', 'membership', 'invitation', 'team_audit', 'platform_operator'))
-      AND (SELECT count(*) = 12 AND bool_and(
+      AND (SELECT count(*) = 13 AND bool_and(
         (policyname = 'membership_owner_read' AND 'public' = ANY(roles) AND qual IS NOT NULL)
         OR ('app_runtime' = ANY(roles) AND CASE policyname
           WHEN 'business_access' THEN qual IS NOT NULL AND with_check IS NOT NULL
@@ -31,6 +31,7 @@ export async function verifyRuntimeRole(
           WHEN 'invitation_read' THEN qual IS NOT NULL
           WHEN 'invitation_create' THEN with_check IS NOT NULL
           WHEN 'invitation_change' THEN qual IS NOT NULL AND with_check IS NOT NULL
+          WHEN 'invitation_expire' THEN qual IS NOT NULL AND with_check IS NOT NULL
           WHEN 'team_audit_read' THEN qual IS NOT NULL
           WHEN 'team_audit_create' THEN with_check IS NOT NULL
           WHEN 'operator_read' THEN qual IS NOT NULL
@@ -38,7 +39,7 @@ export async function verifyRuntimeRole(
       ) FROM pg_policies WHERE schemaname = 'public' AND
         ((tablename = 'business' AND policyname = 'business_access') OR
          (tablename = 'membership' AND policyname IN ('membership_read', 'membership_owner_read', 'membership_create', 'membership_change', 'membership_remove')) OR
-         (tablename = 'invitation' AND policyname IN ('invitation_read', 'invitation_create', 'invitation_change')) OR
+         (tablename = 'invitation' AND policyname IN ('invitation_read', 'invitation_create', 'invitation_change', 'invitation_expire')) OR
          (tablename = 'team_audit' AND policyname IN ('team_audit_read', 'team_audit_create')) OR
          (tablename = 'platform_operator' AND policyname = 'operator_read'))) AS safe
     FROM pg_roles r WHERE r.rolname = current_user

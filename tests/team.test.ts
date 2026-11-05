@@ -578,6 +578,55 @@ describe("Business team access", () => {
     );
   });
 
+  it("lets Admins expire an old Admin invitation without granting Admin authority", async () => {
+    h.clock.set("2026-11-05T20:00:00Z");
+    const owner = await h.signIn("admin-expiry-owner@example.com");
+    const business = await h.application.createBusiness(owner, profile);
+    const admin = await join(
+      owner,
+      business.id,
+      "admin-expiry-admin@example.com",
+      "admin",
+    );
+    const invitation = await h.team.invite(owner, business.id, {
+      email: "admin-expiry-recipient@example.com",
+      role: "admin",
+      expiresInDays: 1,
+    });
+    await expect(
+      h.team.revokeInvitation(admin, business.id, {
+        invitationId: invitation.id,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    h.clock.set("2026-11-06T20:00:00Z");
+    expect(
+      (await h.team.getTeam(admin, business.id)).invitations,
+    ).toContainEqual(
+      expect.objectContaining({ id: invitation.id, status: "expired" }),
+    );
+    const renewed = await h.team.invite(admin, business.id, {
+      email: "admin-expiry-recipient@example.com",
+      role: "salesperson",
+    });
+    expect(renewed).toMatchObject({
+      status: "pending",
+      role: "salesperson",
+      delivery: "sent",
+    });
+    await expect(
+      h.team.invite(admin, business.id, {
+        email: "still-owner-only@example.com",
+        role: "admin",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await h.team.getAudit(admin, business.id)).toContainEqual(
+      expect.objectContaining({
+        action: "invitation.expired",
+        subjectId: invitation.id,
+      }),
+    );
+  });
+
   it("supports forced RLS when the definer owner has no superuser or bypass privileges", async () => {
     h.clock.set("2026-11-05T19:00:00Z");
     const owner = await h.signIn("managed-postgres-owner@example.com");
