@@ -13,3 +13,15 @@ export const GET = (
       conversationId,
     );
   });
+export const PATCH = (
+  request: Request,
+  context: RouteContext<"/api/businesses/[businessId]/inbox/[conversationId]">,
+) =>
+  handleRequest(async () => {
+    const { businessId, conversationId } = await context.params;
+    return (await getServices()).inboxHttp.associate(
+      request,
+      businessId,
+      conversationId,
+    );
+  });

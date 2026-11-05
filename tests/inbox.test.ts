@@ -116,6 +116,489 @@ describe("shared sales inbox at the application seam", () => {
     return { owner, business, connection };
   }
 
+  it("splits independent needs in one conversation while repeated replies retain the selected need after reload and replay", async () => {
+    const { owner, business, connection } = await setup("distinct-needs");
+    const mailBefore = h.mail.sent.length;
+    const invitationsBefore = h.invitations.sent.length;
+    const captured = await inbox.capture(
+      owner,
+      business.id,
+      connection.id,
+      event,
+    );
+    const first = await inbox.conversation(
+      owner,
+      business.id,
+      captured.conversationId,
+    );
+    await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "second",
+      messageRef: "second",
+      text: "A separate need: steel for another site",
+    });
+    const before = await inbox.conversation(owner, business.id, first.id);
+    await inbox.associate(owner, business.id, first.id, {
+      expectedVersion: before.association.version,
+      buyerId: first.buyer.id,
+      messageIds: [before.messages[1].id],
+      target: { kind: "new", title: "Second site" },
+      future: "review",
+      reason: "Buyer confirmed a separate site and order",
+    });
+    await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "repeat",
+      messageRef: "repeat",
+      replyToMessageRef: "second",
+      text: "More details for that site",
+    });
+    const reloaded = await inbox.conversation(owner, business.id, first.id);
+    expect(reloaded.opportunities).toHaveLength(2);
+    const second = reloaded.opportunities.find(
+      (need) => need.title === "Second site",
+    )!;
+    expect(reloaded.messages.map((message) => message.opportunityId)).toEqual([
+      first.opportunity.id,
+      second.id,
+      second.id,
+    ]);
+    expect(reloaded.messages[0]).toMatchObject({
+      eventId: event.eventId,
+      messageRef: event.messageRef,
+      senderRef: event.senderRef,
+    });
+    expect(reloaded.history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: (await h.authenticate(owner)).userId,
+          reason: "Buyer confirmed a separate site and order",
+        }),
+      ]),
+    );
+    expect(
+      await inbox.capture(owner, business.id, connection.id, event),
+    ).toMatchObject({ status: "duplicate" });
+    expect(
+      (await inbox.conversation(owner, business.id, first.id)).messages.map(
+        (message) => message.opportunityId,
+      ),
+    ).toEqual(reloaded.messages.map((message) => message.opportunityId));
+    expect(h.mail.sent).toHaveLength(mailBefore);
+    expect(h.invitations.sent).toHaveLength(invitationsBefore);
+  });
+
+  it("explicitly associates verified channel conversations with one buyer without rewriting engagement, original identities or Opportunity ownership", async () => {
+    const { owner, business, connection } = await setup("verified-channels");
+    const first = await inbox.capture(owner, business.id, connection.id, event);
+    const email = await inbox.conversation(
+      owner,
+      business.id,
+      first.conversationId,
+    );
+    const whatsapp = await inbox.addConnection(owner, business.id, {
+      label: "WhatsApp import",
+      channel: "whatsapp",
+      conversationRefs: [],
+    });
+    const other = await inbox.capture(owner, business.id, whatsapp.id, {
+      ...event,
+      senderRef: "+819012345678",
+    });
+    const original = await inbox.conversation(
+      owner,
+      business.id,
+      other.conversationId,
+    );
+    expect(original.buyer.id).not.toBe(email.buyer.id);
+    // Fixture: historical human ownership is not an association command's authority to replace it.
+    const actor = await h.authenticate(owner);
+    await h.admin.query(
+      "update inbox_opportunity set owner_id=$1, handoff_reason='Quotation exception', next_action='Review quote outcome' where id=$2",
+      [actor.userId, email.opportunity.id],
+    );
+    const historical = await h.admin.query(
+      "insert into inbox_opportunity_history (id,business_id,opportunity_id,kind,detail,actor_id,source_ref,at) values (gen_random_uuid(),$1,$2,'issued_quote','Historical quote Q-102 issued by a person',$3,'quote-Q-102','2026-11-05T09:00:00Z') returning id",
+      [business.id, email.opportunity.id, actor.userId],
+    );
+    const priorHistory = (
+      await inbox.conversation(owner, business.id, email.id)
+    ).opportunity.history;
+    await inbox.associate(owner, business.id, original.id, {
+      expectedVersion: original.association.version,
+      buyerId: email.buyer.id,
+      messageIds: original.messages.map((message) => message.id),
+      target: { kind: "existing", opportunityId: email.opportunity.id },
+      future: "target",
+      reason: "Buyer confirmed this phone number and purchasing need",
+    });
+    await inbox.capture(owner, business.id, whatsapp.id, {
+      ...event,
+      senderRef: "+819012345678",
+      eventId: "next",
+      messageRef: "next",
+    });
+    const linked = await inbox.conversation(owner, business.id, original.id);
+    expect(linked.buyer.id).toBe(email.buyer.id);
+    expect(linked.originalBuyer).toEqual(original.buyer);
+    expect(linked.messages.map((message) => message.opportunityId)).toEqual([
+      email.opportunity.id,
+      email.opportunity.id,
+    ]);
+    expect(linked.buyerConversations.map((row) => row.channel).sort()).toEqual([
+      "email",
+      "whatsapp",
+    ]);
+    expect(
+      linked.opportunities.find((need) => need.id === email.opportunity.id),
+    ).toMatchObject({
+      ownerId: actor.userId,
+      handoffReason: "Quotation exception",
+      nextAction: "Review quote outcome",
+    });
+    expect(
+      linked.opportunities.find((need) => need.id === email.opportunity.id)
+        ?.history,
+    ).toEqual(priorHistory);
+    expect(priorHistory).toEqual([
+      {
+        id: historical.rows[0].id,
+        kind: "issued_quote",
+        detail: "Historical quote Q-102 issued by a person",
+        actorId: actor.userId,
+        sourceRef: "quote-Q-102",
+        at: "2026-11-05T09:00:00.000Z",
+      },
+    ]);
+    expect(linked.opportunity).toEqual(original.opportunity);
+    expect(
+      linked.history.find((entry) =>
+        entry.reason.startsWith("Buyer confirmed"),
+      ),
+    ).toMatchObject({
+      actorId: actor.userId,
+      at: "2026-11-05T09:00:00.000Z",
+      before: {
+        buyerId: original.buyer.id,
+        messages: [
+          {
+            id: original.messages[0].id,
+            opportunityId: original.opportunity.id,
+          },
+        ],
+      },
+      after: {
+        buyerId: email.buyer.id,
+        messages: [
+          { id: original.messages[0].id, opportunityId: email.opportunity.id },
+        ],
+      },
+    });
+    await h.reapplySchema();
+    expect(
+      (await inbox.conversation(owner, business.id, original.id)).messages.map(
+        (message) => message.opportunityId,
+      ),
+    ).toEqual([email.opportunity.id, email.opportunity.id]);
+    expect(
+      await inbox.capture(owner, business.id, whatsapp.id, {
+        ...event,
+        senderRef: "+819012345678",
+      }),
+    ).toMatchObject({ status: "duplicate" });
+    expect(
+      (await inbox.conversation(owner, business.id, original.id)).buyer.id,
+    ).toBe(email.buyer.id);
+  });
+
+  it("routes ambiguity to an accountable reviewer rather than guessing between independent needs", async () => {
+    const { owner, business, connection } = await setup("ambiguity");
+    const captured = await inbox.capture(
+      owner,
+      business.id,
+      connection.id,
+      event,
+    );
+    const first = await inbox.conversation(
+      owner,
+      business.id,
+      captured.conversationId,
+    );
+    await inbox.associate(owner, business.id, first.id, {
+      expectedVersion: first.association.version,
+      buyerId: first.buyer.id,
+      messageIds: [first.messages[0].id],
+      target: { kind: "review" },
+      future: "review",
+      reason: "Unclear which site this order belongs to",
+    });
+    await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "unclear",
+      messageRef: "unclear",
+    });
+    const uncertain = await inbox.conversation(owner, business.id, first.id);
+    expect(uncertain.messages.map((message) => message.opportunityId)).toEqual([
+      null,
+      null,
+    ]);
+    expect(uncertain.association).toMatchObject({
+      reviewOwnerId: (await h.authenticate(owner)).userId,
+      reviewReason: "Message has no unambiguous purchasing need",
+      nextAction:
+        "Review unassociated messages and choose or create a purchasing need",
+    });
+    expect(
+      (await inbox.workspace(owner, business.id)).conversations[0].needsReview,
+    ).toBe(true);
+    await inbox.associate(owner, business.id, first.id, {
+      expectedVersion: uncertain.association.version,
+      buyerId: first.buyer.id,
+      messageIds: uncertain.messages.map((message) => message.id),
+      target: { kind: "existing", opportunityId: first.opportunity.id },
+      future: "target",
+      reason: "Buyer clarified the original site",
+    });
+    expect(
+      (await inbox.conversation(owner, business.id, first.id)).association
+        .reviewReason,
+    ).toBeNull();
+  });
+
+  it("serializes competing corrections and intake without duplicate needs, erased links or rewritten event provenance", async () => {
+    const { owner, business, connection } = await setup("association-race");
+    const captured = await inbox.capture(
+      owner,
+      business.id,
+      connection.id,
+      event,
+    );
+    const before = await inbox.conversation(
+      owner,
+      business.id,
+      captured.conversationId,
+    );
+    const command = {
+      expectedVersion: before.association.version,
+      buyerId: before.buyer.id,
+      messageIds: [before.messages[0].id],
+      target: { kind: "new", title: "Corrected need" },
+      future: "review",
+      reason: "Confirmed independent purchasing need",
+    };
+    const corrections = await Promise.allSettled([
+      inbox.associate(owner, business.id, before.id, command),
+      inbox.associate(owner, business.id, before.id, command),
+    ]);
+    expect(
+      corrections.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      corrections.find((result) => result.status === "rejected"),
+    ).toMatchObject({ reason: { code: "CONFLICT" } });
+    const corrected = await inbox.conversation(owner, business.id, before.id);
+    const needId = corrected.messages[0].opportunityId;
+    expect(corrected.opportunities).toHaveLength(2);
+    expect(
+      corrected.history.filter((entry) => entry.reason === command.reason),
+    ).toHaveLength(1);
+    const next = {
+      ...event,
+      eventId: "raced-intake",
+      messageRef: "raced-intake",
+    };
+    const raced = await Promise.allSettled([
+      inbox.capture(owner, business.id, connection.id, next),
+      inbox.associate(owner, business.id, before.id, {
+        ...command,
+        expectedVersion: corrected.association.version,
+        target: { kind: "existing", opportunityId: needId },
+        reason: "Confirmed correction during intake",
+      }),
+    ]);
+    expect(raced[0].status).toBe("fulfilled");
+    if (raced[1].status === "rejected")
+      expect(raced[1].reason).toMatchObject({ code: "CONFLICT" });
+    const after = await inbox.conversation(owner, business.id, before.id);
+    expect(after.messages.map((message) => message.opportunityId)).toEqual([
+      needId,
+      null,
+    ]);
+    expect(after.opportunities).toHaveLength(2);
+    expect(after.association.reviewReason).not.toBeNull();
+    await inbox.capture(owner, business.id, connection.id, {
+      ...event,
+      eventId: "replay-alias",
+    });
+    expect(
+      (await inbox.conversation(owner, business.id, before.id)).messages,
+    ).toEqual(after.messages);
+    expect(after.history.filter((entry) => entry.sourceEventId)).toHaveLength(
+      2,
+    );
+    expect(after.messages[0].kind).toBe("direct_inquiry");
+  });
+
+  it("validates association commands at HTTP, scopes every buyer/need/message and keeps failures safe", async () => {
+    const first = await setup("association-http");
+    const other = await setup("association-http-other");
+    const one = await inbox.capture(
+      first.owner,
+      first.business.id,
+      first.connection.id,
+      event,
+    );
+    const two = await inbox.capture(
+      other.owner,
+      other.business.id,
+      other.connection.id,
+      event,
+    );
+    const a = await inbox.conversation(
+      first.owner,
+      first.business.id,
+      one.conversationId,
+    );
+    const b = await inbox.conversation(
+      other.owner,
+      other.business.id,
+      two.conversationId,
+    );
+    const diagnostics: unknown[] = [];
+    const http = createInboxHttp({
+      application: inbox,
+      origin: "http://localhost:3000",
+      reportFailure: (value) => diagnostics.push(value),
+    });
+    const command = {
+      expectedVersion: a.association.version,
+      buyerId: a.buyer.id,
+      messageIds: [a.messages[0].id],
+      target: { kind: "existing", opportunityId: a.opportunity.id },
+      future: "target",
+      reason: "Confirmed by buyer",
+    };
+    const request = (
+      value: unknown,
+      credentials = first.owner,
+      origin = "http://localhost:3000",
+    ) =>
+      new Request("http://localhost:3000/api/inbox", {
+        method: "PATCH",
+        headers: {
+          cookie: credentials.get("cookie") ?? "",
+          origin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(value),
+      });
+    expect(
+      (
+        await http.associate(
+          request(command, new Headers()),
+          first.business.id,
+          a.id,
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await http.associate(
+          request(command, other.owner),
+          first.business.id,
+          a.id,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await http.associate(
+          request(command, first.owner, "https://untrusted.example"),
+          first.business.id,
+          a.id,
+        )
+      ).status,
+    ).toBe(403);
+    for (const invalid of [
+      { ...command, businessId: other.business.id },
+      { ...command, expectedVersion: -1 },
+      { ...command, reason: "" },
+      { ...command, reason: "secret-payload\0" },
+      { ...command, messageIds: [] },
+      { ...command, messageIds: [a.messages[0].id, a.messages[0].id] },
+      { ...command, target: { kind: "new", title: "x".repeat(201) } },
+    ])
+      expect(
+        (await http.associate(request(invalid), first.business.id, a.id))
+          .status,
+      ).toBe(400);
+    for (const foreign of [
+      { ...command, buyerId: b.buyer.id },
+      { ...command, messageIds: [b.messages[0].id] },
+      {
+        ...command,
+        target: { kind: "existing", opportunityId: b.opportunity.id },
+      },
+    ])
+      expect(
+        (await http.associate(request(foreign), first.business.id, a.id))
+          .status,
+      ).toBe(404);
+    // Same name and domain establish neither buyer identity nor a need association.
+    const third = await inbox.capture(
+      first.owner,
+      first.business.id,
+      first.connection.id,
+      {
+        ...event,
+        eventId: "different-person",
+        messageRef: "different-person",
+        conversationRef: "different-person",
+        senderRef: "another@example.net",
+      },
+    );
+    const c = await inbox.conversation(
+      first.owner,
+      first.business.id,
+      third.conversationId,
+    );
+    expect(c.buyer.id).not.toBe(a.buyer.id);
+    expect(
+      (
+        await http.associate(
+          request({
+            ...command,
+            target: { kind: "existing", opportunityId: c.opportunity.id },
+          }),
+          first.business.id,
+          a.id,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (await http.associate(request(command), first.business.id, a.id)).status,
+    ).toBe(200);
+    expect(
+      (await http.associate(request(command), first.business.id, a.id)).status,
+    ).toBe(409);
+    const primary = await h.signIn("inbox-association-http@example.com", false);
+    expect(
+      (await http.associate(request(command, primary), first.business.id, a.id))
+        .status,
+    ).toBe(403);
+    await h.signOut(first.owner);
+    expect(
+      (await http.associate(request(command), first.business.id, a.id)).status,
+    ).toBe(401);
+    expect(JSON.stringify(diagnostics)).not.toMatch(
+      /secret-payload|Confirmed by buyer|another@example.net/,
+    );
+    expect(
+      (await inbox.conversation(other.owner, other.business.id, b.id))
+        .messages[0].opportunityId,
+    ).toBe(b.opportunity.id);
+  });
+
   it("serializes concurrent delivery and message aliases into one inquiry, retaining subsequent replies and independent needs", async () => {
     const { owner, business, connection } = await setup("concurrent");
     const results = await Promise.all(
@@ -333,6 +816,25 @@ describe("shared sales inbox at the application seam", () => {
       (await inbox.conversation(sales, business.id, captured.conversationId))
         .buyer.relationship,
     ).toBe("engaged");
+    const salesView = await inbox.conversation(
+      sales,
+      business.id,
+      captured.conversationId,
+    );
+    const correction = {
+      expectedVersion: salesView.association.version,
+      buyerId: salesView.buyer.id,
+      messageIds: salesView.messages.map((message) => message.id),
+      target: { kind: "existing", opportunityId: salesView.opportunity.id },
+      future: "target",
+      reason: "Salesperson confirmed this purchasing need",
+    };
+    await inbox.associate(sales, business.id, salesView.id, correction);
+    expect(
+      (await inbox.conversation(sales, business.id, salesView.id)).history.at(
+        -1,
+      )?.actorId,
+    ).toBe((await h.authenticate(sales)).userId);
     const calls = normalized.length;
     await expect(
       inbox.capture(sales, business.id, connection.id, event),
@@ -353,12 +855,18 @@ describe("shared sales inbox at the application seam", () => {
     await expect(inbox.workspace(sales, business.id)).rejects.toMatchObject({
       code: "MFA_REQUIRED",
     });
+    await expect(
+      inbox.associate(sales, business.id, salesView.id, correction),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
     const admin = await h.signIn("inbox-sales@example.com");
     expect((await inbox.workspace(admin, business.id)).canManage).toBe(true);
     await h.team.removeMember(owner, business.id, actor);
     await expect(inbox.workspace(admin, business.id)).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+    await expect(
+      inbox.associate(admin, business.id, salesView.id, correction),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
     const primaryOwner = await h.signIn("inbox-roles@example.com", false);
     await expect(
       inbox.workspace(primaryOwner, business.id),
@@ -589,6 +1097,10 @@ describe("shared sales inbox at the application seam", () => {
       "inbox_opportunity",
       "inbox_message",
       "inbox_event",
+      "inbox_association",
+      "inbox_message_link",
+      "inbox_association_history",
+      "inbox_opportunity_history",
     ]) {
       expect((await h.runtime.query(`select * from ${table}`)).rows).toEqual(
         [],
@@ -635,5 +1147,76 @@ describe("shared sales inbox at the application seam", () => {
         [other.business.id, connection.id],
       ),
     ).rejects.toMatchObject({ code: "23503" });
+    const otherCapture = await inbox.capture(
+      other.owner,
+      other.business.id,
+      other.connection.id,
+      event,
+    );
+    const otherView = await inbox.conversation(
+      other.owner,
+      other.business.id,
+      otherCapture.conversationId,
+    );
+    await expect(
+      h.admin.query(
+        "update inbox_association set default_opportunity_id=$1 where id=$2",
+        [otherView.opportunity.id, captured.conversationId],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      h.admin.query(
+        "update inbox_message_link set opportunity_id=$1 where conversation_id=$2",
+        [otherView.opportunity.id, captured.conversationId],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+    expect(
+      (
+        await h.admin.query(
+          "select has_table_privilege('app_runtime', 'inbox_association_history', 'UPDATE') as allowed",
+        )
+      ).rows[0].allowed,
+    ).toBe(false);
+  });
+
+  it("upgrades populated legacy intake records additively without losing their engagement or provenance", async () => {
+    const { owner, business, connection } = await setup("legacy-associations");
+    const captured = await inbox.capture(
+      owner,
+      business.id,
+      connection.id,
+      event,
+    );
+    const original = await inbox.conversation(
+      owner,
+      business.id,
+      captured.conversationId,
+    );
+    // Reconstruct the persisted #17 shape in this isolated test database.
+    await h.admin.query(
+      "delete from inbox_association_history where business_id=$1",
+      [business.id],
+    );
+    await h.admin.query("delete from inbox_message_link where business_id=$1", [
+      business.id,
+    ]);
+    await h.admin.query("delete from inbox_association where business_id=$1", [
+      business.id,
+    ]);
+    await h.admin.query(
+      "update inbox_opportunity set buyer_id=null where business_id=$1",
+      [business.id],
+    );
+    await h.reapplySchema();
+    const upgraded = await inbox.conversation(owner, business.id, original.id);
+    expect(upgraded.buyer).toEqual(original.buyer);
+    expect(upgraded.messages).toEqual(original.messages);
+    expect(upgraded.opportunity).toEqual(original.opportunity);
+    expect(upgraded.association.defaultOpportunityId).toBe(
+      original.opportunity.id,
+    );
+    expect(
+      await inbox.capture(owner, business.id, connection.id, event),
+    ).toMatchObject({ status: "duplicate" });
   });
 });

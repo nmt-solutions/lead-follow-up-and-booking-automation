@@ -38,6 +38,10 @@ import {
   inboxOpportunity,
   inboxMessage,
   inboxEvent,
+  inboxAssociation,
+  inboxMessageLink,
+  inboxAssociationHistory,
+  inboxOpportunityHistory,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -253,6 +257,11 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES (active) ON public.inbox_connection FROM app_runtime;
         REVOKE ALL PRIVILEGES (last_received_at) ON public.inbox_conversation FROM app_runtime;
       END IF;
+      IF to_regclass('public.inbox_association') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.inbox_association, public.inbox_message_link, public.inbox_association_history, public.inbox_opportunity_history FROM app_runtime;
+        REVOKE ALL PRIVILEGES (buyer_id, default_opportunity_id, version, review_reason, review_owner_id, next_action) ON public.inbox_association FROM app_runtime;
+        REVOKE ALL PRIVILEGES (opportunity_id) ON public.inbox_message_link FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -273,6 +282,20 @@ export async function secureDatabase(pool: Pool) {
   try {
     await client.query("BEGIN");
     const database = drizzle(client);
+    // Upgrade #17 without rewriting source records. Reapplication never resets corrections.
+    await client.query(`
+      UPDATE inbox_opportunity o SET buyer_id = c.buyer_id, title = c.subject
+        FROM inbox_conversation c WHERE o.conversation_id = c.id AND o.business_id = c.business_id AND o.buyer_id IS NULL;
+      INSERT INTO inbox_association (id,business_id,buyer_id,default_opportunity_id,version,review_reason,review_owner_id,next_action)
+        SELECT c.id,c.business_id,c.buyer_id,o.id,0,NULL,cn.created_by,'Review incoming inquiry'
+        FROM inbox_conversation c JOIN inbox_opportunity o ON o.conversation_id = c.id AND o.business_id = c.business_id
+        JOIN inbox_connection cn ON cn.id = c.connection_id AND cn.business_id = c.business_id
+        ON CONFLICT (id) DO NOTHING;
+      INSERT INTO inbox_message_link (id,business_id,conversation_id,opportunity_id)
+        SELECT m.id,m.business_id,m.conversation_id,o.id FROM inbox_message m
+        JOIN inbox_opportunity o ON o.conversation_id = m.conversation_id AND o.business_id = m.business_id
+        ON CONFLICT (id) DO NOTHING;
+    `);
     // An equivalent unique index avoids the pinned push's composite-UNIQUE
     // replacement order bug. Reconcile it before restoring the scoped FKs;
     // IF NOT EXISTS also recognizes the old constraint's supporting index.
@@ -319,6 +342,10 @@ export async function secureDatabase(pool: Pool) {
       inboxOpportunity,
       inboxMessage,
       inboxEvent,
+      inboxAssociation,
+      inboxMessageLink,
+      inboxAssociationHistory,
+      inboxOpportunityHistory,
       business,
       membership,
       invitation,
@@ -365,6 +392,16 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE inbox_opportunity FORCE ROW LEVEL SECURITY;
       ALTER TABLE inbox_message FORCE ROW LEVEL SECURITY;
       ALTER TABLE inbox_event FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON inbox_association, inbox_message_link, inbox_association_history FROM app_runtime;
+      GRANT SELECT, INSERT ON inbox_association, inbox_message_link, inbox_association_history TO app_runtime;
+      GRANT UPDATE (buyer_id, default_opportunity_id, version, review_reason, review_owner_id, next_action) ON inbox_association TO app_runtime;
+      GRANT UPDATE (opportunity_id) ON inbox_message_link TO app_runtime;
+      ALTER TABLE inbox_association FORCE ROW LEVEL SECURITY;
+      ALTER TABLE inbox_message_link FORCE ROW LEVEL SECURITY;
+      ALTER TABLE inbox_association_history FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON inbox_opportunity_history FROM app_runtime;
+      GRANT SELECT ON inbox_opportunity_history TO app_runtime;
+      ALTER TABLE inbox_opportunity_history FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON ai_profile, ai_activation, ai_activation_audit, ai_execution, ai_attempt, ai_review FROM app_runtime;
       GRANT SELECT, INSERT ON ai_profile, ai_activation, ai_activation_audit, ai_execution, ai_attempt, ai_review TO app_runtime;
       GRANT UPDATE (used_attempts, used_fallback_attempts) ON ai_profile TO app_runtime;

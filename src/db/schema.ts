@@ -30,7 +30,12 @@ import type {
 } from "../models/ai";
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { CommercialPolicy } from "../models/commercial-authority";
-import type { AddInboxConnection, IncomingInquiry } from "../models/inbox";
+import type {
+  AddInboxConnection,
+  IncomingInquiry,
+  AssociationChange,
+  OpportunityHistoryEntry,
+} from "../models/inbox";
 
 import type {
   DiscoveryPolicy,
@@ -1270,7 +1275,9 @@ function inboxPolicies(name: string) {
       withCheck:
         name === "inbox_connection"
           ? sql`(${inboxWrite}) and created_by = current_setting('app.actor_id', true)`
-          : inboxWrite,
+          : name === "inbox_opportunity"
+            ? inboxScope
+            : inboxWrite,
     }),
     ...(["inbox_connection", "inbox_conversation"].includes(name)
       ? [
@@ -1317,6 +1324,7 @@ export const inboxBuyer = pgTable(
   },
   (table) => [
     uniqueIndex("inbox_buyer_identity").on(table.connectionId, table.senderRef),
+    uniqueIndex("inbox_buyer_business_scope").on(table.id, table.businessId),
     uniqueIndex("inbox_buyer_scope").on(
       table.id,
       table.businessId,
@@ -1343,6 +1351,10 @@ export const inboxConversation = pgTable(
       table.connectionId,
       table.providerRef,
     ),
+    uniqueIndex("inbox_conversation_business_scope").on(
+      table.id,
+      table.businessId,
+    ),
     uniqueIndex("inbox_conversation_scope").on(
       table.id,
       table.businessId,
@@ -1356,8 +1368,11 @@ export const inboxOpportunity = pgTable(
   "inbox_opportunity",
   {
     ...inboxColumns(),
-    connectionId: uuid("connection_id").notNull(),
-    conversationId: uuid("conversation_id").notNull(),
+    // Original intake references are immutable; explicitly created needs have no initial intake row.
+    connectionId: uuid("connection_id"),
+    conversationId: uuid("conversation_id"),
+    buyerId: uuid("buyer_id"),
+    title: text("title").notNull().default("Purchasing need"),
     stage: text("stage").$type<"inquiry">().notNull(),
     ownerId: text("owner_id").references(() => user.id),
     handoffReason: text("handoff_reason").notNull(),
@@ -1366,6 +1381,10 @@ export const inboxOpportunity = pgTable(
   },
   (table) => [
     uniqueIndex("inbox_initial_opportunity").on(table.conversationId),
+    uniqueIndex("inbox_opportunity_business_scope").on(
+      table.id,
+      table.businessId,
+    ),
     check("inbox_initial_stage", sql`${table.stage} = 'inquiry'`),
     ...inboxPolicies("inbox_opportunity"),
   ],
@@ -1387,6 +1406,11 @@ export const inboxMessage = pgTable(
       table.connectionId,
       table.messageRef,
     ),
+    uniqueIndex("inbox_message_scope").on(
+      table.id,
+      table.businessId,
+      table.conversationId,
+    ),
     ...inboxPolicies("inbox_message"),
   ],
 ).enableRLS();
@@ -1407,8 +1431,187 @@ export const inboxEvent = pgTable(
   ],
 ).enableRLS();
 
+function associationPolicies(name: string, mutable = false) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck:
+        name === "inbox_association_history"
+          ? sql`(${inboxScope}) and actor_id = current_setting('app.actor_id', true)`
+          : inboxScope,
+    }),
+    ...(mutable
+      ? [
+          pgPolicy(`${name}_update`, {
+            for: "update",
+            to: appRuntime,
+            using: inboxScope,
+            withCheck: inboxScope,
+          }),
+        ]
+      : []),
+  ];
+}
+export const inboxAssociation = pgTable(
+  "inbox_association",
+  {
+    ...inboxColumns(),
+    buyerId: uuid("buyer_id").notNull(),
+    defaultOpportunityId: uuid("default_opportunity_id"),
+    version: integer("version").notNull(),
+    reviewReason: text("review_reason"),
+    reviewOwnerId: text("review_owner_id")
+      .notNull()
+      .references(() => user.id),
+    nextAction: text("next_action").notNull(),
+  },
+  (table) => [
+    uniqueIndex("inbox_association_scope").on(table.id, table.businessId),
+    ...associationPolicies("inbox_association", true),
+  ],
+).enableRLS();
+export const inboxMessageLink = pgTable(
+  "inbox_message_link",
+  {
+    ...inboxColumns(),
+    sequence: integer("sequence").notNull().default(0),
+    conversationId: uuid("conversation_id").notNull(),
+    opportunityId: uuid("opportunity_id"),
+  },
+  () => associationPolicies("inbox_message_link", true),
+).enableRLS();
+export const inboxAssociationHistory = pgTable(
+  "inbox_association_history",
+  {
+    ...inboxColumns(),
+    version: integer("version").notNull().default(0),
+    conversationId: uuid("conversation_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    reason: text("reason").notNull(),
+    sourceEventId: text("source_event_id"),
+    before: jsonb("before").$type<AssociationChange>().notNull(),
+    after: jsonb("after").$type<AssociationChange>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () => associationPolicies("inbox_association_history"),
+).enableRLS();
+
+// Association reads existing history; later ownership/outcome workflows own writes.
+export const inboxOpportunityHistory = pgTable(
+  "inbox_opportunity_history",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    kind: text("kind").$type<OpportunityHistoryEntry["kind"]>().notNull(),
+    detail: text("detail").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    sourceRef: text("source_ref"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "inbox_opportunity_history_kind",
+      sql`${table.kind} in ('ownership','booking_request','confirmed_appointment','attended_appointment','quotation_request','issued_quote','sale')`,
+    ),
+    pgPolicy("inbox_opportunity_history_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+  ],
+).enableRLS();
+
 // Installed after unique indexes by secureDatabase, matching the pinned push contract.
 export const inboxScopeForeignKeys = [
+  new ForeignKey(
+    inboxOpportunityHistory,
+    foreignKey({
+      name: "inbox_opportunity_history_need_scope",
+      columns: [
+        inboxOpportunityHistory.opportunityId,
+        inboxOpportunityHistory.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxOpportunity,
+    foreignKey({
+      name: "inbox_opportunity_buyer_scope",
+      columns: [inboxOpportunity.buyerId, inboxOpportunity.businessId],
+      foreignColumns: [inboxBuyer.id, inboxBuyer.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxAssociation,
+    foreignKey({
+      name: "inbox_association_conversation_scope",
+      columns: [inboxAssociation.id, inboxAssociation.businessId],
+      foreignColumns: [inboxConversation.id, inboxConversation.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxAssociation,
+    foreignKey({
+      name: "inbox_association_buyer_scope",
+      columns: [inboxAssociation.buyerId, inboxAssociation.businessId],
+      foreignColumns: [inboxBuyer.id, inboxBuyer.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxAssociation,
+    foreignKey({
+      name: "inbox_association_need_scope",
+      columns: [
+        inboxAssociation.defaultOpportunityId,
+        inboxAssociation.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxMessageLink,
+    foreignKey({
+      name: "inbox_message_link_source_scope",
+      columns: [
+        inboxMessageLink.id,
+        inboxMessageLink.businessId,
+        inboxMessageLink.conversationId,
+      ],
+      foreignColumns: [
+        inboxMessage.id,
+        inboxMessage.businessId,
+        inboxMessage.conversationId,
+      ],
+    }),
+  ),
+  new ForeignKey(
+    inboxMessageLink,
+    foreignKey({
+      name: "inbox_message_link_need_scope",
+      columns: [inboxMessageLink.opportunityId, inboxMessageLink.businessId],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxAssociationHistory,
+    foreignKey({
+      name: "inbox_association_history_scope",
+      columns: [
+        inboxAssociationHistory.conversationId,
+        inboxAssociationHistory.businessId,
+      ],
+      foreignColumns: [inboxAssociation.id, inboxAssociation.businessId],
+    }),
+  ),
   new ForeignKey(
     inboxBuyer,
     foreignKey({

@@ -45,8 +45,8 @@ export default async function InboxPage({
         <h1 className="page-title">Shared sales inbox</h1>
         <p className="mt-3 text-muted-foreground">
           Direct inquiries and buying-interest replies from any geography. Each
-          conversation retains its buyer, received messages and initial
-          Opportunity.
+          conversation retains its sources. Review purchasing needs and
+          explicitly associate messages across verified channels.
         </p>
       </header>
       <Card>
@@ -71,6 +71,9 @@ export default async function InboxPage({
                         {conversation.subject}
                       </span>
                       <Badge>{conversation.channel}</Badge>
+                      {conversation.needsReview && (
+                        <Badge>Association review needed</Badge>
+                      )}
                     </div>
                     <p className="wrap-anywhere">{conversation.buyerName}</p>
                     <p className="text-sm text-muted-foreground">

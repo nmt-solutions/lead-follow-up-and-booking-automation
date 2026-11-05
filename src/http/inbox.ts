@@ -11,6 +11,16 @@ export function createInboxHttp(options: {
   const respond = createResponder(options.reportFailure);
   const body = createJsonBodyReader(options.origin, 128 * 1024);
   return {
+    associate: (request: Request, businessId: string, id: string) =>
+      respond(async () => {
+        await options.application.associate(
+          request.headers,
+          businessId,
+          id,
+          await body(request),
+        );
+        return dataResponse({ associated: true });
+      }),
     get: (request: Request, businessId: string) =>
       respond(async () =>
         dataResponse(

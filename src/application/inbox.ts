@@ -3,6 +3,8 @@ import { ApplicationError } from "../models/application-error";
 import { businessIdSchema, type Actor, type Clock } from "../models/business";
 import {
   inboxConnectionSchema,
+  associateInquirySchema,
+  type AssociateInquiry,
   incomingInquirySchema,
   type AddInboxConnection,
   type CaptureResult,
@@ -14,6 +16,13 @@ import {
 } from "../models/inbox";
 
 export type InboxRepository = {
+  associate(
+    actor: Actor,
+    businessId: string,
+    id: string,
+    input: AssociateInquiry,
+    at: Date,
+  ): Promise<void>;
   workspace(actor: Actor, businessId: string): Promise<InboxWorkspace>;
   conversation(
     actor: Actor,
@@ -63,6 +72,21 @@ export function createInboxApplication<Credentials>(dependencies: {
     };
   }
   return {
+    async associate(
+      credentials: Credentials,
+      id: unknown,
+      conversationId: unknown,
+      input: unknown,
+    ) {
+      const ctx = await context(credentials, id);
+      await repository.associate(
+        ctx.actor,
+        ctx.businessId,
+        validate(z.uuid(), conversationId),
+        validate(associateInquirySchema, input),
+        dependencies.clock.now(),
+      );
+    },
     async workspace(credentials: Credentials, id: unknown) {
       const ctx = await context(credentials, id);
       return repository.workspace(ctx.actor, ctx.businessId);

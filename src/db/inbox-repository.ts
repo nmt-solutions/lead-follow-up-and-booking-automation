@@ -1,8 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { InboxRepository } from "../application/inbox";
 import { ApplicationError } from "../models/application-error";
-import type { InboxConnection, IncomingInquiry } from "../models/inbox";
+import type { IncomingInquiry } from "../models/inbox";
+import {
+  connectionView,
+  createAssociationRepository,
+} from "./inbox-associations";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import {
@@ -12,21 +16,11 @@ import {
   inboxOpportunity,
   inboxMessage,
   inboxEvent,
+  inboxAssociation,
+  inboxMessageLink,
+  inboxAssociationHistory,
 } from "./schema";
 
-function connectionView(
-  row: typeof inboxConnection.$inferSelect,
-): InboxConnection {
-  return {
-    id: row.id,
-    label: row.label,
-    channel: row.channel,
-    conversationRefs: row.conversationRefs,
-    active: row.active,
-    mode: "normalized_import",
-    createdAt: row.createdAt.toISOString(),
-  };
-}
 async function requireConnection(
   tx: Transaction,
   businessId: string,
@@ -54,120 +48,7 @@ function fingerprint(event: IncomingInquiry, includeEvent: boolean) {
 
 export function createInboxRepository(database: Database): InboxRepository {
   return {
-    workspace(actor, businessId) {
-      return scoped(database, actor, businessId, async (tx) => {
-        const role = await requireCapability(
-          tx,
-          actor,
-          businessId,
-          "sales.work",
-        );
-        const connections = await tx
-          .select()
-          .from(inboxConnection)
-          .where(eq(inboxConnection.businessId, businessId))
-          .orderBy(desc(inboxConnection.createdAt), asc(inboxConnection.id));
-        const rows = await tx
-          .select({
-            conversation: inboxConversation,
-            buyerName: inboxBuyer.name,
-            channel: inboxConnection.channel,
-            opportunityId: inboxOpportunity.id,
-          })
-          .from(inboxConversation)
-          .innerJoin(inboxBuyer, eq(inboxBuyer.id, inboxConversation.buyerId))
-          .innerJoin(
-            inboxConnection,
-            eq(inboxConnection.id, inboxConversation.connectionId),
-          )
-          .innerJoin(
-            inboxOpportunity,
-            eq(inboxOpportunity.conversationId, inboxConversation.id),
-          )
-          .where(eq(inboxConversation.businessId, businessId))
-          .orderBy(
-            desc(inboxConversation.lastReceivedAt),
-            asc(inboxConversation.id),
-          );
-        return {
-          canManage: role !== "salesperson",
-          connections: connections.map(connectionView),
-          conversations: rows.map((row) => ({
-            id: row.conversation.id,
-            subject: row.conversation.subject,
-            buyerName: row.buyerName,
-            channel: row.channel,
-            opportunityId: row.opportunityId,
-            lastReceivedAt: row.conversation.lastReceivedAt.toISOString(),
-          })),
-        };
-      });
-    },
-    conversation(actor, businessId, id) {
-      return scoped(database, actor, businessId, async (tx) => {
-        await requireCapability(tx, actor, businessId, "sales.work");
-        const [row] = await tx
-          .select({
-            conversation: inboxConversation,
-            buyer: inboxBuyer,
-            connection: inboxConnection,
-            opportunity: inboxOpportunity,
-          })
-          .from(inboxConversation)
-          .innerJoin(inboxBuyer, eq(inboxBuyer.id, inboxConversation.buyerId))
-          .innerJoin(
-            inboxConnection,
-            eq(inboxConnection.id, inboxConversation.connectionId),
-          )
-          .innerJoin(
-            inboxOpportunity,
-            eq(inboxOpportunity.conversationId, inboxConversation.id),
-          )
-          .where(
-            and(
-              eq(inboxConversation.businessId, businessId),
-              eq(inboxConversation.id, id),
-            ),
-          );
-        if (!row) throw new ApplicationError("NOT_FOUND");
-        const messages = await tx
-          .select()
-          .from(inboxMessage)
-          .where(
-            and(
-              eq(inboxMessage.businessId, businessId),
-              eq(inboxMessage.conversationId, id),
-            ),
-          )
-          .orderBy(asc(inboxMessage.receivedAt), asc(inboxMessage.id));
-        return {
-          id,
-          subject: row.conversation.subject,
-          providerRef: row.conversation.providerRef,
-          connection: connectionView(row.connection),
-          buyer: {
-            id: row.buyer.id,
-            name: row.buyer.name,
-            senderRef: row.buyer.senderRef,
-            geography: row.buyer.geography,
-            relationship: "engaged",
-          },
-          opportunity: {
-            id: row.opportunity.id,
-            stage: row.opportunity.stage,
-            ownerId: row.opportunity.ownerId,
-            handoffReason: row.opportunity.handoffReason,
-            nextAction: row.opportunity.nextAction,
-            createdAt: row.opportunity.createdAt.toISOString(),
-          },
-          messages: messages.map((message) => ({
-            ...message.content,
-            id: message.id,
-            receivedAt: message.receivedAt.toISOString(),
-          })),
-        };
-      });
-    },
+    ...createAssociationRepository(database),
     addConnection(actor, businessId, input, at) {
       return scoped(
         database,
@@ -313,6 +194,15 @@ export function createInboxRepository(database: Database): InboxRepository {
           if (conversation && conversation.buyerId !== buyerId)
             throw new ApplicationError("CONFLICT");
           const conversationId = conversation?.id ?? randomUUID();
+          let [association] = await tx
+            .select()
+            .from(inboxAssociation)
+            .where(
+              and(
+                eq(inboxAssociation.id, conversationId),
+                eq(inboxAssociation.businessId, businessId),
+              ),
+            );
           if (!conversation) {
             await tx.insert(inboxConversation).values({
               id: conversationId,
@@ -323,9 +213,22 @@ export function createInboxRepository(database: Database): InboxRepository {
               subject: event.subject,
               lastReceivedAt: at,
             });
+            const opportunityId = randomUUID();
+            const [candidate] = await tx
+              .select({ id: inboxOpportunity.id })
+              .from(inboxOpportunity)
+              .where(
+                and(
+                  eq(inboxOpportunity.businessId, businessId),
+                  eq(inboxOpportunity.buyerId, buyerId),
+                ),
+              )
+              .limit(1);
             await tx.insert(inboxOpportunity).values({
-              id: randomUUID(),
+              id: opportunityId,
               businessId,
+              buyerId,
+              title: event.subject,
               connectionId,
               conversationId,
               stage: "inquiry",
@@ -335,14 +238,62 @@ export function createInboxRepository(database: Database): InboxRepository {
               nextAction: "Review incoming inquiry",
               createdAt: at,
             });
+            [association] = await tx
+              .insert(inboxAssociation)
+              .values({
+                id: conversationId,
+                businessId,
+                buyerId,
+                defaultOpportunityId: opportunityId,
+                version: 0,
+                reviewReason: candidate
+                  ? "Buyer has other purchasing needs; compare before associating"
+                  : null,
+                reviewOwnerId: actor.userId,
+                nextAction: candidate
+                  ? "Compare this inquiry with the buyer's existing Opportunities; keep separate or explicitly associate"
+                  : "Review incoming inquiry",
+              })
+              .returning();
           } else {
             await tx
               .update(inboxConversation)
               .set({ lastReceivedAt: at })
               .where(eq(inboxConversation.id, conversationId));
           }
+          if (!association) throw new ApplicationError("CONFLICT");
+          let opportunityId = association.defaultOpportunityId;
+          if (event.replyToMessageRef) {
+            const [reply] = await tx
+              .select({
+                opportunityId: inboxMessageLink.opportunityId,
+                buyerId: inboxAssociation.buyerId,
+              })
+              .from(inboxMessage)
+              .innerJoin(
+                inboxMessageLink,
+                eq(inboxMessageLink.id, inboxMessage.id),
+              )
+              .innerJoin(
+                inboxAssociation,
+                eq(inboxAssociation.id, inboxMessage.conversationId),
+              )
+              .where(
+                and(
+                  eq(inboxMessage.businessId, businessId),
+                  eq(inboxMessage.connectionId, connectionId),
+                  eq(inboxMessage.messageRef, event.replyToMessageRef),
+                ),
+              );
+            if (reply)
+              opportunityId =
+                reply.buyerId === association.buyerId
+                  ? reply.opportunityId
+                  : null;
+          }
+          const messageId = randomUUID();
           await tx.insert(inboxMessage).values({
-            id: randomUUID(),
+            id: messageId,
             businessId,
             connectionId,
             conversationId,
@@ -350,6 +301,53 @@ export function createInboxRepository(database: Database): InboxRepository {
             content: event,
             fingerprint: messageFingerprint,
             receivedAt: at,
+          });
+          await tx.insert(inboxMessageLink).values({
+            id: messageId,
+            businessId,
+            conversationId,
+            opportunityId,
+            sequence: association.version + 1,
+          });
+          await tx
+            .update(inboxAssociation)
+            .set({
+              version: association.version + 1,
+              ...(!opportunityId
+                ? {
+                    reviewReason: "Message has no unambiguous purchasing need",
+                    nextAction:
+                      "Review unassociated messages and choose or create a purchasing need",
+                  }
+                : {}),
+            })
+            .where(
+              and(
+                eq(inboxAssociation.id, conversationId),
+                eq(inboxAssociation.businessId, businessId),
+              ),
+            );
+          await tx.insert(inboxAssociationHistory).values({
+            id: randomUUID(),
+            businessId,
+            conversationId,
+            actorId: actor.userId,
+            sourceEventId: event.eventId,
+            version: association.version + 1,
+            reason: opportunityId
+              ? "Intake used the explicit conversation default or matching reply association"
+              : "Intake retained an ambiguous message for review",
+            before: {
+              buyerId: association.buyerId,
+              defaultOpportunityId: association.defaultOpportunityId,
+              messages: [],
+            },
+            after: {
+              buyerId: association.buyerId,
+              defaultOpportunityId: association.defaultOpportunityId,
+              messages: [{ id: messageId, opportunityId }],
+            },
+            at,
           });
           await recordEvent(conversationId);
           return { status: "captured", conversationId };

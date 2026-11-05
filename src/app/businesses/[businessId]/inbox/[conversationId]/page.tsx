@@ -4,6 +4,8 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import type { OpportunityHistoryEntry } from "@/models/inbox";
+import { InboxAssociation } from "@/components/inbox-association";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Incoming conversation" };
@@ -11,11 +13,18 @@ export default async function ConversationPage({
   params,
 }: PageProps<"/businesses/[businessId]/inbox/[conversationId]">) {
   const { businessId, conversationId } = await params;
-  const conversation = await (async () => {
+  const { conversation, workspace } = await (async () => {
     try {
-      return await (
-        await getServices()
-      ).inbox.conversation(await headers(), businessId, conversationId);
+      const services = await getServices();
+      const credentials = await headers();
+      return {
+        conversation: await services.inbox.conversation(
+          credentials,
+          businessId,
+          conversationId,
+        ),
+        workspace: await services.inbox.workspace(credentials, businessId),
+      };
     } catch (error: unknown) {
       return pageFailure(error);
     }
@@ -37,6 +46,23 @@ export default async function ConversationPage({
             " · Import revoked; history available"}
         </p>
       </header>
+      {conversation.association.reviewReason && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Association review needed</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p>{conversation.association.reviewReason}</p>
+            <p>
+              Responsible person: {conversation.association.reviewOwnerName} (
+              {conversation.association.reviewOwnerId})
+            </p>
+            <p className="font-medium">
+              Next action: {conversation.association.nextAction}
+            </p>
+          </CardContent>
+        </Card>
+      )}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
@@ -53,7 +79,7 @@ export default async function ConversationPage({
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Initial Opportunity</CardTitle>
+            <CardTitle>Original intake Opportunity</CardTitle>
           </CardHeader>
           <CardContent>
             <dl className="space-y-3">
@@ -73,9 +99,63 @@ export default async function ConversationPage({
                 </div>
               ))}
             </dl>
+            <OpportunityHistory entries={conversation.opportunity.history} />
           </CardContent>
         </Card>
       </div>
+      <section aria-labelledby="buyer-needs" className="space-y-4">
+        <h2 id="buyer-needs" className="text-xl font-semibold">
+          Purchasing needs for {conversation.buyer.name}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Separate needs retain separate owners and outcomes. Association
+          changes do not take over an Opportunity or authorize sending.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          {conversation.opportunities.map((need) => (
+            <Card key={need.id}>
+              <CardHeader>
+                <CardTitle>{need.title}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Badge>
+                  {need.id === conversation.association.defaultOpportunityId
+                    ? "Conversation default"
+                    : "Separate Opportunity"}
+                </Badge>
+                <p>Owner: {need.ownerId ?? "Unassigned"}</p>
+                <p>Next action: {need.nextAction}</p>
+                <p className="text-sm text-muted-foreground">
+                  {need.handoffReason}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Reference: {need.id}
+                </p>
+                <OpportunityHistory entries={need.history} />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <h3 className="font-semibold">This buyer&apos;s conversations</h3>
+        <ul className="space-y-2">
+          {conversation.buyerConversations.map((item) => (
+            <li key={item.id}>
+              <Link
+                className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+                href={`/businesses/${businessId}/inbox/${item.id}`}
+              >
+                {item.subject} · {item.channel}
+                {item.needsReview ? " · Review needed" : ""}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <InboxAssociation
+        businessId={businessId}
+        conversation={conversation}
+        workspace={workspace}
+      />
       <section aria-labelledby="messages-title" className="space-y-4">
         <h2 id="messages-title" className="text-xl font-semibold">
           Received messages
@@ -85,11 +165,18 @@ export default async function ConversationPage({
           actions require their own eligibility and authority checks.
         </p>
         <ol className="space-y-4">
-          {conversation.messages.map((message) => (
+          {conversation.messages.map((message, index) => (
             <li key={message.id}>
               <Card>
                 <CardHeader>
-                  <CardTitle>{message.subject}</CardTitle>
+                  <CardTitle>
+                    Message {index + 1}: {message.subject}
+                  </CardTitle>
+                  <Badge>
+                    {workspace.opportunities.find(
+                      (need) => need.id === message.opportunityId,
+                    )?.title ?? "Needs association review"}
+                  </Badge>
                   <p className="text-sm text-muted-foreground">
                     {message.kind === "direct_inquiry"
                       ? "Direct inquiry"
@@ -135,6 +222,105 @@ export default async function ConversationPage({
           ))}
         </ol>
       </section>
+      <section aria-labelledby="association-history" className="space-y-4">
+        <h2 id="association-history" className="text-xl font-semibold">
+          Association history
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Original channel buyer: {conversation.originalBuyer.name} ·{" "}
+          {conversation.originalBuyer.senderRef}. Original engagement and source
+          identities remain attached.
+        </p>
+        {conversation.history.length ? (
+          <ol className="space-y-4">
+            {conversation.history.map((entry) => (
+              <li key={entry.id}>
+                <Card>
+                  <CardContent className="space-y-2 pt-6">
+                    <p className="font-medium">{entry.reason}</p>
+                    <p className="text-sm text-muted-foreground">
+                      By {entry.actorId} ·{" "}
+                      <time dateTime={entry.at}>
+                        {new Date(entry.at).toLocaleString("en-GB", {
+                          timeZone: "UTC",
+                        })}{" "}
+                        UTC
+                      </time>
+                      {entry.sourceEventId &&
+                        ` · Source event: ${entry.sourceEventId}`}
+                    </p>
+                    <details>
+                      <summary className="min-h-11 cursor-pointer py-3">
+                        Association changes
+                      </summary>
+                      <div className="space-y-2 text-sm">
+                        <p>
+                          Buyer: {entry.before.buyerId} → {entry.after.buyerId}
+                        </p>
+                        <p>
+                          Default:{" "}
+                          {entry.before.defaultOpportunityId ?? "Review"} →{" "}
+                          {entry.after.defaultOpportunityId ?? "Review"}
+                        </p>
+                        {entry.after.messages.map((link) => (
+                          <p key={link.id}>
+                            Message {link.id}:{" "}
+                            {entry.before.messages.find(
+                              (previous) => previous.id === link.id,
+                            )?.opportunityId ?? "Unassociated"}{" "}
+                            → {link.opportunityId ?? "Review"}
+                          </p>
+                        ))}
+                      </div>
+                    </details>
+                  </CardContent>
+                </Card>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-muted-foreground">
+            Imported before association history was introduced. Original
+            messages and the intake Opportunity remain available above.
+          </p>
+        )}
+      </section>
     </div>
+  );
+}
+
+function OpportunityHistory({
+  entries,
+}: {
+  entries: OpportunityHistoryEntry[];
+}) {
+  return (
+    <details className="mt-4 text-sm">
+      <summary className="min-h-11 cursor-pointer py-3 font-medium">
+        Ownership and outcome history
+      </summary>
+      {entries.length ? (
+        <ol className="space-y-3">
+          {entries.map((entry) => (
+            <li key={entry.id} className="space-y-1">
+              <p className="font-medium">
+                {entry.kind.replaceAll("_", " ")}: {entry.detail}
+              </p>
+              <p className="text-muted-foreground">
+                <time dateTime={entry.at}>{entry.at}</time> ?{" "}
+                {entry.actorId ?? "Recorded event"} ? Source:{" "}
+                {entry.sourceRef ?? "Not recorded"}
+              </p>
+              <p className="text-muted-foreground">Record: {entry.id}</p>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-muted-foreground">
+          No ownership or outcome events recorded. Association does not create a
+          booking, quotation or sale.
+        </p>
+      )}
+    </details>
   );
 }

@@ -374,8 +374,9 @@ export function InboxImport({
             </div>
             <p className="text-sm text-muted-foreground">
               Keep source references and event time unchanged when retrying an
-              import. Repeated messages about the same need use the same
-              conversation reference.
+              import. Use the original channel conversation reference. Review
+              the conversation to associate messages with the right purchasing
+              need or separate independent needs.
             </p>
             <div className="space-y-2">
               <Label htmlFor="import-subject">Subject</Label>
