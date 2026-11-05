@@ -13,6 +13,8 @@ import { scoped } from "../db/scope";
 import { ApplicationError } from "../models/application-error";
 import type { Clock } from "../models/business";
 import type { SecurityStatus } from "../models/security";
+import type { WorkIdentity } from "../models/discovery";
+import { and } from "drizzle-orm";
 
 export const businessMfaLifetime = 12 * 60 * 60 * 1000;
 export const operatorMfaLifetime = 15 * 60 * 1000;
@@ -42,7 +44,7 @@ export function privilegedRoles(database: Database, userId: string) {
 // Check the authoritative session and current factor together. Client fields,
 // cached cookies, role claims and trusted-device cookies cannot establish MFA.
 export async function hasMfa(
-  database: Database,
+  database: Pick<Database, "select">,
   token: string,
   at: Date,
   maxAge = businessMfaLifetime,
@@ -73,6 +75,35 @@ export async function hasMfa(
     age >= 0 &&
     age < maxAge,
   );
+}
+
+export async function authenticateQueuedActor(
+  database: Database,
+  clock: Clock,
+  identity: WorkIdentity,
+) {
+  const [current] = await database
+    .select()
+    .from(session)
+    .where(
+      and(
+        eq(session.id, identity.sessionId),
+        eq(session.userId, identity.userId),
+      ),
+    );
+  if (!current || current.expiresAt <= clock.now())
+    throw new ApplicationError("UNAUTHENTICATED");
+  const roles = await privilegedRoles(database, identity.userId);
+  const [account] = await database
+    .select({ enrolled: user.twoFactorEnabled })
+    .from(user)
+    .where(eq(user.id, identity.userId));
+  if (
+    (roles.business || roles.operator || account?.enrolled) &&
+    !(await hasMfa(database, current.token, clock.now()))
+  )
+    throw new ApplicationError("MFA_REQUIRED");
+  return { userId: identity.userId };
 }
 
 export function createSessionAccess(options: {
@@ -127,10 +158,19 @@ export function createSessionAccess(options: {
       throw new ApplicationError("MFA_REQUIRED");
     return { userId: identity.user.id };
   }
+  async function authenticateWork(identity: WorkIdentity) {
+    return authenticateQueuedActor(database, clock, identity);
+  }
   return {
     primary,
     status,
     authenticate,
+    authenticateForWork: async (headers: Headers) => {
+      const actor = await authenticate(headers);
+      const identity = await primary(headers);
+      return { ...actor, sessionId: identity.session.id };
+    },
+    authenticateWork,
     authenticatePrivileged: (headers: Headers) => privileged(headers),
     authenticatePlatform: (headers: Headers) =>
       privileged(headers, operatorMfaLifetime),

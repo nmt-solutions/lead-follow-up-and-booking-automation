@@ -78,6 +78,12 @@ export default async function BusinessPage({
         Approved answers and qualification
       </Link>
       <Link
+        href={`/businesses/${businessId}/discovery`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Prospect discovery and sourced potential buyers
+      </Link>
+      <Link
         href={`/businesses/${businessId}/commercial-authority`}
         className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
       >

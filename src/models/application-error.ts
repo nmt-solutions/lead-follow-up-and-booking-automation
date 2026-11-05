@@ -10,7 +10,10 @@ export type ApplicationErrorCode =
   | "SETUP_REQUIRED"
   | "FILE_SETUP_REQUIRED"
   | "FILE_DISALLOWED"
-  | "FILE_UNAVAILABLE";
+  | "FILE_UNAVAILABLE"
+  | "DISCOVERY_SETUP_REQUIRED"
+  | "DISCOVERY_SCOPE_INVALID"
+  | "DISCOVERY_INTERRUPTED";
 
 export class ApplicationError extends Error {
   constructor(

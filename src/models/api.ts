@@ -4,6 +4,21 @@ import {
 } from "./application-error";
 
 const failures = {
+  DISCOVERY_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "Discovery needs configured active reach, coverage, authorized allowances, data permissions and an approved provider and worker. Contact the service operator.",
+  },
+  DISCOVERY_SCOPE_INVALID: {
+    status: 400,
+    message:
+      "Select confirmed markets within active reach and supported coverage, and an allowance within the configured run limit.",
+  },
+  DISCOVERY_INTERRUPTED: {
+    status: 409,
+    message:
+      "Discovery was interrupted. Completed work and reserved usage are preserved. Review the run before starting another.",
+  },
   FILE_SETUP_REQUIRED: {
     status: 503,
     message:

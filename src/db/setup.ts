@@ -14,6 +14,11 @@ import {
   fileUsage,
   knowledgeRevision,
   commercialAuthorityRevision,
+  discoveryConfiguration,
+  discoveryRun,
+  discoveryProspect,
+  discoveryResult,
+  discoveryUsage,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -83,6 +88,31 @@ export async function prepareDatabaseRole(pool: Pool) {
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
   await prepareFileCleanup(pool);
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION public.finish_discovery(run uuid, scope uuid, execution uuid, reason text, at_time timestamptz)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      IF reason NOT IN ('completed', 'budget_exhausted', 'provider_unavailable', 'provider_rate_limited', 'provider_permission_denied', 'invalid_provider_response', 'interrupted', 'defect', 'authorization_revoked', 'configuration_changed', 'queue_unavailable', 'worker_lost') THEN RAISE EXCEPTION 'Invalid stop reason'; END IF;
+      UPDATE public.discovery_run r SET status = CASE WHEN reason = 'completed' THEN 'completed' ELSE 'stopped' END,
+        stop_reason = reason, updated_at = at_time
+        WHERE r.id = run AND r.business_id = scope AND r.execution_id = execution AND r.status IN ('queued', 'running');
+      IF FOUND THEN
+        UPDATE public.discovery_usage u SET outcome = 'uncertain'
+          WHERE u.run_id = run AND u.business_id = scope AND u.outcome = 'reserved';
+      END IF;
+    END $$;
+    REVOKE ALL ON FUNCTION public.finish_discovery(uuid, uuid, uuid, text, timestamptz) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.finish_discovery(uuid, uuid, uuid, text, timestamptz) TO app_runtime;
+    CREATE OR REPLACE FUNCTION public.fail_discovery_operation(run uuid, scope uuid, execution uuid, operation uuid)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      UPDATE public.discovery_usage u SET outcome = 'failed'
+        WHERE u.id = operation AND u.run_id = run AND u.business_id = scope AND u.outcome = 'reserved'
+        AND EXISTS (SELECT 1 FROM public.discovery_run r WHERE r.id = run AND r.business_id = scope AND r.execution_id = execution AND r.status = 'running');
+    END $$;
+    REVOKE ALL ON FUNCTION public.fail_discovery_operation(uuid, uuid, uuid, uuid) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.fail_discovery_operation(uuid, uuid, uuid, uuid) TO app_runtime;
+  `);
   // Current escalation owners are visible to current Business members, including
   // Salespeople whose ordinary membership reads cannot enumerate the team.
   await pool.query(`
@@ -148,6 +178,11 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.commercial_authority_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.commercial_authority_revision FROM app_runtime;
       END IF;
+      IF to_regclass('public.discovery_run') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.discovery_configuration, public.discovery_run, public.discovery_prospect, public.discovery_result, public.discovery_usage FROM app_runtime;
+        REVOKE ALL PRIVILEGES (status, stop_reason, used, completed_steps, updated_at) ON public.discovery_run FROM app_runtime;
+        REVOKE ALL PRIVILEGES (outcome) ON public.discovery_usage FROM app_runtime;
+      END IF;
     END $$;
   `);
 }
@@ -181,6 +216,11 @@ export async function secureDatabase(pool: Pool) {
       fileUsage,
       knowledgeRevision,
       commercialAuthorityRevision,
+      discoveryConfiguration,
+      discoveryRun,
+      discoveryProspect,
+      discoveryResult,
+      discoveryUsage,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -221,6 +261,16 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON commercial_authority_revision FROM app_runtime;
       GRANT SELECT, INSERT ON commercial_authority_revision TO app_runtime;
       ALTER TABLE commercial_authority_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON discovery_configuration, discovery_run, discovery_prospect, discovery_result, discovery_usage FROM app_runtime;
+      GRANT SELECT ON discovery_configuration TO app_runtime;
+      GRANT SELECT, INSERT ON discovery_run, discovery_prospect, discovery_result, discovery_usage TO app_runtime;
+      GRANT UPDATE (status, stop_reason, used, completed_steps, updated_at) ON discovery_run TO app_runtime;
+      GRANT UPDATE (outcome) ON discovery_usage TO app_runtime;
+      ALTER TABLE discovery_configuration FORCE ROW LEVEL SECURITY;
+      ALTER TABLE discovery_run FORCE ROW LEVEL SECURITY;
+      ALTER TABLE discovery_prospect FORCE ROW LEVEL SECURITY;
+      ALTER TABLE discovery_result FORCE ROW LEVEL SECURITY;
+      ALTER TABLE discovery_usage FORCE ROW LEVEL SECURITY;
       SET LOCAL ROLE app_runtime;
     `);
     await verifyRuntimeRole(client);

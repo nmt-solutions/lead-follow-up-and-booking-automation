@@ -15,6 +15,21 @@ export async function verifyRuntimeRole(
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
       AND current_setting('row_security') = 'on'
+      AND (SELECT count(*) = 5 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('discovery_configuration', 'discovery_run', 'discovery_prospect', 'discovery_result', 'discovery_usage'))
+      AND (SELECT count(*) = 13 AND bool_and(
+        (policyname IN ('discovery_run_system', 'discovery_usage_system') AND 'public' = ANY(roles) AND qual IS NOT NULL AND with_check IS NOT NULL)
+        OR ('app_runtime' = ANY(roles) AND CASE
+          WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+          WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
+          WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL
+          ELSE false END)) FROM pg_policies WHERE schemaname = 'public'
+        AND tablename IN ('discovery_configuration', 'discovery_run', 'discovery_prospect', 'discovery_result', 'discovery_usage'))
+      AND NOT has_table_privilege(current_user, 'public.discovery_configuration', 'INSERT,UPDATE,DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.discovery_run', 'budget', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.discovery_run', 'execution_id', 'UPDATE')
       AND (SELECT count(*) = 1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

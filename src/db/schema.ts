@@ -20,6 +20,13 @@ import type { SavedConfiguration } from "../models/configuration";
 import type { FileState } from "../models/files";
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { CommercialPolicy } from "../models/commercial-authority";
+import type {
+  DiscoveryPolicy,
+  DiscoveryBrief,
+  RunStatus,
+  StopReason,
+  DiscoveryProspect,
+} from "../models/discovery";
 
 export const appRuntime = pgRole("app_runtime").existing();
 
@@ -564,6 +571,185 @@ export const fileUsage = pgTable(
       to: "public",
       using: fileOwnerScope,
       withCheck: fileOwnerScope,
+    }),
+  ],
+).enableRLS();
+
+const discoveryScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
+const discoveryWrite = sql`(${discoveryScope}) and public.current_business_role() in ('owner', 'admin')`;
+const discoveryOwner = sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.discovery_run'::regclass)`;
+
+export const discoveryConfiguration = pgTable(
+  "discovery_configuration",
+  {
+    businessId: uuid("business_id")
+      .primaryKey()
+      .references(() => business.id),
+    policy: jsonb("policy").$type<DiscoveryPolicy>().notNull(),
+  },
+  () => [
+    pgPolicy("discovery_configuration_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+  ],
+).enableRLS();
+
+export const discoveryRun = pgTable(
+  "discovery_run",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    brief: jsonb("brief").$type<DiscoveryBrief>().notNull(),
+    policy: jsonb("policy").$type<DiscoveryPolicy>().notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    executionId: uuid("execution_id").notNull(),
+    status: text("status").$type<RunStatus>().notNull(),
+    stopReason: text("stop_reason").$type<StopReason>(),
+    budget: integer("budget").notNull(),
+    used: integer("used").notNull().default(0),
+    completedSteps: integer("completed_steps").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("discovery_request_key").on(table.businessId, table.requestKey),
+    index("discovery_run_business_idx").on(table.businessId, table.createdAt),
+    check(
+      "discovery_budget_bound",
+      sql`${table.budget} > 0 and ${table.used} >= 0 and ${table.used} <= ${table.budget}`,
+    ),
+    pgPolicy("discovery_run_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_run_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${discoveryWrite}) and created_by = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("discovery_run_update", {
+      for: "update",
+      to: appRuntime,
+      using: discoveryWrite,
+      withCheck: discoveryWrite,
+    }),
+    pgPolicy("discovery_run_system", {
+      for: "all",
+      to: "public",
+      using: discoveryOwner,
+      withCheck: discoveryOwner,
+    }),
+  ],
+).enableRLS();
+
+export const discoveryProspect = pgTable(
+  "discovery_prospect",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    canonicalUrl: text("canonical_url").notNull(),
+  },
+  (table) => [
+    uniqueIndex("discovery_prospect_identity").on(
+      table.businessId,
+      table.canonicalUrl,
+    ),
+    pgPolicy("discovery_prospect_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_prospect_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: discoveryWrite,
+    }),
+  ],
+).enableRLS();
+
+export const discoveryResult = pgTable(
+  "discovery_result",
+  {
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => discoveryRun.id),
+    prospectId: uuid("prospect_id")
+      .notNull()
+      .references(() => discoveryProspect.id),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    data: jsonb("data").$type<Omit<DiscoveryProspect, "id">>().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.prospectId] }),
+    pgPolicy("discovery_result_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_result_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${discoveryWrite}) and exists (select 1 from public.discovery_run r where r.id = run_id and r.business_id = ${table.businessId}) and exists (select 1 from public.discovery_prospect p where p.id = prospect_id and p.business_id = ${table.businessId})`,
+    }),
+  ],
+).enableRLS();
+
+export const discoveryUsage = pgTable(
+  "discovery_usage",
+  {
+    id: uuid("id").primaryKey(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => discoveryRun.id),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    kind: text("kind").$type<"search" | "review">().notNull(),
+    units: integer("units").notNull(),
+    position: integer("position").notNull(),
+    outcome: text("outcome")
+      .$type<"reserved" | "succeeded" | "failed" | "uncertain">()
+      .notNull(),
+    query: text("query"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("discovery_usage_run_idx").on(table.businessId, table.runId),
+    check("discovery_usage_positive", sql`${table.units} > 0`),
+    pgPolicy("discovery_usage_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_usage_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${discoveryWrite}) and exists (select 1 from public.discovery_run r where r.id = run_id and r.business_id = ${table.businessId})`,
+    }),
+    pgPolicy("discovery_usage_update", {
+      for: "update",
+      to: appRuntime,
+      using: discoveryWrite,
+      withCheck: discoveryWrite,
+    }),
+    pgPolicy("discovery_usage_system", {
+      for: "all",
+      to: "public",
+      using: discoveryOwner,
+      withCheck: discoveryOwner,
     }),
   ],
 ).enableRLS();

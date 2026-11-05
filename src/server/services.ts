@@ -24,6 +24,13 @@ import { createKnowledgeHttp } from "../http/knowledge";
 import { createCommercialAuthorityApplication } from "../application/commercial-authority";
 import { createCommercialAuthorityRepository } from "../db/commercial-authority-repository";
 import { createCommercialAuthorityHttp } from "../http/commercial-authority";
+import { createDiscoveryApplication } from "../application/discovery";
+import { createDiscoveryRepository } from "../db/discovery-repository";
+import { createDiscoveryHttp } from "../http/discovery";
+import {
+  configuredDiscoveryProvider,
+  configuredDiscoveryQueue,
+} from "../discovery/configuration";
 
 export function reportFailure(diagnostic: FailureDiagnostic) {
   console.error(JSON.stringify({ event: "request_failed", ...diagnostic }));
@@ -97,6 +104,21 @@ async function composeServices() {
     repository: createCommercialAuthorityRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
   });
+  const discovery = createDiscoveryApplication({
+    authenticate,
+    authenticateForWork: access.authenticateForWork,
+    authenticateWork: access.authenticateWork,
+    repository: createDiscoveryRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    clock: { now: () => new Date() },
+    provider: configuredDiscoveryProvider(),
+    queue: configuredDiscoveryQueue(process.env),
+    reportFailure: ({ businessId, runId, code }) =>
+      console.error(
+        JSON.stringify({ event: "discovery_failed", businessId, runId, code }),
+      ),
+  });
   return {
     auth,
     access,
@@ -105,6 +127,12 @@ async function composeServices() {
     files,
     knowledge,
     commercialAuthority,
+    discovery,
+    discoveryHttp: createDiscoveryHttp({
+      application: discovery,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     commercialAuthorityHttp: createCommercialAuthorityHttp({
       application: commercialAuthority,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
