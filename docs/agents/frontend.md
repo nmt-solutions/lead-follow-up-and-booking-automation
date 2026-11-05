@@ -21,4 +21,6 @@ Apply their principles to the web, preserving browser conventions and shadcn beh
 
 ## Completion
 
-Review the changed flow with both skills before finishing. Verify responsive layout, text scaling, semantic labels, keyboard navigation, visible focus, measured contrast from actual tokens and relevant accessibility preferences. Check the affected loading, empty, error and success states, and interruptibility where motion exists. Report verification limits explicitly; do not claim a rendered or accessibility check that was not performed.
+Review the changed source and intended flow with both skills, reusing the existing theme and component standards. Keep agent verification focused on automated application, persistence and code checks.
+
+The user performs UI validation. Run browser/UI validation, visual or accessibility audits, CSS measurements and preference emulation only when the user explicitly requests them. At handoff, identify UI validation as pending and provide concise manual workflow steps with expected outcomes under [the issue handoff](issue-tracker.md#implementation-handoff-and-user-acceptance). Report only checks actually performed.
