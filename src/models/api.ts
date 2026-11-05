@@ -4,6 +4,11 @@ import {
 } from "./application-error";
 
 const failures = {
+  COMMERCIAL_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "Commercial execution has no configured provider. Review the approved action and record authoritative Business evidence only after completing it externally.",
+  },
   CHANNEL_SETUP_REQUIRED: {
     status: 503,
     message:

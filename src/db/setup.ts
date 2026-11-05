@@ -49,6 +49,11 @@ import {
   rfqRequest,
   rfqRevision,
   opportunityScopeForeignKeys,
+  commercialProposal,
+  commercialDecision,
+  commercialExecution,
+  commercialOutcome,
+  commercialScopeForeignKeys,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -294,6 +299,10 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.rfq_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.rfq_revision FROM app_runtime;
       END IF;
+      IF to_regclass('public.commercial_proposal') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.commercial_proposal, public.commercial_decision, public.commercial_execution, public.commercial_outcome FROM app_runtime;
+        REVOKE ALL PRIVILEGES (state, reason, reference) ON public.commercial_execution FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -314,6 +323,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   for (const key of [
     ...inboxScopeForeignKeys,
     ...opportunityScopeForeignKeys,
+    ...commercialScopeForeignKeys,
   ]) {
     const { name } = getTableConfig(key.table);
     const exists = await pool.query<{ present: boolean }>(
@@ -359,6 +369,7 @@ export async function secureDatabase(pool: Pool) {
       ...aiExecutionScopeForeignKeys,
       ...inboxScopeForeignKeys,
       ...opportunityScopeForeignKeys,
+      ...commercialScopeForeignKeys,
     ]) {
       const table = key.table;
       const reference = key.reference();
@@ -390,6 +401,10 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      commercialProposal,
+      commercialDecision,
+      commercialExecution,
+      commercialOutcome,
       rfqRequest,
       rfqRevision,
       inquiryRun,
@@ -442,6 +457,13 @@ export async function secureDatabase(pool: Pool) {
     }
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON commercial_proposal, commercial_decision, commercial_execution, commercial_outcome FROM app_runtime;
+      GRANT SELECT, INSERT ON commercial_proposal, commercial_decision, commercial_execution, commercial_outcome TO app_runtime;
+      GRANT UPDATE (state, reason, reference) ON commercial_execution TO app_runtime;
+      ALTER TABLE commercial_proposal FORCE ROW LEVEL SECURITY;
+      ALTER TABLE commercial_decision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE commercial_execution FORCE ROW LEVEL SECURITY;
+      ALTER TABLE commercial_outcome FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON rfq_request, rfq_revision FROM app_runtime;
       GRANT SELECT, INSERT ON rfq_request, rfq_revision TO app_runtime;
       ALTER TABLE rfq_request FORCE ROW LEVEL SECURITY;

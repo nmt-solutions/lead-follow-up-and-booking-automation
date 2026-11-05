@@ -31,6 +31,11 @@ import type {
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { InquirySnapshot, InquiryResult } from "../models/inquiries";
 import type { RfqRecord } from "../models/rfq";
+import type {
+  CommercialPayload,
+  CommercialActionView,
+  CommercialEvidence,
+} from "../models/commercial-actions";
 import type { CommercialPolicy } from "../models/commercial-authority";
 import type {
   ControlSnapshot,
@@ -1933,6 +1938,184 @@ export const rfqRevision = pgTable(
     ...associationPolicies("rfq_revision"),
   ],
 ).enableRLS();
+
+function commercialPolicies(name: string, privileged = false, mutable = false) {
+  const write = privileged ? sql`(${inboxWrite})` : inboxScope;
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${write}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+    ...(mutable
+      ? [
+          pgPolicy(`${name}_update`, {
+            for: "update",
+            to: appRuntime,
+            using: inboxScope,
+            withCheck: inboxScope,
+          }),
+        ]
+      : []),
+  ];
+}
+export const commercialProposal = pgTable(
+  "commercial_proposal",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    seriesId: uuid("series_id").notNull(),
+    version: integer("version").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    payload: jsonb("payload").$type<CommercialPayload>().notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    contextKey: text("context_key").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    evaluation: jsonb("evaluation")
+      .$type<CommercialActionView["evaluation"]>()
+      .notNull(),
+    note: text("note").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("commercial_proposal_scope").on(
+      t.id,
+      t.businessId,
+      t.opportunityId,
+    ),
+    uniqueIndex("commercial_proposal_version").on(t.seriesId, t.version),
+    uniqueIndex("commercial_proposal_request").on(t.businessId, t.requestKey),
+    uniqueIndex("commercial_proposal_sequence").on(
+      t.businessId,
+      t.opportunityId,
+      t.sequence,
+    ),
+    check("commercial_proposal_positive", sql`${t.version}>0`),
+    ...commercialPolicies("commercial_proposal"),
+  ],
+).enableRLS();
+export const commercialDecision = pgTable(
+  "commercial_decision",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    decision: text("decision").$type<"approved" | "rejected">().notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    contextKey: text("context_key").notNull(),
+    note: text("note").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("commercial_decision_once").on(t.actionId),
+    check(
+      "commercial_decision_value",
+      sql`${t.decision} in ('approved','rejected')`,
+    ),
+    ...commercialPolicies("commercial_decision", true),
+  ],
+).enableRLS();
+export const commercialExecution = pgTable(
+  "commercial_execution",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    state: text("state")
+      .$type<NonNullable<CommercialActionView["execution"]>["state"]>()
+      .notNull(),
+    reason: text("reason"),
+    reference: text("reference"),
+    provider: text("provider").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("commercial_execution_once").on(t.actionId),
+    check(
+      "commercial_execution_state",
+      sql`${t.state} in ('committed','completed','failed','ambiguous','blocked')`,
+    ),
+    ...commercialPolicies("commercial_execution", false, true),
+  ],
+).enableRLS();
+export const commercialOutcome = pgTable(
+  "commercial_outcome",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    kind: text("kind").$type<CommercialEvidence["kind"]>().notNull(),
+    source: text("source").notNull(),
+    reference: text("reference").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    note: text("note").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("commercial_outcome_identity").on(
+      t.businessId,
+      t.source,
+      t.kind,
+      t.reference,
+    ),
+    uniqueIndex("commercial_outcome_once").on(t.actionId, t.kind),
+    check(
+      "commercial_outcome_kind",
+      sql`${t.kind} in ('issued_quote','accepted_order','confirmed_sale')`,
+    ),
+    ...commercialPolicies("commercial_outcome"),
+  ],
+).enableRLS();
+
+export const commercialScopeForeignKeys = [
+  new ForeignKey(
+    commercialProposal,
+    foreignKey({
+      columns: [
+        commercialProposal.opportunityId,
+        commercialProposal.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  ...[commercialDecision, commercialExecution, commercialOutcome].map(
+    (t) =>
+      new ForeignKey(
+        t,
+        foreignKey({
+          columns: [t.actionId, t.businessId, t.opportunityId],
+          foreignColumns: [
+            commercialProposal.id,
+            commercialProposal.businessId,
+            commercialProposal.opportunityId,
+          ],
+        }),
+      ),
+  ),
+];
 
 export const opportunityScopeForeignKeys = [
   new ForeignKey(

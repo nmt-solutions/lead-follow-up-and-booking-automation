@@ -1,4 +1,7 @@
 import "server-only";
+import { createCommercialApplication } from "../application/commercial-actions";
+import { createCommercialRepository } from "../db/commercial-actions-repository";
+import { createCommercialHttp } from "../http/commercial-actions";
 import { createRfqApplication } from "../application/rfq";
 import { createRfqRepository } from "../db/rfq-repository";
 import { createRfqHttp } from "../http/rfq";
@@ -188,7 +191,26 @@ async function composeServices() {
       now: () => new Date(),
     }),
   });
+  const commercialActions = createCommercialApplication({
+    authenticateForWork: access.authenticateForWork,
+    repository: createCommercialRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    provider: {
+      key: "unconfigured",
+      available: false,
+      async execute() {
+        throw new ApplicationError("COMMERCIAL_SETUP_REQUIRED");
+      },
+    },
+  });
   return {
+    commercialActions,
+    commercialActionsHttp: createCommercialHttp({
+      application: commercialActions,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     inquiries,
     rfqs,
     rfqsHttp: createRfqHttp({

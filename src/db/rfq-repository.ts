@@ -48,7 +48,7 @@ async function history(
     )
     .orderBy(asc(rfqRevision.version));
 }
-async function workspace(
+export async function readRfqWorkspace(
   tx: Transaction,
   actor: WorkIdentity,
   businessId: string,
@@ -206,7 +206,7 @@ export function createRfqRepository(database: Database, clock: Clock) {
   return {
     read(actor: WorkIdentity, businessId: string, opportunityId: string) {
       return scope(actor, businessId, async (tx) =>
-        workspace(
+        readRfqWorkspace(
           tx,
           actor,
           businessId,
@@ -222,7 +222,7 @@ export function createRfqRepository(database: Database, clock: Clock) {
     ) {
       return scope(actor, businessId, async (tx) => {
         const c = await inquiryContext(tx, businessId, opportunityId);
-        const state = await workspace(tx, actor, businessId, c);
+        const state = await readRfqWorkspace(tx, actor, businessId, c);
         if (c.need.ownerId !== actor.userId)
           throw new ApplicationError("FORBIDDEN");
         const fingerprint = createHash("sha256")
@@ -331,7 +331,7 @@ export function createRfqRepository(database: Database, clock: Clock) {
           null,
           revisionId,
         );
-        return workspace(
+        return readRfqWorkspace(
           tx,
           actor,
           businessId,

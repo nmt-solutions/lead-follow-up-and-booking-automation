@@ -7,6 +7,10 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "commercial_proposal",
+    "commercial_decision",
+    "commercial_execution",
+    "commercial_outcome",
     "rfq_request",
     "rfq_revision",
     "inquiry_run",

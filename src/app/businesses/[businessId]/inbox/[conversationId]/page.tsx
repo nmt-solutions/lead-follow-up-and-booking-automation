@@ -159,6 +159,12 @@ export default async function ConversationPage({
                 </Badge>
                 <p>Owner: {need.ownerId ?? "Unassigned"}</p>
                 <p>Next action: {need.nextAction}</p>
+                <Link
+                  href={`/businesses/${businessId}/opportunities/${need.id}/commercial-actions`}
+                  className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+                >
+                  Review commercial actions
+                </Link>
                 <p className="text-sm text-muted-foreground">
                   {need.handoffReason}
                 </p>
