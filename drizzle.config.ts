@@ -23,5 +23,10 @@ export default defineConfig({
     "file_usage",
     "knowledge_revision",
     "commercial_authority_revision",
+    "discovery_configuration",
+    "discovery_run",
+    "discovery_prospect",
+    "discovery_result",
+    "discovery_usage",
   ],
 });

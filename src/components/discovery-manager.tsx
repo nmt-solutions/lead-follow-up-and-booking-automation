@@ -15,6 +15,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription } from "./ui/alert";
+import { DiscoveryProspectCard } from "./discovery-prospect";
 
 const reasons: Record<StopReason, string> = {
   completed: "Completed",
@@ -53,6 +54,10 @@ class DiscoveryRequestError extends Error {
 }
 
 function RunResults({ run }: { run: RunView }) {
+  const openRequests = run.prospects.filter((p) => p.requestState === "open");
+  const potentialBuyers = run.prospects.filter(
+    (p) => p.requestState !== "open",
+  );
   return (
     <article className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -83,10 +88,30 @@ function RunResults({ run }: { run: RunView }) {
           <dd className="mt-1 font-medium">{run.completedSteps}</dd>
         </div>
         <div>
-          <dt className="text-sm text-muted-foreground">Potential buyers</dt>
-          <dd className="mt-1 font-medium">{run.prospects.length}</dd>
+          <dt className="text-sm text-muted-foreground">
+            Evidence-backed matches
+          </dt>
+          <dd className="mt-1 font-medium">{run.counts.evidenceBacked}</dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted-foreground">
+            Contactable prospects
+          </dt>
+          <dd className="mt-1 font-medium">{run.counts.contactable}</dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted-foreground">
+            Named-buyer coverage
+          </dt>
+          <dd className="mt-1 font-medium">{run.counts.namedBuyers}</dd>
         </div>
       </dl>
+      <p className="text-sm text-muted-foreground">
+        Counts cover unique prospects in this run. Named-buyer coverage counts
+        prospects with an evidenced purchasing person or owner, even without a
+        contact route. Contactable means a usable public route, including
+        general business contacts; it does not establish permission to send.
+      </p>
       {(run.status === "queued" || run.status === "running") && (
         <p className="text-sm text-muted-foreground">
           Refresh to see progress. Completed evidence appears as it is saved.
@@ -100,7 +125,7 @@ function RunResults({ run }: { run: RunView }) {
         </p>
       )}
       <details className="rounded-lg border border-border p-4">
-        <summary className="cursor-pointer font-medium">
+        <summary className="min-h-11 cursor-pointer font-medium">
           Reviewed brief and usage
         </summary>
         <dl className="mt-4 space-y-3 text-sm">
@@ -146,73 +171,49 @@ function RunResults({ run }: { run: RunView }) {
           ))}
         </ul>
       </details>
-      {run.prospects.length === 0 ? (
+      <section className="space-y-4" aria-labelledby={`open-${run.id}`}>
+        <h4 id={`open-${run.id}`} className="text-lg font-semibold">
+          Open buying requests ({run.counts.openBuyingRequests})
+        </h4>
         <p className="text-sm text-muted-foreground">
-          No evidence-backed potential buyers saved for this run yet. Results
-          depend on sources and scope; no result count is guaranteed.
+          Explicit, dated public needs shown open by their source when checked,
+          with no evidenced expiry reached. Source check times remain visible;
+          no automatic revalidation is assumed.
         </p>
-      ) : (
-        <ul className="space-y-4">
-          {run.prospects.map((prospect) => (
-            <li
-              key={prospect.id}
-              className="space-y-3 rounded-xl border border-border p-5"
-            >
-              <div>
-                <h4 className="font-semibold wrap-anywhere">{prospect.name}</h4>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Potential buyer · {prospect.buyer.label} · {prospect.market}
-                </p>
-              </div>
-              <p className="wrap-anywhere">{prospect.matchReason}</p>
-              <p className="text-sm text-muted-foreground wrap-anywhere">
-                Uncertainty: {prospect.uncertainty}
-              </p>
-              {prospect.request && (
-                <p className="text-sm wrap-anywhere">
-                  Public request ({prospect.request.status},{" "}
-                  {prospect.request.publishedAt
-                    ? `dated ${prospect.request.publishedAt}`
-                    : "date unverified"}
-                  ): “{prospect.request.quote}”
-                  {prospect.request.dateQuote && (
-                    <span className="mt-1 block">
-                      Date evidence: “{prospect.request.dateQuote}”
-                    </span>
-                  )}
-                  {prospect.request.statusQuote && (
-                    <span className="mt-1 block">
-                      Status evidence: “{prospect.request.statusQuote}”
-                    </span>
-                  )}
-                </p>
-              )}
-              {prospect.evidence.map((evidence) => (
-                <div key={evidence.url} className="space-y-2 text-sm">
-                  <blockquote className="border-l-2 border-border pl-3 wrap-anywhere">
-                    “{evidence.quote}”
-                  </blockquote>
-                  <a
-                    href={evidence.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex min-h-11 items-center text-primary underline underline-offset-4 wrap-anywhere"
-                  >
-                    {evidence.url}
-                  </a>
-                  <p className="text-muted-foreground">
-                    Checked {new Date(evidence.checkedAt).toLocaleString()}
-                  </p>
-                </div>
-              ))}
-              <p className="text-sm text-muted-foreground">
-                Contact availability and purchasing role are unverified. No
-                direct engagement or outreach approval is established.
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
+        {openRequests.length ? (
+          <ul className="space-y-4">
+            {openRequests.map((prospect) => (
+              <DiscoveryProspectCard key={prospect.id} prospect={prospect} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No established open buying requests saved for this run.
+          </p>
+        )}
+      </section>
+      <section className="space-y-4" aria-labelledby={`potential-${run.id}`}>
+        <h4 id={`potential-${run.id}`} className="text-lg font-semibold">
+          Potential buyers ({run.counts.potentialBuyers})
+        </h4>
+        <p className="text-sm text-muted-foreground">
+          Evidence-backed fit without established open demand. Expired, undated
+          and uncertain requests remain here with their evidence and actual
+          status.
+        </p>
+        {potentialBuyers.length ? (
+          <ul className="space-y-4">
+            {potentialBuyers.map((prospect) => (
+              <DiscoveryProspectCard key={prospect.id} prospect={prospect} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No other potential buyers saved for this run yet. Results depend on
+            sources and scope; no count is guaranteed.
+          </p>
+        )}
+      </section>
     </article>
   );
 }

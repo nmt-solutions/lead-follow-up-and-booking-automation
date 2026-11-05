@@ -15,6 +15,7 @@ import {
 import { ApplicationError } from "../models/application-error";
 import {
   discoveryPolicySchema,
+  persistedProspectSchema,
   type DiscoveryRun,
   type DiscoveryWork,
   type DiscoveryBrief,
@@ -27,6 +28,7 @@ import {
 import type { BusinessProfile, Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import { hasMfa } from "../auth/access";
+import { coverageCounts, prospectView } from "../discovery/evidence";
 
 async function requireWorkSession(
   tx: Transaction,
@@ -168,6 +170,15 @@ export function createDiscoveryRepository(
             )
             .orderBy(asc(discoveryUsage.position));
           // Explicit public projection excludes worker capabilities and session IDs.
+          const prospects = results.map((result) =>
+            prospectView(
+              {
+                ...persistedProspectSchema.parse(result.data),
+                id: result.prospectId,
+              },
+              clock.now(),
+            ),
+          );
           runs.push({
             id: row.id,
             businessId,
@@ -181,10 +192,8 @@ export function createDiscoveryRepository(
             allowanceUnit: row.policy.allowanceUnit,
             createdAt: row.createdAt.toISOString(),
             updatedAt: row.updatedAt.toISOString(),
-            prospects: results.map((result) => ({
-              ...result.data,
-              id: result.prospectId,
-            })),
+            prospects,
+            counts: coverageCounts(prospects),
             usage: usage.map(({ id, kind, units, outcome, query, at }) => ({
               id,
               kind,
@@ -373,7 +382,8 @@ export function createDiscoveryRepository(
           if (!usage || usage.outcome !== "reserved")
             throw new ApplicationError("CONFLICT");
           if (prospect) {
-            const url = prospect.evidence[0].url;
+            const data = persistedProspectSchema.parse(prospect);
+            const url = data.evidence[0].url;
             await tx
               .insert(discoveryProspect)
               .values({
@@ -397,7 +407,7 @@ export function createDiscoveryRepository(
                 runId: run.id,
                 prospectId: identity.id,
                 businessId: work.businessId,
-                data: prospect,
+                data,
               })
               .onConflictDoNothing();
           }

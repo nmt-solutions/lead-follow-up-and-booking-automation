@@ -135,6 +135,597 @@ describe("Bounded discovery at the primary application seam", () => {
       },
     });
   });
+  it("reloads strong matches without contact details with distinct coverage counts", async () => {
+    const { owner, business } = await setup();
+    await application.start(owner, business.id, request());
+    await execute();
+    await harness.reapplySchema();
+    const state = await application.workspace(owner, business.id);
+    expect(state.runs[0]).toMatchObject({
+      counts: {
+        evidenceBacked: 1,
+        potentialBuyers: 1,
+        openBuyingRequests: 0,
+        contactable: 0,
+        namedBuyers: 0,
+      },
+      prospects: [
+        { contactStatus: "missing", contacts: [], requestState: null },
+      ],
+    });
+    expect(discoveryWorkspaceSchema.safeParse(state).success).toBe(true);
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+    expect(harness.invitations.sent).toEqual([]);
+  });
+  it("retains general and employee contacts without inflating evidence-backed named-buyer coverage", async () => {
+    const { owner, business } = await setup({}, { maxResults: 5 });
+    const contacts = [
+      {
+        name: "Mira Shah",
+        nameQuote: "Mira Shah: Head of procurement",
+        roleEvidence: {
+          role: "purchasing",
+          quote: "Mira Shah: Head of procurement",
+        },
+        route: {
+          kind: "email",
+          value: "mira@fabricator.example",
+          quote: "Mira Shah: mira@fabricator.example",
+        },
+      },
+      {
+        name: "Arun Rao",
+        nameQuote: "Arun Rao: Owner",
+        roleEvidence: { role: "owner", quote: "Arun Rao: Owner" },
+        route: null,
+      },
+      {
+        name: null,
+        nameQuote: null,
+        roleEvidence: null,
+        route: {
+          kind: "contact_form",
+          value: "https://fabricator.example/contact",
+          quote: "https://fabricator.example/contact",
+        },
+      },
+      {
+        name: "Kai Jones",
+        nameQuote: "Kai Jones: Engineer",
+        roleEvidence: { role: "purchasing", quote: "Kai Jones: Engineer" },
+        route: { kind: "phone", value: "+12025550123", quote: "+12025550123" },
+      },
+      null,
+    ];
+    behavior.search = async (input) =>
+      contacts.map((contact, index) => ({
+        name: `Fabricator ${index}`,
+        market: input.market,
+        url: `https://fabricator.example/${index}`,
+        excerpt: `We fabricate galvanized steel sheet to ASTM A653. ${contact?.nameQuote ?? ""}. ${contact?.route?.quote ?? ""}`,
+      }));
+    behavior.review = async (input) => ({
+      relevant: true,
+      reason: "Fits the steel specification",
+      evidenceQuote: "fabricate galvanized steel sheet to ASTM A653",
+      uncertainty: "Purchase timing unknown",
+      request: null,
+      contacts: contacts[Number(new URL(input.source.url).pathname.slice(1))]
+        ? [contacts[Number(new URL(input.source.url).pathname.slice(1))]]
+        : [],
+    });
+    await application.start(owner, business.id, request(9));
+    await execute();
+    const run = (await application.workspace(owner, business.id)).runs[0];
+    expect(run.counts).toEqual({
+      evidenceBacked: 5,
+      potentialBuyers: 5,
+      openBuyingRequests: 0,
+      contactable: 3,
+      namedBuyers: 2,
+    });
+    const byName = new Map(run.prospects.map((p) => [p.name, p]));
+    expect(byName.get("Fabricator 0")).toMatchObject({
+      contactStatus: "buyer_contact",
+      contacts: [
+        {
+          name: "Mira Shah",
+          roleEvidence: {
+            role: "purchasing",
+            quote: "Mira Shah: Head of procurement",
+          },
+          url: "https://fabricator.example/0",
+          checkedAt: "2026-11-05T09:00:00.000Z",
+        },
+      ],
+    });
+    expect(byName.get("Fabricator 1")).toMatchObject({
+      contactStatus: "missing",
+      contacts: [
+        { name: "Arun Rao", roleEvidence: { role: "owner" }, route: null },
+      ],
+    });
+    expect(byName.get("Fabricator 2")?.contactStatus).toBe(
+      "general_business_contact",
+    );
+    expect(byName.get("Fabricator 3")).toMatchObject({
+      contactStatus: "general_business_contact",
+      contacts: [{ name: "Kai Jones", roleEvidence: null }],
+    });
+    expect(byName.get("Fabricator 4")?.contactStatus).toBe("missing");
+    expect(
+      discoveryWorkspaceSchema.safeParse(
+        await application.workspace(owner, business.id),
+      ).success,
+    ).toBe(true);
+  });
+  it("separates open demand from expired, undated and uncertain requests over controlled time without revalidation effects", async () => {
+    const { owner, business } = await setup({}, { maxResults: 5 });
+    const requests = [
+      {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+        expiresAt: "2026-11-05T10:00:00Z",
+        expiryQuote: "Closes 2026-11-05T10:00:00Z",
+      },
+      {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "expired",
+        statusQuote: "Status: expired",
+      },
+      {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: null,
+        dateQuote: null,
+        status: "open",
+        statusQuote: "Status: open",
+      },
+      {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "unknown",
+        statusQuote: null,
+      },
+      {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+      },
+    ];
+    behavior.search = async (input) =>
+      requests.map((r, index) => ({
+        name: `Request ${index}`,
+        market: input.market,
+        url: `https://requests.example/${index}`,
+        excerpt: `${r.quote} ${r.dateQuote ?? ""}. ${r.statusQuote ?? ""}. ${r.expiryQuote ?? ""}`,
+      }));
+    behavior.review = async (input) => ({
+      relevant: true,
+      reason: "Explicit steel need",
+      evidenceQuote: "need galvanized steel sheet",
+      uncertainty: "No engagement established",
+      request: requests[Number(new URL(input.source.url).pathname.slice(1))],
+    });
+    await application.start(owner, business.id, request(9));
+    expect(await execute()).toEqual({ outcome: "completed" });
+    const before = (await application.workspace(owner, business.id)).runs[0];
+    expect(before.counts).toMatchObject({
+      evidenceBacked: 5,
+      potentialBuyers: 3,
+      openBuyingRequests: 2,
+    });
+    expect(
+      Object.fromEntries(before.prospects.map((p) => [p.name, p.requestState])),
+    ).toEqual({
+      "Request 0": "open",
+      "Request 1": "expired",
+      "Request 2": "undated",
+      "Request 3": "uncertain",
+      "Request 4": "open",
+    });
+    harness.clock.set("2026-11-05T10:00:00Z");
+    const after = (await application.workspace(owner, business.id)).runs[0];
+    expect(after.counts).toMatchObject({
+      evidenceBacked: 5,
+      potentialBuyers: 4,
+      openBuyingRequests: 1,
+    });
+    expect(after.prospects.find((p) => p.name === "Request 0")).toMatchObject({
+      requestState: "expired",
+      request: {
+        status: "open",
+        expiresAt: "2026-11-05T10:00:00Z",
+        expiryQuote: "Closes 2026-11-05T10:00:00Z",
+      },
+      evidence: [
+        {
+          checkedAt: "2026-11-05T09:00:00.000Z",
+          url: "https://requests.example/0",
+        },
+      ],
+    });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(5);
+    expect(
+      discoveryWorkspaceSchema.safeParse(
+        await application.workspace(owner, business.id),
+      ).success,
+    ).toBe(true);
+  });
+  it("keeps strong matches while discarding missing, malformed, unsafe and unsupported contact evidence", async () => {
+    const { owner, business } = await setup({}, { maxResults: 8 });
+    const base = {
+      name: "Mira Shah",
+      nameQuote: "Mira Shah: Owner",
+      roleEvidence: { role: "owner", quote: "Mira Shah: Owner" },
+      route: {
+        kind: "email",
+        value: "info@fabricator.example",
+        quote: "info@fabricator.example",
+      },
+    };
+    const contacts = [
+      base,
+      {
+        ...base,
+        roleEvidence: { role: "owner", quote: "Mira Shah: Not the owner" },
+      },
+      {
+        ...base,
+        roleEvidence: {
+          role: "owner",
+          quote: "Mira Shah: Head of procurement",
+        },
+      },
+      { ...base, nameQuote: "Invented named owner", roleEvidence: null },
+      {
+        ...base,
+        route: {
+          kind: "email",
+          value: "not-an-email",
+          quote: "sensitive-malformed-provider-data",
+        },
+      },
+      {
+        ...base,
+        route: {
+          kind: "contact_form",
+          value: "https://private:secret@127.0.0.1/contact?token=sensitive",
+          quote: "unsafe-provider-data",
+        },
+      },
+      { ...base, roleEvidence: { role: "any_employee", quote: "Mira Shah" } },
+      {
+        ...base,
+        route: null,
+        roleEvidence: {
+          role: "owner",
+          quote: "Mira Shah: Owner of another business",
+        },
+      },
+    ];
+    behavior.search = async (input) =>
+      contacts.map((_, index) => ({
+        name: `Fit ${index}`,
+        market: input.market,
+        url: `https://fit.example/${index}`,
+        excerpt:
+          "We fabricate galvanized steel sheet to ASTM A653. Mira Shah: Owner. Mira Shah: Not the owner. Mira Shah: Head of procurement. Mira Shah: Owner of another business. info@fabricator.example",
+      }));
+    behavior.review = async (input) => ({
+      relevant: true,
+      reason: "Strong fit",
+      evidenceQuote: "fabricate galvanized steel sheet to ASTM A653",
+      uncertainty: "Unconfirmed purchasing route",
+      request: null,
+      contacts: [contacts[Number(new URL(input.source.url).pathname.slice(1))]],
+    });
+    await application.start(owner, business.id, request(12));
+    expect(await execute()).toEqual({ outcome: "completed" });
+    const state = await application.workspace(owner, business.id);
+    expect(state.runs[0].counts).toEqual({
+      evidenceBacked: 8,
+      potentialBuyers: 8,
+      openBuyingRequests: 0,
+      contactable: 4,
+      namedBuyers: 1,
+    });
+    expect(
+      state.runs[0].prospects.every((p) => p.contactStatus !== "buyer_contact"),
+    ).toBe(true);
+    expect(
+      state.runs[0].prospects.find((p) => p.name === "Fit 3"),
+    ).toMatchObject({ contacts: [{ name: null, roleEvidence: null }] });
+    const serialized = JSON.stringify({
+      state,
+      diagnostics: harness.diagnostics,
+    });
+    for (const unsafe of [
+      "sensitive-malformed",
+      "private:secret",
+      "token=sensitive",
+      "any_employee",
+      "Invented named owner",
+    ])
+      expect(serialized).not.toContain(unsafe);
+  });
+
+  it("requires an explicit public need rather than a model-labelled suitability quote for consumers", async () => {
+    const { owner, business } = await setup({
+      buyerCategories: [
+        {
+          label: "Personal-use consumers",
+          identity: "individual",
+          use: "personal_use",
+          requiresBuyingRequest: true,
+        },
+      ],
+    });
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Potential use for sheet",
+      evidenceQuote: "fabricate galvanized steel sheet",
+      uncertainty: "No explicit need",
+      request: {
+        quote: "We fabricate galvanized steel sheet to ASTM A653.",
+        publishedAt: null,
+        status: "unknown",
+      },
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).runs[0].prospects,
+    ).toEqual([]);
+  });
+
+  it("loads legacy snapshots conservatively and returns safe HTTP diagnostics for invalid persisted evidence", async () => {
+    const { owner, business } = await setup();
+    await application.start(owner, business.id, request());
+    await execute();
+    // Fixture an existing #10 record; verify reload only through the public seam.
+    await harness.admin.query(
+      "update discovery_result set data=data - 'contacts' where business_id=$1",
+      [business.id],
+    );
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      counts: { evidenceBacked: 1, contactable: 0, namedBuyers: 0 },
+      prospects: [{ contacts: [], contactStatus: "missing" }],
+    });
+    await harness.admin.query(
+      "update discovery_result set data=jsonb_set(data, '{evidence,0,url}', to_jsonb($2::text)) where business_id=$1",
+      [business.id, "https://user:private@127.0.0.1/source?secret=sensitive"],
+    );
+    const diagnostics: { code: string; requestId: string }[] = [];
+    const http = createDiscoveryHttp({
+      application,
+      origin: "http://localhost:3000",
+      reportFailure: (d) => diagnostics.push(d),
+    });
+    const response = await http.get(
+      new Request("http://localhost:3000/api/discovery", { headers: owner }),
+      business.id,
+    );
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toMatchObject({ code: "INTERNAL_ERROR", success: false });
+    expect(diagnostics).toEqual([
+      { code: "INTERNAL_ERROR", requestId: body.requestId },
+    ]);
+    expect(JSON.stringify({ body, diagnostics })).not.toContain("sensitive");
+    expect(JSON.stringify({ body, diagnostics })).not.toContain("private");
+  });
+  it("does not promote truncated role quotations or unrelated public routes into a buyer contact", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) => [
+      {
+        name: "Strong fabricator",
+        market: input.market,
+        url: "https://fabricator.example/people",
+        excerpt:
+          "We fabricate galvanized steel sheet. Mira Shah: Owner of another business. Mira Shah: mira@fabricator.example.invalid",
+      },
+    ];
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Steel fit",
+      evidenceQuote: "fabricate galvanized steel sheet",
+      uncertainty: "Role and route are unconfirmed",
+      request: null,
+      contacts: [
+        {
+          name: "Mira Shah",
+          nameQuote: "Mira Shah: Owner",
+          roleEvidence: { role: "owner", quote: "Mira Shah: Owner" },
+          route: {
+            kind: "email",
+            value: "mira@fabricator.example",
+            quote: "Mira Shah: mira@fabricator.example",
+          },
+        },
+      ],
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      counts: { evidenceBacked: 1, contactable: 0, namedBuyers: 0 },
+      prospects: [
+        {
+          contactStatus: "missing",
+          contacts: [{ name: "Mira Shah", roleEvidence: null, route: null }],
+        },
+      ],
+    });
+  });
+  it("does not treat truncated or negated public statements as consumer buying requests", async () => {
+    const { owner, business } = await setup({
+      buyerCategories: [
+        {
+          label: "Home users",
+          identity: "individual",
+          use: "personal_use",
+          requiresBuyingRequest: true,
+        },
+      ],
+    });
+    const quotes = [
+      "I need galvanized steel sheet",
+      "I need no galvanized steel sheet.",
+    ];
+    behavior.search = async (input) =>
+      quotes.map((quote, index) => ({
+        name: `Consumer ${index}`,
+        market: input.market,
+        url: `https://requests.example/${index}`,
+        excerpt: `${index === 0 ? `${quote} no longer.` : quote} Posted 2026-11-04. Status: open.`,
+      }));
+    behavior.review = async (input) => ({
+      relevant: true,
+      reason: "Claimed sheet demand",
+      evidenceQuote: "galvanized steel sheet",
+      uncertainty: "Request context matters",
+      request: {
+        quote: quotes[Number(new URL(input.source.url).pathname.slice(1))],
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+      },
+    });
+    await application.start(owner, business.id, request(6));
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      counts: { evidenceBacked: 0, openBuyingRequests: 0 },
+      prospects: [],
+    });
+  });
+  it("does not turn a source update timestamp into request expiry", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) => [
+      {
+        name: "Steel request",
+        market: input.market,
+        url: "https://request.example/steel",
+        excerpt:
+          "We need galvanized steel sheet. Posted 2026-11-04. Status: open. Last updated 2026-11-05T10:00:00Z.",
+      },
+    ];
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Explicit demand",
+      evidenceQuote: "need galvanized steel sheet",
+      uncertainty: "No expiry declared",
+      request: {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+        expiresAt: "2026-11-05T10:00:00Z",
+        expiryQuote: "Last updated 2026-11-05T10:00:00Z",
+      },
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    harness.clock.set("2026-11-05T11:00:00Z");
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      counts: { openBuyingRequests: 1 },
+      prospects: [
+        {
+          requestState: "open",
+          request: { expiresAt: null, expiryQuote: null },
+        },
+      ],
+    });
+    expect(searches).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+  });
+  it("retains explicit RFQ and RFP demand with independent dated open-request counts", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) =>
+      ["RFQ", "RFP"].map((label) => ({
+        name: label,
+        market: input.market,
+        url: `https://requests.example/${label.toLowerCase()}`,
+        excerpt: `${label}: 500 kg galvanized steel sheet. Posted 2026-11-04. Status: open.`,
+      }));
+    behavior.review = async (input) => ({
+      relevant: true,
+      reason: "Declared sheet requirement",
+      evidenceQuote: "500 kg galvanized steel sheet",
+      uncertainty: "No engagement",
+      request: {
+        quote: `${input.source.name}: 500 kg galvanized steel sheet.`,
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+      },
+    });
+    await application.start(owner, business.id, request(6));
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      counts: { evidenceBacked: 2, potentialBuyers: 0, openBuyingRequests: 2 },
+      prospects: [{ requestState: "open" }, { requestState: "open" }],
+    });
+  });
+  it("does not turn a truncated source status into established open demand", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) => [
+      {
+        name: "Sheet request",
+        market: input.market,
+        url: "https://request.example/status",
+        excerpt:
+          "We need galvanized steel sheet. Posted 2026-11-04. Status: open-ended discussion, purchasing not confirmed.",
+      },
+    ];
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Sheet need",
+      evidenceQuote: "need galvanized steel sheet",
+      uncertainty: "Status is not established",
+      request: {
+        quote: "We need galvanized steel sheet.",
+        publishedAt: "2026-11-04",
+        dateQuote: "Posted 2026-11-04",
+        status: "open",
+        statusQuote: "Status: open",
+      },
+    });
+    await application.start(owner, business.id, request());
+    await execute();
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({
+      counts: { potentialBuyers: 1, openBuyingRequests: 0 },
+      prospects: [
+        {
+          requestState: "uncertain",
+          request: { status: "unknown", statusQuote: null },
+        },
+      ],
+    });
+  });
   afterAll(async () => {
     await harness?.close();
   });
@@ -769,6 +1360,34 @@ describe("Bounded discovery at the primary application seam", () => {
     expect((await http.get(get(salesperson), business.id)).status).toBe(200);
     const denied = await http.start(post(salesperson, request()), business.id);
     expect(denied.status).toBe(403);
+    behavior.search = async (input) => [
+      {
+        name: "Hudson Fabrication",
+        market: input.market,
+        url: "https://fabricator.example/about",
+        excerpt:
+          "We fabricate galvanized steel sheet. Mira Shah: Owner. Mira Shah: mira@fabricator.example",
+      },
+    ];
+    behavior.review = async () => ({
+      relevant: true,
+      reason: "Fits steel supply",
+      evidenceQuote: "fabricate galvanized steel sheet",
+      uncertainty: "No outreach permission",
+      request: null,
+      contacts: [
+        {
+          name: "Mira Shah",
+          nameQuote: "Mira Shah: Owner",
+          roleEvidence: { role: "owner", quote: "Mira Shah: Owner" },
+          route: {
+            kind: "email",
+            value: "mira@fabricator.example",
+            quote: "Mira Shah: mira@fabricator.example",
+          },
+        },
+      ],
+    });
     const approved = await http.start(post(owner, request()), business.id);
     expect(approved.status).toBe(202);
     await execute();
@@ -777,7 +1396,25 @@ describe("Bounded discovery at the primary application seam", () => {
       success: true,
       data: {
         canRun: false,
-        runs: [{ prospects: [{ relationship: "potential_buyer" }] }],
+        runs: [
+          {
+            counts: { evidenceBacked: 1, contactable: 1, namedBuyers: 1 },
+            prospects: [
+              {
+                relationship: "potential_buyer",
+                contactStatus: "buyer_contact",
+                contacts: [
+                  {
+                    name: "Mira Shah",
+                    roleEvidence: { role: "owner" },
+                    url: "https://fabricator.example/about",
+                    checkedAt: "2026-11-05T09:00:00.000Z",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
       },
     });
     await harness.team.removeMember(owner, business.id, {

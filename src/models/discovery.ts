@@ -88,12 +88,44 @@ export const searchResultSchema = z.strictObject({
   url: evidenceUrlSchema,
   excerpt: z.string().trim().min(1).max(4000),
 });
+const quoteSchema = z.string().trim().min(1).max(500);
+const contactRouteSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("email"),
+    value: z.email().max(254),
+    quote: quoteSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("phone"),
+    value: z.string().regex(/^\+[1-9]\d{7,14}$/),
+    quote: quoteSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("contact_form"),
+    value: evidenceUrlSchema,
+    quote: quoteSchema,
+  }),
+]);
+export const contactCandidateSchema = z.strictObject({
+  name: text.nullable(),
+  nameQuote: quoteSchema.nullable(),
+  roleEvidence: z
+    .strictObject({ role: z.enum(["purchasing", "owner"]), quote: quoteSchema })
+    .nullable(),
+  route: contactRouteSchema.nullable(),
+});
+export const contactEvidenceSchema = contactCandidateSchema.extend({
+  url: evidenceUrlSchema,
+  checkedAt: z.iso.datetime(),
+});
+export type ContactEvidence = z.infer<typeof contactEvidenceSchema>;
 export type SearchResult = z.infer<typeof searchResultSchema>;
 export const reviewResultSchema = z.strictObject({
   relevant: z.boolean(),
   reason: z.string().trim().min(1).max(1000),
   evidenceQuote: z.string().trim().min(1).max(500),
   uncertainty: z.string().trim().min(1).max(1000),
+  contacts: z.array(z.unknown()).max(5).default([]),
   request: z
     .strictObject({
       quote: z.string().trim().min(1).max(500),
@@ -101,6 +133,8 @@ export const reviewResultSchema = z.strictObject({
       dateQuote: z.string().trim().min(1).max(500).nullable().default(null),
       status: z.enum(["open", "expired", "unknown"]),
       statusQuote: z.string().trim().min(1).max(500).nullable().default(null),
+      expiresAt: z.iso.datetime().nullable().default(null),
+      expiryQuote: quoteSchema.nullable().default(null),
     })
     .nullable(),
 });
@@ -152,17 +186,41 @@ export type StopReason =
   | "configuration_changed"
   | "queue_unavailable"
   | "worker_lost";
-export type DiscoveryProspect = {
+// Defaults read #10 snapshots conservatively; no backfilled role/currentness claims.
+export const persistedProspectSchema = z.strictObject({
+  name: text,
+  market: text,
+  buyer: buyerCategorySchema,
+  relationship: z.literal("potential_buyer"),
+  matchReason: z.string().trim().min(1).max(1000),
+  uncertainty: z.string().trim().min(1).max(1000),
+  request: reviewResultSchema.shape.request,
+  contacts: z.array(contactEvidenceSchema).max(5).default([]),
+  evidence: z
+    .array(
+      z.strictObject({
+        url: evidenceUrlSchema,
+        quote: quoteSchema,
+        checkedAt: z.iso.datetime(),
+      }),
+    )
+    .min(1)
+    .max(10),
+});
+export type DiscoveryProspect = z.infer<typeof persistedProspectSchema> & {
   id: string;
-  name: string;
-  market: string;
-  buyer: DiscoveryBrief["buyers"][number];
-  relationship: "potential_buyer";
-  matchReason: string;
-  uncertainty: string;
-  request: ReviewResult["request"];
-  evidence: { url: string; quote: string; checkedAt: string }[];
 };
+export type ProspectView = DiscoveryProspect & {
+  contactStatus: "buyer_contact" | "general_business_contact" | "missing";
+  requestState: "open" | "expired" | "undated" | "uncertain" | null;
+};
+const countsSchema = z.strictObject({
+  evidenceBacked: z.number().int().nonnegative(),
+  potentialBuyers: z.number().int().nonnegative(),
+  openBuyingRequests: z.number().int().nonnegative(),
+  contactable: z.number().int().nonnegative(),
+  namedBuyers: z.number().int().nonnegative(),
+});
 export type DiscoveryUsage = {
   id: string;
   kind: "search" | "review";
@@ -200,7 +258,8 @@ export type RunView = Omit<
   createdAt: string;
   updatedAt: string;
   allowanceUnit: string;
-  prospects: DiscoveryProspect[];
+  prospects: ProspectView[];
+  counts: z.infer<typeof countsSchema>;
   usage: DiscoveryUsage[];
 };
 export type DiscoveryWorkspace = {
@@ -263,23 +322,18 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
         allowanceUnit: text,
         createdAt: z.iso.datetime(),
         updatedAt: z.iso.datetime(),
+        counts: countsSchema,
         prospects: z.array(
-          z.strictObject({
+          persistedProspectSchema.extend({
             id: z.uuid(),
-            name: text,
-            market: text,
-            buyer: buyerCategorySchema,
-            relationship: z.literal("potential_buyer"),
-            matchReason: z.string().max(1000),
-            uncertainty: z.string().max(1000),
-            request: reviewResultSchema.shape.request,
-            evidence: z.array(
-              z.strictObject({
-                url: evidenceUrlSchema,
-                quote: z.string().max(500),
-                checkedAt: z.iso.datetime(),
-              }),
-            ),
+            contactStatus: z.enum([
+              "buyer_contact",
+              "general_business_contact",
+              "missing",
+            ]),
+            requestState: z
+              .enum(["open", "expired", "undated", "uncertain"])
+              .nullable(),
           }),
         ),
         usage: z.array(
