@@ -31,6 +31,13 @@ import {
   aiAttempt,
   aiReview,
   aiExecutionScopeForeignKeys,
+  inboxScopeForeignKeys,
+  inboxConnection,
+  inboxBuyer,
+  inboxConversation,
+  inboxOpportunity,
+  inboxMessage,
+  inboxEvent,
 } from "./schema";
 
 async function prepareFileCleanup(pool: Pool) {
@@ -241,6 +248,11 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.ai_activation_audit') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.ai_activation_audit FROM app_runtime;
       END IF;
+      IF to_regclass('public.inbox_connection') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.inbox_connection, public.inbox_buyer, public.inbox_conversation, public.inbox_opportunity, public.inbox_message, public.inbox_event FROM app_runtime;
+        REVOKE ALL PRIVILEGES (active) ON public.inbox_connection FROM app_runtime;
+        REVOKE ALL PRIVILEGES (last_received_at) ON public.inbox_conversation FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -267,7 +279,10 @@ export async function secureDatabase(pool: Pool) {
     await client.query(
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
-    for (const key of aiExecutionScopeForeignKeys) {
+    for (const key of [
+      ...aiExecutionScopeForeignKeys,
+      ...inboxScopeForeignKeys,
+    ]) {
       const table = key.table;
       const reference = key.reference();
       await database.execute(
@@ -298,6 +313,12 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      inboxConnection,
+      inboxBuyer,
+      inboxConversation,
+      inboxOpportunity,
+      inboxMessage,
+      inboxEvent,
       business,
       membership,
       invitation,
@@ -334,6 +355,16 @@ export async function secureDatabase(pool: Pool) {
     }
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON inbox_connection, inbox_buyer, inbox_conversation, inbox_opportunity, inbox_message, inbox_event FROM app_runtime;
+      GRANT SELECT, INSERT ON inbox_connection, inbox_buyer, inbox_conversation, inbox_opportunity, inbox_message, inbox_event TO app_runtime;
+      GRANT UPDATE (active) ON inbox_connection TO app_runtime;
+      GRANT UPDATE (last_received_at) ON inbox_conversation TO app_runtime;
+      ALTER TABLE inbox_connection FORCE ROW LEVEL SECURITY;
+      ALTER TABLE inbox_buyer FORCE ROW LEVEL SECURITY;
+      ALTER TABLE inbox_conversation FORCE ROW LEVEL SECURITY;
+      ALTER TABLE inbox_opportunity FORCE ROW LEVEL SECURITY;
+      ALTER TABLE inbox_message FORCE ROW LEVEL SECURITY;
+      ALTER TABLE inbox_event FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON ai_profile, ai_activation, ai_activation_audit, ai_execution, ai_attempt, ai_review FROM app_runtime;
       GRANT SELECT, INSERT ON ai_profile, ai_activation, ai_activation_audit, ai_execution, ai_attempt, ai_review TO app_runtime;
       GRANT UPDATE (used_attempts, used_fallback_attempts) ON ai_profile TO app_runtime;

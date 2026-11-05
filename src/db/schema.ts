@@ -30,6 +30,8 @@ import type {
 } from "../models/ai";
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { CommercialPolicy } from "../models/commercial-authority";
+import type { AddInboxConnection, IncomingInquiry } from "../models/inbox";
+
 import type {
   DiscoveryPolicy,
   DiscoveryBrief,
@@ -1244,3 +1246,247 @@ export const discoveryDispatch = pgTable(
     }),
   ],
 ).enableRLS();
+
+function inboxColumns() {
+  return {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+  };
+}
+const inboxScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
+const inboxWrite = sql`(${inboxScope}) and public.current_business_role() in ('owner', 'admin')`;
+function inboxPolicies(name: string) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck:
+        name === "inbox_connection"
+          ? sql`(${inboxWrite}) and created_by = current_setting('app.actor_id', true)`
+          : inboxWrite,
+    }),
+    ...(["inbox_connection", "inbox_conversation"].includes(name)
+      ? [
+          pgPolicy(`${name}_update`, {
+            for: "update",
+            to: appRuntime,
+            using: inboxWrite,
+            withCheck: inboxWrite,
+          }),
+        ]
+      : []),
+  ];
+}
+
+export const inboxConnection = pgTable(
+  "inbox_connection",
+  {
+    ...inboxColumns(),
+    label: text("label").notNull(),
+    channel: text("channel").$type<AddInboxConnection["channel"]>().notNull(),
+    conversationRefs: jsonb("conversation_refs").$type<string[]>().notNull(),
+    active: boolean("active").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("inbox_connection_scope").on(table.id, table.businessId),
+    check("inbox_channel", sql`${table.channel} in ('email','whatsapp')`),
+    ...inboxPolicies("inbox_connection"),
+  ],
+).enableRLS();
+
+export const inboxBuyer = pgTable(
+  "inbox_buyer",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    senderRef: text("sender_ref").notNull(),
+    name: text("name").notNull(),
+    geography: text("geography"),
+    engagedAt: timestamp("engaged_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("inbox_buyer_identity").on(table.connectionId, table.senderRef),
+    uniqueIndex("inbox_buyer_scope").on(
+      table.id,
+      table.businessId,
+      table.connectionId,
+    ),
+    ...inboxPolicies("inbox_buyer"),
+  ],
+).enableRLS();
+
+export const inboxConversation = pgTable(
+  "inbox_conversation",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    buyerId: uuid("buyer_id").notNull(),
+    providerRef: text("provider_ref").notNull(),
+    subject: text("subject").notNull(),
+    lastReceivedAt: timestamp("last_received_at", {
+      withTimezone: true,
+    }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("inbox_conversation_identity").on(
+      table.connectionId,
+      table.providerRef,
+    ),
+    uniqueIndex("inbox_conversation_scope").on(
+      table.id,
+      table.businessId,
+      table.connectionId,
+    ),
+    ...inboxPolicies("inbox_conversation"),
+  ],
+).enableRLS();
+
+export const inboxOpportunity = pgTable(
+  "inbox_opportunity",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    stage: text("stage").$type<"inquiry">().notNull(),
+    ownerId: text("owner_id").references(() => user.id),
+    handoffReason: text("handoff_reason").notNull(),
+    nextAction: text("next_action").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("inbox_initial_opportunity").on(table.conversationId),
+    check("inbox_initial_stage", sql`${table.stage} = 'inquiry'`),
+    ...inboxPolicies("inbox_opportunity"),
+  ],
+).enableRLS();
+
+export const inboxMessage = pgTable(
+  "inbox_message",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    messageRef: text("message_ref").notNull(),
+    content: jsonb("content").$type<IncomingInquiry>().notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("inbox_message_identity").on(
+      table.connectionId,
+      table.messageRef,
+    ),
+    ...inboxPolicies("inbox_message"),
+  ],
+).enableRLS();
+
+export const inboxEvent = pgTable(
+  "inbox_event",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    eventRef: text("event_ref").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    conversationId: uuid("conversation_id"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("inbox_event_identity").on(table.connectionId, table.eventRef),
+    ...inboxPolicies("inbox_event"),
+  ],
+).enableRLS();
+
+// Installed after unique indexes by secureDatabase, matching the pinned push contract.
+export const inboxScopeForeignKeys = [
+  new ForeignKey(
+    inboxBuyer,
+    foreignKey({
+      name: "inbox_buyer_connection_scope",
+      columns: [inboxBuyer.connectionId, inboxBuyer.businessId],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxConversation,
+    foreignKey({
+      name: "inbox_conversation_buyer_scope",
+      columns: [
+        inboxConversation.buyerId,
+        inboxConversation.businessId,
+        inboxConversation.connectionId,
+      ],
+      foreignColumns: [
+        inboxBuyer.id,
+        inboxBuyer.businessId,
+        inboxBuyer.connectionId,
+      ],
+    }),
+  ),
+  new ForeignKey(
+    inboxOpportunity,
+    foreignKey({
+      name: "inbox_opportunity_conversation_scope",
+      columns: [
+        inboxOpportunity.conversationId,
+        inboxOpportunity.businessId,
+        inboxOpportunity.connectionId,
+      ],
+      foreignColumns: [
+        inboxConversation.id,
+        inboxConversation.businessId,
+        inboxConversation.connectionId,
+      ],
+    }),
+  ),
+  new ForeignKey(
+    inboxMessage,
+    foreignKey({
+      name: "inbox_message_conversation_scope",
+      columns: [
+        inboxMessage.conversationId,
+        inboxMessage.businessId,
+        inboxMessage.connectionId,
+      ],
+      foreignColumns: [
+        inboxConversation.id,
+        inboxConversation.businessId,
+        inboxConversation.connectionId,
+      ],
+    }),
+  ),
+  new ForeignKey(
+    inboxEvent,
+    foreignKey({
+      name: "inbox_event_connection_scope",
+      columns: [inboxEvent.connectionId, inboxEvent.businessId],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    inboxEvent,
+    foreignKey({
+      name: "inbox_event_conversation_scope",
+      columns: [
+        inboxEvent.conversationId,
+        inboxEvent.businessId,
+        inboxEvent.connectionId,
+      ],
+      foreignColumns: [
+        inboxConversation.id,
+        inboxConversation.businessId,
+        inboxConversation.connectionId,
+      ],
+    }),
+  ),
+];

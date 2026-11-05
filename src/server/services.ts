@@ -1,4 +1,8 @@
 import "server-only";
+import { createInboxApplication } from "../application/inbox";
+import { createInboxRepository } from "../db/inbox-repository";
+import { createInboxHttp } from "../http/inbox";
+import { normalizedInquiryAdapter } from "../inbox/adapter";
 import { Pool } from "pg";
 import { createAuth } from "../auth/auth";
 import { createSignInMailer } from "../auth/resend";
@@ -135,7 +139,19 @@ async function composeServices() {
         JSON.stringify({ event: "discovery_failed", businessId, runId, code }),
       ),
   });
+  const inbox = createInboxApplication({
+    authenticate,
+    repository: createInboxRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    adapter: normalizedInquiryAdapter,
+  });
   return {
+    inbox,
+    inboxHttp: createInboxHttp({
+      application: inbox,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     auth,
     access,
     application,

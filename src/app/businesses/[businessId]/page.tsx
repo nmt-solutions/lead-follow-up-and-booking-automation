@@ -85,6 +85,12 @@ export default async function BusinessPage({
       >
         Approved answers and qualification
       </Link>
+      <Link
+        href={`/businesses/${businessId}/inbox`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Shared sales inbox
+      </Link>
       {canManageAi && (
         <Link
           href={`/businesses/${businessId}/ai`}

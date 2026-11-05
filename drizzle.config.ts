@@ -7,6 +7,12 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "inbox_connection",
+    "inbox_buyer",
+    "inbox_conversation",
+    "inbox_opportunity",
+    "inbox_message",
+    "inbox_event",
     "user",
     "session",
     "account",

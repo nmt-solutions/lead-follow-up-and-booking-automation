@@ -18,6 +18,26 @@ export async function verifyRuntimeRole(
       AND (SELECT count(*) = 6 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('inbox_connection','inbox_buyer','inbox_conversation','inbox_opportunity','inbox_message','inbox_event'))
+      AND (SELECT count(*) = 14 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
+        WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL
+        ELSE false END) FROM pg_policies WHERE schemaname = 'public'
+        AND tablename IN ('inbox_connection','inbox_buyer','inbox_conversation','inbox_opportunity','inbox_message','inbox_event'))
+      AND (SELECT bool_and(NOT has_table_privilege(current_user, c.oid, 'UPDATE,DELETE,TRUNCATE'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('inbox_buyer','inbox_opportunity','inbox_message','inbox_event'))
+      AND NOT has_table_privilege(current_user, 'public.inbox_connection', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.inbox_conversation', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.inbox_connection', 'business_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.inbox_connection', 'conversation_refs', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.inbox_conversation', 'buyer_id', 'UPDATE')
+      AND (SELECT count(*) = 6 AND bool_and(convalidated) FROM pg_constraint
+        WHERE conname IN ('inbox_buyer_connection_scope','inbox_conversation_buyer_scope','inbox_opportunity_conversation_scope','inbox_message_conversation_scope','inbox_event_connection_scope','inbox_event_conversation_scope') AND contype = 'f')
+      AND (SELECT count(*) = 6 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relname IN ('ai_profile','ai_activation','ai_activation_audit','ai_execution','ai_attempt','ai_review'))
       AND (SELECT count(*) = 15 AND bool_and('app_runtime' = ANY(roles) AND CASE
         WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
