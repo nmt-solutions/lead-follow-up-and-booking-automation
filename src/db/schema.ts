@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { BusinessRole, Invitation } from "../models/team";
 import type { SavedConfiguration } from "../models/configuration";
+import type { FileState } from "../models/files";
 
 export const appRuntime = pgRole("app_runtime").existing();
 
@@ -353,6 +354,139 @@ export const platformOperator = pgTable(
       for: "select",
       to: appRuntime,
       using: sql`${table.userId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+const fileBusinessScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
+const fileOwnerScope = sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.business_file'::regclass)`;
+export const businessFile = pgTable(
+  "business_file",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id),
+    name: text("name").notNull(),
+    contentType: text("content_type").notNull(),
+    size: bigint("size", { mode: "number" }).notNull(),
+    accountScope: text("account_scope").notNull(),
+    state: text("state").$type<FileState>().notNull(),
+    uploadHash: text("upload_hash").notNull(),
+    uploadExpiresAt: timestamp("upload_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    retentionUntil: timestamp("retention_until", {
+      withTimezone: true,
+    }).notNull(),
+    recordRetentionSeconds: integer("record_retention_seconds").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    cleanupAfter: timestamp("cleanup_after", { withTimezone: true }),
+    purgeAfter: timestamp("purge_after", { withTimezone: true }),
+    operationId: uuid("operation_id"),
+    sha256: text("sha256"),
+    failure: text("failure"),
+  },
+  (table) => [
+    index("business_file_scope_idx").on(table.businessId, table.createdAt),
+    index("business_file_cleanup_idx").on(
+      table.accountScope,
+      table.cleanupAfter,
+    ),
+    check("business_file_size", sql`${table.size} > 0`),
+    check(
+      "business_file_state",
+      sql`${table.state} in ('pending','uploading','ready','failed','deleting','deleted')`,
+    ),
+    pgPolicy("file_read", {
+      for: "select",
+      to: appRuntime,
+      using: fileBusinessScope,
+    }),
+    pgPolicy("file_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${table.ownerId} = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("file_update", {
+      for: "update",
+      to: appRuntime,
+      using: managerScope,
+      withCheck: managerScope,
+    }),
+    // Narrow definer cleanup functions can operate after a member leaves; the runtime cannot assume the table owner.
+    pgPolicy("file_system", {
+      for: "all",
+      to: "public",
+      using: fileOwnerScope,
+      withCheck: fileOwnerScope,
+    }),
+  ],
+).enableRLS();
+export const fileAccess = pgTable(
+  "file_access",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => businessFile.id, { onDelete: "cascade" }),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("file_access_expiry_idx").on(table.expiresAt),
+    pgPolicy("file_access_scope", {
+      for: "all",
+      to: appRuntime,
+      using: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true)`,
+      withCheck: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId})`,
+    }),
+    pgPolicy("file_access_system", {
+      for: "all",
+      to: "public",
+      using: fileOwnerScope,
+      withCheck: fileOwnerScope,
+    }),
+  ],
+).enableRLS();
+export const fileUsage = pgTable(
+  "file_usage",
+  {
+    id: uuid("id").primaryKey(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => businessFile.id, { onDelete: "cascade" }),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    accountScope: text("account_scope").notNull(),
+    action: text("action").$type<"put" | "get" | "delete">().notNull(),
+    outcome: text("outcome").$type<"uncertain" | "succeeded">().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("file_usage_business_idx").on(table.businessId, table.at),
+    pgPolicy("file_usage_scope", {
+      for: "all",
+      to: appRuntime,
+      using: fileBusinessScope,
+      withCheck: sql`(${fileBusinessScope}) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId} and f.account_scope = ${table.accountScope})`,
+    }),
+    pgPolicy("file_usage_system", {
+      for: "all",
+      to: "public",
+      using: fileOwnerScope,
+      withCheck: fileOwnerScope,
     }),
   ],
 ).enableRLS();

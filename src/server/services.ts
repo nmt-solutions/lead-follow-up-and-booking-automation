@@ -14,6 +14,10 @@ import { createTeamRepository } from "../db/team-repository";
 import { createTeamHttp } from "../http/team";
 import { createInvitationMailer } from "../auth/invitation-mailer";
 import { invitationTokens } from "../auth/invitation-tokens";
+import { createFileApplication } from "../application/files";
+import { createFileRepository } from "../db/file-repository";
+import { createFilesHttp } from "../http/files";
+import { filesConfiguration } from "./files-configuration";
 
 export function reportFailure(diagnostic: FailureDiagnostic) {
   console.error(JSON.stringify({ event: "request_failed", ...diagnostic }));
@@ -70,11 +74,23 @@ async function composeServices() {
     }),
     origin: environment.BETTER_AUTH_URL,
   });
+  const files = createFileApplication({
+    authenticate,
+    repository: createFileRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    ...filesConfiguration(),
+  });
   return {
     auth,
     access,
     application,
     team,
+    files,
+    filesHttp: createFilesHttp({
+      application: files,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     teamHttp: createTeamHttp({
       application: team,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

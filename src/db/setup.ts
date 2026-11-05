@@ -9,7 +9,54 @@ import {
   invitation,
   teamAudit,
   platformOperator,
+  businessFile,
+  fileAccess,
+  fileUsage,
 } from "./schema";
+
+async function prepareFileCleanup(pool: Pool) {
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION public.claim_file_cleanup(scope text, at_time timestamptz, lease_seconds integer)
+    RETURNS TABLE(id uuid, business_id uuid, operation_id uuid)
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      IF lease_seconds <= 0 THEN RAISE EXCEPTION 'Invalid cleanup lease'; END IF;
+      DELETE FROM public.file_access a USING public.business_file f
+        WHERE a.file_id = f.id AND f.account_scope = scope AND a.expires_at <= at_time;
+      DELETE FROM public.business_file f WHERE f.account_scope = scope
+        AND f.state = 'deleted' AND f.purge_after <= at_time;
+      RETURN QUERY WITH due AS (
+        SELECT f.id FROM public.business_file f
+        WHERE f.account_scope = scope AND f.state <> 'deleted' AND f.cleanup_after <= at_time
+        ORDER BY f.cleanup_after, f.id LIMIT 50 FOR UPDATE SKIP LOCKED
+      ), claimed AS (
+        UPDATE public.business_file f SET state = 'deleting', operation_id = gen_random_uuid(),
+          cleanup_after = at_time + make_interval(secs => lease_seconds)
+        FROM due WHERE f.id = due.id RETURNING f.*
+      ), attempts AS (
+        INSERT INTO public.file_usage (id, file_id, business_id, account_scope, action, outcome, at)
+        SELECT c.operation_id, c.id, c.business_id, c.account_scope, 'delete', 'uncertain', at_time FROM claimed c
+      ) SELECT c.id, c.business_id, c.operation_id FROM claimed c;
+    END $$;
+    CREATE OR REPLACE FUNCTION public.finish_file_cleanup(file_id uuid, operation uuid, at_time timestamptz, success boolean)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      UPDATE public.business_file f SET
+        state = CASE WHEN success THEN 'deleted' ELSE 'deleting' END,
+        deleted_at = CASE WHEN success THEN at_time ELSE NULL END,
+        purge_after = CASE WHEN success THEN at_time + make_interval(secs => f.record_retention_seconds) ELSE NULL END,
+        cleanup_after = CASE WHEN success THEN NULL ELSE f.cleanup_after END,
+        failure = CASE WHEN success THEN NULL ELSE 'CLEANUP_FAILED' END
+      WHERE f.id = file_id AND f.operation_id = operation AND f.state = 'deleting';
+      IF FOUND AND success THEN
+        UPDATE public.file_usage u SET outcome = 'succeeded' WHERE u.id = operation AND u.file_id = finish_file_cleanup.file_id;
+        DELETE FROM public.file_access a WHERE a.file_id = finish_file_cleanup.file_id;
+      END IF;
+    END $$;
+    REVOKE ALL ON FUNCTION public.claim_file_cleanup(text, timestamptz, integer), public.finish_file_cleanup(uuid, uuid, timestamptz, boolean) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.claim_file_cleanup(text, timestamptz, integer), public.finish_file_cleanup(uuid, uuid, timestamptz, boolean) TO app_runtime;
+  `);
+}
 
 /** Role setup is separate because Drizzle does not model all privilege attributes. */
 export async function prepareDatabaseRole(pool: Pool) {
@@ -33,6 +80,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await pool.query(
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
+  await prepareFileCleanup(pool);
   // Narrow definer helpers avoid recursive membership RLS. PL/pgSQL resolves
   // tables at execution, so they can be installed before the first schema push.
   await pool.query(`
@@ -73,6 +121,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.platform_operator') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.platform_operator FROM app_runtime;
       END IF;
+      IF to_regclass('public.business_file') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.business_file, public.file_access, public.file_usage FROM app_runtime;
+      END IF;
     END $$;
   `);
 }
@@ -101,6 +152,9 @@ export async function secureDatabase(pool: Pool) {
       invitation,
       teamAudit,
       platformOperator,
+      businessFile,
+      fileAccess,
+      fileUsage,
     ]) {
       for (const policy of getTableConfig(table).policies) {
         await database.execute(sql`alter policy ${sql.identifier(policy.name)} on ${table}
@@ -126,6 +180,15 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE invitation FORCE ROW LEVEL SECURITY;
       ALTER TABLE team_audit FORCE ROW LEVEL SECURITY;
       ALTER TABLE platform_operator FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON business_file, file_access, file_usage FROM app_runtime;
+      GRANT SELECT, INSERT ON business_file TO app_runtime;
+      GRANT UPDATE (state, operation_id, sha256, failure, cleanup_after, completed_at) ON business_file TO app_runtime;
+      GRANT SELECT, INSERT ON file_access TO app_runtime;
+      GRANT SELECT, INSERT ON file_usage TO app_runtime;
+      GRANT UPDATE (outcome) ON file_usage TO app_runtime;
+      ALTER TABLE business_file FORCE ROW LEVEL SECURITY;
+      ALTER TABLE file_access FORCE ROW LEVEL SECURITY;
+      ALTER TABLE file_usage FORCE ROW LEVEL SECURITY;
       SET LOCAL ROLE app_runtime;
     `);
     await verifyRuntimeRole(client);

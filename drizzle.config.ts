@@ -18,5 +18,8 @@ export default defineConfig({
     "team_audit",
     "platform_operator",
     "two_factor",
+    "business_file",
+    "file_access",
+    "file_usage",
   ],
 });

@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Specs and tickets live in this repo's GitHub Issues. Before issue operations or implementation handoff, read `docs/agents/issue-tracker.md`.
+Specs and tickets live in this repo's GitHub Issues. Before issue operations, selecting dependent work or implementation handoff, read `docs/agents/issue-tracker.md` and use its status-aware dependency readiness rules.
 
 ### Triage labels
 

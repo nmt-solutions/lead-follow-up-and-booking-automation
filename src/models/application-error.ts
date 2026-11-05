@@ -7,7 +7,10 @@ export type ApplicationErrorCode =
   | "CONFLICT"
   | "INVITATION_UNAVAILABLE"
   | "PROVIDER_UNAVAILABLE"
-  | "SETUP_REQUIRED";
+  | "SETUP_REQUIRED"
+  | "FILE_SETUP_REQUIRED"
+  | "FILE_DISALLOWED"
+  | "FILE_UNAVAILABLE";
 
 export class ApplicationError extends Error {
   constructor(

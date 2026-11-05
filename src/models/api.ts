@@ -4,6 +4,21 @@ import {
 } from "./application-error";
 
 const failures = {
+  FILE_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "Private files need storage, limits, retention and cleanup configuration. Contact the service operator.",
+  },
+  FILE_DISALLOWED: {
+    status: 400,
+    message:
+      "This file does not match the configured file type or size rules. Choose a supported file.",
+  },
+  FILE_UNAVAILABLE: {
+    status: 410,
+    message:
+      "This file or link is unavailable or expired. Refresh the file list and try again.",
+  },
   INVALID_INPUT: {
     status: 400,
     message: "Check the request fields and try again.",

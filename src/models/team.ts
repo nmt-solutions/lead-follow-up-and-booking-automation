@@ -31,13 +31,15 @@ export const capabilitySchema = z.enum([
   "integrations.manage",
   "commercial-authority.manage",
   "sales.work",
+  "files.read",
+  "files.manage",
 ]);
 export type BusinessCapability = z.infer<typeof capabilitySchema>;
 export const capabilities: Record<BusinessRole, readonly BusinessCapability[]> =
   {
     owner: capabilitySchema.options,
     admin: capabilitySchema.options,
-    salesperson: ["profile.read", "sales.work"],
+    salesperson: ["profile.read", "sales.work", "files.read"],
   };
 export const platformCapabilitySchema = z.enum([
   "tax.manage",

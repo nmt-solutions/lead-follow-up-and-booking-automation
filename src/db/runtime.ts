@@ -15,6 +15,20 @@ export async function verifyRuntimeRole(
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
       AND current_setting('row_security') = 'on'
+      AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('business_file','file_access','file_usage'))
+      AND (SELECT count(*) = 8 AND bool_and(
+        (policyname IN ('file_system','file_access_system','file_usage_system') AND 'public' = ANY(roles) AND qual IS NOT NULL AND with_check IS NOT NULL)
+        OR ('app_runtime' = ANY(roles) AND CASE policyname
+          WHEN 'file_read' THEN qual IS NOT NULL
+          WHEN 'file_insert' THEN with_check IS NOT NULL
+          WHEN 'file_update' THEN qual IS NOT NULL AND with_check IS NOT NULL
+          WHEN 'file_access_scope' THEN qual IS NOT NULL AND with_check IS NOT NULL
+          WHEN 'file_usage_scope' THEN qual IS NOT NULL AND with_check IS NOT NULL
+          ELSE false END)) FROM pg_policies WHERE schemaname = 'public'
+        AND tablename IN ('business_file','file_access','file_usage'))
       AND (SELECT count(*) = 5 AND bool_and(
         c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER')
