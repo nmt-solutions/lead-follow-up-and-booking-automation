@@ -4,6 +4,11 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  whatsAppConnection,
+  whatsAppOauth,
+  whatsAppEvent,
+  whatsAppEvidence,
+  whatsAppScopeForeignKeys,
   emailSequencePolicy,
   emailSequenceScopeForeignKeys,
   emailSequenceRun,
@@ -434,6 +439,15 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON public.google_calendar_grant FROM app_runtime;
         REVOKE UPDATE (consumed) ON public.google_calendar_oauth FROM app_runtime;
       END IF;
+      IF to_regclass('public.whatsapp_connection') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_connection, public.whatsapp_oauth, public.whatsapp_event FROM app_runtime;
+        REVOKE UPDATE (version, configuration, status, reason, terms_actor_id, terms_accepted_at, credentials, provider_key, observation, operation_id, assets, coexistence_finished, phone_number_id) ON public.whatsapp_connection FROM app_runtime;
+        REVOKE UPDATE (consumed) ON public.whatsapp_oauth FROM app_runtime;
+      END IF;
+      IF to_regclass('public.whatsapp_evidence') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_evidence FROM app_runtime;
+        REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON public.whatsapp_evidence FROM app_runtime;
+      END IF;
       IF to_regclass('public.microsoft_mail_grant') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.microsoft_mail_grant, public.microsoft_mail_oauth FROM app_runtime;
       END IF;
@@ -529,6 +543,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     ...appointmentScopeForeignKeys,
     ...microsoftCalendarScopeForeignKeys,
     ...googleCalendarScopeForeignKeys,
+    ...whatsAppScopeForeignKeys,
   ]) {
     const { name } = getTableConfig(key.table);
     const exists = await pool.query<{ present: boolean }>(
@@ -586,6 +601,7 @@ export async function secureDatabase(pool: Pool) {
       ...appointmentScopeForeignKeys,
       ...microsoftCalendarScopeForeignKeys,
       ...googleCalendarScopeForeignKeys,
+      ...whatsAppScopeForeignKeys,
     ]) {
       const table = key.table;
       const reference = key.reference();
@@ -619,6 +635,10 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      whatsAppEvidence,
+      whatsAppConnection,
+      whatsAppOauth,
+      whatsAppEvent,
       emailSequencePolicy,
       emailSequenceRun,
       emailSequenceAction,
@@ -778,6 +798,17 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE mailbox_policy FORCE ROW LEVEL SECURITY;
       ALTER TABLE mailbox_job FORCE ROW LEVEL SECURITY;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON whatsapp_connection, whatsapp_oauth, whatsapp_event FROM app_runtime;
+      REVOKE ALL PRIVILEGES ON whatsapp_evidence FROM app_runtime;
+      REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON whatsapp_evidence FROM app_runtime;
+      GRANT SELECT, INSERT ON whatsapp_evidence TO app_runtime;
+      ALTER TABLE whatsapp_evidence FORCE ROW LEVEL SECURITY;
+      GRANT SELECT, INSERT ON whatsapp_connection, whatsapp_oauth, whatsapp_event TO app_runtime;
+      GRANT UPDATE (version, configuration, status, reason, terms_actor_id, terms_accepted_at, credentials, provider_key, observation, operation_id, assets, coexistence_finished, phone_number_id) ON whatsapp_connection TO app_runtime;
+      GRANT UPDATE (consumed) ON whatsapp_oauth TO app_runtime;
+      ALTER TABLE whatsapp_connection FORCE ROW LEVEL SECURITY;
+      ALTER TABLE whatsapp_oauth FORCE ROW LEVEL SECURITY;
+      ALTER TABLE whatsapp_event FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON sender_connection, sender_reply_route, sender_identity, sender_observation FROM app_runtime;
       GRANT SELECT, INSERT ON sender_connection, sender_reply_route, sender_identity, sender_observation TO app_runtime;
       GRANT UPDATE (version, configuration, updated_at) ON sender_connection TO app_runtime;

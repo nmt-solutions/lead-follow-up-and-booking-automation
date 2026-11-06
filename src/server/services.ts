@@ -19,6 +19,10 @@ import { configuredMicrosoftCalendar } from "../microsoft-calendar/configuration
 import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
 import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
+import { createWhatsAppApplication } from "../application/whatsapp";
+import { createWhatsAppRepository } from "../db/whatsapp-repository";
+import { configuredMetaCloud } from "../whatsapp/configuration";
+import { createWhatsAppHttp } from "../http/whatsapp";
 import { createEmailSequenceApplication } from "../application/email-sequences";
 import { createEmailSequenceRepository } from "../db/email-sequence-repository";
 import { createEmailSequenceHttp } from "../http/email-sequences";
@@ -438,7 +442,27 @@ async function composeServices() {
       ),
     timeoutMs: 5000,
   });
+  const whatsappComposition = configuredMetaCloud(
+    process.env,
+    fetch,
+    googleOptions.clock,
+  );
+  const whatsapp = createWhatsAppApplication({
+    authenticate: access.authenticateForWork,
+    repository: createWhatsAppRepository(
+      runtimeDatabase(pool),
+      googleOptions.clock,
+    ),
+    clock: googleOptions.clock,
+    ...whatsappComposition,
+  });
   return {
+    whatsapp,
+    whatsappHttp: createWhatsAppHttp({
+      application: whatsapp,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     emailSequences,
     emailSequencesHttp: createEmailSequenceHttp({
       application: emailSequences,

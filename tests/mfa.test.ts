@@ -210,6 +210,63 @@ describe("privileged MFA", () => {
     });
   });
 
+  it("integrates a WhatsApp-review-only operator with public MFA status, readiness and current capability authorization", async () => {
+    h.clock.set("2026-11-05T10:40:00Z");
+    const operator = await h.signIn("mfa-whatsapp-review-only@example.com");
+    const actor = await h.authenticate(operator);
+    await h.admin.query(
+      "INSERT INTO platform_operator (user_id, whatsapp_review) VALUES ($1, true)",
+      [actor.userId],
+    );
+    expect(await h.access.status(operator)).toMatchObject({
+      required: true,
+      operator: true,
+      operatorVerified: true,
+      readiness: "mfa-satisfied",
+    });
+    const primaryOnly = await h.signIn(
+      "mfa-whatsapp-review-only@example.com",
+      false,
+    );
+    expect(await h.access.status(primaryOnly)).toMatchObject({
+      required: true,
+      operator: true,
+      verified: false,
+      operatorVerified: false,
+      readiness: "mfa-incomplete",
+    });
+    await expect(
+      h.access.authenticateForWork(primaryOnly),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    await expect(
+      h.team.requirePlatformCapability(operator, "whatsapp.review"),
+    ).resolves.toEqual({ capability: "whatsapp.review" });
+    h.clock.set("2026-11-05T10:55:00Z");
+    expect(await h.access.status(operator)).toMatchObject({
+      required: true,
+      operator: true,
+      verified: true,
+      operatorVerified: false,
+      readiness: "mfa-incomplete",
+    });
+    await expect(
+      h.team.requirePlatformCapability(operator, "whatsapp.review"),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    await h.reverifyAuthenticator(operator);
+    await h.admin.query(
+      "UPDATE platform_operator SET whatsapp_review=false WHERE user_id=$1",
+      [actor.userId],
+    );
+    expect(await h.access.status(operator)).toMatchObject({
+      required: false,
+      operator: false,
+      readiness: "mfa-satisfied",
+    });
+    await expect(
+      h.team.requirePlatformCapability(operator, "whatsapp.review"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("locks repeated invalid challenges across primary sessions without elevating them", async () => {
     h.clock.set("2026-11-05T11:00:00Z");
     await h.signIn("mfa-lock@example.com");
