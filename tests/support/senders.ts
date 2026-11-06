@@ -85,6 +85,7 @@ export async function readySender(
   businessId: string,
   inboxConnectionId: string,
   overrides: Partial<SenderIdentityConfiguration> = {},
+  mailboxProvider: "gmail" | "microsoft" = "gmail",
 ) {
   const f = senderFixture(h);
   const origin = overrides.origin ?? "customer_mailbox";
@@ -94,7 +95,7 @@ export async function readySender(
     expectedVersion: 0,
     configuration: {
       label: "Deterministic mail connection",
-      provider: origin === "customer_mailbox" ? "gmail" : origin,
+      provider: origin === "customer_mailbox" ? mailboxProvider : origin,
       account,
       enabled: true,
     },

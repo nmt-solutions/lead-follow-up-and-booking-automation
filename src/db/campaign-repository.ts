@@ -13,6 +13,7 @@ import { and, asc, eq } from "drizzle-orm";
 import type { z } from "zod";
 import type { Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
+import type { BusinessRole } from "../models/team";
 import { ApplicationError } from "../models/application-error";
 import {
   campaignSnapshotSchema,
@@ -33,6 +34,8 @@ import { readCommercialPolicy } from "./commercial-authority-repository";
 import { identityView, inspectionAt } from "./sender-repository";
 import { evaluateEmailAction } from "./email-eligibility-context";
 import { firstOutreachConversationState } from "./opportunity-followups";
+import { emailDecisionAtDispatch } from "./email-eligibility-context";
+import type { CampaignReview } from "../models/campaigns";
 import { contactClassification } from "../discovery/evidence";
 import {
   campaignRevision,
@@ -84,7 +87,7 @@ export function createCampaignRepository(database: Database, clock: Clock) {
   function scope<T>(
     actor: WorkIdentity,
     businessId: string,
-    operation: (tx: Transaction, role: string) => Promise<T>,
+    operation: (tx: Transaction, role: BusinessRole) => Promise<T>,
   ) {
     return scoped(
       database,
@@ -310,6 +313,46 @@ export function createCampaignRepository(database: Database, clock: Clock) {
     };
   }
   return {
+    /** Keep approval and current safety checks under the shared Business/policy guard through local preparation. */
+    withApprovedAction<T>(
+      actor: WorkIdentity,
+      businessId: string,
+      input: z.infer<typeof inspectCampaignSchema>,
+      run: (tx: Transaction, review: CampaignReview) => Promise<T>,
+    ) {
+      return scope(actor, businessId, async (tx, role) => {
+        async function requireCurrent() {
+          await requireSalesSession(tx, actor, clock.now(), role);
+          const result = await review(tx, businessId, role, actor, input);
+          if (
+            result.approval?.decision !== "approved" ||
+            [
+              result.current.version,
+              result.current.authority,
+              result.current.evidence,
+              result.current.sender,
+              result.current.reach,
+              result.current.conversation,
+            ].some((c) => c.status !== "allowed")
+          )
+            throw new ApplicationError("CONFLICT");
+          const eligibility = await emailDecisionAtDispatch(
+            tx,
+            businessId,
+            actor.userId,
+            result.eligibility,
+            clock.now(),
+          );
+          if (eligibility.status !== "allowed")
+            throw new ApplicationError("CONFLICT");
+          return { ...result, eligibility };
+        }
+        const result = await run(tx, await requireCurrent());
+        // Time can cross an expiry/effective boundary while local persistence waits, even with concurrent writers fenced out.
+        await requireCurrent();
+        return result;
+      });
+    },
     workspace(actor: WorkIdentity, businessId: string) {
       return scope(actor, businessId, (tx, role) =>
         workspace(tx, businessId, role, actor.userId),

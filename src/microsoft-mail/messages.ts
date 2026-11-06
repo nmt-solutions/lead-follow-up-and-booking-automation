@@ -18,7 +18,7 @@ const recipient = z.object({
   emailAddress: z.object({ address: z.email().max(254) }),
 });
 export const graphMetadataFields =
-  "id,conversationId,parentFolderId,receivedDateTime,sentDateTime,isDraft,subject,internetMessageId,from,sender,toRecipients,ccRecipients,internetMessageHeaders";
+  "id,conversationId,parentFolderId,receivedDateTime,sentDateTime,isDraft,subject,internetMessageId,from,sender,toRecipients,ccRecipients,bccRecipients,internetMessageHeaders";
 export const graphMessageSchema = z.object({
   id: graphId,
   conversationId: graphId,
@@ -32,6 +32,7 @@ export const graphMessageSchema = z.object({
   sender: recipient,
   toRecipients: z.array(recipient).max(50),
   ccRecipients: z.array(recipient).max(50),
+  bccRecipients: z.array(recipient).max(50),
   internetMessageHeaders: z
     .array(
       z.object({
@@ -61,6 +62,7 @@ export function graphMetadata(
           "from",
           "to",
           "cc",
+          "bcc",
           "subject",
           "message-id",
           "in-reply-to",
@@ -83,9 +85,11 @@ export function graphMetadata(
     sender = message.sender.emailAddress.address.toLowerCase();
   const to = [
     ...new Set(
-      [...message.toRecipients, ...message.ccRecipients].map((r) =>
-        r.emailAddress.address.toLowerCase(),
-      ),
+      [
+        ...message.toRecipients,
+        ...message.ccRecipients,
+        ...message.bccRecipients,
+      ].map((r) => r.emailAddress.address.toLowerCase()),
     ),
   ];
   const sent = message.parentFolderId === nativeGrant.sentFolderRef;
@@ -111,7 +115,7 @@ export function graphMetadata(
   const validDirection =
     from === sender &&
     (sent
-      ? from === account && !to.includes(account) && !!native.data?.inReplyTo
+      ? from === account && !to.includes(account)
       : from !== account && to.includes(account));
   const subject = message.subject.toLocaleLowerCase();
   const sales =

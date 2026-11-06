@@ -13,6 +13,7 @@ import type {
 } from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
 import type { CampaignSnapshot } from "../models/campaigns";
+import type { HandoffSource } from "../models/email-handoffs";
 import type {
   EmailMarketPolicy,
   RecipientFacts,
@@ -1628,6 +1629,7 @@ export const inboxMessage = pgTable(
   "inbox_message",
   {
     ...inboxColumns(),
+    nativeSyncGeneration: integer("native_sync_generation"),
     connectionId: uuid("connection_id").notNull(),
     conversationId: uuid("conversation_id").notNull(),
     messageRef: text("message_ref").notNull(),
@@ -2781,6 +2783,7 @@ export const gmailManualMessage = pgTable(
   "gmail_manual_message",
   {
     ...inboxColumns(),
+    nativeSyncGeneration: integer("native_sync_generation"),
     mailboxId: uuid("mailbox_id").notNull(),
     messageRef: text("message_ref").notNull(),
     policyVersion: integer("policy_version").notNull(),
@@ -3352,6 +3355,74 @@ export const campaignDecision = pgTable(
       for: "insert",
       to: appRuntime,
       withCheck: sql`(${inboxScope}) and public.current_business_role() = 'owner' and actor_id = current_setting('app.actor_id',true) and exists (select 1 from public.campaign_revision r where r.id = revision_id and r.business_id = ${t.businessId} and r.payload_hash = ${t.payloadHash})`,
+    }),
+  ],
+).enableRLS();
+
+export const emailHandoff = pgTable(
+  "email_handoff",
+  {
+    ...emailRecordColumns(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => campaignRevision.id),
+    payloadHash: text("payload_hash").notNull(),
+    contactId: text("contact_id").notNull(),
+  },
+  (t) => [
+    uniqueIndex("email_handoff_recipient").on(t.revisionId, t.contactId),
+    pgPolicy("email_handoff_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("email_handoff_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and actor_id = current_setting('app.actor_id',true) and exists (select 1 from public.campaign_revision r join public.campaign_decision d on d.revision_id=r.id and d.business_id=r.business_id where r.id=${t.revisionId} and r.business_id=${t.businessId} and r.payload_hash=${t.payloadHash} and d.decision='approved')`,
+    }),
+  ],
+).enableRLS();
+export const emailHandoffEvidence = pgTable(
+  "email_handoff_evidence",
+  {
+    ...emailRecordColumns(),
+    handoffId: uuid("handoff_id")
+      .notNull()
+      .references(() => emailHandoff.id),
+    kind: text("kind")
+      .$type<
+        | "prepared"
+        | "user_marked_sent"
+        | "sent_folder_observed"
+        | "reply_observed"
+      >()
+      .notNull(),
+    sourceKey: text("source_key").notNull(),
+    source: jsonb("source").$type<HandoffSource>(),
+  },
+  (t) => [
+    uniqueIndex("email_handoff_evidence_once").on(
+      t.handoffId,
+      t.kind,
+      t.sourceKey,
+    ),
+    uniqueIndex("email_handoff_native_once")
+      .on(t.businessId, t.sourceKey)
+      .where(sql`${t.source} is not null`),
+    check(
+      "email_handoff_evidence_kind",
+      sql`(${t.kind} in ('prepared','user_marked_sent') and ${t.source} is null) or (${t.kind} in ('sent_folder_observed','reply_observed') and ${t.source} is not null)`,
+    ),
+    pgPolicy("email_handoff_evidence_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("email_handoff_evidence_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and actor_id = current_setting('app.actor_id',true) and (${t.source} is null or public.current_business_role() in ('owner','admin')) and exists (select 1 from public.email_handoff h where h.id=${t.handoffId} and h.business_id=${t.businessId})`,
     }),
   ],
 ).enableRLS();

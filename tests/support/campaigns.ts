@@ -19,7 +19,11 @@ import { readySender } from "./senders";
 
 export async function campaignFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
-  options: { multipleSources?: boolean; namedGeneral?: boolean } = {},
+  options: {
+    multipleSources?: boolean;
+    namedGeneral?: boolean;
+    mailboxProvider?: "gmail" | "microsoft";
+  } = {},
 ) {
   h.clock.set("2026-11-05T09:00:00Z");
   const owner = await h.signIn(`campaign-${crypto.randomUUID()}@example.com`);
@@ -173,10 +177,17 @@ export async function campaignFixture(
     channel: "email",
     conversationRefs: [],
   });
-  const sender = await readySender(h, owner, business.id, connection.id, {
-    purpose: "dedicated_outreach",
-    uses: ["first_contact"],
-  });
+  const sender = await readySender(
+    h,
+    owner,
+    business.id,
+    connection.id,
+    {
+      purpose: "dedicated_outreach",
+      uses: ["first_contact"],
+    },
+    options.mailboxProvider,
+  );
   const newApplication = () =>
     createCampaignApplication({
       authenticate: h.access.authenticateForWork,

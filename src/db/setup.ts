@@ -4,6 +4,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  emailHandoff,
+  emailHandoffEvidence,
   campaignRevision,
   campaignDecision,
   emailMarketPolicy,
@@ -419,6 +421,12 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.campaign_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.campaign_revision, public.campaign_decision FROM app_runtime;
       END IF;
+      IF to_regclass('public.email_handoff') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.email_handoff, public.email_handoff_evidence FROM app_runtime;
+      END IF;
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inbox_message' AND column_name='native_sync_generation') THEN
+        REVOKE UPDATE (native_sync_generation) ON public.inbox_message, public.gmail_manual_message FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -535,6 +543,8 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      emailHandoff,
+      emailHandoffEvidence,
       campaignRevision,
       campaignDecision,
       emailMarketPolicy,
@@ -620,6 +630,10 @@ export async function secureDatabase(pool: Pool) {
     await client.query(`
       REVOKE ALL PRIVILEGES ON campaign_revision, campaign_decision FROM app_runtime;
       GRANT SELECT, INSERT ON campaign_revision, campaign_decision TO app_runtime;
+      REVOKE ALL PRIVILEGES ON email_handoff, email_handoff_evidence FROM app_runtime;
+      GRANT SELECT, INSERT ON email_handoff, email_handoff_evidence TO app_runtime;
+      ALTER TABLE email_handoff FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_handoff_evidence FORCE ROW LEVEL SECURITY;
       ALTER TABLE campaign_revision FORCE ROW LEVEL SECURITY;
       ALTER TABLE campaign_decision FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON gmail_grant, gmail_oauth FROM app_runtime;
@@ -640,6 +654,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON gmail_manual_message FROM app_runtime;
       GRANT SELECT, INSERT ON gmail_manual_message TO app_runtime;
       GRANT UPDATE (conversation_id, opportunity_id, state, current_metadata) ON gmail_manual_message TO app_runtime;
+      GRANT UPDATE (native_sync_generation) ON gmail_manual_message TO app_runtime;
       ALTER TABLE gmail_manual_message FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON mailbox_policy, mailbox_job FROM app_runtime;
       GRANT SELECT, INSERT ON mailbox_policy, mailbox_job TO app_runtime;
@@ -711,6 +726,7 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE inbox_conversation FORCE ROW LEVEL SECURITY;
       ALTER TABLE inbox_opportunity FORCE ROW LEVEL SECURITY;
       ALTER TABLE inbox_message FORCE ROW LEVEL SECURITY;
+      GRANT UPDATE (native_sync_generation) ON inbox_message TO app_runtime;
       ALTER TABLE inbox_event FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON inbox_association, inbox_message_link, inbox_association_history FROM app_runtime;
       GRANT SELECT, INSERT ON inbox_association, inbox_message_link, inbox_association_history TO app_runtime;

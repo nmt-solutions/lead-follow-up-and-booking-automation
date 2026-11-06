@@ -26,6 +26,7 @@ import { Label } from "./ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Alert } from "./ui/alert";
+import { EmailHandoffManager } from "./email-handoff-manager";
 
 type Recipient = CampaignSnapshot["recipients"][number];
 const selectionKey = (r: Recipient) =>
@@ -854,7 +855,7 @@ function CampaignEditor({
                     <Badge>
                       {r.decision?.decision ?? "Awaiting Owner approval"}
                     </Badge>
-                    <Badge>Not scheduled · 0 campaign sends</Badge>
+                    <Badge>Automation not scheduled</Badge>
                     {r.version !== c.revisions.at(-1)?.version && (
                       <Badge>Superseded</Badge>
                     )}
@@ -1069,6 +1070,7 @@ function CampaignEditor({
           </div>
         ))}
       </section>
+      <EmailHandoffManager businessId={businessId} campaigns={state} />
     </div>
   );
 }

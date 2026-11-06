@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "email_handoff",
+    "email_handoff_evidence",
     "campaign_revision",
     "campaign_decision",
     "email_market_policy",

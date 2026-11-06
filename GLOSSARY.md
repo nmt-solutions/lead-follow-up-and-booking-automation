@@ -89,6 +89,18 @@ The Business's ability to observe incoming and supported manual replies within i
 **Email handoff**:
 A prepared email that a person opens in their own email application, reviews, and chooses whether to send. Preparing or opening it does not establish that it was sent.
 
+**Prepared email**:
+An exact approved recipient and message made available for a person to use in their own email client. Preparation establishes no sending or delivery evidence.
+
+**User-marked sent**:
+A person's assertion that they sent a prepared email. It is separate from mailbox observations and delivery evidence.
+
+**Sent-folder observation**:
+An authorized mailbox synchronization's observation of a specific outgoing message in the mailbox's Sent folder, linked to a prepared email after explicit review. It does not establish delivery.
+
+**Reply observation**:
+An authorized mailbox synchronization's observation of a reply linked by exact message references to an observed outgoing message. An observed reply alone establishes neither buying interest nor a sale.
+
 **Verified sending domain**:
 An email domain that a business has demonstrated control over and authorized the service to use for sending.
 

@@ -122,6 +122,7 @@ export function microsoftMailFixture(clock: Clock) {
       folder?: string;
       from?: string;
       to?: string;
+      bcc?: string;
       reply?: string;
       subject?: string;
       text?: string;
@@ -143,6 +144,9 @@ export function microsoftMailFixture(clock: Clock) {
         { emailAddress: { address: options.to ?? identity.control.email } },
       ],
       ccRecipients: [],
+      bccRecipients: options.bcc
+        ? [{ emailAddress: { address: options.bcc } }]
+        : [],
       internetMessageHeaders: options.reply
         ? [{ name: "In-Reply-To", value: options.reply }]
         : [],

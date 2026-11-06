@@ -1,0 +1,41 @@
+# Own-client email handoff (#33)
+
+The Business campaign page prepares the approved **initial** message for one exact recipient. `createEmailHandoffApplication` exposes workspace, prepare, use, markSent and bindSent through the authenticated Business API. Follow-up scheduling and transport remain #34–#36.
+
+## Preparation and client contract
+
+Preparation consumes the immutable campaign revision/hash, prospect/contact/address and initial step. The campaign repository keeps approval, the approving Owner/session, commercial policy, current recipient evidence, sender readiness, Geographic reach, conversation/control and email eligibility checks under the shared Business and email-policy locks through preparation. A final check catches effective-time/expiry boundaries crossed while persistence waits. Every open/copy command repeats these checks. A restriction that wins the guard prevents preparation; a later restriction cannot retract content already handed to a person.
+
+One append-only prepared record per revision/contact derives its exact content from the approved snapshot. Concurrent preparation returns that record. Current authenticated sales staff can prepare/copy/open and record an assertion. Owner/Admin native binding also requires current MFA/session and integration capability. Reads and writes retain Business RLS; the history tables have forced RLS and SELECT/INSERT-only runtime grants.
+
+The only compose format is [RFC 6068 mailto](https://www.rfc-editor.org/info/rfc6068/), using a validated email addr-spec, subject and plain body. URI components are UTF-8 percent encoded once: spaces use `%20`, literal plus signs `%2B`, and body line breaks `%0D%0A`. Header controls and malformed Unicode are rejected. Query-like body text remains body content. React renders untrusted text as text/form values.
+
+Client support means a configured RFC 6068 handler accepting recipient, subject and body. No provider-specific compose URL, downloadable MIME draft, attachment or From-account enforcement is offered. Handler installation, URL-length limits and field preservation vary; fields remain selectable and individually copyable. The person must choose the approved From account and review the actual draft. External edits create neither an approved campaign revision nor application-observed sending. Preparation, use and user assertions have no provider-send or scheduling port.
+
+## Evidence and native binding
+
+Append-only evidence remains independent: **Prepared**, **User-marked sent**, **Sent-folder observed**, **Reply observed**. Opening/copying records no stronger state. User assertions retain actor/time and remain possible after a restriction to record history without granting permission. A Sent-folder observation is not delivery. A reply may be an acknowledgement; this flow does not promote a public Prospect to an Engaged lead or record a sale.
+
+An Owner/Admin explicitly selects a synchronized provider message after review. Equal subject/recipient never binds automatically. A candidate requires exact approved From, sole visible recipient, subject and plain body (only CR/LF normalization), time at/after preparation, unique RFC Message-ID, the approved identity's connection and the provider's Sent folder. Signatures, edited content/accounts/recipients and duplicate RFC identities remain unlinked. Multiple matching records require explicit selection. One native record can bind to only one handoff; a handoff can have only one Sent binding. Rebinding another message is rejected.
+
+Provenance includes provider, Business-scoped mailbox/connection, policy version, OAuth generation, provider message/thread, RFC Message-ID/In-Reply-To, occurrence time, recording actor and observation time. Native sync tags retained content with its validated OAuth generation after existing scope/session/checkpoint checks. Normalized imports, forwarded headers, BCC copies, manual assertions and request-supplied flags cannot create that provenance.
+
+Binding requires current enabled identity/connection/mailbox, native OAuth generation and read grant, fresh synchronization (the existing five-minute boundary), current scope and completed incremental work under a still-authorized manager/session. Only association-review limited states support individual observations; history gaps, recovering/unfinished work, failed grants, stale sync and revocation cannot. Limited observations never establish complete synchronization or authorize follow-ups.
+
+Replies correlate only after explicit Sent binding: same mailbox, connection/generation and provider thread, exact In-Reply-To to the unique linked Message-ID, expected native participants, current selection and nondecreasing occurrence time. Deferred incoming records and captured inbox messages are considered, so reordered pages and later sync rounds retain provenance idempotently. Unmatched inbox associations remain for their existing review path; this flow invents no buyer or Opportunity. Historical evidence survives access loss; current visibility becomes unavailable separately.
+
+Native Gmail and Microsoft Graph contracts use deterministic HTTP adapters and real OAuth/application/persistence flows in tests. Sent membership uses Gmail's `SENT` label or Graph's canonical Sent Items folder; see [Gmail Message](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages) and [Graph message](https://learn.microsoft.com/en-us/graph/api/resources/message?view=graph-rest-1.0). Standalone sent mail enters existing metadata-first selection through explicit threads or folders plus deliberate subject terms. Full-mailbox selection still cannot infer arbitrary private sales intent. Existing #29/#30 gaps, complete-reply-capture limits, sender restrictions, consent and worker launch prerequisites remain in force.
+
+## Successor boundary
+
+#34 must consume applicable immutable approval and recheck #27 sender readiness, #31 eligibility/suppression and #19 conversation/ownership at its guarded effect boundary, with durable action/attempt identity. This handoff supplies no send/delivery receipt, attempt accounting, follow-up grant or queue. Prepared/User-marked sent cannot justify automated follow-up. Historical native evidence cannot substitute for current visibility or authority.
+
+## Human verification pending
+
+1. In Business → First-outreach campaigns, save an initial message/recipient set and obtain Owner approval. Configure current permission, sender and policy evidence through their existing flows. Prepare one initial email; reload and expect the same content and Prepared history. A blocked prerequisite must show an error without a new record.
+2. Copy each field and compare Unicode, `&`, `+` and multiline body text. If you choose to open a configured client yourself, inspect the fields and From account; cancel without sending. Expect Prepared only. The app sends and schedules nothing.
+3. Record “I sent this email” only when appropriate. Expect separate User-marked sent history, no delivery claim and no automatic follow-up.
+4. With separately approved native mailbox/worker setup, synchronize selected consented test mail. An Owner/Admin reviews the exact candidate before linking. Expect Sent-folder observed, never delivered. An exact referenced reply produces Reply observed; wrong references or edited content remain unlinked. Inbox association review may still be needed.
+5. Remove reading consent, change selection or let sync expire. Expect current visibility unavailable, no new strong binding and retained history. Opt-outs or current authority/sender changes block another prepare/open/copy.
+
+Source/intended-flow review applied both required Apple design skills: named actions, persistent field labels, inline status/error recovery, explicit account/evidence limits, and the existing semantic Tailwind/shadcn controls. Browser/UI validation, visual/accessibility audits, measurements, preference emulation and mail-client/live-send checks are user-owned and were not performed. `tested` remains absent pending human acceptance.

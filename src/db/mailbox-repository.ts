@@ -21,6 +21,7 @@ import { scoped, requireCapability, type Transaction } from "./scope";
 import { requireSalesSession } from "./sales-session";
 import { retainMailManual, applyMailManual } from "./mailbox-intake";
 import { pauseMailboxFollowups } from "./mailbox-visibility";
+import { reconcileHandoffReplies } from "./email-handoff-observations";
 import {
   inboxConnection,
   mailboxPolicy,
@@ -791,6 +792,31 @@ export function createMailboxRepository(
         }
         await applyPendingMailInquiries(tx, batch, clock.now());
         await applyMailManual(tx, batch, clock.now());
+        // Native provenance is set only after the authorized OAuth generation and batch commit checks above.
+        if (snapshot.oauthGeneration)
+          for (const { event, metadata } of batch.selected) {
+            if (!metadata.native) continue;
+            await tx
+              .update(gmailManualMessage)
+              .set({ nativeSyncGeneration: snapshot.oauthGeneration })
+              .where(
+                and(
+                  eq(gmailManualMessage.businessId, work.businessId),
+                  eq(gmailManualMessage.mailboxId, policy.id),
+                  eq(gmailManualMessage.messageRef, event.messageRef),
+                ),
+              );
+            await tx
+              .update(inboxMessage)
+              .set({ nativeSyncGeneration: snapshot.oauthGeneration })
+              .where(
+                and(
+                  eq(inboxMessage.businessId, work.businessId),
+                  eq(inboxMessage.connectionId, policy.id),
+                  eq(inboxMessage.messageRef, event.messageRef),
+                ),
+              );
+          }
         const unresolved = await tx
           .select({
             metadata: gmailManualMessage.metadata,
@@ -868,6 +894,17 @@ export function createMailboxRepository(
           .where(eq(mailboxPolicy.id, policy.id));
         if (job.state.mode === "incremental" && visibility !== "current")
           await pauseMailboxFollowups(tx, work.businessId, policy.id);
+        if (
+          snapshot.oauthGeneration &&
+          job.state.mode === "incremental" &&
+          state.status === "completed"
+        )
+          await reconcileHandoffReplies(
+            tx,
+            work.identity,
+            work.businessId,
+            clock.now(),
+          );
         return state;
       });
     },

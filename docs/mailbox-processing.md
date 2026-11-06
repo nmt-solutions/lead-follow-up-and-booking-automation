@@ -37,3 +37,5 @@ Changing mailbox scope invalidates #27 reply-route proof. General reply routes c
 ## Human verification
 
 UI validation and user acceptance remain pending. In Business → Mailbox processing, select a Business mailbox identity, request read/send separately, save a folder/label or thread selection and reload. Expect the same settings and history off. Connect with the provider-specific procedure above. Without approved provider/worker setup, expect a reviewable blocked/setup-required or worker-required job with no invented grants. Opt into history with a past UTC interval and count, save, then start it. Disable processing or reading and save; new sync requests must be unavailable while existing inbox correspondence stays readable. Verify layout, keyboard operation, larger text and both appearances yourself.
+
+For prepared first-outreach emails, [Email handoffs](email-handoffs.md) documents explicit native Sent-folder binding and exact reply evidence. Individual scoped observations retain the native synchronization and complete-capture limitations above.

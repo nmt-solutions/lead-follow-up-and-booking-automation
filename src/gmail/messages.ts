@@ -33,9 +33,15 @@ function headers(message: Message) {
     const value = h.value.replace(/\r?\n[ \t]+/g, " ").trim();
     if (/[\u0000-\u001f\u007f]/.test(value) || result.has(name)) {
       if (
-        ["from", "to", "cc", "subject", "message-id", "in-reply-to"].includes(
-          name,
-        )
+        [
+          "from",
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "message-id",
+          "in-reply-to",
+        ].includes(name)
       )
         throw new GmailFailure("invalid_response");
       continue;
@@ -69,6 +75,7 @@ export function gmailMetadata(
     ...new Set([
       ...addresses(h.get("to") ?? ""),
       ...addresses(h.get("cc") ?? ""),
+      ...addresses(h.get("bcc") ?? ""),
     ]),
   ];
   const account = context.account.toLowerCase();
@@ -91,7 +98,7 @@ export function gmailMetadata(
     h.has("list-id") ||
     (h.has("auto-submitted") && h.get("auto-submitted") !== "no");
   const directionValid = sent
-    ? from[0] === account && !to.includes(account) && !!native.data?.inReplyTo
+    ? from[0] === account && !to.includes(account)
     : from[0] !== account && to.includes(account);
   const subject = decodedHeader(h.get("subject") ?? "").toLocaleLowerCase();
   const known = context.knownThreads?.includes(message.threadId);

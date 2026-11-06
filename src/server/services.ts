@@ -21,6 +21,9 @@ import "server-only";
 import { createCampaignApplication } from "../application/campaigns";
 import { createCampaignRepository } from "../db/campaign-repository";
 import { createCampaignHttp } from "../http/campaigns";
+import { createEmailHandoffApplication } from "../application/email-handoffs";
+import { createEmailHandoffRepository } from "../db/email-handoff-repository";
+import { createEmailHandoffHttp } from "../http/email-handoffs";
 import { createEmailEligibilityApplication } from "../application/email-eligibility";
 import { createEmailEligibilityRepository } from "../db/email-eligibility-repository";
 import { createEmailEligibilityHttp } from "../http/email-eligibility";
@@ -135,6 +138,12 @@ async function composeServices() {
   const campaigns = createCampaignApplication({
     authenticate: access.authenticateForWork,
     repository: createCampaignRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+  });
+  const emailHandoffs = createEmailHandoffApplication({
+    authenticate: access.authenticateForWork,
+    repository: createEmailHandoffRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
   });
@@ -358,6 +367,12 @@ async function composeServices() {
   });
   return {
     campaigns,
+    emailHandoffs,
+    emailHandoffsHttp: createEmailHandoffHttp({
+      application: emailHandoffs,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     campaignsHttp: createCampaignHttp({
       application: campaigns,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
