@@ -1,5 +1,9 @@
 import type { MailAcceptance } from "../models/mail-dispatch";
 import type {
+  SubscriptionLifecycle,
+  LifecycleEvent,
+} from "../models/subscription-lifecycle";
+import type {
   MailboxConfiguration,
   MailboxGrant,
   MailboxJobState,
@@ -732,6 +736,7 @@ export const subscriptionPayment = pgTable(
     checkout: jsonb("checkout").$type<CheckoutReference>(),
     observation: jsonb("observation").$type<PaymentObservation>(),
     recovery: jsonb("recovery").$type<PaymentAction["recovery"]>(),
+    lifecycle: jsonb("lifecycle").$type<SubscriptionLifecycle>(),
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
     reconciliationPending: boolean("reconciliation_pending")
       .notNull()
@@ -767,6 +772,27 @@ export const subscriptionPayment = pgTable(
       using: paymentOwner,
       withCheck: paymentOwner,
     }),
+  ],
+).enableRLS();
+export const subscriptionLifecycleEvent = pgTable(
+  "subscription_lifecycle_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    lifecycle: jsonb("lifecycle").$type<SubscriptionLifecycle>().notNull(),
+    notice: jsonb("notice").$type<LifecycleEvent["notice"]>(),
+  },
+  (t) => [
+    uniqueIndex("subscription_lifecycle_event_identity").on(t.actionId, t.key),
+    ...paymentHistoryPolicies(
+      "subscription_lifecycle_event",
+      sql`${t.actionId}`,
+    ),
   ],
 ).enableRLS();
 export const subscriptionPaymentEvent = pgTable(
@@ -884,6 +910,17 @@ export const subscriptionUsage = pgTable(
 // Reconcile these composite keys after the pinned push replaces referenced
 // UNIQUE constraints, while financial runtime access remains paused.
 export const subscriptionPaymentScopeForeignKeys = [
+  new ForeignKey(
+    subscriptionLifecycleEvent,
+    foreignKey({
+      name: "subscription_lifecycle_event_scope",
+      columns: [
+        subscriptionLifecycleEvent.actionId,
+        subscriptionLifecycleEvent.businessId,
+      ],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
   new ForeignKey(
     subscriptionPaymentEvent,
     foreignKey({

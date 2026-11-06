@@ -2,6 +2,8 @@
 
 The Next.js payment application and Trigger recovery worker share `configuredPayments`. A supported configured path creates a native hosted subscription link, accepts signature-authenticated durable webhook receipts and polls native subscription, invoice and captured payment resources. The app never receives or stores card numbers, CVVs or mandate tokens. Cashfree, UPI and eMandate are unavailable.
 
+Issue #46 composes the [reviewed lifecycle policy, native Standard Checkout card update, cancellation and in-app notification contracts](subscription-lifecycle.md) into this same adapter and recovery task. Supply `SUBSCRIPTION_LIFECYCLE_POLICY` independently of the merchant account review; missing policy does not authorize grace or cancellation.
+
 ## Operator configuration
 
 Set server-only `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRETS` (JSON array of one to three current/retained webhook secrets), and `RAZORPAY_ACCOUNT_REVIEW` (JSON matching `src/models/razorpay-account.ts`). Deploy the same credentials, evidence version and recovery cron configuration to web and Trigger. Key prefix must match the reviewed `test` or `live` mode. Native test mode is displayed distinctly and uses fixture-mode approved tax configuration; it does not establish live activation. Native account binding includes merchant ID and mode so test and live receipts cannot collide. No values are seeded.

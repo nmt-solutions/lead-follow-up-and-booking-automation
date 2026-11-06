@@ -21,6 +21,7 @@ export default defineConfig({
     "seller_document_storage",
     "whatsapp_outbound",
     "subscription_payment",
+    "subscription_lifecycle_event",
     "subscription_payment_event",
     "subscription_payment_history",
     "subscription_period",

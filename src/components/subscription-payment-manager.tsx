@@ -1,5 +1,8 @@
 "use client";
 import Link from "next/link";
+import { SubscriptionLifecyclePanel } from "./subscription-lifecycle-panel";
+import { openCardRecovery } from "./razorpay-recovery";
+import { recoveryCheckoutSchema } from "@/models/subscription-lifecycle";
 import { useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -174,6 +177,8 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
               observation: a.observation,
               recovery: a.recovery,
               history: a.history,
+              lifecycle: a.lifecycle,
+              lifecycleEvents: a.lifecycleEvents,
               events: a.events,
             },
             null,
@@ -240,6 +245,47 @@ export function SubscriptionPaymentManager({
     );
     await refresh();
     setMessage("Saved payment status refreshed.");
+  }
+  async function lifecycleCommand(
+    kind: "cancel" | "update-payment",
+    actionId: string,
+  ) {
+    const response = await fetch(`${base}/${kind}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ actionId, requestKey: crypto.randomUUID() }),
+    });
+    if (kind === "cancel") {
+      await readCommercialResponse(response, paymentActionSchema);
+      await refresh();
+      setMessage(
+        "Cancellation request saved. Review provider confirmation and the effective date below.",
+      );
+      return;
+    }
+    const checkout = await readCommercialResponse(
+      response,
+      recoveryCheckoutSchema,
+    );
+    await openCardRecovery(
+      checkout,
+      () => {
+        void run(async () => {
+          await command("refresh", actionId);
+          setMessage(
+            "Secure card flow completed. Only reconciled captures change paid access.",
+          );
+        });
+      },
+      () =>
+        setMessage(
+          "Secure card flow closed. Reconcile payment status to check any payment outcome.",
+        ),
+    );
+    await refresh();
+    setMessage(
+      "Secure card recovery opened. Paid access still requires a confirmed capture.",
+    );
   }
   return (
     <div className="space-y-8" aria-busy={busy}>
@@ -514,6 +560,14 @@ export function SubscriptionPaymentManager({
             className="space-y-4 rounded-2xl border border-border bg-card p-6"
           >
             <PaymentDetail action={a} />
+            <SubscriptionLifecyclePanel
+              action={a}
+              busy={busy}
+              onUpdate={() =>
+                run(() => lifecycleCommand("update-payment", a.id))
+              }
+              onCancel={() => run(() => lifecycleCommand("cancel", a.id))}
+            />
             <div className="flex flex-wrap gap-3">
               {a.state === "reviewed" && (
                 <Button
@@ -591,6 +645,7 @@ export function SubscriptionPaymentOperator({
             {a.snapshot.quote.profile.profile.legalName}
           </h2>
           <PaymentDetail action={a} />
+          <SubscriptionLifecyclePanel action={a} />
           <div className="flex flex-wrap gap-4">
             <Link
               href={`/platform/billing/${a.businessId}`}
