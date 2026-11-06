@@ -26,7 +26,7 @@ const envelope = z.discriminatedUnion("success", [
 ]);
 const iso = (value: FormDataEntryValue | null) => {
   const s = String(value ?? "");
-  const date=new Date(`${s}Z`);
+  const date = new Date(`${s}Z`);
   return s && Number.isFinite(date.getTime()) ? date.toISOString() : "";
 };
 function Field({
@@ -285,7 +285,8 @@ export function WhatsAppSendingManager({
           <div key={r.peer} className="space-y-2 rounded-xl bg-muted p-4">
             <p className="font-medium">+{r.peer}</p>
             <p>
-              This recipient and its source/contact evidence are fixed for this version.
+              This recipient and its source/contact evidence are fixed for this
+              version.
             </p>
             {r.steps.map((s, i) => (
               <div key={i}>
@@ -397,7 +398,8 @@ export function WhatsAppSendingManager({
                   {[...new Set(state.actions.map((a) => a.opportunityId))].map(
                     (id) => (
                       <option key={id} value={id}>
-                        {state.actions.find((a)=>a.opportunityId===id)?.title??id}
+                        {state.actions.find((a) => a.opportunityId === id)
+                          ?.title ?? id}
                       </option>
                     ),
                   )}
@@ -451,10 +453,7 @@ export function WhatsAppSendingManager({
               ],
             ].map(([name, label]) => (
               <label key={name} className="flex min-h-11 items-center gap-3">
-                <Checkbox
-                  name={name}
-                  required
-                />
+                <Checkbox name={name} required />
                 {label}
               </label>
             ))}
@@ -729,22 +728,60 @@ export function WhatsAppSendingManager({
                     ? "Owner approved"
                     : "Awaiting Owner approval"}
             </Badge>
-            <p className="font-medium">Approved sender: {p.sender.number} · connection version {p.plan.connectionVersion}</p>
-            {p.blockedReason&&<p className="text-sm text-warning">Current execution check: {p.blockedReason.replaceAll("_"," ")}</p>}
+            <p className="font-medium">
+              Approved sender: {p.sender.number} · connection version{" "}
+              {p.plan.connectionVersion}
+            </p>
+            {p.blockedReason && (
+              <p className="text-sm text-warning">
+                Current execution check: {p.blockedReason.replaceAll("_", " ")}
+              </p>
+            )}
             {planSummary(p.plan)}
-            <details><summary className="min-h-11 cursor-pointer py-3 font-medium">Saved source and contact evidence</summary><div className="space-y-4">{p.sources.map((s)=><div key={s.contactId} className="space-y-2 rounded-xl bg-muted p-4"><p className="font-medium">{s.name} · +{s.peer}</p>{s.sources.map((source,i)=><div key={i}><a href={source.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center text-primary underline">View recorded public source (new tab)</a><blockquote className="border-l-2 border-border pl-3">{source.quote}</blockquote><p className="text-sm text-muted-foreground">Checked {source.checkedAt}</p></div>)}</div>)}</div></details>
+            <details>
+              <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                Saved source and contact evidence
+              </summary>
+              <div className="space-y-4">
+                {p.sources.map((s) => (
+                  <div
+                    key={s.contactId}
+                    className="space-y-2 rounded-xl bg-muted p-4"
+                  >
+                    <p className="font-medium">
+                      {s.name} · +{s.peer}
+                    </p>
+                    {s.sources.map((source, i) => (
+                      <div key={i}>
+                        <a
+                          href={source.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 items-center text-primary underline"
+                        >
+                          View recorded public source (new tab)
+                        </a>
+                        <blockquote className="border-l-2 border-border pl-3">
+                          {source.quote}
+                        </blockquote>
+                        <p className="text-sm text-muted-foreground">
+                          Checked {source.checkedAt}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </details>
             {p.current && !p.cancelled && (
               <div className="space-y-3">
                 {!p.approved && state.canApprove && (
                   <form onSubmit={(e) => approval(e, p)} className="space-y-3">
                     <label className="flex min-h-11 items-start gap-3">
-                      <Checkbox
-                        required
-                        className="mt-1"
-                      />
-                      I reviewed this sender version, recipient set, retained
-                      source/contact evidence, exact messages, timing, attempt
-                      cap and stop conditions.
+                      <Checkbox required className="mt-1" />I reviewed this
+                      sender version, recipient set, retained source/contact
+                      evidence, exact messages, timing, attempt cap and stop
+                      conditions.
                     </label>
                     <Button disabled={pending}>
                       Approve this exact version
@@ -918,7 +955,95 @@ export function WhatsAppSendingManager({
                     )}
                   </div>
                 ))}
-              {a.intent&&<details><summary className="min-h-11 cursor-pointer py-3 font-medium">Record a sourced customer Meta cost estimate</summary><p className="mb-4 text-sm text-muted-foreground">Optional assisted estimate for this one message, from your reviewed Meta account/rate evidence. This is not a charge or an observed final bill. Do not enter payment credentials.</p><form className="space-y-4" onSubmit={(e)=>{e.preventDefault();const f=new FormData(e.currentTarget);void command("estimate",{actionId:a.id,currency:f.get("currency"),minor:f.get("minor"),reference:f.get("reference"),observedAt:iso(f.get("observed")),validUntil:iso(f.get("valid"))});}}><div className="grid gap-4 sm:grid-cols-2"><Field id={`wa-cost-currency-${a.id}`} label="Meta billing currency"><Input id={`wa-cost-currency-${a.id}`} name="currency" required pattern="[A-Z]{3}"/></Field><Field id={`wa-cost-minor-${a.id}`} label="Estimated minor units for this message"><Input id={`wa-cost-minor-${a.id}`} name="minor" inputMode="numeric" required pattern="[0-9]+"/></Field><Field id={`wa-cost-ref-${a.id}`} label="Rate evidence case reference"><Input id={`wa-cost-ref-${a.id}`} name="reference" required pattern="[A-Z][A-Z0-9-]{5,100}"/></Field><Field id={`wa-cost-observed-${a.id}`} label="Rate observed (UTC)"><Input id={`wa-cost-observed-${a.id}`} name="observed" type="datetime-local" required/></Field><Field id={`wa-cost-valid-${a.id}`} label="Estimate valid until (UTC)"><Input id={`wa-cost-valid-${a.id}`} name="valid" type="datetime-local" required/></Field></div><Button variant="outline" disabled={pending}>Record separate Meta estimate</Button></form></details>}
+              {a.intent && (
+                <details>
+                  <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                    Record a sourced customer Meta cost estimate
+                  </summary>
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    Optional assisted estimate for this one message, from your
+                    reviewed Meta account/rate evidence. This is not a charge or
+                    an observed final bill. Do not enter payment credentials.
+                  </p>
+                  <form
+                    className="space-y-4"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const f = new FormData(e.currentTarget);
+                      void command("estimate", {
+                        actionId: a.id,
+                        currency: f.get("currency"),
+                        minor: f.get("minor"),
+                        reference: f.get("reference"),
+                        observedAt: iso(f.get("observed")),
+                        validUntil: iso(f.get("valid")),
+                      });
+                    }}
+                  >
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field
+                        id={`wa-cost-currency-${a.id}`}
+                        label="Meta billing currency"
+                      >
+                        <Input
+                          id={`wa-cost-currency-${a.id}`}
+                          name="currency"
+                          required
+                          pattern="[A-Z]{3}"
+                        />
+                      </Field>
+                      <Field
+                        id={`wa-cost-minor-${a.id}`}
+                        label="Estimated minor units for this message"
+                      >
+                        <Input
+                          id={`wa-cost-minor-${a.id}`}
+                          name="minor"
+                          inputMode="numeric"
+                          required
+                          pattern="[0-9]+"
+                        />
+                      </Field>
+                      <Field
+                        id={`wa-cost-ref-${a.id}`}
+                        label="Rate evidence case reference"
+                      >
+                        <Input
+                          id={`wa-cost-ref-${a.id}`}
+                          name="reference"
+                          required
+                          pattern="[A-Z][A-Z0-9-]{5,100}"
+                        />
+                      </Field>
+                      <Field
+                        id={`wa-cost-observed-${a.id}`}
+                        label="Rate observed (UTC)"
+                      >
+                        <Input
+                          id={`wa-cost-observed-${a.id}`}
+                          name="observed"
+                          type="datetime-local"
+                          required
+                        />
+                      </Field>
+                      <Field
+                        id={`wa-cost-valid-${a.id}`}
+                        label="Estimate valid until (UTC)"
+                      >
+                        <Input
+                          id={`wa-cost-valid-${a.id}`}
+                          name="valid"
+                          type="datetime-local"
+                          required
+                        />
+                      </Field>
+                    </div>
+                    <Button variant="outline" disabled={pending}>
+                      Record separate Meta estimate
+                    </Button>
+                  </form>
+                </details>
+              )}
             </div>
           ))}
         </CardContent>

@@ -232,9 +232,20 @@ export type MetaCandidate = {
   evidenceKey: string;
   market: string;
   evidence: unknown;
-  sources: {url:string;quote:string;checkedAt:string}[];
+  sources: { url: string; quote: string; checkedAt: string }[];
 };
-const candidateSchema=z.object({prospectId:z.uuid(),contactId:z.string(),peer:z.string(),name:z.string(),evidenceKey:z.string(),market:z.string(),evidence:z.unknown(),sources:z.array(z.object({url:z.url(),quote:z.string(),checkedAt:z.iso.datetime()}))});
+const candidateSchema = z.object({
+  prospectId: z.uuid(),
+  contactId: z.string(),
+  peer: z.string(),
+  name: z.string(),
+  evidenceKey: z.string(),
+  market: z.string(),
+  evidence: z.unknown(),
+  sources: z.array(
+    z.object({ url: z.url(), quote: z.string(), checkedAt: z.iso.datetime() }),
+  ),
+});
 export const metaSendingWorkspaceSchema: z.ZodType<MetaSendingWorkspace> =
   z.object({
     connectionVersion: z.number().nullable(),
@@ -273,7 +284,7 @@ export const metaSendingWorkspaceSchema: z.ZodType<MetaSendingWorkspace> =
         cancelled: z.boolean(),
         sender: z.object({ number: z.string(), assets: metaAssetsSchema }),
         blockedReason: z.string().nullable(),
-        sources:z.array(candidateSchema),
+        sources: z.array(candidateSchema),
       }),
     ),
     candidates: z.array(candidateSchema),

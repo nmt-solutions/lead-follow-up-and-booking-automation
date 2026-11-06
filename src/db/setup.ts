@@ -954,6 +954,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON opportunity_control_history, opportunity_manual_event, opportunity_due_action FROM app_runtime;
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
       GRANT UPDATE (state, reason, email) ON opportunity_due_action TO app_runtime;
+      REVOKE UPDATE (whatsapp_plan_id,whatsapp_step,whatsapp_peer) ON opportunity_due_action FROM app_runtime;
       CREATE OR REPLACE FUNCTION public.protect_opportunity_mail() RETURNS trigger
       LANGUAGE plpgsql SET search_path = pg_catalog, public AS $protect$
       BEGIN

@@ -423,8 +423,16 @@ async function composeServices() {
         ]
       : []),
   ]);
-  const inquiryProvider: OpportunityActionProvider = {...emailInquiryProvider,channels:[...emailInquiryProvider.channels,"whatsapp"]};
-  const whatsappSending = createWhatsAppSendingApplication({authenticate:access.authenticateForWork,repository:whatsappSendingRepository,opportunities:opportunityRepository,clock:{now:()=>new Date()}});
+  const inquiryProvider: OpportunityActionProvider = {
+    ...emailInquiryProvider,
+    channels: [...emailInquiryProvider.channels, "whatsapp"],
+  };
+  const whatsappSending = createWhatsAppSendingApplication({
+    authenticate: access.authenticateForWork,
+    repository: whatsappSendingRepository,
+    opportunities: opportunityRepository,
+    clock: { now: () => new Date() },
+  });
   const opportunities = createOpportunityApplication({
     authenticate,
     authenticateForWork: access.authenticateForWork,

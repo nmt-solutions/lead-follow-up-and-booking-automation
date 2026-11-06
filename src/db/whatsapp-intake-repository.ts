@@ -24,6 +24,7 @@ import {
   inboxAssociation,
   inboxOpportunity,
   opportunityControlHistory,
+  opportunityDueAction,
 } from "./schema";
 
 export type MetaScope = { id: string; businessId: string; actorId: string };
@@ -711,12 +712,33 @@ export function createWhatsAppIntakeRepository(
                   activity.replyTo,
                 )
               : null;
+            const planned = !activity.replyTo
+              ? await tx
+                  .select({ opportunityId: opportunityDueAction.opportunityId })
+                  .from(opportunityDueAction)
+                  .where(
+                    and(
+                      eq(opportunityDueAction.businessId, scope.businessId),
+                      eq(
+                        opportunityDueAction.connectionId,
+                        intake.inboxConnectionId,
+                      ),
+                      eq(opportunityDueAction.whatsappPeer, activity.peer),
+                      inArray(opportunityDueAction.state, [
+                        "pending",
+                        "committed",
+                        "dispatched",
+                      ]),
+                    ),
+                  )
+              : [];
             const ids = [
               ...new Set([
                 ...candidates.flatMap((c) =>
                   c.opportunityId ? [c.opportunityId] : [],
                 ),
                 ...(outboundParent ? [outboundParent.opportunityId] : []),
+                ...planned.map((p) => p.opportunityId),
               ]),
             ];
             if (ids.length === 1) {

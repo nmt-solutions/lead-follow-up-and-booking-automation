@@ -46,6 +46,9 @@ describe("WhatsApp sends through current public application commands", () => {
     });
     await f.control.dispatch(f.credentials, f.businessId, action.id);
     expect(f.sent).toHaveLength(1);
+    const restarted = f.restart();
+    await restarted.recoverDue();
+    expect(f.sent).toHaveLength(1);
     expect(
       (await f.app.workspace(f.credentials, f.businessId)).actions[0],
     ).toMatchObject({
@@ -100,7 +103,8 @@ describe("WhatsApp sends through current public application commands", () => {
       ],
     });
     await f.intake.drain();
-    const workspace = await f.app.reconcile(f.credentials, f.businessId, {
+    await f.restart().recoverDue();
+    const workspace = await f.restart().reconcile(f.credentials, f.businessId, {
       actionId: action.id,
     });
     expect(workspace.actions[0]).toMatchObject({
@@ -494,6 +498,49 @@ describe("WhatsApp sends through current public application commands", () => {
     ).toBe("automation");
     expect(f.sent).toHaveLength(1);
   });
+  it("takes over an unambiguous approved prospect after supported Business App activity and never revives cancelled work on handback", async () => {
+    const f = await metaSendingFixture(h, "prospect-takeover"),
+      o = await f.outreach(),
+      saved = await f.app.savePlan(f.credentials, f.businessId, o.plan),
+      r = saved.plans[0],
+      ref = { planId: r.id, hash: r.hash };
+    await f.app.decide(f.credentials, f.businessId, { ...ref, approved: true });
+    const started = await f.app.start(f.credentials, f.businessId, ref),
+      actions = [...started.actions].sort((a, b) =>
+        a.dueAt.localeCompare(b.dueAt),
+      );
+    await f.control.dispatch(f.credentials, f.businessId, actions[0].id);
+    h.clock.set("2026-11-05T09:01:00Z");
+    await f.deliver("smb_message_echoes", {
+      message_echoes: [
+        {
+          id: "wamid.prospect-human",
+          from: "14155550123",
+          to: "919876543211",
+          timestamp: "1793869260",
+          type: "text",
+          text: { body: "I will help you personally" },
+        },
+      ],
+    });
+    await f.intake.drain();
+    const state = await f.control.read(
+      f.credentials,
+      f.businessId,
+      actions[0].opportunityId,
+    );
+    expect(state.state).toBe("human");
+    await f.control.change(f.credentials, f.businessId, state.id, {
+      command: "handback",
+      expectedVersion: state.version,
+      reason: "Reviewed",
+      nextAction: "Only freshly evaluated work",
+    });
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, actions[1].id),
+    ).toMatchObject({ state: "cancelled" });
+    expect(f.sent).toHaveLength(1);
+  });
   it("sends an expired-window ordinary reply only through a current approved template with exactly its saved grounded body", async () => {
     const f = await metaSendingFixture(h, "ordinary-template");
     h.clock.set("2026-11-06T09:01:00Z");
@@ -612,5 +659,16 @@ describe("WhatsApp sends through current public application commands", () => {
     await expect(
       h.runtime.query("UPDATE whatsapp_outbound SET data='{}'::jsonb"),
     ).rejects.toBeDefined();
+  });
+  it("rejects a missing SELECT grant independently, even when INSERT is still present", async () => {
+    await h.admin.query("REVOKE SELECT ON whatsapp_outbound FROM app_runtime");
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
+      await h.admin.query("GRANT SELECT ON whatsapp_outbound TO app_runtime");
+    }
+    await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
   });
 });

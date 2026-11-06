@@ -2765,7 +2765,7 @@ export const opportunityDueAction = pgTable(
     ),
     check(
       "opportunity_action_origin",
-      sql`(${t.whatsappPlanId} IS NULL AND ${t.whatsappStep} IS NULL AND ${t.whatsappPeer} IS NULL AND ${t.messageId} IS NOT NULL AND ${t.conversationId} IS NOT NULL) OR (${t.whatsappPlanId} IS NOT NULL AND ${t.whatsappStep}>=0 AND ${t.whatsappPeer} ~ '^[1-9][0-9]{6,14}$' AND ${t.messageId} IS NULL AND ${t.conversationId} IS NULL AND ${t.inquiryRunId} IS NULL)`,
+      sql`(${t.whatsappPlanId} IS NULL AND ${t.whatsappStep} IS NULL AND ${t.whatsappPeer} IS NULL AND ${t.messageId} IS NOT NULL AND ${t.conversationId} IS NOT NULL) OR (${t.whatsappPlanId} IS NOT NULL AND ${t.whatsappStep} IS NOT NULL AND ${t.whatsappPeer} IS NOT NULL AND ${t.whatsappStep}>=0 AND ${t.whatsappPeer} ~ '^[1-9][0-9]{6,14}$' AND ${t.messageId} IS NULL AND ${t.conversationId} IS NULL AND ${t.inquiryRunId} IS NULL)`,
     ),
     pgPolicy("opportunity_due_action_read", {
       for: "select",

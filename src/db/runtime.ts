@@ -206,6 +206,9 @@ export async function verifyRuntimeRole(
       AND NOT has_table_privilege(current_user, 'public.opportunity_control_history', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_table_privilege(current_user, 'public.opportunity_manual_event', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'evaluation', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'whatsapp_plan_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'whatsapp_step', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'whatsapp_peer', 'UPDATE')
       AND has_column_privilege(current_user, 'public.opportunity_due_action', 'email', 'UPDATE')
       AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.opportunity_due_action'::regclass
         AND tgname='protect_opportunity_mail' AND tgenabled <> 'D')

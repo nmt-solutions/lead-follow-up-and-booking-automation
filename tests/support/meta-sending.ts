@@ -149,12 +149,17 @@ export async function metaSendingFixture(
     }
     throw new Error("Unexpected Meta HTTP operation");
   };
-  const repository = createWhatsAppSendingRepository(db, h.clock, {
+  const sendingOptions = {
     provider: meta.provider,
     vault,
     transport: createMetaTransport({ graphVersion: "v25.0", fetch: fetcher }),
     workerReady: true,
-  });
+  };
+  const repository = createWhatsAppSendingRepository(
+    db,
+    h.clock,
+    sendingOptions,
+  );
   const opportunities = createOpportunityRepository(db, h.clock, repository);
   const control = createOpportunityApplication({
     authenticate: h.authenticate,
@@ -174,6 +179,15 @@ export async function metaSendingFixture(
     opportunities,
     clock: h.clock,
   });
+  function restart() {
+    const fresh = createWhatsAppSendingRepository(db, h.clock, sendingOptions);
+    return createWhatsAppSendingApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: fresh,
+      opportunities: createOpportunityRepository(db, h.clock, fresh),
+      clock: h.clock,
+    });
+  }
   const inbox = createInboxApplication({
     authenticate: h.authenticate,
     repository: createInboxRepository(db),
@@ -552,5 +566,6 @@ export async function metaSendingFixture(
     groundedReply,
     permission,
     outreach,
+    restart,
   };
 }

@@ -86,11 +86,11 @@ export function InquiryHandling({
               ? "Meta accepted the saved WhatsApp reply. Review WhatsApp message evidence for Sent, delivery and read status."
               : action?.email?.result?.status === "accepted_pending_identity"
                 ? "Microsoft accepted processing. Native message identity and delivery remain unconfirmed. Synchronize the selected mailbox and check Sent evidence; this action will not resend."
-              : action?.state === "committed"
-                ? "Acceptance remains unknown. Review native mailbox or WhatsApp provider evidence. This action will not resend."
-                : action?.state === "cancelled"
-                  ? `Sending stopped: ${action.reason?.replaceAll("_", " ") ?? "current authorization failed"}. Review setup and current inquiry context.`
-                  : "No new Sent evidence was confirmed. Synchronize the selected mailbox and check again.",
+                : action?.state === "committed"
+                  ? "Acceptance remains unknown. Review native mailbox or WhatsApp provider evidence. This action will not resend."
+                  : action?.state === "cancelled"
+                    ? `Sending stopped: ${action.reason?.replaceAll("_", " ") ?? "current authorization failed"}. Review setup and current inquiry context.`
+                    : "No new Sent evidence was confirmed. Synchronize the selected mailbox and check again.",
       );
       router.refresh();
     } catch {

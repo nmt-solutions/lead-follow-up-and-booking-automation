@@ -987,7 +987,11 @@ export function createOpportunityRepository(
           let email: OpportunityMailEnvelope | undefined;
           let metaIntent: MetaIntent | undefined;
           if (
-            ((provider.selectEmail || [gmailSequenceKey,microsoftTransportKey].includes(provider.emailIdentity?.adapterKey??"")) && row.inquiryRunId) ||
+            ((provider.selectEmail ||
+              [gmailSequenceKey, microsoftTransportKey].includes(
+                provider.emailIdentity?.adapterKey ?? "",
+              )) &&
+              row.inquiryRunId) ||
             (whatsapp &&
               (row.whatsappPlanId ||
                 (await messageContext(tx, businessId, row.messageId ?? ""))

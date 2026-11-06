@@ -394,7 +394,14 @@ export function createWhatsAppSendingRepository(
             market: p.market,
             evidenceKey: campaignHash(evidence),
             evidence,
-            sources:[...p.evidence.map((e)=>({url:e.url,quote:e.quote,checkedAt:e.checkedAt})),{url:c.url,quote:c.route.quote,checkedAt:c.checkedAt}],
+            sources: [
+              ...p.evidence.map((e) => ({
+                url: e.url,
+                quote: e.quote,
+                checkedAt: e.checkedAt,
+              })),
+              { url: c.url, quote: c.route.quote, checkedAt: c.checkedAt },
+            ],
           },
         ];
       }),
@@ -780,7 +787,10 @@ export function createWhatsAppSendingRepository(
       .select()
       .from(opportunityDueAction)
       .where(eq(opportunityDueAction.businessId, businessId));
-    const needs=await tx.select({id:inboxOpportunity.id,title:inboxOpportunity.title}).from(inboxOpportunity).where(eq(inboxOpportunity.businessId,businessId));
+    const needs = await tx
+      .select({ id: inboxOpportunity.id, title: inboxOpportunity.title })
+      .from(inboxOpportunity)
+      .where(eq(inboxOpportunity.businessId, businessId));
     const evidence = new Map(
       await Promise.all(
         intents.map(
@@ -872,7 +882,9 @@ export function createWhatsAppSendingRepository(
           return {
             id: r.id,
             opportunityId: r.opportunityId,
-            title:needs.find((n)=>n.id===r.opportunityId)?.title??"Purchasing need",
+            title:
+              needs.find((n) => n.id === r.opportunityId)?.title ??
+              "Purchasing need",
             state: r.state,
             reason: r.reason,
             dueAt: r.dueAt.toISOString(),
@@ -1184,22 +1196,20 @@ export function createWhatsAppSendingRepository(
             );
           if (existing.length) throw new ApplicationError("CONFLICT");
           const opportunityId = randomUUID();
-          await tx
-            .insert(inboxOpportunity)
-            .values({
-              id: opportunityId,
-              businessId,
-              title: `${plan.name}: ${recipient.peer}`,
-              stage: "prospect",
-              ownerId: actor.userId,
-              controlState: "automation",
-              controlVersion: 0,
-              policyVersion: plan.authorityVersion,
-              handoffReason:
-                "Owner-approved WhatsApp prospect plan; no direct engagement",
-              nextAction: "Run bounded approved messages and monitor replies",
-              createdAt: clock.now(),
-            });
+          await tx.insert(inboxOpportunity).values({
+            id: opportunityId,
+            businessId,
+            title: `${plan.name}: ${recipient.peer}`,
+            stage: "prospect",
+            ownerId: actor.userId,
+            controlState: "automation",
+            controlVersion: 0,
+            policyVersion: plan.authorityVersion,
+            handoffReason:
+              "Owner-approved WhatsApp prospect plan; no direct engagement",
+            nextAction: "Run bounded approved messages and monitor replies",
+            createdAt: clock.now(),
+          });
           let due = sequenceDue(
             plan.timing,
             new Date(
@@ -1215,28 +1225,26 @@ export function createWhatsAppSendingRepository(
                 plan.timing,
                 new Date(due.getTime() + step.delayMinutes * 60000),
               );
-            await tx
-              .insert(opportunityDueAction)
-              .values({
-                id: randomUUID(),
-                businessId,
-                opportunityId,
-                messageId: null,
-                conversationId: null,
-                connectionId: a.intake.inboxConnectionId,
-                actorId: actor.userId,
-                sessionId: actor.sessionId,
-                controlVersion: 0,
-                associationVersion: 0,
-                policyVersion: plan.authorityVersion,
-                evaluation: step.evaluation,
-                state: "pending",
-                dueAt: due,
-                createdAt: clock.now(),
-                whatsappPlanId: planId,
-                whatsappPeer: recipient.peer,
-                whatsappStep: stepIndex,
-              });
+            await tx.insert(opportunityDueAction).values({
+              id: randomUUID(),
+              businessId,
+              opportunityId,
+              messageId: null,
+              conversationId: null,
+              connectionId: a.intake.inboxConnectionId,
+              actorId: actor.userId,
+              sessionId: actor.sessionId,
+              controlVersion: 0,
+              associationVersion: 0,
+              policyVersion: plan.authorityVersion,
+              evaluation: step.evaluation,
+              state: "pending",
+              dueAt: due,
+              createdAt: clock.now(),
+              whatsappPlanId: planId,
+              whatsappPeer: recipient.peer,
+              whatsappStep: stepIndex,
+            });
           }
         }
       });
