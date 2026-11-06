@@ -55,7 +55,6 @@ export function createGmailSenderAdapter(d: {
       const proof = proofs.length === 1 ? proofs[0] : null;
       const native =
         context.identity.origin === "customer_mailbox" &&
-        context.identity.purpose === "dedicated_outreach" &&
         context.connection?.configuration.provider === "gmail" &&
         context.connection.configuration.account ===
           context.identity.fromAddress &&
@@ -64,7 +63,16 @@ export function createGmailSenderAdapter(d: {
         binding: context.binding,
         observedAt: at.toISOString(),
         validUntil: proof?.validUntil ?? at.toISOString(),
-        approvedUses: native && proof ? ["first_contact"] : [],
+        approvedUses:
+          native && proof
+            ? context.identity.uses.filter(
+                (use) =>
+                  use === "inbound" ||
+                  use === "existing_conversation" ||
+                  (use === "first_contact" &&
+                    context.identity.purpose === "dedicated_outreach"),
+              )
+            : [],
         ...(proof ? { verificationReference: proof.reference } : {}),
         checks: {
           // Current native account/grant and selected reply visibility are additionally checked in identityView and at dispatch.

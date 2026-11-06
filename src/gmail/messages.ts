@@ -42,6 +42,7 @@ function headers(message: Message) {
           "subject",
           "message-id",
           "in-reply-to",
+          "reply-to",
         ].includes(name)
       )
         throw new GmailFailure("invalid_response");
@@ -90,6 +91,7 @@ export function gmailMetadata(
     inReplyTo: h.get("in-reply-to") ?? null,
     from: from?.[0],
     to,
+    ...(h.has("reply-to") ? { replyTo: addresses(h.get("reply-to")!) } : {}),
   });
   const occurred = Number(message.internalDate);
   if (

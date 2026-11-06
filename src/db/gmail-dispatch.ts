@@ -1,15 +1,12 @@
 import { and, eq } from "drizzle-orm";
-import type {
-  SequenceEnvelope,
-  SequenceMailAccess,
-} from "../models/email-sequences";
+import type { MailEnvelope, MailDispatchAccess } from "../models/mail-dispatch";
 import type { Transaction } from "./scope";
 import { gmailGrant, mailboxPolicy, senderConnection } from "./schema";
 import { invalidateMailboxVisibility } from "./mailbox-visibility";
 import { currentMailbox } from "./email-handoff-observations";
 import { gmailReadScope, gmailSendScope } from "../models/gmail";
 
-/** Readiness for exact RFC references registered by this sequence contract, never general mailbox completeness. */
+/** Readiness for registered RFC replies and associated native inquiry threads, never general mailbox completeness. */
 export async function gmailSequenceReplyReady(
   tx: Transaction,
   businessId: string,
@@ -87,11 +84,12 @@ export async function gmailSendingAuthorized(
 /** Called only within the authenticated, locked dispatch transaction; never opens a nested transaction. */
 export async function gmailDispatchAccess(
   tx: Transaction,
-  envelope: SequenceEnvelope,
-  previousReceipt: SequenceMailAccess["previousReceipt"],
+  envelope: Pick<MailEnvelope, "businessId" | "connectionId" | "fromAddress">,
+  previousReceipt: MailDispatchAccess["previousReceipt"],
   previousSubject: string | null,
-  confirm: SequenceMailAccess["confirm"],
-): Promise<SequenceMailAccess> {
+  confirm: MailDispatchAccess["confirm"],
+  replyParent?: MailDispatchAccess["replyParent"],
+): Promise<MailDispatchAccess> {
   const policies = await tx
     .select()
     .from(mailboxPolicy)
@@ -107,7 +105,13 @@ export async function gmailDispatchAccess(
     policy.provider !== "gmail" ||
     policy.account !== envelope.fromAddress
   )
-    return { gmail: null, previousReceipt, previousSubject, confirm };
+    return {
+      gmail: null,
+      previousReceipt,
+      previousSubject,
+      replyParent,
+      confirm,
+    };
   const [connection] = await tx
     .select()
     .from(senderConnection)
@@ -129,6 +133,7 @@ export async function gmailDispatchAccess(
   return {
     previousReceipt,
     previousSubject,
+    replyParent,
     confirm,
     gmail: {
       policy,

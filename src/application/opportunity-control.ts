@@ -15,6 +15,11 @@ import {
 } from "../models/opportunity-control";
 
 export type OpportunityRepository = {
+  reconcile(
+    actor: WorkIdentity,
+    businessId: string,
+    actionId: string,
+  ): Promise<DueAction>;
   read(
     actor: WorkIdentity,
     businessId: string,

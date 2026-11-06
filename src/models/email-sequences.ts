@@ -2,7 +2,10 @@ import { z } from "zod";
 import type { WorkIdentity } from "./discovery";
 import type { EmailDispatchAuthorization } from "./email-eligibility";
 import { mailObservationSourceSchema } from "./mail-evidence";
-import type { MailboxAuthorizationStore } from "./mailbox-authorization";
+import {
+  mailReceiptSchema as sequenceReceiptSchema,
+  type MailDispatchAccess,
+} from "./mail-dispatch";
 
 const positive = z.number().int().positive().max(2147483646);
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -76,32 +79,14 @@ export const sequenceWorkSchema = z.strictObject({
   }),
 });
 export type SequenceWork = z.infer<typeof sequenceWorkSchema>;
-export const sequenceReceiptSchema = z.strictObject({
-  actionId: z.uuid(),
-  attemptId: z.uuid(),
-  businessId: z.uuid(),
-  connectionId: z.uuid(),
-  recipient: z.email(),
-  messageRef: z.string().min(1).max(256),
-  internetMessageId: z.string().min(1).max(256),
-  threadRef: z.string().min(1).max(256),
-  acceptedAt: z.iso.datetime(),
-  evidence: z.enum(["provider_response", "sent_folder"]).optional(),
-});
-export type SequenceReceipt = z.infer<typeof sequenceReceiptSchema>;
-export const sequenceResultSchema = z.discriminatedUnion("status", [
-  z.strictObject({
-    status: z.literal("accepted"),
-    receipt: sequenceReceiptSchema,
-  }),
-  z.strictObject({
-    status: z.literal("not_accepted"),
-    reason: z.enum(["rate_limited", "rejected", "unavailable"]),
-    retryAt: z.iso.datetime().nullable(),
-  }),
-  z.strictObject({ status: z.literal("unknown") }),
-]);
-export type SequenceResult = z.infer<typeof sequenceResultSchema>;
+export {
+  mailReceiptSchema as sequenceReceiptSchema,
+  mailResultSchema as sequenceResultSchema,
+} from "./mail-dispatch";
+export type {
+  MailReceipt as SequenceReceipt,
+  MailResult as SequenceResult,
+} from "./mail-dispatch";
 export type SequenceEnvelope = {
   adapterKey: string;
   adapterMode: "fixture" | "live";
@@ -139,16 +124,7 @@ export type SequenceMailProvider = {
   ): Promise<unknown>;
   reconcile(envelope: SequenceEnvelope, signal: AbortSignal): Promise<unknown>;
 };
-/** Invocation-local authority under the dispatch lock. Credentials never enter the persisted envelope. */
-export type SequenceMailAccess = {
-  gmail: Pick<
-    MailboxAuthorizationStore,
-    "policy" | "grant" | "processingEnabled" | "updateGrant" | "invalidate"
-  > | null;
-  previousReceipt: SequenceReceipt | null;
-  previousSubject: string | null;
-  confirm(): Promise<boolean>;
-};
+export type SequenceMailAccess = MailDispatchAccess;
 export type SequenceQueue = {
   enqueue(work: SequenceWork, dueAt: Date): Promise<string>;
   cancel(runId: string): Promise<void>;

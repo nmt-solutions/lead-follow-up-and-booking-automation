@@ -1,3 +1,4 @@
+import { createOpportunityRepository } from "../../src/db/opportunity-control-repository";
 import { randomUUID } from "node:crypto";
 import { createAiApplication } from "../../src/application/ai";
 import { createInquiryApplication } from "../../src/application/inquiries";
@@ -131,12 +132,19 @@ export async function bookingInquiry(
     expectedActivationVersion: draft.activation.version,
     note: "Activate fixture profile",
   });
+  void opportunities;
   return createInquiryApplication({
     authenticate: h.authenticate,
     authenticateForWork: h.access.authenticateForWork,
     repository: createInquiryRepository(database, h.clock),
     clock: h.clock,
     ai,
-    opportunities,
+    opportunityRepository: createOpportunityRepository(database, h.clock),
+    provider: {
+      channels: [],
+      async dispatch() {
+        throw new Error("No booking inquiry transport");
+      },
+    },
   });
 }

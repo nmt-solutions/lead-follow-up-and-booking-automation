@@ -149,6 +149,10 @@ export async function verifyRuntimeRole(
       AND NOT has_table_privilege(current_user, 'public.opportunity_control_history', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_table_privilege(current_user, 'public.opportunity_manual_event', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'evaluation', 'UPDATE')
+      AND has_column_privilege(current_user, 'public.opportunity_due_action', 'email', 'UPDATE')
+      AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.opportunity_due_action'::regclass
+        AND tgname='protect_opportunity_mail' AND tgenabled <> 'D')
+      AND NOT has_table_privilege(current_user, 'public.opportunity_due_action', 'UPDATE,DELETE,TRUNCATE')
       AND (SELECT count(*) = 1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
