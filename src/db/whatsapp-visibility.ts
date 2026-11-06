@@ -11,6 +11,21 @@ import {
   membership,
 } from "./schema";
 
+export function metaConnectionAuthorized(
+  connection: typeof whatsAppConnection.$inferSelect,
+) {
+  const checks = connection.observation?.checks;
+  return (
+    connection.status === "connected" &&
+    !!connection.credentials &&
+    !!checks &&
+    checks.customer_ownership === "confirmed" &&
+    checks.permissions === "confirmed" &&
+    checks.number_verified === "confirmed" &&
+    checks.number_registered === "confirmed"
+  );
+}
+
 export async function metaInboundAllowed(
   tx: Transaction,
   businessId: string,
@@ -41,8 +56,7 @@ export async function metaInboundAllowed(
     !!r &&
     (r.role === "owner" || r.role === "admin") &&
     r.intake.connectionVersion === r.connection.version &&
-    r.connection.status === "connected" &&
-    !!r.connection.credentials
+    metaConnectionAuthorized(r.connection)
   );
 }
 export async function metaOpportunityVisible(
@@ -83,22 +97,43 @@ export async function metaOpportunityVisible(
     if (
       !intake?.inboundAt ||
       !intake.echoAt ||
-      (intake.gap && intake.gap !== "manual_activity_needs_association")
+      (intake.gap &&
+        ![
+          "manual_activity_needs_association",
+          "unsupported_event_coverage",
+          "unprocessed_event_expired",
+        ].includes(intake.gap))
     )
       return false;
     // Accepted but unprocessed activity must stop dispatch even before the durable worker runs.
-    const [pending] = await tx
-      .select({ id: whatsAppReceipt.id })
+    const pending = await tx
+      .select({ replyTo: whatsAppReceipt.replyTo })
       .from(whatsAppReceipt)
       .where(
         and(
           eq(whatsAppReceipt.connectionId, intake.id),
           eq(whatsAppReceipt.connectionVersion, intake.connectionVersion),
-          sql`${whatsAppReceipt.state} IN ('pending','review') AND (${whatsAppReceipt.activity}->>'peer' IS NULL OR ${whatsAppReceipt.activity}->>'peer'=${source.content.senderRef})`,
+          sql`(${whatsAppReceipt.state} IN ('pending','review','expired') OR (${whatsAppReceipt.kind}='gap' AND ${whatsAppReceipt.state}<>'historical')) AND ${whatsAppReceipt.kind}<>'status' AND (${whatsAppReceipt.peer} IS NULL OR ${whatsAppReceipt.peer}=${source.content.senderRef})`,
         ),
-      )
-      .limit(1);
-    if (pending) return false;
+      );
+    for (const receipt of pending) {
+      if (!receipt.replyTo) return false;
+      const [anchor] = await tx
+        .select({ opportunityId: inboxMessageLink.opportunityId })
+        .from(inboxMessage)
+        .innerJoin(inboxMessageLink, eq(inboxMessage.id, inboxMessageLink.id))
+        .where(
+          and(
+            eq(inboxMessage.businessId, businessId),
+            eq(inboxMessage.connectionId, source.connectionId),
+            eq(inboxMessage.messageRef, receipt.replyTo),
+            sql`${inboxMessage.content}->>'senderRef'=${source.content.senderRef}`,
+          ),
+        );
+      // A known exact reference fences its need. Unresolved references still fence the peer.
+      if (!anchor?.opportunityId || anchor.opportunityId === opportunityId)
+        return false;
+    }
   }
   return true;
 }

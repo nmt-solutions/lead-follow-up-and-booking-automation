@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 import { createHarness } from "./support/harness";
-import { runtimeDatabase } from "../src/db/runtime";
+import { runtimeDatabase, verifyRuntimeRole } from "../src/db/runtime";
 import { createWhatsAppApplication } from "../src/application/whatsapp";
 import { createWhatsAppRepository } from "../src/db/whatsapp-repository";
 import { calendarCredentialVault } from "../src/appointments/credentials";
@@ -17,6 +17,9 @@ import { createKnowledgeApplication } from "../src/application/knowledge";
 import { createKnowledgeRepository } from "../src/db/knowledge-repository";
 import { bookingInquiry } from "./support/booking-inquiry";
 import { createWhatsAppIntakeHttp } from "../src/http/whatsapp-intake";
+import { createCommercialAuthorityApplication } from "../src/application/commercial-authority";
+import { createCommercialAuthorityRepository } from "../src/db/commercial-authority-repository";
+import type { OpportunityDispatch } from "../src/models/opportunity-control";
 
 describe("Signed Meta intake through real restricted persistence", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -35,6 +38,8 @@ describe("Signed Meta intake through real restricted persistence", () => {
   async function fixture(
     name: string,
     activationTime = "2026-11-05T09:00:00Z",
+    allowDispatch = false,
+    retention = 86400,
   ) {
     h.clock.set("2026-11-05T09:00:00Z");
     const credentials = await h.signIn(`meta-intake-${name}@example.com`);
@@ -103,8 +108,9 @@ describe("Signed Meta intake through real restricted persistence", () => {
     h.clock.set(activationTime);
     await app.enable(credentials, business.id, {
       expectedVersion: 2,
-      receiptRetentionSeconds: 86400,
+      receiptRetentionSeconds: retention,
     });
+    const outbound: OpportunityDispatch[] = [];
     const control = createOpportunityApplication({
       authenticate: h.authenticate,
       authenticateForWork: h.access.authenticateForWork,
@@ -112,8 +118,10 @@ describe("Signed Meta intake through real restricted persistence", () => {
       clock: h.clock,
       provider: {
         channels: ["email", "whatsapp"],
-        async dispatch() {
-          throw new Error("No outbound authorized by intake");
+        async dispatch(action) {
+          if (!allowDispatch)
+            throw new Error("No outbound authorized by intake");
+          outbound.push(action);
         },
       },
     });
@@ -125,6 +133,8 @@ describe("Signed Meta intake through real restricted persistence", () => {
       inbox,
       control,
       onboarding,
+      meta,
+      outbound,
       restart: () => createWhatsAppIntakeApplication(options),
     };
   }
@@ -174,6 +184,13 @@ describe("Signed Meta intake through real restricted persistence", () => {
     await f.app.drain();
     const before = await f.inbox.workspace(f.credentials, f.businessId);
     expect(before.conversations).toHaveLength(1);
+    await deliver(
+      f.app,
+      payload(f.assets.phoneNumberId, "wamid.expired-old-generation"),
+    );
+    h.clock.set("2026-11-07T09:00:00Z");
+    await f.restart().drain();
+    h.clock.set("2026-11-05T09:00:00.500Z");
     const start = await f.onboarding.start(f.credentials, f.businessId, {
       expectedVersion: 2,
     });
@@ -187,6 +204,7 @@ describe("Signed Meta intake through real restricted persistence", () => {
       expectedVersion: start.version,
       receiptRetentionSeconds: 86400,
     });
+    expect((await f.app.workspace(f.credentials, f.businessId)).gap).toBeNull();
     await deliver(f.app, payload(f.assets.phoneNumberId));
     await f.restart().drain();
     const after = await f.inbox.workspace(f.credentials, f.businessId);
@@ -731,6 +749,313 @@ describe("Signed Meta intake through real restricted persistence", () => {
     expect(
       (await f.inbox.workspace(renewed, f.businessId)).conversations,
     ).toHaveLength(1);
+  });
+  it("requires read and append grants separately for Meta staging", async () => {
+    await h.admin.query("REVOKE INSERT ON whatsapp_receipt FROM app_runtime");
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
+      await h.admin.query("GRANT INSERT ON whatsapp_receipt TO app_runtime");
+    }
+    await h.admin.query("REVOKE SELECT ON whatsapp_intake FROM app_runtime");
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
+      await h.admin.query("GRANT SELECT ON whatsapp_intake TO app_runtime");
+    }
+    await verifyRuntimeRole(h.runtime);
+  });
+  it("rechecks current provider permissions for intake and recovery while retaining captured work", async () => {
+    const f = await fixture("permission-revoked");
+    await deliver(f.app, payload(f.assets.phoneNumberId));
+    await f.app.drain();
+    await deliver(
+      f.app,
+      payload(f.assets.phoneNumberId, "wamid.permission-pending"),
+    );
+    f.meta.checks.permissions = "missing";
+    await f.onboarding.refresh(f.credentials, f.businessId, {
+      expectedVersion: 2,
+    });
+    expect((await f.app.workspace(f.credentials, f.businessId)).enabled).toBe(
+      false,
+    );
+    await expect(
+      deliver(
+        f.app,
+        payload(f.assets.phoneNumberId, "wamid.after-permission-revoked"),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await f.restart().drain();
+    const ws = await f.inbox.workspace(f.credentials, f.businessId);
+    const c = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      ws.conversations[0].id,
+    );
+    expect(c.messages.map((message) => message.messageRef)).toEqual([
+      "wamid.incoming-1",
+    ]);
+  });
+  it("does not let a future worker clock erase staging before its actual database expiry", async () => {
+    const f = await fixture("purge-bound", undefined, false, 315360000);
+    await deliver(f.app, payload(f.assets.phoneNumberId));
+    await f.app.drain();
+    h.clock.set("2026-11-05T09:01:00Z");
+    await deliver(f.app, echo(f.assets.phoneNumberId));
+    await f.app.drain();
+    const ws = await f.inbox.workspace(f.credentials, f.businessId);
+    h.clock.set("2040-11-05T09:01:00Z");
+    await f.restart().drain();
+    h.clock.set("2026-11-05T09:01:00Z");
+    const history = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      ws.conversations[0].id,
+    );
+    expect(history.manualReplies).toMatchObject([
+      { text: "A salesperson is helping you" },
+    ]);
+  });
+  it("does not invent manual origin from unfamiliar app metadata or hide altered evidence under a known event identity", async () => {
+    const f = await fixture("origin-evidence");
+    await deliver(f.app, payload(f.assets.phoneNumberId));
+    await f.app.drain();
+    h.clock.set("2026-11-05T09:01:00Z");
+    const original = echo(f.assets.phoneNumberId, "wamid.origin-evidence");
+    const altered = {
+      ...original,
+      entry: original.entry.map((entry) => ({
+        ...entry,
+        changes: entry.changes.map((change) => ({
+          ...change,
+          value: {
+            ...change.value,
+            message_echoes: change.value.message_echoes.map((message) => ({
+              ...message,
+              origin: "cloud_api",
+            })),
+          },
+        })),
+      })),
+    };
+    await deliver(f.app, altered);
+    await f.app.drain();
+    expect(
+      (await f.app.workspace(f.credentials, f.businessId)).receipts.find(
+        (r) => r.messageRef === "wamid.origin-evidence",
+      ),
+    ).toMatchObject({ kind: "gap" });
+    expect(
+      (await f.app.workspace(f.credentials, f.businessId)).manualObserved,
+    ).toBe(false);
+    const second = echo(f.assets.phoneNumberId, "wamid.changed-native-fields");
+    await deliver(f.app, second);
+    await f.app.drain();
+    const changed = {
+      ...second,
+      entry: second.entry.map((entry) => ({
+        ...entry,
+        changes: entry.changes.map((change) => ({
+          ...change,
+          value: {
+            ...change.value,
+            message_echoes: change.value.message_echoes.map((message) => ({
+              ...message,
+              origin: "unknown_device",
+            })),
+          },
+        })),
+      })),
+    };
+    await deliver(f.app, changed);
+    expect((await f.app.workspace(f.credentials, f.businessId)).gap).toBe(
+      "conflicting_provider_identity",
+    );
+  });
+  it("fences pending exact activity only for its need and ambiguous activity only for its peer while unrelated dispatch continues", async () => {
+    const f = await fixture("dispatch-scope", undefined, true);
+    await deliver(f.app, payload(f.assets.phoneNumberId));
+    await f.app.drain();
+    await deliver(f.app, payload(f.assets.phoneNumberId, "wamid.scope-second"));
+    await f.app.drain();
+    const ws = await f.inbox.workspace(f.credentials, f.businessId);
+    let c = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      ws.conversations[0].id,
+    );
+    const second = c.messages.find(
+      (m) => m.messageRef === "wamid.scope-second",
+    )!;
+    await f.inbox.associate(f.credentials, f.businessId, c.id, {
+      expectedVersion: c.association.version,
+      buyerId: c.buyer.id,
+      messageIds: [second.id],
+      allMessages: false,
+      target: { kind: "new", title: "Independent order" },
+      future: "review",
+      reason: "Separate need",
+    });
+    const other = payload(f.assets.phoneNumberId, "wamid.other-peer");
+    other.entry[0].changes[0].value.messages[0].from = "919876543211";
+    other.entry[0].changes[0].value.contacts[0].wa_id = "919876543211";
+    await deliver(f.app, other);
+    await f.app.drain();
+    c = await f.inbox.conversation(f.credentials, f.businessId, c.id);
+    const first = c.messages.find((m) => m.messageRef === "wamid.incoming-1")!;
+    const secondCurrent = c.messages.find((m) => m.id === second.id)!;
+    const otherWs = await f.inbox.workspace(f.credentials, f.businessId);
+    const otherConversation = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      otherWs.conversations.find((item) => item.id !== c.id)!.id,
+    );
+    const third = otherConversation.messages[0];
+    const authority = createCommercialAuthorityApplication({
+      authenticate: h.authenticate,
+      authenticatePrivileged: h.access.authenticatePrivileged,
+      repository: createCommercialAuthorityRepository(
+        runtimeDatabase(h.runtime),
+      ),
+      clock: h.clock,
+    });
+    const policy = await authority.workspace(f.credentials, f.businessId);
+    const actor = await h.authenticate(f.credentials);
+    policy.policy.prices = {
+      automationEnabled: true,
+      approvalRequired: false,
+      amountLimit: { currency: "USD", minor: "10000" },
+      discountLimitBps: 0,
+      escalationOwnerId: actor.userId,
+    };
+    await authority.save(f.credentials, f.businessId, {
+      expectedVersion: policy.version,
+      policy: policy.policy,
+      note: "Approved bounded action",
+    });
+    h.clock.set("2026-11-05T09:01:00Z");
+    await deliver(
+      f.app,
+      echo(f.assets.phoneNumberId, "wamid.coverage", "wamid.incoming-1"),
+    );
+    await f.app.drain();
+    h.clock.set("2026-11-05T09:02:00Z");
+    for (const message of [first, secondCurrent, third])
+      await handback(f, message.opportunityId!);
+    const queue = (message: typeof first) =>
+      f.control.queue(f.credentials, f.businessId, message.opportunityId!, {
+        messageId: message.id,
+        dueAt: h.clock.now().toISOString(),
+        evaluation: {
+          action: "prices",
+          amount: { currency: "USD", minor: "500" },
+          discountBps: 0,
+        },
+      });
+    const affected = await queue(first);
+    const independent = await queue(secondCurrent);
+    const pending = echo(
+      f.assets.phoneNumberId,
+      "wamid.pending-exact",
+      "wamid.incoming-1",
+    );
+    pending.entry[0].changes[0].value.message_echoes[0].timestamp =
+      "1793869380";
+    h.clock.set("2026-11-05T09:03:00Z");
+    await deliver(f.app, pending);
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, affected.id),
+    ).toMatchObject({
+      state: "cancelled",
+      reason: "reply_visibility_unavailable",
+    });
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, independent.id),
+    ).toMatchObject({ state: "dispatched" });
+    await f.app.drain();
+    const ambiguous = echo(f.assets.phoneNumberId, "wamid.pending-ambiguous");
+    ambiguous.entry[0].changes[0].value.message_echoes[0].timestamp =
+      "1793869380";
+    await deliver(f.app, ambiguous);
+    await f.app.drain();
+    const blocked = await queue(secondCurrent);
+    const unrelated = await queue(third);
+    await deliver(f.app, {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "200001",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: { phone_number_id: f.assets.phoneNumberId },
+                statuses: [
+                  {
+                    id: "wamid.status-only",
+                    status: "delivered",
+                    timestamp: "1793869380",
+                    recipient_id: "919876543211",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, blocked.id),
+    ).toMatchObject({
+      state: "cancelled",
+      reason: "reply_visibility_unavailable",
+    });
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, unrelated.id),
+    ).toMatchObject({ state: "dispatched" });
+    const ambiguousReceipt = (
+      await f.app.workspace(f.credentials, f.businessId)
+    ).receipts.find((r) => r.messageRef === "wamid.pending-ambiguous")!;
+    await f.app.associate(f.credentials, f.businessId, {
+      receiptId: ambiguousReceipt.id,
+      messageId: secondCurrent.id,
+    });
+    await handback(f, secondCurrent.opportunityId!);
+    const gap = echo(
+      f.assets.phoneNumberId,
+      "wamid.unsupported-known-peer",
+      "wamid.incoming-1",
+    );
+    gap.entry[0].changes[0].value.message_echoes[0].type = "image";
+    await deliver(f.app, gap);
+    await f.app.drain();
+    const afterGap = await queue(third);
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, afterGap.id),
+    ).toMatchObject({ state: "dispatched" });
+    h.clock.set("2026-11-07T09:03:00Z");
+    await f.restart().drain();
+    h.clock.set("2026-11-05T09:03:00Z");
+    const samePeerAfterPurge = await queue(secondCurrent);
+    expect(
+      await f.control.dispatch(
+        f.credentials,
+        f.businessId,
+        samePeerAfterPurge.id,
+      ),
+    ).toMatchObject({ state: "dispatched" });
+    expect(f.outbound.map((action) => action.actionId)).toEqual([
+      independent.id,
+      unrelated.id,
+      afterGap.id,
+      samePeerAfterPurge.id,
+    ]);
   });
   it("keeps separate purchasing needs independent and lets an accountable review resolve ambiguous manual activity", async () => {
     const f = await fixture("manual-needs");

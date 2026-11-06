@@ -9,7 +9,10 @@ import type { MetaActivity, MetaIntakeView } from "../models/whatsapp-intake";
 import { ApplicationError } from "../models/application-error";
 import { captureInboxInquiry } from "./inbox-repository";
 import { writeControl } from "./opportunity-control-repository";
-import { metaInboundAllowed } from "./whatsapp-visibility";
+import {
+  metaInboundAllowed,
+  metaConnectionAuthorized,
+} from "./whatsapp-visibility";
 import {
   whatsAppConnection,
   whatsAppIntake,
@@ -58,16 +61,31 @@ export async function metaIntakeView(
         .orderBy(desc(whatsAppReceipt.at), desc(whatsAppReceipt.id))
         .limit(100)
     : [];
+  const [unresolvedCoverage] = row
+    ? await tx
+        .select({ state: whatsAppReceipt.state })
+        .from(whatsAppReceipt)
+        .where(
+          and(
+            eq(whatsAppReceipt.connectionId, row.id),
+            eq(whatsAppReceipt.connectionVersion, row.connectionVersion),
+            sql`((${whatsAppReceipt.kind}='gap' AND ${whatsAppReceipt.state}<>'historical') OR (${whatsAppReceipt.state}='expired' AND ${whatsAppReceipt.kind}<>'status'))`,
+          ),
+        )
+        .limit(1)
+    : [];
+  const gap =
+    row?.gap ?? (unresolvedCoverage ? "unsupported_event_coverage" : null);
   return {
     enabled,
     inboundObserved: enabled && !!row?.inboundAt,
     manualObserved: enabled && !!row?.echoAt,
-    replyVisibility: row?.gap
+    replyVisibility: gap
       ? "gap"
       : enabled && row?.echoAt && !count?.value
         ? "supported_app_events"
         : "unverified",
-    gap: row?.gap ?? null,
+    gap,
     pending: count?.value ?? 0,
     inboxConnectionId: row?.inboxConnectionId ?? null,
     receiptRetentionSeconds: row?.receiptRetentionSeconds ?? null,
@@ -143,8 +161,7 @@ export function createWhatsAppIntakeRepository(
           !intake ||
           intake.actorId !== scope.actorId ||
           intake.connectionVersion !== connection.version ||
-          connection.status !== "connected" ||
-          !connection.credentials
+          !metaConnectionAuthorized(connection)
         )
           throw new ApplicationError("FORBIDDEN");
         return operation(tx, intake, connection);
@@ -484,6 +501,8 @@ export function createWhatsAppIntakeRepository(
             activity,
             kind: activity.kind,
             messageRef: activity.messageRef,
+            peer: activity.peer,
+            replyTo: activity.replyTo,
             status: activity.status,
             state: "pending",
             at: clock.now(),
@@ -529,7 +548,7 @@ export function createWhatsAppIntakeRepository(
           if (new Date(activity.occurredAt) < intake.enabledAt) {
             await tx
               .update(whatsAppReceipt)
-              .set({ state: "processed" })
+              .set({ state: "historical" })
               .where(eq(whatsAppReceipt.id, row.id));
             continue;
           }

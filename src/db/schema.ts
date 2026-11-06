@@ -3039,6 +3039,8 @@ export const whatsAppReceipt = pgTable(
     activity: jsonb("activity").$type<MetaActivity>(),
     kind: text("kind").notNull(),
     messageRef: text("message_ref"),
+    peer: text("peer"),
+    replyTo: text("reply_to"),
     status: text("provider_status"),
     state: text("state")
       .$type<"pending" | "processed" | "historical" | "review" | "expired">()

@@ -5,6 +5,19 @@ import {
   type MetaActivity,
 } from "../models/whatsapp-intake";
 
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  return value;
+}
+const knownKeys = (value: object, keys: string[]) =>
+  Object.keys(value).every((key) => keys.includes(key));
+
 export function verifyMetaSignature(
   raw: Uint8Array,
   signature: string | null,
@@ -60,10 +73,30 @@ export function metaActivities(raw: Uint8Array, at: Date) {
         if (!Number.isFinite(occurred.getTime()) || occurred > at)
           throw new ApplicationError("INVALID_INPUT");
         const echo = change.field === "smb_message_echoes";
+        const knownOrigin =
+          !echo ||
+          (knownKeys(m, [
+            "id",
+            "from",
+            "to",
+            "timestamp",
+            "type",
+            "text",
+            "context",
+          ]) &&
+            (!m.text || knownKeys(m.text, ["body"])) &&
+            (!m.context || knownKeys(m.context, ["id"])) &&
+            knownKeys(v, [
+              "messaging_product",
+              "metadata",
+              "contacts",
+              "message_echoes",
+            ]) &&
+            knownKeys(v.metadata, ["phone_number_id", "display_phone_number"]));
         add({
           ...base,
           kind:
-            m.type === "text" && m.text && (!echo || m.to)
+            m.type === "text" && m.text && (!echo || m.to) && knownOrigin
               ? echo
                 ? "app_echo"
                 : "incoming"
@@ -77,6 +110,29 @@ export function metaActivities(raw: Uint8Array, at: Date) {
           text: m.type === "text" ? (m.text?.body ?? null) : null,
           replyTo: m.context?.id ?? null,
           occurredAt: occurred.toISOString(),
+          providerFingerprint: createHash("sha256")
+            .update(
+              JSON.stringify(
+                canonical({
+                  message: m,
+                  metadata: v.metadata,
+                  extra: Object.fromEntries(
+                    Object.entries(v).filter(
+                      ([key]) =>
+                        ![
+                          "messages",
+                          "message_echoes",
+                          "statuses",
+                          "contacts",
+                          "metadata",
+                          "messaging_product",
+                        ].includes(key),
+                    ),
+                  ),
+                }),
+              ),
+            )
+            .digest("hex"),
         });
       }
       for (const s of change.field === "messages" ? (v.statuses ?? []) : []) {

@@ -18,6 +18,10 @@ export const metaActivitySchema = z.object({
   replyTo: ref.nullable(),
   occurredAt: z.iso.datetime(),
   status: z.string().max(80).nullable(),
+  providerFingerprint: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 });
 export type MetaActivity = z.infer<typeof metaActivitySchema>;
 export const enableMetaIntakeSchema = z.strictObject({
@@ -46,15 +50,20 @@ export const metaIntakeViewSchema = z.object({
 });
 export type MetaIntakeView = z.infer<typeof metaIntakeViewSchema>;
 
-const message = z.object({
-  id: ref,
-  from: phone,
-  to: phone.optional(),
-  timestamp: z.string().regex(/^\d{1,12}$/),
-  type: z.string().max(80),
-  text: z.object({ body: z.string().min(1).max(20000) }).optional(),
-  context: z.object({ id: ref }).optional(),
-});
+const message = z
+  .object({
+    id: ref,
+    from: phone,
+    to: phone.optional(),
+    timestamp: z.string().regex(/^\d{1,12}$/),
+    type: z.string().max(80),
+    text: z
+      .object({ body: z.string().min(1).max(20000) })
+      .passthrough()
+      .optional(),
+    context: z.object({ id: ref }).passthrough().optional(),
+  })
+  .passthrough();
 export const metaWebhookSchema = z.object({
   object: z.literal("whatsapp_business_account"),
   entry: z
@@ -68,10 +77,12 @@ export const metaWebhookSchema = z.object({
               value: z
                 .object({
                   messaging_product: z.literal("whatsapp"),
-                  metadata: z.object({
-                    phone_number_id: metaIdSchema,
-                    display_phone_number: z.string().max(80).optional(),
-                  }),
+                  metadata: z
+                    .object({
+                      phone_number_id: metaIdSchema,
+                      display_phone_number: z.string().max(80).optional(),
+                    })
+                    .passthrough(),
                   contacts: z
                     .array(
                       z.object({

@@ -1076,6 +1076,10 @@ export async function secureDatabase(pool: Pool) {
         WHERE c.provider_key=provider AND c.assets->>'wabaId'=waba AND c.phone_number_id=phone
           AND c.version=i.connection_version AND c.status='connected' AND c.credentials IS NOT NULL
           AND m.role IN ('owner','admin')
+          AND c.observation->'checks'->>'customer_ownership'='confirmed'
+          AND c.observation->'checks'->>'permissions'='confirmed'
+          AND c.observation->'checks'->>'number_verified'='confirmed'
+          AND c.observation->'checks'->>'number_registered'='confirmed'
       $$;
       CREATE OR REPLACE FUNCTION public.pending_meta_intakes(provider text)
       RETURNS TABLE(id uuid,business_id uuid,actor_id text)
@@ -1085,6 +1089,10 @@ export async function secureDatabase(pool: Pool) {
         JOIN public.membership m ON m.business_id=i.business_id AND m.user_id=i.actor_id
         WHERE c.provider_key=provider AND c.version=i.connection_version AND c.status='connected'
           AND c.credentials IS NOT NULL AND m.role IN ('owner','admin')
+          AND c.observation->'checks'->>'customer_ownership'='confirmed'
+          AND c.observation->'checks'->>'permissions'='confirmed'
+          AND c.observation->'checks'->>'number_verified'='confirmed'
+          AND c.observation->'checks'->>'number_registered'='confirmed'
           AND EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id AND r.state IN ('pending','review') AND r.connection_version=i.connection_version)
         ORDER BY EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id AND r.connection_version=i.connection_version AND r.state='pending') DESC,i.id LIMIT 100
       $$;
@@ -1092,10 +1100,10 @@ export async function secureDatabase(pool: Pool) {
       RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
         UPDATE public.whatsapp_intake i SET gap='unprocessed_event_expired'
           WHERE EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id
-            AND r.connection_version=i.connection_version AND r.state IN ('pending','review') AND r.expires_at<=at_time);
+            AND r.connection_version=i.connection_version AND r.state IN ('pending','review') AND r.expires_at<=least(at_time,statement_timestamp()));
         UPDATE public.whatsapp_receipt SET activity=NULL,
           state=CASE WHEN state IN ('pending','review') THEN 'expired' ELSE state END
-        WHERE expires_at<=at_time AND activity IS NOT NULL
+        WHERE expires_at<=least(at_time,statement_timestamp()) AND activity IS NOT NULL
       $$;
       REVOKE ALL ON FUNCTION public.purge_meta_receipts(timestamptz) FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.purge_meta_receipts(timestamptz) TO app_runtime;
