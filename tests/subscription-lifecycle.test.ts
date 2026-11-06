@@ -856,4 +856,167 @@ describe("Subscription lifecycle at the public application seam", () => {
       ),
     ).toHaveLength(0);
   });
+  it("restores a halted subscription from a later genuinely captured native cycle without funding its unpaid gap", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      app = compose(native);
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await app.start(f.owner, f.business.id, { actionId: action.id });
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    await app.recover();
+    const original = (await app.workspace(f.owner, f.business.id)).periods[0];
+    await h.admin.query(
+      "UPDATE business_file SET retention_until='2028-01-01' WHERE business_id=$1",
+      [f.business.id],
+    );
+    h.clock.set("2026-12-09T09:00:00.000Z");
+    native.subscriptions.get("sub_fixture1")!.status = "halted";
+    await app.recover();
+    h.clock.set("2027-01-05T09:00:00.000Z");
+    native.subscriptions.get("sub_fixture1")!.status = "active";
+    await app.recover();
+    const owner = await h.signIn("tax-owner@example.com");
+    await app.updatePayment(owner, f.business.id, {
+      actionId: action.id,
+      requestKey: randomUUID(),
+    });
+    expect((await app.workspace(owner, f.business.id)).access.active).toBe(
+      false,
+    );
+    native.charge(
+      "pay_afterhalt",
+      "2027-01-05T09:00:00.000Z",
+      "2027-02-05T09:00:00.000Z",
+    );
+    await app.recover();
+    const state = await app.workspace(owner, f.business.id);
+    expect(state.periods.map((p) => [p.start, p.end])).toEqual([
+      ["2026-11-05T09:00:00.000Z", "2026-12-05T09:00:00.000Z"],
+      ["2027-01-05T09:00:00.000Z", "2027-02-05T09:00:00.000Z"],
+    ]);
+    expect(state.access.active).toBe(true);
+    expect(state.periods[0]).toEqual(original);
+    expect(state.periods[1].snapshot.basis?.kind).toBe("renewal");
+    expect(native.creations).toHaveLength(1);
+    const recovered = state.periods[1];
+    h.clock.set("2027-01-06T09:00:00.000Z");
+    native.charge(
+      "pay_latearrears",
+      "2026-12-05T09:00:00.000Z",
+      "2027-01-05T09:00:00.000Z",
+    );
+    // A paid older invoice does not move the native subscription's current schedule backwards.
+    native.subscriptions.get("sub_fixture1")!.current_end = Math.floor(
+      new Date("2027-02-05T09:00:00.000Z").getTime() / 1000,
+    );
+    await app.recover();
+    await app.recover();
+    const current = await app.workspace(
+      await h.signIn("tax-owner@example.com"),
+      f.business.id,
+    );
+    expect(current.periods).toHaveLength(3);
+    expect(
+      current.periods.find((p) => p.paymentId === "pay_afterhalt"),
+    ).toEqual(recovered);
+    expect(current.access).toMatchObject({
+      active: true,
+      paidThrough: "2027-02-05T09:00:00.000Z",
+      period: { paymentId: "pay_afterhalt" },
+    });
+    expect(
+      current.periods.find((p) => p.paymentId === "pay_latearrears")?.charge
+        ?.paidAt,
+    ).toBe("2027-01-06T09:00:00.000Z");
+  });
+  it("requires the genuine original initial capture before accepting later native cycles across an unpaid gap", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      app = compose(native);
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await app.start(f.owner, f.business.id, { actionId: action.id });
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    const initialInvoice = native.invoices.shift();
+    if (!initialInvoice)
+      throw new Error("Missing external initial invoice fixture");
+    await h.admin.query(
+      "UPDATE business_file SET retention_until='2028-01-01' WHERE business_id=$1",
+      [f.business.id],
+    );
+    h.clock.set("2027-01-05T09:00:00.000Z");
+    native.charge(
+      "pay_later",
+      "2027-01-05T09:00:00.000Z",
+      "2027-02-05T09:00:00.000Z",
+    );
+    await app.recover();
+    const owner = await h.signIn("tax-owner@example.com");
+    expect((await app.workspace(owner, f.business.id)).periods).toHaveLength(0);
+    native.invoices.push(initialInvoice);
+    await app.recover();
+    await app.recover();
+    const state = await app.workspace(owner, f.business.id);
+    expect(state.periods.map((p) => p.paymentId)).toEqual([
+      "pay_initial",
+      "pay_later",
+    ]);
+    expect(state.access).toMatchObject({
+      active: true,
+      paidThrough: "2027-02-05T09:00:00.000Z",
+    });
+    expect(native.creations).toHaveLength(1);
+  });
+  it("distinguishes overdue unconfirmed renewal from an actually observed provider failure in persisted notices", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      app = compose(native);
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await app.start(f.owner, f.business.id, { actionId: action.id });
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    h.clock.set("2026-12-06T09:00:00.000Z");
+    await app.recover();
+    const owner = await h.signIn("tax-owner@example.com");
+    let state = await app.workspace(owner, f.business.id);
+    expect(state.access.active).toBe(false);
+    expect(state.actions[0].lifecycle?.state).toBe("past_due");
+    expect(
+      state.actions[0].lifecycleEvents.filter(
+        (e) => e.notice?.kind === "payment_failed",
+      ),
+    ).toHaveLength(0);
+    expect(
+      state.actions[0].lifecycleEvents.filter(
+        (e) => e.notice?.kind === "payment_pending",
+      ),
+    ).toHaveLength(1);
+    native.subscriptions.get("sub_fixture1")!.status = "pending";
+    await app.recover();
+    state = await app.workspace(owner, f.business.id);
+    expect(
+      state.actions[0].lifecycleEvents.filter(
+        (e) => e.notice?.kind === "payment_failed",
+      ),
+    ).toHaveLength(1);
+  });
 });

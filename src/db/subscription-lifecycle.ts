@@ -234,19 +234,25 @@ export async function reconcileLifecycle(
         ? "cancellation_confirmed"
         : state === "active" && previous?.state === "past_due"
           ? "payment_recovered"
-          : previous?.accessState &&
-              previous.accessState !== "blocked" &&
-              accessState === "blocked"
-            ? "access_ended"
-            : state !== previous?.state
-              ? state === "past_due"
-                ? "payment_failed"
-                : state === "active"
-                  ? "payment_active"
-                  : state === "pending"
-                    ? "payment_pending"
-                    : "cancellation_confirmed"
-              : null;
+          : state === "past_due" &&
+              failedThrough &&
+              previous?.failedThrough !== failedThrough
+            ? "payment_failed"
+            : previous?.accessState &&
+                previous.accessState !== "blocked" &&
+                accessState === "blocked"
+              ? "access_ended"
+              : state !== previous?.state
+                ? state === "past_due"
+                  ? failedThrough
+                    ? "payment_failed"
+                    : "payment_pending"
+                  : state === "active"
+                    ? "payment_active"
+                    : state === "pending"
+                      ? "payment_pending"
+                      : "cancellation_confirmed"
+                : null;
     const stable = (value: unknown): unknown =>
       Array.isArray(value)
         ? value.map(stable)

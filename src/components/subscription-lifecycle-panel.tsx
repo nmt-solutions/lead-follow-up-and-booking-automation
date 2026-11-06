@@ -16,7 +16,7 @@ const time = (v: string | null | undefined) =>
   v ? new Date(v).toLocaleString() : "Not established";
 const notices = {
   payment_pending:
-    "Payment is pending. Access requires a confirmed captured payment.",
+    "Current payment is not confirmed. Access requires a confirmed captured payment for its eligible period.",
   payment_active:
     "A captured payment established paid access for its recorded period.",
   payment_failed:

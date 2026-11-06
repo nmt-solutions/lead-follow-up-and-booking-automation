@@ -28,6 +28,8 @@ Owners/Admins use `workspace`, `refresh`, `updatePayment` and `cancel` on `creat
 
 Provider retries remain provider-owned. The app does not manually charge invoices, synthesize a hosted link, or promise that halted arrears are automatically collected. The supported customer action is the documented card-change Checkout; only the resulting independently reconciled captured invoice can restore its eligible period. Domestic manual invoice charging is not enabled.
 
+Once the genuine original initial capture is known, a later fully bound native monthly capture can establish its own period across an unpaid gap. Missing months are never backfilled as paid. A genuine late arrears capture records its original invoice window without moving current paid access beyond actual captured periods. Original monthly anchor/cycle bounds, exact original renewal net/current approved tax, capture/identity/overlap uniqueness and initial-basis requirements still apply; generic paid-pilot/renewal continuity is unchanged.
+
 ## Persistence, entitlement and notification seams
 
 `subscription_payment.lifecycle` persists pending/active/past_due/cancelled state, access state, paid-through, failure boundary, grace end, reviewed policy, bound provider observation, and requested/confirmed cancellation with request actor/time and effective end. `subscription_lifecycle_event` is its append-only attributed ledger. Stable action/key uniqueness deduplicates state checkpoints and command notices; financial snapshots, charges, periods, usage, seller invoices and credit notes are not rewritten.

@@ -1053,6 +1053,23 @@ export function createSubscriptionPaymentRepository(database: Database) {
             o,
           );
         }
+        const nativeRenewal =
+          renewal &&
+          s.provider.key === "razorpay" &&
+          row.snapshot.term.kind === "calendar_month" &&
+          o.charge?.kind === "renewal";
+        // A halted native subscription may resume with a later paid cycle while older
+        // invoices remain unpaid. Require its real initial basis, never fund the gap.
+        const renewalBasisKnown = nativeRenewal
+          ? periods.some(
+              (p) =>
+                p.start.toISOString() === o.charge?.subscriptionStart &&
+                p.snapshot.basis?.kind !== "renewal",
+            )
+          : periods.some(
+              (p) =>
+                p.end.getTime() === new Date(o.periodStart ?? "").getTime(),
+            );
         if (
           !o.checkoutId ||
           !o.customerId ||
@@ -1064,12 +1081,9 @@ export function createSubscriptionPaymentRepository(database: Database) {
           !o.periodEnd ||
           new Date(o.periodStart) < row.at ||
           (!renewal && periods.length > 0) ||
-          (renewal &&
-            !periods.some(
-              (p) => p.end.getTime() === new Date(o.periodStart!).getTime(),
-            )) ||
+          (renewal && !renewalBasisKnown) ||
           new Date(o.periodStart) > new Date(o.paidAt) ||
-          new Date(o.periodEnd) <= new Date(o.paidAt) ||
+          (!nativeRenewal && new Date(o.periodEnd) <= new Date(o.paidAt)) ||
           new Date(o.paidAt) > at ||
           (o.charge
             ? !monthlyPeriodMatches(
