@@ -4,6 +4,11 @@ import {
 } from "./application-error";
 
 const failures = {
+  SELLER_DOCUMENT_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "Seller documents need an approved effective issuer configuration matching the original currency, rounding and required legal fields. Ask the document operator to review setup.",
+  },
   PAID_ACCESS_REQUIRED: {
     status: 409,
     message:

@@ -1,4 +1,5 @@
 export type ApplicationErrorCode =
+  | "SELLER_DOCUMENT_SETUP_REQUIRED"
   | "PAID_ACCESS_REQUIRED"
   | "CALENDAR_SETUP_REQUIRED"
   | "INVALID_INPUT"

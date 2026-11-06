@@ -111,12 +111,30 @@ export default async function BusinessesPage() {
       return null;
     }
   })();
+  const documentsLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "documents.manage");
+      return (
+        <Link
+          href="/platform/seller-documents"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Review seller documents
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   if (!businesses.length)
     return (
       <div className="mx-auto max-w-2xl space-y-8">
         {billingReviewLink}
         {pricingLink}
         {paymentsLink}
+        {documentsLink}
         {whatsAppReviewLink}
         {senderHealthLink}
         <div>
@@ -139,6 +157,7 @@ export default async function BusinessesPage() {
       {billingReviewLink}
       {pricingLink}
       {paymentsLink}
+      {documentsLink}
       {senderHealthLink}
       {whatsAppReviewLink}
       <div className="flex flex-wrap items-center justify-between gap-4">

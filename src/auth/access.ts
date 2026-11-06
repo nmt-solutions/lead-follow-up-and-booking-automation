@@ -44,7 +44,8 @@ export function privilegedRoles(database: Database, userId: string) {
         operator?.emailPolicy ||
         operator?.pricing ||
         operator?.whatsAppReview ||
-        operator?.senderHealth,
+        operator?.senderHealth ||
+        operator?.documents,
       ),
     };
   });

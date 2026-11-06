@@ -37,6 +37,12 @@ export default async function SubscriptionPaymentsPage({
           {data.profile.name}
         </p>
         <h1 className="page-title">Subscription payments</h1>
+        <Link
+          href={`/businesses/${businessId}/seller-documents`}
+          className="mt-3 inline-flex min-h-11 items-center text-primary underline"
+        >
+          View invoices and credit notes
+        </Link>
         <p className="mt-3 text-muted-foreground">
           Review the exact tax, total and intended period before hosted
           checkout. Paid access starts after provider confirmation.
