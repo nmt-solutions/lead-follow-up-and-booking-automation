@@ -290,19 +290,38 @@ export function createWhatsAppRepository(database: Database, clock: Clock) {
         : null,
       readiness: {
         onboardingReady: issues.length === 0,
-        automationReady: false,
+        automationReady:
+          issues.length === 0 &&
+          provider.sendingAvailable === true &&
+          provider.outboundWorkerReady === true &&
+          intake.enabled &&
+          intake.inboundObserved &&
+          intake.manualObserved &&
+          !intake.gap,
         inboundReady: intake.enabled && intake.inboundObserved,
         manualVisibilityReady:
           intake.enabled &&
           intake.replyVisibility === "supported_app_events" &&
           !intake.gap,
-        sendingReady: false,
+        sendingReady:
+          issues.length === 0 &&
+          provider.sendingAvailable === true &&
+          provider.outboundWorkerReady === true &&
+          intake.enabled &&
+          intake.inboundObserved &&
+          intake.manualObserved &&
+          !intake.gap,
         issues,
       },
       billing: whatsAppBilling,
     };
   }
   return {
+    workspaceAt: (
+      tx: Transaction,
+      businessId: string,
+      provider: MetaProvider,
+    ) => workspace(tx, businessId, provider, false),
     ensureAccess: (actor: WorkIdentity, businessId: string) =>
       authorized(actor, businessId, async () => {}),
     workspace(actor: WorkIdentity, businessId: string, provider: MetaProvider) {

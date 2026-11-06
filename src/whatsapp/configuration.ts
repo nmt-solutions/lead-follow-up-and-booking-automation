@@ -54,7 +54,12 @@ export function configuredMetaCloud(
   if (!parsed.success || !configured)
     return { provider: { ...unavailableMetaProvider, setup }, vault: null };
   return {
-    provider: createMetaCloudProvider(parsed.data, setup, fetcher, clock),
+    provider: {
+      ...createMetaCloudProvider(parsed.data, setup, fetcher, clock),
+      sendingAvailable: true,
+      outboundWorkerReady:
+        env.META_OUTBOUND_WORKER_DEPLOYMENT_CONFIRMED === "true",
+    },
     vault: calendarCredentialVault(parsed.data),
   };
 }

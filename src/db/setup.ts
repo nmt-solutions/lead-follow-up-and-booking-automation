@@ -6,6 +6,7 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
   whatsAppIntake,
+  whatsAppOutbound,
   whatsAppReceipt,
   whatsAppIntakeScopeForeignKeys,
   whatsAppConnection,
@@ -459,6 +460,7 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.whatsapp_intake,public.whatsapp_receipt FROM app_runtime;
         REVOKE ALL PRIVILEGES (connection_version,account_key,inbox_connection_id,actor_id,enabled_at,receipt_retention_seconds,inbound_at,echo_at,gap) ON public.whatsapp_intake FROM app_runtime;
         REVOKE ALL PRIVILEGES (activity,state,conversation_id,opportunity_id) ON public.whatsapp_receipt FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_receipt' AND column_name='status_evidence') THEN REVOKE UPDATE(status_evidence) ON public.whatsapp_receipt FROM app_runtime; END IF;
       END IF;
       IF to_regclass('public.whatsapp_connection') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.whatsapp_connection, public.whatsapp_oauth, public.whatsapp_event FROM app_runtime;
@@ -468,6 +470,10 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.whatsapp_evidence') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.whatsapp_evidence FROM app_runtime;
         REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON public.whatsapp_evidence FROM app_runtime;
+      END IF;
+      IF to_regclass('public.whatsapp_outbound') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_outbound FROM app_runtime;
+        REVOKE ALL PRIVILEGES (id,business_id,connection_id,key,actor_id,at,data,position) ON public.whatsapp_outbound FROM app_runtime;
       END IF;
       IF to_regclass('public.microsoft_mail_grant') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.microsoft_mail_grant, public.microsoft_mail_oauth FROM app_runtime;
@@ -658,6 +664,7 @@ export async function secureDatabase(pool: Pool) {
     // Upgrade the original owner-only role check from the schema's definition.
     for (const table of [
       membership,
+      opportunityDueAction,
       inboxOpportunity,
       senderHealthRecord,
       whatsAppIntake,
@@ -675,6 +682,7 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      whatsAppOutbound,
       whatsAppIntake,
       whatsAppReceipt,
       whatsAppEvidence,
@@ -790,12 +798,23 @@ export async function secureDatabase(pool: Pool) {
         IF current_user=(SELECT pg_get_userbyid(c.relowner) FROM pg_catalog.pg_class c WHERE c.oid='public.inbox_opportunity'::regclass) THEN RETURN NEW; END IF;
         IF NEW.buyer_id IS DISTINCT FROM OLD.buyer_id OR NEW.stage IS DISTINCT FROM OLD.stage THEN
           IF NOT (OLD.buyer_id IS NULL AND OLD.stage='prospect' AND NEW.stage='inquiry' AND NEW.buyer_id IS NOT NULL
-            AND EXISTS (SELECT 1 FROM public.email_sequence_action a
+            AND (EXISTS (SELECT 1 FROM public.email_sequence_action a
               JOIN public.email_sequence_event r ON r.action_id=a.id AND r.business_id=a.business_id AND r.kind='reply_observed'
               JOIN public.email_sequence_event p ON p.action_id=a.id AND p.business_id=a.business_id AND p.kind='attempt_reserved'
               JOIN public.inbox_buyer b ON b.id=NEW.buyer_id AND b.business_id=a.business_id
               WHERE a.opportunity_id=OLD.id AND a.business_id=OLD.business_id
-              AND p.envelope->>'recipient'=lower(b.sender_ref) AND ((p.envelope->>'replyInboxId')::uuid=b.connection_id OR ((r.source->>'mailboxId')::uuid=b.connection_id AND r.source->>'connectionId'=p.envelope->>'replyConnectionId'))))
+              AND p.envelope->>'recipient'=lower(b.sender_ref) AND ((p.envelope->>'replyInboxId')::uuid=b.connection_id OR ((r.source->>'mailboxId')::uuid=b.connection_id AND r.source->>'connectionId'=p.envelope->>'replyConnectionId')))
+            OR EXISTS (SELECT 1 FROM public.whatsapp_outbound p
+              JOIN public.whatsapp_outbound s ON s.business_id=p.business_id AND s.data->>'kind'='result' AND s.data->>'actionId'=p.data->'intent'->>'actionId' AND s.data->'result'->>'status'='accepted'
+              JOIN public.whatsapp_intake i ON i.id=p.connection_id AND i.business_id=p.business_id
+              JOIN public.whatsapp_receipt r ON r.connection_id=i.id AND r.business_id=i.business_id AND r.connection_version=i.connection_version AND r.kind='incoming'
+              JOIN public.inbox_buyer b ON b.id=NEW.buyer_id AND b.business_id=p.business_id AND b.connection_id=i.inbox_connection_id
+              WHERE p.data->>'kind'='intent' AND p.business_id=OLD.business_id AND p.data->'intent'->>'opportunityId'=OLD.id::text
+                AND p.data->'intent'->>'inboxConnectionId'=b.connection_id::text AND p.data->'intent'->>'peer'=b.sender_ref
+                AND p.data->'intent'->>'connectionVersion'=i.connection_version::text
+                AND r.account_key=(p.data->'intent'->'assets'->>'wabaId')||':'||(p.data->'intent'->'assets'->>'phoneNumberId')
+                AND r.reply_to=s.data->'result'->>'messageRef' AND r.peer=b.sender_ref AND s.data->'result'->>'peer'=b.sender_ref
+                AND r.at>=(p.data->'intent'->>'reservedAt')::timestamptz)))
           THEN RAISE EXCEPTION 'Opportunity intake is immutable'; END IF;
         END IF;
         RETURN NEW;
@@ -851,6 +870,11 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON whatsapp_evidence FROM app_runtime;
       GRANT SELECT, INSERT ON whatsapp_evidence TO app_runtime;
       ALTER TABLE whatsapp_evidence FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON whatsapp_outbound FROM app_runtime;
+      REVOKE ALL PRIVILEGES (id,business_id,connection_id,key,actor_id,at,data,position) ON whatsapp_outbound FROM app_runtime;
+      GRANT SELECT, INSERT ON whatsapp_outbound TO app_runtime;
+      GRANT USAGE ON SEQUENCE whatsapp_outbound_position_seq TO app_runtime;
+      ALTER TABLE whatsapp_outbound FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON whatsapp_connection, whatsapp_oauth, whatsapp_event TO app_runtime;
       GRANT UPDATE (version, configuration, status, reason, terms_actor_id, terms_accepted_at, credentials, provider_key, observation, operation_id, assets, coexistence_finished, phone_number_id) ON whatsapp_connection TO app_runtime;
       GRANT UPDATE (consumed) ON whatsapp_oauth TO app_runtime;
@@ -941,6 +965,9 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON opportunity_control_history, opportunity_manual_event, opportunity_due_action FROM app_runtime;
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
       GRANT UPDATE (state, reason, email) ON opportunity_due_action TO app_runtime;
+      REVOKE UPDATE (whatsapp_plan_id,whatsapp_step,whatsapp_peer) ON opportunity_due_action FROM app_runtime;
+      REVOKE UPDATE (meta_recovery_at) ON opportunity_due_action FROM app_runtime;
+      GRANT UPDATE (meta_recovery_at) ON opportunity_due_action TO app_runtime;
       CREATE OR REPLACE FUNCTION public.protect_opportunity_mail() RETURNS trigger
       LANGUAGE plpgsql SET search_path = pg_catalog, public AS $protect$
       BEGIN
@@ -1139,6 +1166,19 @@ export async function secureDatabase(pool: Pool) {
       GRANT EXECUTE ON FUNCTION public.purge_meta_receipts(timestamptz) TO app_runtime;
       REVOKE ALL ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) TO app_runtime;
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION public.pending_meta_outbound()
+      RETURNS TABLE(business_id uuid,action_id uuid,actor_id text,session_id text)
+      LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        SELECT a.business_id,a.id,a.actor_id,a.session_id FROM public.opportunity_due_action a
+        JOIN public.inbox_connection i ON i.id=a.connection_id AND i.business_id=a.business_id AND i.mode='meta'
+        JOIN public.membership m ON m.business_id=a.business_id AND m.user_id=a.actor_id AND m.role IN ('owner','admin')
+        WHERE (a.state='pending' AND a.due_at<=statement_timestamp() OR a.state='committed')
+        ORDER BY coalesce(a.meta_recovery_at,a.created_at),a.due_at,a.id LIMIT 100
+      $$;
+      REVOKE ALL ON FUNCTION public.pending_meta_outbound() FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
     `);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);

@@ -14,6 +14,11 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*)=1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='whatsapp_outbound')
+      AND (SELECT count(*)=2 AND bool_and('app_runtime'=ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL ELSE with_check IS NOT NULL END) FROM pg_policies WHERE schemaname='public' AND tablename='whatsapp_outbound')
+      AND has_sequence_privilege(current_user,'public.whatsapp_outbound_position_seq','USAGE')
+      AND (SELECT count(*)=1 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='pending_meta_outbound')
+      AND (SELECT count(*)=2 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conname IN ('whatsapp_outbound_connection_scope','whatsapp_action_plan_scope'))
       AND (SELECT count(*)=5 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('subscription_payment','subscription_payment_event','subscription_payment_history','subscription_period','subscription_usage'))
       AND (SELECT count(*)=15 AND bool_and(CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL WHEN policyname LIKE '%_system' OR policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL ELSE false END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('subscription_payment','subscription_payment_event','subscription_payment_history','subscription_period','subscription_usage'))
       AND NOT has_any_column_privilege(current_user,'public.subscription_period','UPDATE')
@@ -38,6 +43,7 @@ export async function verifyRuntimeRole(
       AND NOT has_column_privilege(current_user,'public.whatsapp_receipt','account_key','UPDATE')
       AND NOT has_column_privilege(current_user,'public.whatsapp_receipt','peer','UPDATE')
       AND NOT has_column_privilege(current_user,'public.whatsapp_receipt','reply_to','UPDATE')
+      AND NOT has_column_privilege(current_user,'public.whatsapp_receipt','status_evidence','UPDATE')
       AND (SELECT count(*)=5 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conname IN ('whatsapp_intake_connection_scope','whatsapp_intake_inbox_scope','whatsapp_receipt_connection_scope','whatsapp_receipt_conversation_scope','whatsapp_receipt_opportunity_scope'))
       AND (SELECT count(*)=3 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('resolve_meta_intake','pending_meta_intakes','purge_meta_receipts'))
       AND (SELECT count(*) = 1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT,INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='whatsapp_evidence')
@@ -200,6 +206,10 @@ export async function verifyRuntimeRole(
       AND NOT has_table_privilege(current_user, 'public.opportunity_control_history', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_table_privilege(current_user, 'public.opportunity_manual_event', 'UPDATE,DELETE,TRUNCATE')
       AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'evaluation', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'whatsapp_plan_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'whatsapp_step', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.opportunity_due_action', 'whatsapp_peer', 'UPDATE')
+      AND has_column_privilege(current_user, 'public.opportunity_due_action', 'meta_recovery_at', 'UPDATE')
       AND has_column_privilege(current_user, 'public.opportunity_due_action', 'email', 'UPDATE')
       AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.opportunity_due_action'::regclass
         AND tgname='protect_opportunity_mail' AND tgenabled <> 'D')

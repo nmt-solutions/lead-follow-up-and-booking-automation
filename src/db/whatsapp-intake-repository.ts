@@ -9,6 +9,7 @@ import type { MetaActivity, MetaIntakeView } from "../models/whatsapp-intake";
 import { ApplicationError } from "../models/application-error";
 import { captureInboxInquiry } from "./inbox-repository";
 import { writeControl } from "./opportunity-control-repository";
+import { resolveMetaOutgoing } from "./whatsapp-references";
 import {
   metaInboundAllowed,
   metaConnectionAuthorized,
@@ -23,6 +24,7 @@ import {
   inboxAssociation,
   inboxOpportunity,
   opportunityControlHistory,
+  opportunityDueAction,
 } from "./schema";
 
 export type MetaScope = { id: string; businessId: string; actorId: string };
@@ -504,6 +506,7 @@ export function createWhatsAppIntakeRepository(
             peer: activity.peer,
             replyTo: activity.replyTo,
             status: activity.status,
+            statusEvidence: activity.statusEvidence ?? null,
             state: "pending",
             at: clock.now(),
             expiresAt: new Date(
@@ -571,7 +574,16 @@ export function createWhatsAppIntakeRepository(
                     eq(inboxMessage.messageRef, activity.replyTo),
                   ),
                 );
-              if (!parent) {
+              const outgoing = !parent
+                ? await resolveMetaOutgoing(
+                    tx,
+                    scope.businessId,
+                    intake.inboxConnectionId,
+                    activity.peer,
+                    activity.replyTo,
+                  )
+                : null;
+              if (!parent && !outgoing) {
                 await tx
                   .update(whatsAppReceipt)
                   .set({ state: "review" })
@@ -651,6 +663,23 @@ export function createWhatsAppIntakeRepository(
             activity.from ===
               connection.configuration.requestedNumber.replace(/^\+/, "")
           ) {
+            const application = await resolveMetaOutgoing(
+              tx,
+              scope.businessId,
+              intake.inboxConnectionId,
+              activity.peer,
+              activity.messageRef,
+            );
+            if (application && activity.text === application.body) {
+              await tx
+                .update(whatsAppReceipt)
+                .set({
+                  state: "processed",
+                  opportunityId: application.opportunityId,
+                })
+                .where(eq(whatsAppReceipt.id, row.id));
+              continue;
+            }
             await tx
               .update(whatsAppIntake)
               .set({ echoAt: at })
@@ -674,15 +703,46 @@ export function createWhatsAppIntakeRepository(
                     : []),
                 ),
               );
+            const outboundParent = activity.replyTo
+              ? await resolveMetaOutgoing(
+                  tx,
+                  scope.businessId,
+                  intake.inboxConnectionId,
+                  activity.peer,
+                  activity.replyTo,
+                )
+              : null;
+            const planned = !activity.replyTo
+              ? await tx
+                  .select({ opportunityId: opportunityDueAction.opportunityId })
+                  .from(opportunityDueAction)
+                  .where(
+                    and(
+                      eq(opportunityDueAction.businessId, scope.businessId),
+                      eq(
+                        opportunityDueAction.connectionId,
+                        intake.inboxConnectionId,
+                      ),
+                      eq(opportunityDueAction.whatsappPeer, activity.peer),
+                      inArray(opportunityDueAction.state, [
+                        "pending",
+                        "committed",
+                        "dispatched",
+                      ]),
+                    ),
+                  )
+              : [];
             const ids = [
-              ...new Set(
-                candidates.flatMap((c) =>
+              ...new Set([
+                ...candidates.flatMap((c) =>
                   c.opportunityId ? [c.opportunityId] : [],
                 ),
-              ),
+                ...(outboundParent ? [outboundParent.opportunityId] : []),
+                ...planned.map((p) => p.opportunityId),
+              ]),
             ];
             if (ids.length === 1) {
-              conversationId = candidates[0].conversationId;
+              conversationId = candidates[0]?.conversationId ?? null;
               opportunityId = ids[0];
               const [lastHandback] = await tx
                 .select()

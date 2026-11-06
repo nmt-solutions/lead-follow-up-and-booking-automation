@@ -155,7 +155,7 @@ export function createWhatsAppIntakeApplication<Credentials>(options: {
     async drain() {
       await options.repository.purge();
       const results = [];
-      let failed = false;
+      let failed: { error: unknown } | null = null;
       for (const scope of await options.repository.pending(
         options.provider.key,
       )) {
@@ -167,10 +167,13 @@ export function createWhatsAppIntakeApplication<Credentials>(options: {
             ["FORBIDDEN", "NOT_FOUND"].includes(error.code)
           )
             continue;
-          failed = true;
+          failed = { error };
         }
       }
-      if (failed) throw new ApplicationError("PROVIDER_UNAVAILABLE");
+      if (failed)
+        throw new ApplicationError("PROVIDER_UNAVAILABLE", {
+          cause: failed.error,
+        });
       return results;
     },
   };

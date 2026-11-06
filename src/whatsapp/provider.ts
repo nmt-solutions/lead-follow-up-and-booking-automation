@@ -19,6 +19,8 @@ export class MetaFailure extends Error {
 }
 
 export type MetaProvider = {
+  sendingAvailable?: boolean;
+  outboundWorkerReady?: boolean;
   key: string;
   setup: WhatsAppSetup;
   login?: { appId: string; configId: string; graphVersion: string };
