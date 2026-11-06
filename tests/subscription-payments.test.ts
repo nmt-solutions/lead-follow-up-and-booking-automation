@@ -866,6 +866,36 @@ describe("Subscription purchase at the public application seam", () => {
     await secureDatabase(h.admin);
     await verifyRuntimeRole(h.runtime);
   });
+  it("prepares existing financial scope constraints for replacement and restores paid access without losing records", async () => {
+    const f = await subscriptionFixture(h),
+      p = compose();
+    const action = await p.app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await p.app.start(f.owner, f.business.id, { actionId: action.id });
+    p.gateway.confirm(action.operationKey);
+    await p.app.recover();
+    await prepareDatabaseRole(h.admin);
+    try {
+      // Reproduce the pinned push's replacement of referenced UNIQUE constraints.
+      await h.admin.query(`
+        ALTER TABLE subscription_payment DROP CONSTRAINT subscription_payment_scope;
+        ALTER TABLE subscription_payment ADD CONSTRAINT subscription_payment_scope UNIQUE(id,business_id);
+        ALTER TABLE subscription_period DROP CONSTRAINT subscription_period_scope;
+        ALTER TABLE subscription_period ADD CONSTRAINT subscription_period_scope UNIQUE(id,business_id);
+      `);
+      await expect(
+        h.runtime.query("SELECT * FROM subscription_payment"),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await secureDatabase(h.admin);
+    }
+    await verifyRuntimeRole(h.runtime);
+    expect(
+      (await p.app.workspace(f.owner, f.business.id)).periods,
+    ).toHaveLength(1);
+  });
   it("requires read and append grants separately for every financial ledger", async () => {
     for (const table of [
       "subscription_payment",
