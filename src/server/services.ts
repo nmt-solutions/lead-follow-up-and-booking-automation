@@ -1,3 +1,8 @@
+import { configuredMailboxQueue } from "../mailboxes/queue";
+import { createMailboxApplication } from "../application/mailboxes";
+import { createMailboxRepository } from "../db/mailbox-repository";
+import { createMailboxHttp } from "../http/mailboxes";
+import { unavailableMailboxProvider } from "../mailboxes/provider";
 import { createMicrosoftCalendarApplication } from "../application/microsoft-calendar";
 import { createMicrosoftCalendarRepository } from "../db/microsoft-calendar-repository";
 import { createMicrosoftCalendarProvider } from "../microsoft-calendar/provider";
@@ -113,6 +118,15 @@ async function composeServices() {
     clock: { now: () => new Date() },
   });
   const { authenticate, authenticatePrivileged, authenticatePlatform } = access;
+  const mailboxes = createMailboxApplication({
+    authenticate: access.authenticateForWork,
+    repository: createMailboxRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    provider: unavailableMailboxProvider,
+    clock: { now: () => new Date() },
+    enqueue: configuredMailboxQueue(process.env),
+  });
   const senders = createSenderApplication({
     authenticate: access.authenticateForWork,
     repository: createSenderRepository(runtimeDatabase(pool), {
@@ -288,6 +302,12 @@ async function composeServices() {
     timeoutMs: 5000,
   });
   return {
+    mailboxes,
+    mailboxesHttp: createMailboxHttp({
+      application: mailboxes,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     senders,
     sendersHttp: createSenderHttp({
       application: senders,

@@ -139,7 +139,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
     businessId: string,
     opportunityId: string,
   ) {
-    const c = await inquiryContext(tx, businessId, opportunityId);
+    const c = await inquiryContext(tx, businessId, opportunityId, clock.now());
     const authority = await readCommercialPolicy(tx, businessId, false);
     return {
       ...c,

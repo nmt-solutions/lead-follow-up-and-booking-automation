@@ -80,6 +80,9 @@ A business-controlled email inbox linked to the service for sending and synchron
 **Mailbox scope**:
 The sales mailboxes or conversations a business has selected for the service to process, including any selected historical correspondence.
 
+**Historical correspondence import**:
+An explicitly authorized import of selected past sales mail within a chosen time range and message limit. Connecting a mailbox does not authorize this import.
+
 **Email handoff**:
 A prepared email that a person opens in their own email application, reviews, and chooses whether to send. Preparing or opening it does not establish that it was sent.
 

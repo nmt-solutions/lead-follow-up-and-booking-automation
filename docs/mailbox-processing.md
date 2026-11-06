@@ -1,0 +1,39 @@
+# Mailbox processing (#28)
+
+Read this contract when implementing Gmail (#29), Microsoft Graph (#30), or changing mailbox synchronization. The conventional application seam is `createMailboxApplication`; PostgreSQL owns policy versions, checkpoints and deduplication. Trigger.dev owns durable execution and retries.
+
+## Consent and ownership
+
+A mailbox selection belongs to one Business and one selected Gmail/Microsoft sender connection. Its provider/account identity is immutable. Read and send requests are independent preferences, never proof of provider authorization. Login, calendar access, a verified domain and broad OAuth access do not establish processing consent.
+
+Supported scope shapes are this mailbox's sales mail, exact provider folder/label IDs, or exact provider conversation/thread IDs. Folder/label matching uses any selected ID. A provider grant restricted along a different dimension cannot prove coverage of a selection; the application blocks it conservatively. Provider IDs are checked against the observed folders/threads of that exact mailbox during synchronization, separately from granted OAuth coverage. The current settings UI accepts exact IDs; native selection catalogs and OAuth belong to the provider issues.
+
+History defaults off. An explicit import uses an inclusive start, exclusive end and one total selected-message limit, including duplicates against already imported inbox records. Its original time/count bounds survive pagination, retry and explicit resume. Re-queuing the same history job cannot reset its allowance. Changing settings creates a new policy version, so starting another import is a new explicit authorization.
+
+New-mail processing begins at the recorded boundary. Changing scope/read access resets that boundary and cursor to prevent historical backfill through an expanded selection. Changing only history bounds or the send request preserves the incremental boundary/cursor. Stored, already authorized correspondence remains visible. Further automated use filters it against current scope, connection and read access.
+
+## Provider contract
+
+`MailboxProvider` is server supplied. HTTP accepts settings and sync requests, never permission observations, cursor values, events or readiness flags. Production currently composes the unavailable adapter; no OAuth, live mailbox reading, sending or AI classification is claimed by #28. Deterministic adapters exercise the same application contract against real persistence.
+
+1. `inspect` establishes current permission for the exact provider/account. It distinguishes read and send, and supplies a revision and expiring observation. A native adapter must validate its Business-owned token/account binding and surface revocation or insufficient permission truthfully.
+2. `list` fetches metadata before bodies, bound to the selected account, scope, mode, time bounds, persisted cursor and page limit. Gmail adapters should use label/thread metadata and Graph adapters should use folder/thread metadata and provider-supported filtering. The application independently filters metadata. At most 100 metadata entries are accepted per page; history pages also respect the remaining global message allowance.
+3. Relevance is `sales`, `unrelated` or `unknown`. A native adapter must provide a justified metadata-only sales decision or leave it unknown. Unknown/unrelated entries are excluded before body reads. Folder selection alone and broad OAuth do not prove every message is sales mail. This foundation deliberately makes no promise to infer sales intent from arbitrary private correspondence; #29/#30 must specify their supported metadata rules and limitations.
+4. `read` returns one validated normalized incoming inquiry for the exact listed message, thread and timestamp. It must not fetch unrelated message bodies as part of thread expansion. Returned content is untrusted and cannot grant authority.
+5. Permissions are inspected again after fetch. The commit rechecks the persisted actor/session/MFA, current membership, mailbox policy/connection version and cursor checkpoint under the Business lock. A stale batch retains no body and advances no cursor. Shared permission observations also use compare-and-swap across history and incremental jobs, so an older page cannot overwrite a recorded revocation. Provider I/O takes place outside the transaction with a cancellation/deadline signal; native adapters must honor that signal and bound their own network requests.
+
+Every page commits atomically through the same inbox ingestion used by explicit normalized imports. Message identity is stable within the selected inbox; association with buyers/conversations/Opportunities and replay protection are shared. A failed page leaves its cursor unchanged. Concurrent or reordered stale completions cannot overwrite a newer checkpoint. Only safe counts, status, reason and checkpoint numbers reach the settings UI; provider cursor strings and grant revisions remain server-side.
+
+## Execution and reply readiness
+
+`synchronize-selected-mailbox` resumes persisted work for bounded pages. Trigger retries use the same job and allowance. Cancellation is recorded as blocked/interrupted, separate from a retryable provider outage. A trusted worker may acknowledge an authorization failure only by blocking its exact unfinished checkpoint, under the current Business role and RLS; it cannot resume work, change grants or advance cursors. If membership removal also prevents that acknowledgement, a currently verified manager reconciles the blocked state when reviewing it. An explicit resume can bind unfinished work to the currently verified integration manager; older queued actor/session payloads then fail. Dispatch failures leave queued work reviewable. The optional queue requires configured Trigger credentials and a confirmed mailbox worker deployment. Native adapters must be composed consistently in both web and worker hosts before activation.
+
+States are queued, running, partial, completed or blocked. Partial work retains counters/checkpoint; a reached history limit stops further reads. Permission, setup and invalid-response problems are blocked with safe reasons. The user can review settings and request work again. UI status refresh is explicit; no background polling process or application-owned durable scheduler is added.
+
+Changing mailbox scope invalidates #27 reply-route proof. General reply routes currently promise complete reply capture, so a folder/thread-only scope cannot satisfy that promise. A native reply route must use the exact selected mailbox connection and address. A full-mailbox selection also needs a completed current incremental sync with no unfinished incremental job and current reading access, independently of sender proof. Native sending identities bound to a mailbox additionally need the separate send request and current granted send permission. Stored records remain readable when readiness is blocked.
+
+#17 manual normalized imports remain explicitly authorized input. Their endpoints cannot inject events into a native mailbox inbox, and they do not establish live synchronization. No mailbox test reads a private live inbox, sends a message, invokes a calendar, or uses an unselected provider.
+
+## Human verification
+
+UI validation and user acceptance remain pending. In Business → Mailbox processing, select a Business mailbox identity, request read/send separately, save a folder/label or thread selection and reload. Expect the same settings and history off. Opt into history with a past UTC interval and count, save, then start it. With the current unavailable native adapters, expect a reviewable blocked/setup-required job with no captured content or invented grants. Disable processing or reading and save; new sync requests must be unavailable while existing inbox correspondence stays readable. Verify layout, keyboard operation, larger text and both appearances yourself.

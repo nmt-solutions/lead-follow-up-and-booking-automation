@@ -123,7 +123,7 @@ export function createInquiryRepository(database: Database, clock: Clock) {
       id: string,
     ): Promise<InquiryWorkspace> {
       return scope(actor, businessId, async (tx) => {
-        const context = await inquiryContext(tx, businessId, id);
+        const context = await inquiryContext(tx, businessId, id, clock.now());
         const canProcess =
           context.need.controlState === "automation" &&
           context.need.ownerId === actor.userId;
@@ -147,7 +147,7 @@ export function createInquiryRepository(database: Database, clock: Clock) {
       messageId: string,
     ) {
       return scope(actor, businessId, async (tx) => {
-        const context = await inquiryContext(tx, businessId, id);
+        const context = await inquiryContext(tx, businessId, id, clock.now());
         const history = await runs(tx, businessId, id);
         const latest = history.findLast((r) => r.messageId === messageId);
         if (
@@ -279,7 +279,12 @@ export function createInquiryRepository(database: Database, clock: Clock) {
     ) {
       return scope(actor, businessId, async (tx) => {
         const row = await ownedRun(tx, businessId, opportunityId, id);
-        const context = await inquiryContext(tx, businessId, opportunityId);
+        const context = await inquiryContext(
+          tx,
+          businessId,
+          opportunityId,
+          clock.now(),
+        );
         const [message] = await tx
           .select()
           .from(inboxMessage)
@@ -322,7 +327,12 @@ export function createInquiryRepository(database: Database, clock: Clock) {
         if (row.actorId !== actor.userId || row.sessionId !== actor.sessionId)
           throw new ApplicationError("FORBIDDEN");
         if (row.result.status !== "processing") return view(tx, row);
-        const context = await inquiryContext(tx, businessId, opportunityId);
+        const context = await inquiryContext(
+          tx,
+          businessId,
+          opportunityId,
+          clock.now(),
+        );
         if (
           !sameInquirySnapshot(row.snapshot, context.snapshot) ||
           context.need.controlState !== "automation" ||

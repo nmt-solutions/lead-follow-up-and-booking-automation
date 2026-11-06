@@ -35,6 +35,12 @@ export default async function SendersPage({
           reply handling are separate requirements.
         </p>
       </header>
+      <Link
+        href={`/businesses/${businessId}/mailboxes`}
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+      >
+        Choose mailbox processing scope and optional history
+      </Link>
       <SenderManager businessId={businessId} initialState={state} />
     </div>
   );

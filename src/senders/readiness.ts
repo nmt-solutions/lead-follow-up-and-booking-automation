@@ -35,9 +35,10 @@ export function senderReadiness(
   at: Date,
   inboxActive: boolean,
   adapter?: Pick<SenderAdapter, "key" | "mode">,
+  mailboxIssues: SenderReadiness["issues"] = [],
 ): SenderReadiness {
   const { identity, connection, replyRoute, replyConnection } = context;
-  const issues: SenderReadiness["issues"] = [];
+  const issues: SenderReadiness["issues"] = [...mailboxIssues];
   const issue = (code: string, action: string) => issues.push({ code, action });
   if (adapter?.mode === "unconfigured")
     issue(

@@ -4,6 +4,9 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  mailboxPolicy,
+  mailboxJob,
+  mailboxScopeForeignKeys,
   senderConnection,
   senderReplyRoute,
   senderIdentity,
@@ -352,6 +355,11 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, account_kind, tenant_id, scopes, authorized_at, actor_id, at) ON public.microsoft_calendar_grant FROM app_runtime;
         REVOKE UPDATE (consumed) ON public.microsoft_calendar_oauth FROM app_runtime;
       END IF;
+      IF to_regclass('public.mailbox_policy') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.mailbox_policy, public.mailbox_job FROM app_runtime;
+        REVOKE UPDATE (version, connection_version, configuration, incremental_since, cursor, permission_observation, updated_at) ON public.mailbox_policy FROM app_runtime;
+        REVOKE UPDATE (state, cursor, seen, identity) ON public.mailbox_job FROM app_runtime;
+      END IF;
       IF to_regclass('public.sender_identity') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.sender_connection, public.sender_reply_route, public.sender_identity, public.sender_observation FROM app_runtime;
         REVOKE UPDATE (version, configuration, updated_at) ON public.sender_connection FROM app_runtime;
@@ -376,6 +384,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...mailboxScopeForeignKeys,
     ...senderScopeForeignKeys,
     ...inboxScopeForeignKeys,
     ...opportunityScopeForeignKeys,
@@ -425,6 +434,7 @@ export async function secureDatabase(pool: Pool) {
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...mailboxScopeForeignKeys,
       ...senderScopeForeignKeys,
       ...aiExecutionScopeForeignKeys,
       ...inboxScopeForeignKeys,
@@ -464,6 +474,8 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      mailboxPolicy,
+      mailboxJob,
       senderConnection,
       senderReplyRoute,
       senderIdentity,
@@ -532,6 +544,12 @@ export async function secureDatabase(pool: Pool) {
       }
     }
     await client.query(`
+      REVOKE ALL PRIVILEGES ON mailbox_policy, mailbox_job FROM app_runtime;
+      GRANT SELECT, INSERT ON mailbox_policy, mailbox_job TO app_runtime;
+      GRANT UPDATE (version, connection_version, configuration, incremental_since, cursor, permission_observation, updated_at) ON mailbox_policy TO app_runtime;
+      GRANT UPDATE (state, cursor, seen, identity) ON mailbox_job TO app_runtime;
+      ALTER TABLE mailbox_policy FORCE ROW LEVEL SECURITY;
+      ALTER TABLE mailbox_job FORCE ROW LEVEL SECURITY;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
       REVOKE ALL PRIVILEGES ON sender_connection, sender_reply_route, sender_identity, sender_observation FROM app_runtime;
       GRANT SELECT, INSERT ON sender_connection, sender_reply_route, sender_identity, sender_observation TO app_runtime;

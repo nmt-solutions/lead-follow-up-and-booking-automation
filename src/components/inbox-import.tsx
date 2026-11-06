@@ -46,6 +46,9 @@ export function InboxImport({
   businessId: string;
   connections: InboxConnection[];
 }) {
+  connections = connections.filter(
+    (connection) => connection.mode === "normalized_import",
+  );
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");

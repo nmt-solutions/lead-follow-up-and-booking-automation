@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "mailbox_policy",
+    "mailbox_job",
     "sender_connection",
     "sender_reply_route",
     "sender_identity",

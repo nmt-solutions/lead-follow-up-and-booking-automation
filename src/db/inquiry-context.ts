@@ -1,3 +1,4 @@
+import { mailboxMessageAllowed } from "./mailbox-processing";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Transaction } from "./scope";
 import {
@@ -23,6 +24,7 @@ export async function inquiryContext(
   tx: Transaction,
   businessId: string,
   opportunityId: string,
+  at: Date,
 ) {
   const [need] = await tx
     .select()
@@ -51,6 +53,8 @@ export async function inquiryContext(
   const sources = await tx
     .select({
       id: inboxMessage.id,
+      connectionId: inboxMessage.connectionId,
+      metadata: inboxMessage.mailboxMetadata,
       text: inboxMessage.content,
       sequence: inboxMessageLink.sequence,
       associationVersion: inboxAssociation.version,
@@ -76,7 +80,19 @@ export async function inquiryContext(
     .select()
     .from(inboxAssociationHistory)
     .where(eq(inboxAssociationHistory.businessId, businessId));
-  const messages = sources.map((source) => ({
+  const allowedSources = [];
+  for (const source of sources)
+    if (
+      await mailboxMessageAllowed(
+        tx,
+        businessId,
+        source.connectionId,
+        source.metadata,
+        at,
+      )
+    )
+      allowedSources.push(source);
+  const messages = allowedSources.map((source) => ({
     ...source,
     correctionVersion: Math.max(
       0,
@@ -129,6 +145,7 @@ export async function inquiryDispatchContext(
   businessId: string,
   id: string,
   opportunityId: string,
+  at: Date,
 ) {
   const [run] = await tx
     .select()
@@ -141,7 +158,7 @@ export async function inquiryDispatchContext(
       ),
     );
   if (!run) return { reason: "inquiry_missing", reply: undefined };
-  const current = await inquiryContext(tx, businessId, opportunityId);
+  const current = await inquiryContext(tx, businessId, opportunityId, at);
   if (
     run.result.status !== "ready" ||
     !run.result.body ||

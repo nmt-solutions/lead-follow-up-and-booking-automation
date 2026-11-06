@@ -210,7 +210,7 @@ export function createRfqRepository(database: Database, clock: Clock) {
           tx,
           actor,
           businessId,
-          await inquiryContext(tx, businessId, opportunityId),
+          await inquiryContext(tx, businessId, opportunityId, clock.now()),
         ),
       );
     },
@@ -221,7 +221,12 @@ export function createRfqRepository(database: Database, clock: Clock) {
       input: SaveRfq,
     ) {
       return scope(actor, businessId, async (tx) => {
-        const c = await inquiryContext(tx, businessId, opportunityId);
+        const c = await inquiryContext(
+          tx,
+          businessId,
+          opportunityId,
+          clock.now(),
+        );
         const state = await readRfqWorkspace(tx, actor, businessId, c);
         if (c.need.ownerId !== actor.userId)
           throw new ApplicationError("FORBIDDEN");
@@ -335,7 +340,7 @@ export function createRfqRepository(database: Database, clock: Clock) {
           tx,
           actor,
           businessId,
-          await inquiryContext(tx, businessId, opportunityId),
+          await inquiryContext(tx, businessId, opportunityId, clock.now()),
         );
       });
     },

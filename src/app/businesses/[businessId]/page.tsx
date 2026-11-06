@@ -88,6 +88,12 @@ export default async function BusinessPage({
         </Link>
       )}
       <Link
+        href={`/businesses/${businessId}/mailboxes`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Mailbox processing and optional history
+      </Link>
+      <Link
         href={`/businesses/${businessId}/knowledge`}
         className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
       >

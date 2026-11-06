@@ -81,7 +81,7 @@ export function createCommercialRepository(database: Database, clock: Clock) {
     businessId: string,
     opportunityId: string,
   ) {
-    const c = await inquiryContext(tx, businessId, opportunityId);
+    const c = await inquiryContext(tx, businessId, opportunityId, clock.now());
     const rfq = await readRfqWorkspace(tx, actor, businessId, c);
     const authority = await readCommercialPolicy(tx, businessId, false);
     const key = hash({

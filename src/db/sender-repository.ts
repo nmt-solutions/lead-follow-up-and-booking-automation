@@ -1,3 +1,4 @@
+import { mailboxReplyReady } from "./mailbox-processing";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { sameSenderBinding } from "../models/senders";
@@ -29,6 +30,7 @@ import {
   senderReplyRoute,
   senderIdentity,
   senderObservation,
+  mailboxPolicy,
 } from "./schema";
 
 type Save<T> = { id: string | null; expectedVersion: number; configuration: T };
@@ -151,6 +153,32 @@ async function identityView(
     .select({ name: business.name })
     .from(business)
     .where(eq(business.id, businessId));
+  const [mailbox] = context.connection
+    ? await tx
+        .select()
+        .from(mailboxPolicy)
+        .where(
+          and(
+            eq(mailboxPolicy.businessId, businessId),
+            eq(mailboxPolicy.connectionId, context.connection.id),
+          ),
+        )
+    : [];
+  const mailboxIssues =
+    mailbox &&
+    (!mailbox.configuration.enabled ||
+      !mailbox.configuration.requestedSend ||
+      mailbox.grant?.send !== "granted" ||
+      new Date(mailbox.grant.validUntil) <= at ||
+      mailbox.connectionVersion !== context.connection?.version)
+      ? [
+          {
+            code: "mailbox_send_not_authorized",
+            action:
+              "Request sending separately and reconnect the selected mailbox with a current sending grant.",
+          },
+        ]
+      : [];
   return {
     ...view(row),
     identification: {
@@ -163,8 +191,20 @@ async function identityView(
       context,
       latest?.evidence ?? null,
       at,
-      Boolean(inbox?.active && inbox.channel === "email"),
+      Boolean(
+        inbox?.active &&
+        inbox.channel === "email" &&
+        (inbox.mode === "normalized_import" ||
+          (await mailboxReplyReady(
+            tx,
+            businessId,
+            inbox.id,
+            at,
+            context.replyConnection?.id ?? "",
+          ))),
+      ),
       adapter,
+      mailboxIssues,
     ),
   };
 }
@@ -418,6 +458,18 @@ export function createSenderRepository(database: Database, clock: Clock) {
           );
         if (!inbox || inbox.channel !== "email")
           throw new ApplicationError("NOT_FOUND");
+        if (inbox.mode === "mailbox") {
+          const [policy] = await tx
+            .select()
+            .from(mailboxPolicy)
+            .where(inBusiness(mailboxPolicy, businessId, inbox.id));
+          if (
+            !policy ||
+            policy.connectionId !== input.configuration.connectionId ||
+            policy.account !== input.configuration.address
+          )
+            throw new ApplicationError("INVALID_INPUT");
+        }
         const [duplicate] = await tx
           .select()
           .from(senderReplyRoute)

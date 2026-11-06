@@ -1,4 +1,11 @@
 import type {
+  MailboxConfiguration,
+  MailboxGrant,
+  MailboxJobState,
+  MailboxMetadata,
+} from "../models/mailboxes";
+import type { WorkIdentity } from "../models/discovery";
+import type {
   MicrosoftCalendarStatus,
   MicrosoftIdentity,
 } from "../models/microsoft-calendar";
@@ -1431,6 +1438,10 @@ export const inboxConnection = pgTable(
     channel: text("channel").$type<AddInboxConnection["channel"]>().notNull(),
     conversationRefs: jsonb("conversation_refs").$type<string[]>().notNull(),
     active: boolean("active").notNull(),
+    mode: text("mode")
+      .$type<"normalized_import" | "mailbox">()
+      .notNull()
+      .default("normalized_import"),
     manualRepliesObservable: boolean("manual_replies_observable")
       .notNull()
       .default(false),
@@ -1443,6 +1454,51 @@ export const inboxConnection = pgTable(
     uniqueIndex("inbox_connection_scope").on(table.id, table.businessId),
     check("inbox_channel", sql`${table.channel} in ('email','whatsapp')`),
     ...inboxPolicies("inbox_connection"),
+  ],
+).enableRLS();
+
+export const mailboxPolicy = pgTable(
+  "mailbox_policy",
+  {
+    ...senderColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    connectionVersion: integer("connection_version").notNull(),
+    provider: text("provider").$type<"gmail" | "microsoft">().notNull(),
+    account: text("account").notNull(),
+    configuration: jsonb("configuration")
+      .$type<MailboxConfiguration>()
+      .notNull(),
+    incrementalSince: timestamp("incremental_since", {
+      withTimezone: true,
+    }).notNull(),
+    cursor: text("cursor"),
+    grant: jsonb("permission_observation").$type<MailboxGrant>(),
+  },
+  (t) => [
+    uniqueIndex("mailbox_policy_scope").on(t.id, t.businessId),
+    uniqueIndex("mailbox_policy_connection").on(t.connectionId),
+    check("mailbox_policy_version", sql`${t.version} > 0`),
+    ...senderPolicies("mailbox_policy", true),
+  ],
+).enableRLS();
+export const mailboxJob = pgTable(
+  "mailbox_job",
+  {
+    ...inboxColumns(),
+    mailboxId: uuid("mailbox_id").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    identity: jsonb("identity").$type<WorkIdentity>().notNull(),
+    state: jsonb("state").$type<MailboxJobState>().notNull(),
+    cursor: text("cursor"),
+    seen: jsonb("seen").$type<string[]>().notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("mailbox_job_scope").on(t.id, t.businessId, t.mailboxId),
+    ...senderPolicies("mailbox_job", true),
   ],
 ).enableRLS();
 
@@ -1553,6 +1609,7 @@ export const inboxMessage = pgTable(
     conversationId: uuid("conversation_id").notNull(),
     messageRef: text("message_ref").notNull(),
     content: jsonb("content").$type<IncomingInquiry>().notNull(),
+    mailboxMetadata: jsonb("mailbox_metadata").$type<MailboxMetadata>(),
     fingerprint: text("fingerprint").notNull(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
   },
@@ -1691,6 +1748,32 @@ export const inboxOpportunityHistory = pgTable(
 ).enableRLS();
 
 // Installed after unique indexes by secureDatabase, matching the pinned push contract.
+export const mailboxScopeForeignKeys = [
+  new ForeignKey(
+    mailboxPolicy,
+    foreignKey({
+      name: "mailbox_policy_inbox_scope",
+      columns: [mailboxPolicy.id, mailboxPolicy.businessId],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    mailboxPolicy,
+    foreignKey({
+      name: "mailbox_policy_connection_scope",
+      columns: [mailboxPolicy.connectionId, mailboxPolicy.businessId],
+      foreignColumns: [senderConnection.id, senderConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    mailboxJob,
+    foreignKey({
+      name: "mailbox_job_policy_scope",
+      columns: [mailboxJob.mailboxId, mailboxJob.businessId],
+      foreignColumns: [mailboxPolicy.id, mailboxPolicy.businessId],
+    }),
+  ),
+];
 export const senderScopeForeignKeys = [
   new ForeignKey(
     senderReplyRoute,

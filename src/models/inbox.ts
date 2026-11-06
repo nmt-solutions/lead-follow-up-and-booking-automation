@@ -48,7 +48,7 @@ export type IncomingInquiry = z.infer<typeof incomingInquirySchema>;
 export type AddInboxConnection = z.infer<typeof inboxConnectionSchema>;
 export type InboxConnection = AddInboxConnection & {
   id: string;
-  mode: "normalized_import";
+  mode: "normalized_import" | "mailbox";
   active: boolean;
   createdAt: string;
 };

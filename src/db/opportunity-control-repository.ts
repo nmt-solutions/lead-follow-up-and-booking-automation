@@ -23,6 +23,7 @@ import { scoped, requireCapability, type Transaction } from "./scope";
 import { readCommercialPolicy } from "./commercial-authority-repository";
 import { inquiryDispatchContext, lockInquiryProfile } from "./inquiry-context";
 import { responseSender } from "./sender-repository";
+import { mailboxMessageAllowed } from "./mailbox-processing";
 import {
   membership,
   user,
@@ -607,12 +608,20 @@ export function createOpportunityRepository(
                 businessId,
                 action.inquiryRunId,
                 need.id,
+                clock.now(),
               )
             : null;
           const policy = await readCommercialPolicy(tx, businessId, false);
           const decision = action.evaluation
             ? evaluateCommercialAuthority(policy, action.evaluation, now())
             : null;
+          const mailboxAllowed = await mailboxMessageAllowed(
+            tx,
+            businessId,
+            ctx.connection.id,
+            ctx.message.mailboxMetadata,
+            now(),
+          );
           const reason =
             need.controlState !== "automation" ||
             need.controlVersion !== action.controlVersion ||
@@ -621,7 +630,7 @@ export function createOpportunityRepository(
               : ctx.association.version !== action.associationVersion ||
                   ctx.link.opportunityId !== need.id
                 ? "association_changed"
-                : !ctx.connection.active
+                : !mailboxAllowed
                   ? "connection_revoked"
                   : policy.version !== action.policyVersion
                     ? "policy_changed"

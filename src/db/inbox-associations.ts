@@ -41,7 +41,7 @@ export function connectionView(
     conversationRefs: row.conversationRefs,
     active: row.active,
     manualRepliesObservable: row.manualRepliesObservable,
-    mode: "normalized_import",
+    mode: row.mode,
     createdAt: row.createdAt.toISOString(),
   };
 }
