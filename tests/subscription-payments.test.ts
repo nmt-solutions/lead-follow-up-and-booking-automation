@@ -12,7 +12,7 @@ import type { DiscoveryWork } from "../src/models/discovery";
 import type { ScheduleWork } from "../src/models/discovery-schedules";
 import { createSubscriptionPaymentHttp } from "../src/http/subscription-payments";
 import { verifyRuntimeRole } from "../src/db/runtime";
-import { secureDatabase } from "../src/db/setup";
+import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 
 describe("Subscription purchase at the public application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -865,5 +865,50 @@ describe("Subscription purchase at the public application seam", () => {
     await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
     await secureDatabase(h.admin);
     await verifyRuntimeRole(h.runtime);
+  });
+  it("requires read and append grants separately for every financial ledger", async () => {
+    for (const table of [
+      "subscription_payment",
+      "subscription_payment_event",
+      "subscription_payment_history",
+      "subscription_period",
+      "subscription_usage",
+    ]) {
+      for (const privilege of ["SELECT", "INSERT"]) {
+        await h.admin.query(`REVOKE ${privilege} ON ${table} FROM app_runtime`);
+        try {
+          await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+            code: "SETUP_REQUIRED",
+          });
+        } finally {
+          await secureDatabase(h.admin);
+        }
+        await verifyRuntimeRole(h.runtime);
+      }
+    }
+  });
+  it("requires every restricted payment recovery function before accepting runtime setup", async () => {
+    for (const signature of [
+      "payment_worker_authorized(uuid,uuid)",
+      "pending_subscription_payments(text,text)",
+      "subscription_payment_target(text,text,uuid)",
+      "subscription_payment_allocated(text,text,text,uuid)",
+      "current_paid_scope(uuid,timestamptz)",
+      "payment_event_identity(text,text,text,text,uuid)",
+      "capture_unmatched_payment_event(jsonb,timestamptz)",
+    ]) {
+      await h.admin.query(
+        `REVOKE EXECUTE ON FUNCTION public.${signature} FROM app_runtime`,
+      );
+      try {
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+          code: "SETUP_REQUIRED",
+        });
+      } finally {
+        await prepareDatabaseRole(h.admin);
+        await secureDatabase(h.admin);
+      }
+      await verifyRuntimeRole(h.runtime);
+    }
   });
 });
