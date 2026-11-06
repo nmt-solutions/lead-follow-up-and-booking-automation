@@ -65,6 +65,10 @@ import type {
   BillingReview,
 } from "../models/billing";
 import type {
+  SubscriptionOffer,
+  SubscriptionQuote,
+} from "../models/subscription-quotes";
+import type {
   AiProfile,
   AiSample,
   AiOutput,
@@ -365,6 +369,42 @@ export const commercialAuthorityRevision = pgTable(
     }),
   ],
 ).enableRLS();
+const pricingOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.pricing)`;
+export const subscriptionPricingRevision = pgTable(
+  "subscription_pricing_revision",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    effectiveFrom: timestamp("effective_from", {
+      withTimezone: true,
+    }).notNull(),
+    offers: jsonb("offers").$type<SubscriptionOffer[]>().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_pricing_version").on(t.version),
+    check(
+      "subscription_pricing_version_positive",
+      sql`${t.version} > 0 and ${t.effectiveFrom} >= ${t.at}`,
+    ),
+    pgPolicy("subscription_pricing_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${pricingOperatorScope}) or public.current_business_role() in ('owner','admin')`,
+    }),
+    pgPolicy("subscription_pricing_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${pricingOperatorScope}) and ${t.actorId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
 const taxOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.tax)`;
 const billingOperatorScope = sql`current_setting('app.billing_review', true) = 'true' and (${taxOperatorScope})`;
 const taxRuleReadScope = sql`(${billingOperatorScope}) or (current_setting('app.tax_calculation', true) = 'true' and public.current_business_role() in ('owner','admin'))`;
@@ -574,6 +614,49 @@ export const billingProfileReview = pgTable(
   ],
 ).enableRLS();
 
+export const subscriptionQuote = pgTable(
+  "subscription_quote",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    pricingId: uuid("pricing_id")
+      .notNull()
+      .references(() => subscriptionPricingRevision.id),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => billingProfileRevision.id),
+    reviewId: uuid("review_id")
+      .notNull()
+      .references(() => billingProfileReview.id),
+    snapshot: jsonb("snapshot").$type<SubscriptionQuote>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_quote_request_once").on(
+      t.businessId,
+      t.requestKey,
+    ),
+    pgPolicy("subscription_quote_read", {
+      for: "select",
+      to: appRuntime,
+      using: managerScope,
+    }),
+    pgPolicy("subscription_quote_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${t.actorId} = current_setting('app.actor_id', true)
+    and exists (select 1 from public.billing_profile_revision p join public.billing_profile_review r on r.profile_id=p.id and r.business_id=p.business_id where p.id=${t.profileId} and p.business_id=${t.businessId} and r.id=${t.reviewId} and r.outcome='reviewed')
+    and ${t.snapshot}->>'businessId'=${t.businessId}::text and ${t.snapshot}->>'id'=${t.id}::text`,
+    }),
+  ],
+).enableRLS();
+
 export const knowledgeRevision = pgTable(
   "knowledge_revision",
   {
@@ -735,6 +818,7 @@ export const platformOperator = pgTable(
     ai: boolean("ai").notNull().default(false),
     discovery: boolean("discovery").notNull().default(false),
     emailPolicy: boolean("email_policy").notNull().default(false),
+    pricing: boolean("pricing").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {

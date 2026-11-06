@@ -30,6 +30,18 @@ export async function verifyRuntimeRole(
       AND NOT has_any_column_privilege(current_user,'public.tax_calculation','UPDATE')
       AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname='tax_calculation_resolution_scope' AND contype='f' AND convalidated)
       AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER')
+        AND has_table_privilege(current_user, c.oid, 'SELECT')
+        AND has_table_privilege(current_user, c.oid, 'INSERT')
+        AND NOT has_table_privilege(current_user, c.oid, 'UPDATE,DELETE,TRUNCATE')
+        AND NOT has_any_column_privilege(current_user, c.oid, 'UPDATE'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relname IN ('subscription_pricing_revision','subscription_quote'))
+      AND (SELECT count(*) = 4 AND bool_and('app_runtime' = ANY(roles)
+        AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+          WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname='public' AND tablename IN ('subscription_pricing_revision','subscription_quote'))
+      AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relname IN ('billing_profile_revision','billing_profile_review'))

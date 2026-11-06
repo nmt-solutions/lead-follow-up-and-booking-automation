@@ -385,9 +385,11 @@ export function createTeamRepository(database: Database): TeamRepository {
           .where(eq(platformOperator.userId, actor.userId));
         if (
           !operator ||
-          !(capability === "tax.manage"
-            ? operator.tax
-            : operator.reconciliation)
+          !(capability === "pricing.manage"
+            ? operator.pricing
+            : capability === "tax.manage"
+              ? operator.tax
+              : operator.reconciliation)
         )
           throw new ApplicationError("FORBIDDEN");
       });

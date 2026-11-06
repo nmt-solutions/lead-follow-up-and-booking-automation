@@ -174,6 +174,42 @@ describe("privileged MFA", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("reports current MFA requirements for a pricing-only operator and notices grant revocation", async () => {
+    h.clock.set("2026-11-05T10:20:00Z");
+    const operator = await h.signIn("mfa-pricing-only@example.com");
+    const actor = await h.authenticate(operator);
+    await h.admin.query(
+      "INSERT INTO platform_operator (user_id, pricing) VALUES ($1, true)",
+      [actor.userId],
+    );
+    expect(await h.access.status(operator)).toMatchObject({
+      required: true,
+      operator: true,
+      operatorVerified: true,
+      readiness: "mfa-satisfied",
+    });
+    h.clock.set("2026-11-05T10:35:00Z");
+    expect(await h.access.status(operator)).toMatchObject({
+      required: true,
+      operator: true,
+      verified: true,
+      operatorVerified: false,
+      readiness: "mfa-incomplete",
+    });
+    await expect(
+      h.team.requirePlatformCapability(operator, "pricing.manage"),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    await h.admin.query(
+      "UPDATE platform_operator SET pricing = false WHERE user_id = $1",
+      [actor.userId],
+    );
+    expect(await h.access.status(operator)).toMatchObject({
+      required: false,
+      operator: false,
+      readiness: "mfa-satisfied",
+    });
+  });
+
   it("locks repeated invalid challenges across primary sessions without elevating them", async () => {
     h.clock.set("2026-11-05T11:00:00Z");
     await h.signIn("mfa-lock@example.com");

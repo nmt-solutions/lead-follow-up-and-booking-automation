@@ -10,6 +10,8 @@ export default defineConfig({
     "tax_rule_revision",
     "tax_rule_decision",
     "tax_calculation",
+    "subscription_pricing_revision",
+    "subscription_quote",
     "billing_profile_revision",
     "billing_profile_review",
     "email_sequence_policy",
