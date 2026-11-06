@@ -785,4 +785,75 @@ describe("Subscription lifecycle at the public application seam", () => {
       expect(state.access.active).toBe(cancellationAccess === "paid_through");
     },
   );
+  it("applies an earlier terminal provider end after an acknowledged cycle-end cancellation without rewriting its paid period", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      app = compose(native, { ...policy, cancellationAccess: "provider_end" });
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await app.start(f.owner, f.business.id, { actionId: action.id });
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    await app.recover();
+    const original = (await app.workspace(f.owner, f.business.id)).periods[0];
+    await app.cancel(f.owner, f.business.id, {
+      actionId: action.id,
+      requestKey: randomUUID(),
+    });
+    h.clock.set("2026-11-06T09:00:00.000Z");
+    native.subscriptions.get("sub_fixture1")!.status = "cancelled";
+    native.subscriptions.get("sub_fixture1")!.ended_at = Math.floor(
+      h.clock.now().getTime() / 1000,
+    );
+    await app.recover();
+    const owner = await h.signIn("tax-owner@example.com");
+    const state = await app.workspace(owner, f.business.id);
+    expect(state.access.active).toBe(false);
+    expect(state.actions[0].lifecycle?.cancellation?.effectiveEnd).toBe(
+      "2026-11-06T09:00:00.000Z",
+    );
+    expect(state.periods[0]).toEqual(original);
+  });
+  it("never labels paid-through cancellation as ended access while its captured period remains eligible", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      app = compose(native);
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await app.start(f.owner, f.business.id, { actionId: action.id });
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    await app.recover();
+    await app.cancel(f.owner, f.business.id, {
+      actionId: action.id,
+      requestKey: randomUUID(),
+    });
+    h.clock.set("2026-11-06T09:00:00.000Z");
+    native.subscriptions.get("sub_fixture1")!.status = "cancelled";
+    native.subscriptions.get("sub_fixture1")!.ended_at = Math.floor(
+      h.clock.now().getTime() / 1000,
+    );
+    await app.recover();
+    const owner = await h.signIn("tax-owner@example.com"),
+      state = await app.workspace(owner, f.business.id);
+    expect(state.access.active).toBe(true);
+    expect(state.actions[0].lifecycle?.cancellation?.effectiveEnd).toBe(
+      "2026-11-06T09:00:00.000Z",
+    );
+    expect(
+      state.actions[0].lifecycleEvents.filter(
+        (e) => e.notice?.kind === "access_ended",
+      ),
+    ).toHaveLength(0);
+  });
 });

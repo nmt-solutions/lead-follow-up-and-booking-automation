@@ -123,6 +123,15 @@ export async function reconcileLifecycle(
     failedThrough = paidThrough;
   let cancellation = previous?.cancellation ?? null;
   if (
+    cancellation?.status === "confirmed" &&
+    terminal(provider?.status) &&
+    provider?.endedAt &&
+    cancellation.effectiveEnd &&
+    new Date(provider.endedAt) < new Date(cancellation.effectiveEnd)
+  ) {
+    cancellation = { ...cancellation, effectiveEnd: provider.endedAt };
+  }
+  if (
     cancellation &&
     cancellation.status === "requested" &&
     (cancellationAcknowledged || terminal(provider?.status))
@@ -236,7 +245,7 @@ export async function reconcileLifecycle(
                   ? "payment_active"
                   : state === "pending"
                     ? "payment_pending"
-                    : "access_ended"
+                    : "cancellation_confirmed"
               : null;
     const stable = (value: unknown): unknown =>
       Array.isArray(value)
