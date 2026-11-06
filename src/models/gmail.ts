@@ -66,13 +66,6 @@ export const gmailViewSchema = z.object({
   authorizedAt: z.string().nullable(),
 });
 export type GmailView = z.infer<typeof gmailViewSchema>;
-export const gmailCallbackSchema = z
-  .strictObject({
-    state: z.string().regex(/^[a-f0-9]{64}$/),
-    code: z.string().min(1).max(4096).optional(),
-    error: z.string().min(1).max(256).optional(),
-  })
-  .refine((v) => Boolean(v.code) !== Boolean(v.error));
 export {
   mailNativeSchema as gmailNativeSchema,
   mailManualSchema as gmailManualSchema,
@@ -90,3 +83,5 @@ export {
   type MailboxAuthorizationStore as GmailStore,
   type MailboxAuthorizationRepository as GmailRepository,
 } from "./mailbox-authorization";
+
+export { mailboxAuthorizationCallbackSchema as gmailCallbackSchema } from "./mailbox-authorization";

@@ -121,7 +121,9 @@ export async function resolveMailReference(
   }
   const manual = sent[0];
   if (
-    !manual?.content.native.inReplyTo ||
+    !manual ||
+    manual.content.kind !== "manual_reply" ||
+    !manual.content.native.inReplyTo ||
     (thread && manual.content.conversationRef !== thread) ||
     !manual.content.native.to.some((to) => participants.includes(to))
   )

@@ -35,6 +35,8 @@ class MailboxFormError extends Error {
   }
 }
 const reasons = {
+  reply_association_review:
+    "A selected incoming reply is retained but its exact received or sent reference is not yet available. Review the reply below and explicitly authorize any needed source conversation/history. It has not been assigned to a guessed purchasing need; affected follow-ups remain paused.",
   worker_required:
     "Mailbox authorization is separate from durable synchronization. Ask the operator to configure or restore the deployed mailbox worker, then resume this saved job.",
   manual_reply_review:
@@ -266,9 +268,43 @@ export function MailboxManager({
                 <p className="mt-3 text-sm text-muted-foreground">
                   Occurred {new Date(reply.occurredAt).toLocaleString()}. Exact
                   received-message header: {reply.inReplyTo ?? "unavailable"}.
-                  Locate this message in Gmail and explicitly approve the
-                  corresponding thread and history bounds if needed; no buyer
-                  association is inferred.
+                  Locate this message in{" "}
+                  {mailbox.provider === "microsoft" ? "Outlook" : "Gmail"} and
+                  explicitly approve the corresponding thread and history bounds
+                  if needed; no buyer association is inferred.
+                </p>
+                <p
+                  className="mt-3 whitespace-pre-wrap wrap-anywhere"
+                  dir="auto"
+                >
+                  {reply.text}
+                </p>
+              </details>
+            ))}
+            {mailbox.pendingIncomingReplies > 0 && (
+              <Alert>
+                {mailbox.pendingIncomingReplies} incoming replies await their
+                exact source reference. Retained content remains available while
+                association and affected follow-ups are paused.
+              </Alert>
+            )}
+            {mailbox.incomingReplyReview.map((reply) => (
+              <details
+                key={reply.id}
+                className="rounded-xl border border-border p-4"
+              >
+                <summary className="min-h-11 cursor-pointer font-medium">
+                  Review incoming reply: {reply.subject}
+                </summary>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Occurred {new Date(reply.occurredAt).toLocaleString()}. Exact
+                  reply header: {reply.inReplyTo ?? "unavailable"}. Locate its
+                  source in{" "}
+                  {mailbox.provider === "microsoft" ? "Outlook" : "Gmail"}, then
+                  explicitly authorize the relevant conversation or bounded
+                  history. Synchronization will reconcile the received message
+                  to the current Opportunity of that source when it becomes
+                  observable.
                 </p>
                 <p
                   className="mt-3 whitespace-pre-wrap wrap-anywhere"

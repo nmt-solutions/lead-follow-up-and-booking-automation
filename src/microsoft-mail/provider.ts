@@ -31,6 +31,7 @@ const cursorSchema = z.strictObject({
   query: z.string().regex(/^[a-f0-9]{64}$/),
   index: z.number().int().min(0).max(49),
   gap: z.boolean(),
+  baselineComplete: z.boolean().default(false),
   folders: z
     .array(z.strictObject({ id: graphId, link: link.nullable() }))
     .min(1)
@@ -71,6 +72,14 @@ function continuation(value: string, path: string, filter: string | null) {
       url.searchParams.get("$select") !== graphMetadataFields) ||
     (url.searchParams.has("$filter") &&
       url.searchParams.get("$filter") !== filter)
+  )
+    throw new MicrosoftMailFailure("invalid_response");
+  const top = url.searchParams.get("$top");
+  if (
+    top &&
+    (!/^\d{1,3}$/.test(top) ||
+      Number(top) < 1 ||
+      Number(top) > (path.endsWith("/delta") ? 100 : 1))
   )
     throw new MicrosoftMailFailure("invalid_response");
   return url.toString();
@@ -203,6 +212,7 @@ export function createMicrosoftMailProvider(
                 query,
                 index: 0,
                 gap: false,
+                baselineComplete: false,
                 folders: grant.availableFolders
                   .filter(
                     (id) => !grant.microsoft!.excludedFolderRefs.includes(id),
@@ -225,8 +235,10 @@ export function createMicrosoftMailProvider(
             if (
               !grant.microsoft.excludedFolderRefs.includes(id) &&
               !cursor.folders.some((f) => f.id === id)
-            )
+            ) {
               cursor.folders.push({ id, link: null });
+              cursor.baselineComplete = false;
+            }
         }
         const folder = cursor.folders[cursor.index],
           incremental = context.mode === "incremental";
@@ -243,7 +255,8 @@ export function createMicrosoftMailProvider(
         const previouslyCurrent =
           incremental &&
           Boolean(context.cursor && context.permissionObservation) &&
-          cursor.folders.every((f) => f.link !== null) &&
+          cursor.baselineComplete &&
+          context.visibility === "current" &&
           !cursor.gap;
         const result = (
           messages: MailboxPage["messages"],
@@ -282,6 +295,7 @@ export function createMicrosoftMailProvider(
             throw error;
           folder.link = null;
           cursor.gap = true;
+          cursor.baselineComplete = false;
           return result([], true);
         }
         const page = microsoftValue(
@@ -351,6 +365,7 @@ export function createMicrosoftMailProvider(
           cursor.index + 1 < cursor.folders.length;
         if (!page["@odata.nextLink"])
           cursor.index = more ? cursor.index + 1 : 0;
+        if (!more) cursor.baselineComplete = true;
         return result(messages, more);
       });
     },

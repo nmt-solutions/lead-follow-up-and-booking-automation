@@ -377,6 +377,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.gmail_manual_message') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.gmail_manual_message FROM app_runtime;
         REVOKE UPDATE (conversation_id, opportunity_id, state) ON public.gmail_manual_message FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='gmail_manual_message' AND column_name='current_metadata') THEN
+          REVOKE UPDATE (current_metadata) ON public.gmail_manual_message FROM app_runtime;
+        END IF;
       END IF;
       IF to_regclass('public.microsoft_calendar_grant') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.microsoft_calendar_grant, public.microsoft_calendar_oauth FROM app_runtime;
@@ -612,7 +615,7 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE gmail_oauth FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON gmail_manual_message FROM app_runtime;
       GRANT SELECT, INSERT ON gmail_manual_message TO app_runtime;
-      GRANT UPDATE (conversation_id, opportunity_id, state) ON gmail_manual_message TO app_runtime;
+      GRANT UPDATE (conversation_id, opportunity_id, state, current_metadata) ON gmail_manual_message TO app_runtime;
       ALTER TABLE gmail_manual_message FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON mailbox_policy, mailbox_job FROM app_runtime;
       GRANT SELECT, INSERT ON mailbox_policy, mailbox_job TO app_runtime;

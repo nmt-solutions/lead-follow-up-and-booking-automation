@@ -66,15 +66,13 @@ export function createMailboxSendRecorder(database: Database, clock: Clock) {
               throw new ApplicationError("CONFLICT");
             return;
           }
-          await tx
-            .insert(mailboxAppMessage)
-            .values({
-              ...receipt,
-              id: randomUUID(),
-              businessId,
-              actorId: identity.userId,
-              at: clock.now(),
-            });
+          await tx.insert(mailboxAppMessage).values({
+            ...receipt,
+            id: randomUUID(),
+            businessId,
+            actorId: identity.userId,
+            at: clock.now(),
+          });
         },
         { lock: true },
       );

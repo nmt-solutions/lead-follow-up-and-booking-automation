@@ -1,6 +1,13 @@
 import { z } from "zod";
 import type { WorkIdentity } from "./discovery";
 import type { MailboxConfiguration } from "./mailboxes";
+export const mailboxAuthorizationCallbackSchema = z
+  .strictObject({
+    state: z.string().regex(/^[a-f0-9]{64}$/),
+    code: z.string().min(1).max(4096).optional(),
+    error: z.string().min(1).max(256).optional(),
+  })
+  .refine((value) => Boolean(value.code) !== Boolean(value.error));
 export type MailboxCredentialVault = {
   encrypt(value: string, context: string): string;
   decrypt(value: string, context: string): string;

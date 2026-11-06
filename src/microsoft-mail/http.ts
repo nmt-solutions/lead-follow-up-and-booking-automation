@@ -13,7 +13,14 @@ export function microsoftValue<T>(schema: z.ZodType<T>, raw: unknown): T {
   return parsed.data;
 }
 export function graphMailUrl(path: string, expectedPath?: string): URL {
-  const url = new URL(path, "https://graph.microsoft.com/v1.0/");
+  if (/[\u0000-\u0020\u007f]/.test(path))
+    throw new MicrosoftMailFailure("invalid_response");
+  let url: URL;
+  try {
+    url = new URL(path, "https://graph.microsoft.com/v1.0/");
+  } catch {
+    throw new MicrosoftMailFailure("invalid_response");
+  }
   if (
     url.origin !== "https://graph.microsoft.com" ||
     !(url.pathname === "/v1.0/me" || url.pathname.startsWith("/v1.0/me/")) ||

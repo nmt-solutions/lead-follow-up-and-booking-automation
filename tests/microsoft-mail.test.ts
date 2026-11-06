@@ -1314,4 +1314,172 @@ describe("Selected MicrosoftMail at the persisted application seam", () => {
     });
     expect(f.graph.bodyReads).toEqual([]);
   });
+  it("keeps every unfinished initial delta page unsafe until a completed baseline is persisted", async () => {
+    const f = await setup();
+    await connect(f);
+    f.graph.pages.set("sales", {
+      value: [],
+      "@odata.nextLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$skiptoken=second",
+    });
+    f.graph.pages.set("second", {
+      value: [],
+      "@odata.nextLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$skiptoken=third",
+    });
+    f.graph.pages.set("third", {
+      value: [],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=ready",
+    });
+    const work = await f.sync.queue(f.credentials, f.businessId, f.mailbox.id, {
+      mode: "incremental",
+    });
+    await f.sync.execute(work);
+    await f.sync.execute(work);
+    expect(
+      (await f.sync.workspace(f.credentials, f.businessId)).mailboxes[0]
+        .visibility,
+    ).toBe("recovering");
+    await f.sync.execute(work);
+    expect(
+      (await f.sync.workspace(f.credentials, f.businessId)).mailboxes[0]
+        .visibility,
+    ).toBe("current");
+  });
+  it("defers an incoming reference until its later Sent Items page resolves the exact non-default purchasing need", async () => {
+    const f = await setup();
+    f.mailbox = await f.mailboxes.save(f.credentials, f.businessId, {
+      id: f.mailbox.id,
+      expectedVersion: f.mailbox.version,
+      configuration: {
+        ...f.mailbox.configuration,
+        scope: { kind: "folders", refs: ["sales", "sent"] },
+      },
+    });
+    await connect(f);
+    f.graph.pages.set("sales", {
+      value: [f.graph.add("first-need"), f.graph.add("second-need")],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=base",
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    await synchronize(f);
+    const w = await f.inbox.workspace(f.credentials, f.businessId),
+      detail = await f.inbox.conversation(
+        f.credentials,
+        f.businessId,
+        w.conversations[0].id,
+      );
+    const source = detail.messages.find((m) => m.messageRef === "second-need")!;
+    await f.inbox.associate(f.credentials, f.businessId, detail.id, {
+      expectedVersion: detail.association.version,
+      buyerId: detail.buyer.id,
+      messageIds: [source.id],
+      allMessages: false,
+      target: { kind: "new", title: "Independent second need" },
+      future: "keep",
+      reason: "Human verified a separate need",
+    });
+    const split = await f.inbox.conversation(
+        f.credentials,
+        f.businessId,
+        detail.id,
+      ),
+      secondNeed = split.messages.find(
+        (m) => m.id === source.id,
+      )!.opportunityId!;
+    const incoming = f.graph.add("reordered-incoming", {
+      reply: "<late-sent@example.com>",
+      at: "2026-11-05T09:05:00Z",
+    });
+    const sent = f.graph.add("late-sent", {
+      folder: "sent",
+      from: "sales@supplier.example",
+      to: "buyer@example.com",
+      reply: "<second-need@example.com>",
+      at: "2026-11-05T09:04:00Z",
+    });
+    f.graph.pages.set("base", {
+      value: [incoming],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=next",
+    });
+    f.graph.pages.set("sent-steady", {
+      value: [sent],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sent/messages/delta?$deltatoken=sent2",
+    });
+    h.clock.set("2026-11-05T09:06:00Z");
+    const work = await f.sync.queue(f.credentials, f.businessId, f.mailbox.id, {
+      mode: "incremental",
+    });
+    await f.sync.execute(work);
+    expect(
+      (
+        await f.inbox.conversation(f.credentials, f.businessId, detail.id)
+      ).messages.find((m) => m.messageRef === "reordered-incoming"),
+    ).toBeUndefined();
+    await f.sync.execute(work);
+    expect(
+      (
+        await f.inbox.conversation(f.credentials, f.businessId, detail.id)
+      ).messages.find((m) => m.messageRef === "reordered-incoming")
+        ?.opportunityId,
+    ).toBe(secondNeed);
+    expect(
+      (await f.control.read(f.credentials, f.businessId, secondNeed)).history,
+    ).toContainEqual(expect.objectContaining({ command: "manual_reply" }));
+    expect(
+      (
+        await f.control.read(
+          f.credentials,
+          f.businessId,
+          detail.association.defaultOpportunityId!,
+        )
+      ).history,
+    ).toEqual([]);
+  });
+  it("retains unmatched incoming content for scoped review without inventing a buyer or Opportunity, including after disconnect", async () => {
+    const f = await setup();
+    await connect(f);
+    f.graph.pages.set("sales", {
+      value: [
+        f.graph.add("unmatched", {
+          reply: "<not-approved@example.com>",
+          text: "My selected reply is retained",
+        }),
+      ],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=base",
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    expect(await synchronize(f)).toMatchObject({
+      status: "completed",
+      reason: "reply_association_review",
+    });
+    expect(
+      (await f.inbox.workspace(f.credentials, f.businessId)).opportunities,
+    ).toEqual([]);
+    expect(
+      (await f.sync.workspace(f.credentials, f.businessId)).mailboxes[0],
+    ).toMatchObject({
+      pendingIncomingReplies: 1,
+      incomingReplyReview: [
+        {
+          text: "My selected reply is retained",
+          inReplyTo: "<not-approved@example.com>",
+        },
+      ],
+    });
+    await f.app.disconnect(f.credentials, f.businessId, f.mailbox.id);
+    expect(
+      (await f.sync.workspace(f.credentials, f.businessId)).mailboxes[0]
+        .incomingReplyReview[0].text,
+    ).toBe("My selected reply is retained");
+    const other = await setup();
+    await expect(
+      f.sync.workspace(other.credentials, f.businessId),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 });

@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { MailboxFailure } from "./mailbox-failure";
-import { gmailCallbackSchema } from "./gmail";
 
 import {
   mailboxAuthorizationStatusSchema,
+  mailboxAuthorizationCallbackSchema,
   type MailboxAuthorizationRepository,
   type MailboxStoredGrant,
 } from "./mailbox-authorization";
@@ -70,6 +70,6 @@ export const microsoftMailViewSchema = z.object({
   ),
 });
 export type MicrosoftMailView = z.infer<typeof microsoftMailViewSchema>;
-export const microsoftMailCallbackSchema = gmailCallbackSchema;
+export const microsoftMailCallbackSchema = mailboxAuthorizationCallbackSchema;
 export type MicrosoftMailRepository = MailboxAuthorizationRepository;
 export type MicrosoftMailStoredGrant = MailboxStoredGrant;

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, asc, desc } from "drizzle-orm";
+import { and, eq, asc, desc, sql } from "drizzle-orm";
 import type { Transaction } from "./scope";
 import { ApplicationError } from "../models/application-error";
 import type { MailboxBatch } from "../models/mailboxes";
@@ -41,6 +41,16 @@ export async function retainMailManual(
       ),
     );
   if (appSend) return "duplicate";
+  return retainMailObservation(tx, batch, selected, at);
+}
+export async function retainMailObservation(
+  tx: Transaction,
+  batch: MailboxBatch,
+  selected: MailboxBatch["selected"][number],
+  at: Date,
+) {
+  const { event, metadata } = selected,
+    { work } = batch.snapshot;
   const fingerprint = createHash("sha256")
     .update(JSON.stringify(event))
     .digest("hex");
@@ -90,6 +100,7 @@ export async function applyMailManual(
         eq(gmailManualMessage.businessId, work.businessId),
         eq(gmailManualMessage.mailboxId, work.mailboxId),
         eq(gmailManualMessage.state, "pending"),
+        sql`${gmailManualMessage.content}->>'kind' = 'manual_reply'`,
       ),
     )
     .orderBy(asc(gmailManualMessage.at), asc(gmailManualMessage.id))
@@ -98,13 +109,14 @@ export async function applyMailManual(
     if (
       !selectedMetadata(
         snapshot.configuration,
-        manual.metadata,
+        manual.currentMetadata ?? manual.metadata,
         snapshot.incrementalSince,
         snapshot.mode,
       )
     )
       continue;
     const event = manual.content;
+    if (event.kind !== "manual_reply") continue;
     if (!event.native.inReplyTo) continue;
     const original = await resolveMailReference(
       tx,
@@ -191,18 +203,25 @@ export async function mailManualHistory(
       and(
         eq(gmailManualMessage.businessId, businessId),
         eq(gmailManualMessage.conversationId, conversationId),
+        sql`${gmailManualMessage.content}->>'kind' = 'manual_reply'`,
       ),
     )
     .orderBy(asc(gmailManualMessage.at), asc(gmailManualMessage.id))
     .limit(500);
-  return records.map((r) => ({
-    id: r.id,
-    subject: r.content.subject,
-    text: r.content.text,
-    from: r.content.native.from,
-    to: r.content.native.to,
-    occurredAt: r.content.occurredAt,
-    state: r.state,
-    opportunityId: r.opportunityId,
-  }));
+  return records.flatMap((r) =>
+    r.content.kind !== "manual_reply"
+      ? []
+      : [
+          {
+            id: r.id,
+            subject: r.content.subject,
+            text: r.content.text,
+            from: r.content.native.from,
+            to: r.content.native.to,
+            occurredAt: r.content.occurredAt,
+            state: r.state,
+            opportunityId: r.opportunityId,
+          },
+        ],
+  );
 }

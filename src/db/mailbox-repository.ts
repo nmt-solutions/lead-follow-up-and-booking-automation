@@ -1,18 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, desc, eq, count } from "drizzle-orm";
+import { and, asc, desc, eq, count, sql } from "drizzle-orm";
 import { ApplicationError } from "../models/application-error";
 import type { Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import {
   permissionAllows,
-  selectedMetadata,
   type MailboxRepository,
   type MailboxView,
   type MailboxWork,
   type MailboxJobState,
 } from "../models/mailboxes";
-import { captureInboxInquiry } from "./inbox-repository";
+import {
+  captureMailInquiry,
+  applyPendingMailInquiries,
+  selectedRetainedReply,
+} from "./mailbox-replies";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { requireSalesSession } from "./sales-session";
@@ -53,20 +56,18 @@ async function createJob(
     duplicates: 0,
     excluded: 0,
   };
-  await tx
-    .insert(mailboxJob)
-    .values({
-      id,
-      businessId: policy.businessId,
-      mailboxId: policy.id,
-      policyVersion: policy.version,
-      identity,
-      state,
-      cursor: mode === "incremental" ? policy.cursor : null,
-      seen: [],
-      createdBy: identity.userId,
-      createdAt: at,
-    });
+  await tx.insert(mailboxJob).values({
+    id,
+    businessId: policy.businessId,
+    mailboxId: policy.id,
+    policyVersion: policy.version,
+    identity,
+    state,
+    cursor: mode === "incremental" ? policy.cursor : null,
+    seen: [],
+    createdBy: identity.userId,
+    createdAt: at,
+  });
   return {
     businessId: policy.businessId,
     mailboxId: policy.id,
@@ -192,6 +193,7 @@ async function view(
         eq(gmailManualMessage.businessId, row.businessId),
         eq(gmailManualMessage.mailboxId, row.id),
         eq(gmailManualMessage.state, "pending"),
+        sql`${gmailManualMessage.content}->>'kind' = 'manual_reply'`,
       ),
     );
   const review = await tx
@@ -202,10 +204,35 @@ async function view(
         eq(gmailManualMessage.businessId, row.businessId),
         eq(gmailManualMessage.mailboxId, row.id),
         eq(gmailManualMessage.state, "pending"),
+        sql`${gmailManualMessage.content}->>'kind' = 'manual_reply'`,
       ),
     )
     .orderBy(desc(gmailManualMessage.at))
     .limit(30);
+  const incoming = await tx
+    .select()
+    .from(gmailManualMessage)
+    .where(
+      and(
+        eq(gmailManualMessage.businessId, row.businessId),
+        eq(gmailManualMessage.mailboxId, row.id),
+        eq(gmailManualMessage.state, "pending"),
+        sql`${gmailManualMessage.content}->>'kind' <> 'manual_reply'`,
+      ),
+    )
+    .orderBy(desc(gmailManualMessage.at))
+    .limit(30);
+  const [incomingCount] = await tx
+    .select({ total: count() })
+    .from(gmailManualMessage)
+    .where(
+      and(
+        eq(gmailManualMessage.businessId, row.businessId),
+        eq(gmailManualMessage.mailboxId, row.id),
+        eq(gmailManualMessage.state, "pending"),
+        sql`${gmailManualMessage.content}->>'kind' <> 'manual_reply'`,
+      ),
+    );
   return {
     id: row.id,
     inboxConnectionId: row.id,
@@ -220,12 +247,21 @@ async function view(
         : "unsafe",
     lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
     pendingManualReplies: pending.total,
+    pendingIncomingReplies: incomingCount.total,
+    incomingReplyReview: incoming.map((r) => ({
+      id: r.id,
+      subject: r.content.subject,
+      text: r.content.text,
+      occurredAt: r.content.occurredAt,
+      inReplyTo: r.metadata.native?.inReplyTo ?? null,
+    })),
     manualReplyReview: review.map((r) => ({
       id: r.id,
       subject: r.content.subject,
       text: r.content.text,
       occurredAt: r.content.occurredAt,
-      inReplyTo: r.content.native.inReplyTo,
+      inReplyTo:
+        r.content.kind === "manual_reply" ? r.content.native.inReplyTo : null,
     })),
     grant: grant
       ? {
@@ -532,7 +568,11 @@ export function createMailboxRepository(
           job.state.mode !== "incremental" ||
           job.state.status !== "completed" ||
           (job.state.reason &&
-            !["history_gap", "manual_reply_review"].includes(job.state.reason))
+            ![
+              "history_gap",
+              "manual_reply_review",
+              "reply_association_review",
+            ].includes(job.state.reason))
         )
           return null;
         const latest = await tx
@@ -641,6 +681,11 @@ export function createMailboxRepository(
           oauthGeneration: oauth?.generation ?? null,
           appMessages,
           retryAt: job.state.retryAt,
+          visibility:
+            policy.lastSyncedAt &&
+            policy.lastSyncedAt.getTime() + 300000 > clock.now().getTime()
+              ? policy.visibility
+              : "unsafe",
         };
       });
     },
@@ -661,6 +706,33 @@ export function createMailboxRepository(
         if (!permissionAllows(policy.configuration, grant, clock.now()))
           throw new ApplicationError("FORBIDDEN");
         for (const metadata of page.messages) {
+          const [retained] = await tx
+            .select()
+            .from(gmailManualMessage)
+            .where(
+              and(
+                eq(gmailManualMessage.businessId, work.businessId),
+                eq(gmailManualMessage.mailboxId, policy.id),
+                eq(gmailManualMessage.messageRef, metadata.messageRef),
+              ),
+            );
+          if (retained) {
+            if (
+              retained.metadata.conversationRef !== metadata.conversationRef ||
+              retained.metadata.native?.internetMessageId !==
+                metadata.native?.internetMessageId
+            )
+              throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+            await tx
+              .update(gmailManualMessage)
+              .set({ currentMetadata: metadata })
+              .where(
+                and(
+                  eq(gmailManualMessage.id, retained.id),
+                  eq(gmailManualMessage.businessId, work.businessId),
+                ),
+              );
+          }
           const [stored] = await tx
             .select()
             .from(inboxMessage)
@@ -696,7 +768,7 @@ export function createMailboxRepository(
             new Date(a.event.occurredAt).getTime() -
             new Date(b.event.occurredAt).getTime(),
         )) {
-          const { event, metadata } = selected;
+          const { event } = selected;
           if (event.kind === "manual_reply") {
             const result = await retainMailManual(
               tx,
@@ -708,28 +780,23 @@ export function createMailboxRepository(
             else duplicates++;
             continue;
           }
-          const result = await captureInboxInquiry(
+          const result = await captureMailInquiry(
             tx,
-            work.identity,
-            work.businessId,
-            policy.id,
-            event,
+            batch,
+            selected,
             clock.now(),
-            {
-              since: new Date(
-                job.state.mode === "history"
-                  ? policy.configuration.history!.from
-                  : policy.incrementalSince,
-              ),
-              metadata,
-            },
           );
           if (result.status === "captured") captured++;
           else if (result.status === "duplicate") duplicates++;
         }
+        await applyPendingMailInquiries(tx, batch, clock.now());
         await applyMailManual(tx, batch, clock.now());
         const unresolved = await tx
-          .select({ metadata: gmailManualMessage.metadata })
+          .select({
+            metadata: gmailManualMessage.metadata,
+            current: gmailManualMessage.currentMetadata,
+            content: gmailManualMessage.content,
+          })
           .from(gmailManualMessage)
           .where(
             and(
@@ -739,12 +806,12 @@ export function createMailboxRepository(
             ),
           );
         const needsReview = unresolved.some((r) =>
-          selectedMetadata(
-            policy.configuration,
-            r.metadata,
-            policy.incrementalSince.toISOString(),
-            "incremental",
-          ),
+          selectedRetainedReply(batch, r.current ?? r.metadata),
+        );
+        const incomingReview = unresolved.some(
+          (r) =>
+            r.content.kind !== "manual_reply" &&
+            selectedRetainedReply(batch, r.current ?? r.metadata),
         );
         const visibility = needsReview
           ? ("limited" as const)
@@ -761,13 +828,15 @@ export function createMailboxRepository(
           reason:
             bounded && page.hasMore
               ? "limit_reached"
-              : needsReview
-                ? "manual_reply_review"
-                : page.visibility === "limited"
-                  ? "history_gap"
-                  : page.visibility === "recovering"
-                    ? "cursor_recovery"
-                    : null,
+              : incomingReview
+                ? "reply_association_review"
+                : needsReview
+                  ? "manual_reply_review"
+                  : page.visibility === "limited"
+                    ? "history_gap"
+                    : page.visibility === "recovering"
+                      ? "cursor_recovery"
+                      : null,
           checkpoint: job.state.checkpoint + 1,
           considered,
           captured: job.state.captured + captured,

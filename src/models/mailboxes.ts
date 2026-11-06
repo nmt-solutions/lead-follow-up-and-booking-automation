@@ -129,6 +129,14 @@ export type MailboxView = {
   visibility: "unsafe" | "current" | "recovering" | "limited";
   lastSyncedAt: string | null;
   pendingManualReplies: number;
+  pendingIncomingReplies: number;
+  incomingReplyReview: {
+    id: string;
+    subject: string;
+    text: string;
+    occurredAt: string;
+    inReplyTo: string | null;
+  }[];
   manualReplyReview: {
     id: string;
     subject: string;
@@ -172,6 +180,7 @@ export type MailboxSnapshot = {
   oauthGeneration?: number | null;
   appMessages?: { messageRef: string; internetMessageId: string }[];
   retryAt?: string | null;
+  visibility?: MailboxView["visibility"];
 };
 export type MailboxProvider = {
   key: string;
@@ -303,6 +312,7 @@ const jobStateSchema = z.object({
       "cursor_recovery",
       "history_gap",
       "manual_reply_review",
+      "reply_association_review",
     ])
     .nullable(),
   checkpoint: z.number().int(),
@@ -334,6 +344,16 @@ export const mailboxWorkspaceSchema = z.object({
       visibility: z.enum(["unsafe", "current", "recovering", "limited"]),
       lastSyncedAt: z.string().nullable(),
       pendingManualReplies: z.number().int().nonnegative(),
+      pendingIncomingReplies: z.number().int().nonnegative(),
+      incomingReplyReview: z.array(
+        z.object({
+          id: z.uuid(),
+          subject: z.string(),
+          text: z.string(),
+          occurredAt: z.string(),
+          inReplyTo: z.string().nullable(),
+        }),
+      ),
       manualReplyReview: z.array(
         z.object({
           id: z.uuid(),
