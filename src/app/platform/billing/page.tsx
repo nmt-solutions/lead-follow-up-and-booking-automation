@@ -25,6 +25,12 @@ export default async function BillingQueuePage() {
           Back to Businesses
         </Link>
         <h1 className="page-title">Billing evidence review</h1>
+        <Link
+          href="/platform/tax"
+          className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Tax calculation review and rule approvals
+        </Link>
         <p className="mt-3 text-muted-foreground">
           Submitted profiles needing tax-operator review. Missing and
           conflicting evidence remains unresolved until a recorded review of the

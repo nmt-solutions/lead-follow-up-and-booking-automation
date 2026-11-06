@@ -5,6 +5,7 @@ import type {
   MailboxMetadata,
 } from "../models/mailboxes";
 import type { WorkIdentity } from "../models/discovery";
+import type { TaxRule, TaxCalculation } from "../models/tax";
 import type { MailboxAuthorizationStatus } from "../models/mailbox-authorization";
 import type { MailManual } from "../models/mail-native";
 import type {
@@ -407,6 +408,128 @@ export const subscriptionPricingRevision = pgTable(
 
 const taxOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.tax)`;
 const billingOperatorScope = sql`current_setting('app.billing_review', true) = 'true' and (${taxOperatorScope})`;
+const taxRuleReadScope = sql`(${billingOperatorScope}) or (current_setting('app.tax_calculation', true) = 'true' and public.current_business_role() in ('owner','admin'))`;
+export const taxRuleRevision = pgTable(
+  "tax_rule_revision",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    version: integer("version").notNull(),
+    rule: jsonb("rule").$type<TaxRule>().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("tax_rule_key_version").on(table.key, table.version),
+    check("tax_rule_version_positive", sql`${table.version}>0`),
+    pgPolicy("tax_rule_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxRuleReadScope,
+    }),
+    pgPolicy("tax_rule_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${billingOperatorScope}) and ${table.actorId}=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const taxRuleDecision = pgTable(
+  "tax_rule_decision",
+  {
+    id: uuid("id").primaryKey(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => taxRuleRevision.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("tax_decision_revision_version").on(
+      table.revisionId,
+      table.version,
+    ),
+    check("tax_decision_version_positive", sql`${table.version}>0`),
+    check(
+      "tax_decision_outcome",
+      sql`${table.outcome} in ('approved','withdrawn')`,
+    ),
+    pgPolicy("tax_decision_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxRuleReadScope,
+    }),
+    pgPolicy("tax_decision_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${billingOperatorScope}) and ${table.actorId}=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const taxCalculation = pgTable(
+  "tax_calculation",
+  {
+    version: integer("version").notNull(),
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    resolvesId: uuid("resolves_id"),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<TaxCalculation>().notNull(),
+  },
+  (table) => [
+    uniqueIndex("tax_calculation_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check("tax_calculation_version_positive", sql`${table.version}>0`),
+    uniqueIndex("tax_calculation_request").on(
+      table.businessId,
+      table.requestKey,
+    ),
+    uniqueIndex("tax_calculation_resolution").on(table.resolvesId),
+    uniqueIndex("tax_calculation_business_id").on(table.businessId, table.id),
+    check(
+      "tax_calculation_snapshot_scope",
+      sql`${table.snapshot}->>'id'=${table.id}::text and ${table.snapshot}->>'businessId'=${table.businessId}::text and ${table.snapshot}->>'actorId'=${table.actorId} and ${table.snapshot}->>'requestKey'=${table.requestKey}::text`,
+    ),
+    pgPolicy("tax_calculation_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${billingOperatorScope})`,
+    }),
+    pgPolicy("tax_calculation_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`((${managerScope}) or (${billingOperatorScope})) and ${table.businessId}=nullif(current_setting('app.business_id',true),'')::uuid and ${table.actorId}=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const taxScopeForeignKeys = [
+  new ForeignKey(
+    taxCalculation,
+    foreignKey({
+      name: "tax_calculation_resolution_scope",
+      columns: [taxCalculation.businessId, taxCalculation.resolvesId],
+      foreignColumns: [taxCalculation.businessId, taxCalculation.id],
+    }),
+  ),
+];
 export const billingProfileRevision = pgTable(
   "billing_profile_revision",
   {
