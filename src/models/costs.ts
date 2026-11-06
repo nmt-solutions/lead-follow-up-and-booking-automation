@@ -151,8 +151,16 @@ export const costPlanningSchema = z
   )
   .refine(
     (v) =>
-      new Set(v.rates.map((r) => `${r.provider}:${r.unit}:${r.model}`)).size ===
-      v.rates.length,
+      new Set(
+        v.rates.map((r) =>
+          JSON.stringify([
+            r.provider,
+            r.unit,
+            r.model,
+            new Date(r.effectiveAt).getTime(),
+          ]),
+        ),
+      ).size === v.rates.length,
   )
   .refine((v) =>
     v.rates.every(

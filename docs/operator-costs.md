@@ -33,6 +33,8 @@ Top-up cash is funding, separate from consumed purchased OpenAI/Gateway credits.
 
 Money is retained in original INR/USD millionths. Missing provider amounts can be estimated only from an explicitly configured effective rate and available meters, with the planning-version evidence identified. Reserved/uncertain provider acceptance does not infer a charge. Unknown rates, missing sources and unconverted amounts are not free usage. Workspace fields enumerate estimates, unsettled observations and unresolved funding. No provider billing-fetch contract is guessed: authorized statements/configuration are the production evidence route for commitments, hosting/database/worker meters and other sources without a composed safe API.
 
+Keep each effective rate change in the month's rate configuration. Usage selects the matching exact model before a generic rate, then the latest effective date covering its observation. A rate change does not reprice earlier usage; duplicate model/unit rates at the same instant are rejected.
+
 USD→INR is an explicitly evidenced planning assumption with its check date. It is never customer FX, actual settlement or a bank receipt. With no conversion, original USD values remain separate. The optional linear forecast extrapolates incurred variable monetary usage over elapsed UTC-month time and adds full recorded fixed commitments plus unresolved signed plan changes. This assumes a stable usage/rate mix and complete commitments; it cannot price missing sources or predict unrecorded plan changes. Forecast output includes its as-of time, elapsed/month duration, assumptions and source coverage. It can be disabled.
 
 ## Durable effects and security
