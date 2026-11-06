@@ -40,7 +40,8 @@ export function privilegedRoles(database: Database, userId: string) {
         operator?.tax ||
         operator?.reconciliation ||
         operator?.ai ||
-        operator?.discovery,
+        operator?.discovery ||
+        operator?.emailPolicy,
       ),
     };
   });

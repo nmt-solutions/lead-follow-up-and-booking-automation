@@ -4,6 +4,11 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  emailMarketPolicy,
+  emailRecipientRevision,
+  emailSuppression,
+  emailEligibilityEvaluation,
+  emailActionReview,
   microsoftMailGrant,
   microsoftMailOauth,
   microsoftMailScopeForeignKeys,
@@ -406,6 +411,9 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (version, configuration, updated_at, connection_id, inbox_connection_id) ON public.sender_reply_route FROM app_runtime;
         REVOKE UPDATE (version, configuration, updated_at, connection_id, reply_route_id) ON public.sender_identity FROM app_runtime;
       END IF;
+      IF to_regclass('public.email_market_policy') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.email_market_policy, public.email_recipient_revision, public.email_suppression, public.email_eligibility_evaluation, public.email_action_review FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -522,6 +530,11 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      emailMarketPolicy,
+      emailRecipientRevision,
+      emailSuppression,
+      emailEligibilityEvaluation,
+      emailActionReview,
       mailboxPolicy,
       microsoftMailGrant,
       microsoftMailOauth,
@@ -714,6 +727,12 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON business, membership, invitation, team_audit, platform_operator FROM app_runtime;
       GRANT SELECT, INSERT ON membership, business, invitation, team_audit TO app_runtime;
       GRANT SELECT ON platform_operator TO app_runtime;
+      GRANT SELECT, INSERT ON email_market_policy, email_recipient_revision, email_suppression, email_eligibility_evaluation, email_action_review TO app_runtime;
+      ALTER TABLE email_market_policy FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_recipient_revision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_suppression FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_eligibility_evaluation FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_action_review FORCE ROW LEVEL SECURITY;
       GRANT UPDATE (role) ON membership TO app_runtime;
       GRANT DELETE ON membership TO app_runtime;
       GRANT UPDATE (status, accepted_by, accepted_at, delivery, delivery_started_at) ON invitation TO app_runtime;

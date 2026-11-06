@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  evaluateEmailAction,
+  emailDecisionAtDispatch,
+} from "./email-eligibility-context";
+import { emailDispatchAuthorization } from "../models/email-eligibility";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
@@ -647,6 +652,29 @@ export function createCommercialRepository(database: Database, clock: Clock) {
           await finish("blocked", reason);
           return;
         }
+        let eligibility =
+          p.payload.channel === "email"
+            ? await evaluateEmailAction(
+                tx,
+                businessId,
+                { kind: "commercial", id: p.id },
+                actor.userId,
+                clock.now(),
+              )
+            : null;
+        if (eligibility) {
+          eligibility = await emailDecisionAtDispatch(
+            tx,
+            businessId,
+            actor.userId,
+            eligibility,
+            clock.now(),
+          );
+          if (eligibility.status !== "allowed") {
+            await finish("blocked", `email_eligibility_${eligibility.status}`);
+            return;
+          }
+        }
         let timer: ReturnType<typeof setTimeout> | undefined;
         const controller = new AbortController();
         try {
@@ -658,6 +686,11 @@ export function createCommercialRepository(database: Database, clock: Clock) {
                 actionId: p.id,
                 payloadHash: p.payloadHash,
                 payload: p.payload,
+                ...(eligibility
+                  ? {
+                      emailEligibility: emailDispatchAuthorization(eligibility),
+                    }
+                  : {}),
               },
               controller.signal,
             ),

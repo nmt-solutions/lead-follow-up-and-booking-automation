@@ -7,6 +7,11 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "email_market_policy",
+    "email_recipient_revision",
+    "email_suppression",
+    "email_eligibility_evaluation",
+    "email_action_review",
     "mailbox_app_message",
     "microsoft_mail_grant",
     "microsoft_mail_oauth",

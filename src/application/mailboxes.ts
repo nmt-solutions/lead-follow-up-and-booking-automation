@@ -186,8 +186,17 @@ export function createMailboxApplication<Credentials>(dependencies: {
               new Date(metadata.occurredAt).getTime() ||
             (event.kind === "manual_reply" &&
               !isDeepStrictEqual(event.native, metadata.native)) ||
+            (event.kind !== "manual_reply" &&
+              metadata.native &&
+              (metadata.native.direction !== "incoming" ||
+                event.senderRef.toLowerCase() !==
+                  metadata.native.from.toLowerCase() ||
+                !metadata.native.to
+                  .map((v) => v.toLowerCase())
+                  .includes(snapshot.account.toLowerCase()))) ||
             (event.kind !== "direct_inquiry" &&
               event.kind !== "buying_interest_reply" &&
+              event.kind !== "opt_out" &&
               event.kind !== "manual_reply")
           )
             throw new ApplicationError("INVALID_PROVIDER_RESPONSE");

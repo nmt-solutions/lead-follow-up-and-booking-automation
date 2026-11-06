@@ -111,6 +111,12 @@ export default async function BusinessPage({
       >
         Sending identities and reply readiness
       </Link>
+      <Link
+        href={`/businesses/${businessId}/email-eligibility`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Email eligibility and opt-outs
+      </Link>
       {canManageAi && (
         <Link
           href={`/businesses/${businessId}/ai`}

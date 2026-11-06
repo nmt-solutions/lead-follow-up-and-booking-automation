@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import {
+  configureEmailFixture,
+  eligibilityApplication,
+} from "./support/email-eligibility";
+import { readySender } from "./support/senders";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
 import { createInboxApplication } from "../src/application/inbox";
@@ -84,6 +89,8 @@ describe("Commercial actions through real persistence and guarded outbound execu
     });
     const ws = await inbox.workspace(credentials, business.id);
     const need = ws.opportunities[0];
+    await readySender(h, credentials, business.id, connection.id);
+    await configureEmailFixture(h, credentials, business.id, need.id);
     const opportunities = createOpportunityApplication({
       authenticate: h.authenticate,
       authenticateForWork: h.access.authenticateForWork,
@@ -176,6 +183,151 @@ describe("Commercial actions through real persistence and guarded outbound execu
     };
   }
   type Fixture = Awaited<ReturnType<typeof fixture>>;
+  it("applies a first-ever recipient opt-out between immutable commercial commitment and provider execution", async () => {
+    const f = await fixture(),
+      a = await propose(f);
+    await approve(f, a);
+    const app = eligibilityApplication(h);
+    const gate = await h.admin.connect();
+    await gate.query("BEGIN");
+    await gate.query("select pg_advisory_xact_lock(310033)");
+    await h.admin.query(
+      "CREATE FUNCTION test_commercial_optout_barrier() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(310033); RETURN NEW; END $$; CREATE TRIGGER test_commercial_optout_barrier BEFORE INSERT ON commercial_execution FOR EACH ROW WHEN (NEW.state='committed') EXECUTE FUNCTION test_commercial_optout_barrier()",
+    );
+    async function blocked(count: number) {
+      const deadline = performance.now() + 5000;
+      while (performance.now() < deadline) {
+        const r = await h.admin.query(
+          "select count(*) from pg_locks where locktype='advisory' and not granted",
+        );
+        if (Number(r.rows[0].count) >= count) return;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      throw new Error("Commercial opt-out barrier not reached");
+    }
+    const executing = f.application.execute(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      ref(a),
+    );
+    try {
+      await blocked(1);
+      const restriction = app.suppress(f.credentials, f.business.id, {
+        requestKey: randomUUID(),
+        recipient: "buyer@example.net",
+        scope: "recipient_outreach",
+        opportunityId: null,
+        effectiveAt: h.clock.now().toISOString(),
+        reference: "No more outreach",
+      });
+      await blocked(2);
+      await gate.query("COMMIT");
+      await restriction;
+      await executing;
+      expect(f.effects).toEqual([]);
+      expect((await f.read()).actions[0]).toMatchObject({
+        payloadHash: a.payloadHash,
+        execution: { state: "blocked", reason: "email_eligibility_blocked" },
+      });
+      expect(
+        await f.opportunities.read(f.credentials, f.business.id, f.need.id),
+      ).toMatchObject({ state: "human", ownerId: f.actor.userId, version: 1 });
+    } finally {
+      await gate.query("ROLLBACK");
+      gate.release();
+      await h.admin.query(
+        "DROP TRIGGER test_commercial_optout_barrier ON commercial_execution; DROP FUNCTION test_commercial_optout_barrier()",
+      );
+    }
+  });
+  it("requires policy-bound permission and exact content reviews, and never accepts a review as proof of an unsupported one-click unsubscribe capability", async () => {
+    const f = await fixture(),
+      a = await propose(f);
+    await approve(f, a);
+    const app = eligibilityApplication(h);
+    const ws = await app.workspace(f.credentials, f.business.id),
+      p = ws.policies.find((p) => p.policy.purpose === "sales_follow_up")!;
+    try {
+      await app.publishPolicy(f.credentials, f.business.id, {
+        expectedVersion: p.version,
+        policy: {
+          ...p.policy,
+          requiredContent: ["unsubscribe_instructions", "purpose_review"],
+        },
+      });
+      let result = await app.evaluate(f.credentials, f.business.id, {
+        kind: "commercial",
+        id: a.id,
+      });
+      expect(result.status).toBe("unknown");
+      expect(result.evidence).toEqual([]);
+      await configureEmailFixture(h, f.credentials, f.business.id, f.need.id);
+      await app.reviewContent(f.credentials, f.business.id, {
+        action: { kind: "commercial", id: a.id },
+        requirements: ["unsubscribe_instructions"],
+        reference: "Reviewed exact prepared description and terms",
+      });
+      result = await app.evaluate(f.credentials, f.business.id, {
+        kind: "commercial",
+        id: a.id,
+      });
+      expect(result.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "content_purpose_review",
+            status: "unknown",
+          }),
+        ]),
+      );
+      await app.reviewContent(f.credentials, f.business.id, {
+        action: { kind: "commercial", id: a.id },
+        requirements: ["purpose_review"],
+        reference: "Reviewed the full concrete commercial purpose",
+      });
+      expect(
+        await app.evaluate(f.credentials, f.business.id, {
+          kind: "commercial",
+          id: a.id,
+        }),
+      ).toMatchObject({ status: "allowed" });
+      const latest = (
+        await app.workspace(f.credentials, f.business.id)
+      ).policies.find((p) => p.policy.purpose === "sales_follow_up")!;
+      await app.publishPolicy(f.credentials, f.business.id, {
+        expectedVersion: latest.version,
+        policy: {
+          ...latest.policy,
+          requiredContent: ["one_click_unsubscribe"],
+        },
+      });
+      await configureEmailFixture(h, f.credentials, f.business.id, f.need.id);
+      await app.reviewContent(f.credentials, f.business.id, {
+        action: { kind: "commercial", id: a.id },
+        requirements: ["one_click_unsubscribe"],
+        reference: "Human checkbox cannot prove an absent mechanism",
+      });
+      await f.application.execute(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ref(a),
+      );
+      expect(f.effects).toEqual([]);
+      expect((await f.read()).actions[0].execution).toMatchObject({
+        state: "blocked",
+        reason: "email_eligibility_unknown",
+      });
+    } finally {
+      const latest = (
+        await app.workspace(f.credentials, f.business.id)
+      ).policies.find((p) => p.policy.purpose === "sales_follow_up")!;
+      await app.publishPolicy(f.credentials, f.business.id, {
+        expectedVersion: latest.version,
+        policy: { ...latest.policy, requiredContent: [] },
+      });
+    }
+  });
   const ref = (a: { id: string; payloadHash: string }) => ({
     actionId: a.id,
     payloadHash: a.payloadHash,

@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import {
+  configureEmailFixture,
+  eligibilityApplication,
+} from "./support/email-eligibility";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
 import { createSenderApplication } from "../src/application/senders";
@@ -229,6 +233,130 @@ describe("Selected Gmail at the persisted application seam", () => {
         await f.app.read(f.credentials, f.businessId, f.mailbox.id),
       ),
     ).not.toMatch(/fixture-access|fixture-refresh|client_secret/);
+  });
+  it("normalizes an explicit selected Gmail opt-out into suppression without qualification engagement or ownership changes", async () => {
+    const f = await setup();
+    await connect(f);
+    f.google.add("a1");
+    f.google.add("a2", {
+      reply: "<a1@example.com>",
+      text: "Unsubscribe",
+      at: "2026-11-05T09:01:30Z",
+    });
+    f.google.pages.set("Label_sales", {
+      messages: [
+        { id: "a1", threadId: "abc123" },
+        { id: "a2", threadId: "abc123" },
+      ],
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    await synchronize(f);
+    const state = await eligibilityApplication(h).workspace(
+      f.credentials,
+      f.businessId,
+    );
+    expect(state.suppressions).toMatchObject([
+      {
+        recipient: "buyer@example.com",
+        scope: "recipient_outreach",
+        source: "incoming_opt_out",
+      },
+    ]);
+    const inbox = await f.inbox.workspace(f.credentials, f.businessId);
+    expect(inbox.opportunities).toHaveLength(1);
+    const conversation = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      inbox.conversations[0].id,
+    );
+    expect(conversation.messages).toHaveLength(1);
+    expect(conversation.opportunity.ownerId).toBeNull();
+    expect(f.effects).toEqual([]);
+  });
+  it("applies an exact native opt-out to the referenced message's current Opportunity when a Gmail thread has split purchasing needs", async () => {
+    const f = await setup();
+    await connect(f);
+    f.google.add("a1");
+    f.google.add("a2");
+    f.google.pages.set("Label_sales", {
+      messages: [
+        { id: "a1", threadId: "abc123" },
+        { id: "a2", threadId: "abc123" },
+      ],
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    await synchronize(f);
+    const ws = await f.inbox.workspace(f.credentials, f.businessId),
+      detail = await f.inbox.conversation(
+        f.credentials,
+        f.businessId,
+        ws.conversations[0].id,
+      ),
+      second = detail.messages.find((m) => m.messageRef === "a2")!;
+    await f.inbox.associate(f.credentials, f.businessId, detail.id, {
+      expectedVersion: detail.association.version,
+      buyerId: detail.buyer.id,
+      messageIds: [second.id],
+      allMessages: false,
+      target: { kind: "new", title: "Separate purchasing need" },
+      future: "keep",
+      discoveryObservationId: null,
+      reason: "Two needs share one email thread",
+    });
+    const changed = await f.inbox.conversation(
+        f.credentials,
+        f.businessId,
+        detail.id,
+      ),
+      needId = changed.messages.find((m) => m.id === second.id)!.opportunityId!;
+    const eligibility = await configureEmailFixture(
+      h,
+      f.credentials,
+      f.businessId,
+      needId,
+      "buyer@example.com",
+    );
+    const p = (
+      await eligibility.workspace(f.credentials, f.businessId)
+    ).policies.find((p) => p.policy.purpose === "sales_follow_up")!;
+    await eligibility.publishPolicy(f.credentials, f.businessId, {
+      expectedVersion: p.version,
+      policy: { ...p.policy, incomingOptOutScope: "opportunity_outreach" },
+    });
+    f.google.add("a3", {
+      reply: "<a2@example.com>",
+      text: "Unsubscribe",
+      at: "2026-11-05T09:02:30Z",
+    });
+    f.google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [{ message: { id: "a3" } }],
+        },
+      ],
+    });
+    h.clock.set("2026-11-05T09:03:00Z");
+    await synchronize(f);
+    expect(
+      (await eligibility.workspace(f.credentials, f.businessId)).suppressions,
+    ).toMatchObject([
+      {
+        recipient: "buyer@example.com",
+        scope: "opportunity_outreach",
+        opportunityId: needId,
+      },
+    ]);
+    expect(
+      (await f.inbox.conversation(f.credentials, f.businessId, detail.id))
+        .messages,
+    ).toHaveLength(2);
+    expect(
+      (
+        await f.inbox.workspace(f.credentials, f.businessId)
+      ).opportunities.every((n) => n.ownerId === null),
+    ).toBe(true);
   });
   it("imports only selected new per-message content, persists a large history cursor, then deduplicates incremental replies", async () => {
     const f = await setup();

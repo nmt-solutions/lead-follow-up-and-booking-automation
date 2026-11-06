@@ -1,5 +1,7 @@
 # Sending identities and reply readiness
 
+Recipient eligibility, market/purpose policy and opt-outs are managed separately under [Email eligibility and outreach suppression](email-eligibility.md). Both guarded email action paths consume the authoritative current evaluator.
+
 The Business page links to **Sending identities**. Owners and Admins manage setup; current members can inspect their Business's status. Current session, role and MFA are checked again inside each protected transaction. Setup writes and email dispatch share the Business lock.
 
 ## Setup contract

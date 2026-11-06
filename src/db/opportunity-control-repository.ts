@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  evaluateEmailAction,
+  emailDecisionAtDispatch,
+} from "./email-eligibility-context";
+import { emailDispatchAuthorization } from "../models/email-eligibility";
 import { and, asc, eq, or } from "drizzle-orm";
 import type { OpportunityRepository } from "../application/opportunity-control";
 import { ApplicationError } from "../models/application-error";
@@ -681,6 +686,16 @@ export function createOpportunityRepository(
                     : "existing_conversation",
                 )
               : null;
+          let eligibility =
+            ctx.connection.channel === "email"
+              ? await evaluateEmailAction(
+                  tx,
+                  businessId,
+                  { kind: "opportunity", id: actionId },
+                  actor.userId,
+                  now(),
+                )
+              : null;
           if (sender?.reason)
             return { action: await cancel(tx, sender.reason), failure: null };
           if (
@@ -692,24 +707,54 @@ export function createOpportunityRepository(
               action: await cancel(tx, "sender_transport_unavailable"),
               failure: null,
             };
+          if (eligibility)
+            eligibility = await emailDecisionAtDispatch(
+              tx,
+              businessId,
+              actor.userId,
+              eligibility,
+              now(),
+            );
+          if (eligibility && eligibility.status !== "allowed")
+            return {
+              action: await cancel(
+                tx,
+                `email_eligibility_${eligibility.status}`,
+              ),
+              failure: null,
+            };
           // Reviewed exception to external-I/O-outside-transactions: the shared lock is held
           // through bounded adapter I/O, so a committed pause cannot precede a stale send.
           // Policy/team/connection changes use this same lock. Providers must never retry here.
-          await boundedDispatch((signal) =>
-            provider.dispatch(
-              {
-                actionId,
-                businessId,
-                opportunityId: need.id,
-                connectionId: ctx.connection.id,
-                channel: ctx.connection.channel,
-                evaluation: action.evaluation,
-                ...(sender?.sender ? { sender: sender.sender } : {}),
-                ...(inquiry?.reply ? { reply: inquiry.reply } : {}),
-              },
-              signal,
-            ),
-          );
+          try {
+            await boundedDispatch((signal) =>
+              provider.dispatch(
+                {
+                  actionId,
+                  businessId,
+                  opportunityId: need.id,
+                  connectionId: ctx.connection.id,
+                  channel: ctx.connection.channel,
+                  evaluation: action.evaluation,
+                  ...(eligibility
+                    ? {
+                        emailEligibility:
+                          emailDispatchAuthorization(eligibility),
+                      }
+                    : {}),
+                  ...(sender?.sender ? { sender: sender.sender } : {}),
+                  ...(inquiry?.reply ? { reply: inquiry.reply } : {}),
+                },
+                signal,
+              ),
+            );
+          } catch (error: unknown) {
+            return {
+              action: currentAction,
+              failure: null,
+              providerFailure: { error },
+            };
+          }
           const [sent] = await tx
             .update(opportunityDueAction)
             .set({ state: "dispatched", reason: null })
@@ -721,6 +766,8 @@ export function createOpportunityRepository(
       );
       // Throw after committing a known pre-provider cancellation, so it stays visible on reload.
       if (result.failure) throw result.failure;
+      if ("providerFailure" in result && result.providerFailure)
+        throw result.providerFailure.error;
       return actionView(result.action);
     },
   };

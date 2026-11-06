@@ -1,4 +1,6 @@
 import type { MailboxMetadata } from "../models/mailboxes";
+import { captureEmailOptOut } from "./email-opt-out";
+import { explicitEmailOptOut } from "../inbox/opt-out";
 import { resolveMailReference } from "./mailbox-reference";
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
@@ -170,6 +172,24 @@ export async function captureInboxInquiry(
       receivedAt: at,
     });
   };
+  if (
+    connection.channel === "email" &&
+    event.kind !== "public_signal" &&
+    (event.kind === "opt_out" || explicitEmailOptOut(event.text))
+  ) {
+    const result = await captureEmailOptOut(
+      tx,
+      businessId,
+      connectionId,
+      actor.userId,
+      event,
+      at,
+      authorization?.metadata,
+    );
+    await recordEvent(result.conversationId);
+    return result;
+  }
+  if (event.kind === "opt_out") throw new ApplicationError("INVALID_INPUT");
   if (event.kind === "public_signal" || event.kind === "other_reply") {
     await recordEvent(null);
     return { status: "ignored", conversationId: null };

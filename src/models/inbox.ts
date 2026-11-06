@@ -34,6 +34,7 @@ export const incomingInquirySchema = z
       "buying_interest_reply",
       "public_signal",
       "other_reply",
+      "opt_out",
     ]),
     replyToMessageRef: reference.optional(),
     subject: content(500),

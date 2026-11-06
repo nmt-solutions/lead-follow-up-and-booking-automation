@@ -13,6 +13,14 @@ import type {
 } from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
 import type {
+  EmailMarketPolicy,
+  RecipientFacts,
+  EmailEligibility,
+  AddEmailSuppression,
+  EmailContentReview,
+  IncomingOptOutEvidence,
+} from "../models/email-eligibility";
+import type {
   SenderConnectionConfiguration,
   ReplyRouteConfiguration,
   SenderIdentityConfiguration,
@@ -502,6 +510,7 @@ export const platformOperator = pgTable(
     reconciliation: boolean("reconciliation").notNull().default(false),
     ai: boolean("ai").notNull().default(false),
     discovery: boolean("discovery").notNull().default(false),
+    emailPolicy: boolean("email_policy").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {
@@ -2153,6 +2162,116 @@ export const opportunityDueAction = pgTable(
       withCheck: inboxScope,
     }),
   ],
+).enableRLS();
+
+const emailPolicyOperator = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.email_policy)`;
+export const emailMarketPolicy = pgTable(
+  "email_market_policy",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    version: integer("version").notNull(),
+    policy: jsonb("policy").$type<EmailMarketPolicy>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("email_market_policy_version").on(t.key, t.version),
+    pgPolicy("email_market_policy_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`nullif(current_setting('app.actor_id', true), '') is not null`,
+    }),
+    pgPolicy("email_market_policy_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${emailPolicyOperator}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+function emailRecordColumns() {
+  return {
+    ...inboxColumns(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  };
+}
+function emailRecordPolicies(name: string, manager = false) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${manager ? managerScope : inboxScope}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+  ];
+}
+export const emailRecipientRevision = pgTable(
+  "email_recipient_revision",
+  {
+    ...emailRecordColumns(),
+    recipient: text("recipient").notNull(),
+    version: integer("version").notNull(),
+    facts: jsonb("facts").$type<RecipientFacts>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("email_recipient_version").on(
+      t.businessId,
+      t.recipient,
+      t.version,
+    ),
+    ...emailRecordPolicies("email_recipient_revision", true),
+  ],
+).enableRLS();
+export const emailSuppression = pgTable(
+  "email_suppression",
+  {
+    ...emailRecordColumns(),
+    recipient: text("recipient").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    suppression: jsonb("suppression").$type<AddEmailSuppression>().notNull(),
+    evidence: jsonb("evidence").$type<IncomingOptOutEvidence>(),
+    source: text("source").$type<"business" | "incoming_opt_out">().notNull(),
+  },
+  (t) => [
+    uniqueIndex("email_suppression_request").on(t.businessId, t.requestKey),
+    ...emailRecordPolicies("email_suppression"),
+  ],
+).enableRLS();
+export const emailEligibilityEvaluation = pgTable(
+  "email_eligibility_evaluation",
+  {
+    ...emailRecordColumns(),
+    actionId: uuid("action_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    result: jsonb("result").$type<EmailEligibility>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("email_eligibility_business_sequence").on(
+      t.businessId,
+      t.sequence,
+    ),
+    ...emailRecordPolicies("email_eligibility_evaluation"),
+  ],
+).enableRLS();
+export const emailActionReview = pgTable(
+  "email_action_review",
+  {
+    ...emailRecordColumns(),
+    actionId: uuid("action_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    review: jsonb("review").$type<EmailContentReview>().notNull(),
+  },
+  () => emailRecordPolicies("email_action_review", true),
 ).enableRLS();
 
 export const inquiryRun = pgTable(

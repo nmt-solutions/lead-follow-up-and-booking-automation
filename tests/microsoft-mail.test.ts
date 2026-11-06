@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eligibilityApplication } from "./support/email-eligibility";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
 import { createSenderApplication } from "../src/application/senders";
@@ -236,6 +237,44 @@ describe("Selected MicrosoftMail at the persisted application seam", () => {
         await f.app.read(f.credentials, f.businessId, f.mailbox.id),
       ),
     ).not.toMatch(/fixture-access|fixture-refresh|client_secret/);
+  });
+  it("normalizes an explicit selected Outlook opt-out into suppression without qualification engagement or ownership changes", async () => {
+    const f = await setup();
+    await connect(f);
+    const first = f.graph.add("m1"),
+      stop = f.graph.add("m2", {
+        reply: "<m1@example.com>",
+        text: "Please stop emailing me.",
+        at: "2026-11-05T09:01:30Z",
+      });
+    f.graph.pages.set("sales", {
+      value: [first, stop],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=current",
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    await synchronize(f);
+    const state = await eligibilityApplication(h).workspace(
+      f.credentials,
+      f.businessId,
+    );
+    expect(state.suppressions).toMatchObject([
+      {
+        recipient: "buyer@example.com",
+        scope: "recipient_outreach",
+        source: "incoming_opt_out",
+      },
+    ]);
+    const inbox = await f.inbox.workspace(f.credentials, f.businessId);
+    expect(inbox.opportunities).toHaveLength(1);
+    const conversation = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      inbox.conversations[0].id,
+    );
+    expect(conversation.messages).toHaveLength(1);
+    expect(conversation.opportunity.ownerId).toBeNull();
+    expect(f.effects).toEqual([]);
   });
 
   it("filters new mail metadata before bodies and persists folder delta links without duplicate inbox effects", async () => {

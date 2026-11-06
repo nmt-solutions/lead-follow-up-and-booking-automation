@@ -42,6 +42,12 @@ export default async function SendersPage({
         Choose mailbox processing scope and optional history
       </Link>
       <SenderManager businessId={businessId} initialState={state} />
+      <Link
+        href={`/businesses/${businessId}/email-eligibility`}
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+      >
+        Review recipient eligibility and opt-outs
+      </Link>
     </div>
   );
 }

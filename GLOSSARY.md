@@ -113,6 +113,18 @@ The authentication and delivery condition of an email sender, assessed through d
 **Email eligibility**:
 Whether a particular email may be sent to a recipient under the applicable destination, recipient-type, permission, sender, and opt-out conditions. Paid geographic reach alone does not establish eligibility.
 
+**Recipient legal class**:
+The recipient's evidenced legal category under the applicable communication rules, distinct from their purchasing role or Business buyer category.
+
+**Email market policy**:
+An attributable, time-bound set of email conditions for a destination, recipient legal class and message purpose. Missing coverage leaves eligibility unknown.
+
+**Permission evidence**:
+An attributed record of consent, a documented relationship or a direct inquiry for its stated recipient, purpose and purchasing need. Public contact details and paid discovery reach are not permission evidence.
+
+**Outreach suppression**:
+A recorded restriction preventing email covered by a recipient's opt-out or another eligibility restriction from its effective time. Its scope identifies the covered Business, recipient, purposes and, where applicable, Opportunity.
+
 **WhatsApp business identity**:
 The customer-controlled business identity and associated number used for WhatsApp conversations with prospects and engaged leads.
 

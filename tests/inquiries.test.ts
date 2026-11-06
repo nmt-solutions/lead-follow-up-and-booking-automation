@@ -28,6 +28,10 @@ import { AiProviderFailure } from "../src/models/ai";
 import { createCommercialAuthorityApplication } from "../src/application/commercial-authority";
 import { createCommercialAuthorityRepository } from "../src/db/commercial-authority-repository";
 import { readySender, fixtureMailBinding } from "./support/senders";
+import {
+  configureEmailFixture,
+  eligibilityApplication,
+} from "./support/email-eligibility";
 
 describe("Inquiry handling at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -167,6 +171,7 @@ describe("Inquiry handling at the persisted application seam", () => {
     const first = await capture("first", "Delivery?\nQuantity: 500");
     const ws = await inbox.workspace(credentials, business.id);
     const need = ws.opportunities[0];
+    await configureEmailFixture(h, credentials, business.id, need.id);
     const effects: OpportunityDispatch[] = [];
     let failAfterSend = false;
     const opportunities = createOpportunityApplication({
@@ -238,7 +243,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       },
     });
     await h.admin.query(
-      "INSERT INTO platform_operator (user_id, ai) VALUES ($1, true)",
+      "INSERT INTO platform_operator (user_id, ai) VALUES ($1, true) ON CONFLICT (user_id) DO UPDATE SET ai=true",
       [actor.userId],
     );
     const aiState = await ai.workspace(credentials, business.id);
@@ -357,6 +362,56 @@ describe("Inquiry handling at the persisted application seam", () => {
     expect(f.calls).toEqual([]);
     expect(f.effects).toEqual([]);
   });
+  it.each(["recipient_outreach", "recipient_email"])(
+    "applies %s suppression at the prepared inquiry response dispatch seam without promoting inquiry evidence to outreach permission",
+    async (scope) => {
+      const f = await fixture(`eligibility-response-${scope}`);
+      await handback(f);
+      const app = eligibilityApplication(h),
+        ws = await app.workspace(f.credentials, f.business.id),
+        r = ws.recipients[0];
+      await app.saveRecipient(f.credentials, f.business.id, {
+        expectedVersion: r.version,
+        facts: {
+          ...r.facts,
+          permissions: [],
+          reference:
+            "Destination and class only; direct inquiry is the sole response evidence",
+        },
+      });
+      const prepared = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      expect(prepared.status).toBe("ready");
+      await app.suppress(f.credentials, f.business.id, {
+        requestKey: randomUUID(),
+        recipient: "buyer@example.net",
+        scope,
+        opportunityId: null,
+        effectiveAt: h.clock.now().toISOString(),
+        reference: "Honor only the stated covered scope",
+      });
+      const result = await f.app.dispatch(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        prepared.id,
+      );
+      expect(result.action?.state).toBe(
+        scope === "recipient_email" ? "cancelled" : "dispatched",
+      );
+      expect(f.effects).toHaveLength(scope === "recipient_email" ? 0 : 1);
+      const evaluated = (await app.workspace(f.credentials, f.business.id))
+        .evaluations[0];
+      expect(evaluated.purpose).toBe("inquiry_response");
+      expect(evaluated.evidence).toMatchObject([
+        { kind: "direct_inquiry", reference: `message:${f.first.id}` },
+      ]);
+    },
+  );
   it("captures accumulated sourced qualification into a real RFQ and pauses drafts without sending or granting commercial authority", async () => {
     const f = await fixture("rfq-capture");
     await handback(f);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { EmailDispatchAuthorization } from "./email-eligibility";
 import {
   commercialActionSchema,
   commercialEvaluationResultSchema,
@@ -98,6 +99,7 @@ export const commercialProviderResultSchema = z.discriminatedUnion("status", [
   }),
 ]);
 export type CommercialDispatch = {
+  emailEligibility?: EmailDispatchAuthorization;
   businessId: string;
   opportunityId: string;
   actionId: string;

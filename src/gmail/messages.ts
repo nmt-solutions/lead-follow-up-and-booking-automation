@@ -223,9 +223,10 @@ export function gmailEvent(
     ? { ...base, kind: "manual_reply", native: metadata.native }
     : {
         ...base,
-        kind: "direct_inquiry",
+        kind: explicitEmailOptOut(base.text) ? "opt_out" : "direct_inquiry",
         senderRef: metadata.native.from,
         senderName: metadata.native.from,
         geography: null,
       };
 }
+import { explicitEmailOptOut } from "../inbox/opt-out";

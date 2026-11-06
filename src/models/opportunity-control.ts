@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { commercialEvaluationSchema } from "./commercial-authority";
+import type { EmailDispatchAuthorization } from "./email-eligibility";
 
 const note = z
   .string()
@@ -75,6 +76,7 @@ export type DueAction = {
   dueAt: string;
 };
 export type OpportunityDispatch = {
+  emailEligibility?: EmailDispatchAuthorization;
   sender?: {
     identityId: string;
     identityVersion: number;

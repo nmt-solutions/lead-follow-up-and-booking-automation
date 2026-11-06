@@ -83,6 +83,12 @@ export default async function ConversationPage({
           Back to shared inbox
         </Link>
         <h1 className="page-title">{conversation.subject}</h1>
+        <Link
+          href={`/businesses/${businessId}/email-eligibility`}
+          className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Review email eligibility and record an opt-out
+        </Link>
         <p className="mt-3 text-muted-foreground">
           {conversation.connection.label} · {conversation.connection.channel} ·
           Received-message import

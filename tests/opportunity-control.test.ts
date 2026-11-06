@@ -11,6 +11,7 @@ import type { OpportunityDispatch } from "../src/models/opportunity-control";
 import { createOpportunityHttp } from "../src/http/opportunity-control";
 import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
 import { readySender, fixtureMailBinding } from "./support/senders";
+import { configureEmailFixture } from "./support/email-eligibility";
 
 describe("Opportunity control at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -197,6 +198,8 @@ describe("Opportunity control at the persisted application seam", () => {
     );
   }
   async function queue(f: Fixture) {
+    if (f.suffix !== "eligibility-required")
+      await configureEmailFixture(h, f.credentials, f.businessId, f.need.id);
     const detail = await inbox.conversation(
       f.credentials,
       f.businessId,
@@ -208,6 +211,19 @@ describe("Opportunity control at the persisted application seam", () => {
       dueAt: h.clock.now().toISOString(),
     });
   }
+  it("fails closed at actual dispatch when recipient market policy and evidence are missing despite a ready sender and approved authority", async () => {
+    const f = await setup("eligibility-required");
+    await enable(f);
+    const action = await queue(f);
+    const before = outbound.length;
+    expect(
+      await app.dispatch(f.credentials, f.businessId, action.id),
+    ).toMatchObject({
+      state: "cancelled",
+      reason: "email_eligibility_unknown",
+    });
+    expect(outbound).toHaveLength(before);
+  });
   it("blocks enabled email delivery without a ready persisted sender and explicit reply path", async () => {
     const f = await setup("sender-required", false);
     await enable(f);
@@ -406,6 +422,7 @@ describe("Opportunity control at the persisted application seam", () => {
         dueAt: h.clock.now().toISOString(),
       },
     );
+    await configureEmailFixture(h, f.credentials, f.businessId, second.id);
     expect(
       await app.manualReply(
         f.credentials,
