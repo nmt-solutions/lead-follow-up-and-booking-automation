@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 import { createHarness } from "./support/harness";
+import { persistPaidSubscription } from "./support/paid-subscription";
 import { runtimeDatabase } from "../src/db/runtime";
 import { createWhatsAppApplication } from "../src/application/whatsapp";
 import { createWhatsAppRepository } from "../src/db/whatsapp-repository";
@@ -633,6 +634,11 @@ describe("Signed Meta intake through real restricted persistence", () => {
   });
   it("pauses dispatch for unsupported or pending visibility and keeps stored incoming work readable", async () => {
     const f = await fixture("visibility");
+    await persistPaidSubscription(h, f.credentials, f.businessId, {
+      markets: ["US"],
+      discovery: { quantity: 0, unit: "research units" },
+      automation: { quantity: 100, unit: "provider calls" },
+    });
     await deliver(f.app, payload(f.assets.phoneNumberId));
     await f.app.drain();
     const ws = await f.inbox.workspace(f.credentials, f.businessId);
