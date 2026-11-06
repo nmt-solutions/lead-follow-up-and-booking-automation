@@ -7,6 +7,8 @@ import {
   checkoutReferenceSchema,
   paymentObservationSchema,
   authenticatedPaymentEventSchema,
+  paymentActionSchema,
+  PaymentCreationNotAttempted,
   type PaymentGateway,
 } from "../models/subscription-payments";
 import { ApplicationError } from "../models/application-error";
@@ -34,6 +36,32 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       action.snapshot.provider.mode !== d.gateway.mode
     )
       throw new ApplicationError("SETUP_REQUIRED");
+    if (d.gateway.poll) {
+      let result;
+      try {
+        result = await d.gateway.poll({ action });
+      } catch {
+        return d.repository.pollUnavailable(work, d.clock.now());
+      }
+      if (result.checkout)
+        await d.repository.creation(
+          work,
+          parse(checkoutReferenceSchema, result.checkout),
+          d.clock.now(),
+        );
+      for (const charge of result.observations)
+        await d.repository.reconcile(
+          work,
+          parse(paymentObservationSchema, charge),
+          d.clock.now(),
+        );
+      await d.repository.saveRecovery(
+        work,
+        parse(paymentActionSchema.shape.recovery, result.recovery) ?? null,
+        d.clock.now(),
+      );
+      return d.repository.readWork(work);
+    }
     let observation = null;
     try {
       observation = parse(
@@ -90,7 +118,9 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
             snapshot: result.action.snapshot,
           }),
         );
-      } catch {
+      } catch (error: unknown) {
+        if (error instanceof PaymentCreationNotAttempted)
+          return d.repository.creationRejected(result.work, d.clock.now());
         /* The persisted intent owns this operation, including a crash before/after I/O. */
       }
       return d.repository.creation(result.work, checkout, d.clock.now());
@@ -120,7 +150,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         throw new ApplicationError("FORBIDDEN");
       const work = await d.repository.receive(event, d.clock.now());
       // Receipt commits first; a crash here is recovered from the persisted action.
-      if (work) await reconcile(work);
+      if (work && !d.gateway.deferEvents) await reconcile(work);
       return { received: true };
     },
     async recover() {

@@ -376,6 +376,7 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.subscription_payment') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.subscription_payment, public.subscription_payment_event, public.subscription_payment_history, public.subscription_period, public.subscription_usage FROM app_runtime;
         REVOKE UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON public.subscription_payment FROM app_runtime;
+        IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='subscription_payment' AND column_name='recovery') THEN REVOKE UPDATE(recovery) ON public.subscription_payment FROM app_runtime; END IF;
       END IF;
       IF to_regclass('public.seller_issuer_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.seller_issuer_revision,public.seller_issuer_decision FROM app_runtime;
@@ -1128,7 +1129,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON subscription_quote FROM app_runtime;
       REVOKE ALL PRIVILEGES ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage FROM app_runtime;
       GRANT SELECT,INSERT ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage TO app_runtime;
-      GRANT UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON subscription_payment TO app_runtime;
+      GRANT UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending,recovery) ON subscription_payment TO app_runtime;
       ALTER TABLE subscription_payment FORCE ROW LEVEL SECURITY;
       ALTER TABLE subscription_payment_event FORCE ROW LEVEL SECURITY;
       ALTER TABLE subscription_payment_history FORCE ROW LEVEL SECURITY;
@@ -1239,6 +1240,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL ON FUNCTION public.pending_meta_outbound() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
     `);
+    await preparePaymentSecurity(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");

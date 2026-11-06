@@ -1,7 +1,7 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 /** Identifier-only recovery capabilities. No actor impersonation or browser session is involved. */
-export async function preparePaymentSecurity(pool: Pool) {
+export async function preparePaymentSecurity(pool: Pool | PoolClient) {
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.payment_worker_authorized(action uuid, tenant uuid)
     RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -12,7 +12,7 @@ export async function preparePaymentSecurity(pool: Pool) {
     RETURNS TABLE(id uuid,business_id uuid,recovery_key uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
     BEGIN RETURN QUERY SELECT a.id,a.business_id,a.recovery_key FROM public.subscription_payment a
       WHERE a.snapshot->'provider'->>'key'=provider_key AND a.snapshot->'provider'->>'account'=account_ref
-      AND (a.state IN ('pending','checkout','review_required') OR a.reconciliation_pending) AND a.started
+      AND (a.state IN ('pending','checkout','review_required') OR a.reconciliation_pending OR (a.state='confirmed' AND a.snapshot->'provider'->>'key'='razorpay')) AND a.started
       ORDER BY coalesce(a.reconciled_at,a.at),a.id LIMIT 50; END $$;
     CREATE OR REPLACE FUNCTION public.subscription_payment_target(provider_key text, account_ref text, operation uuid)
     RETURNS TABLE(id uuid,business_id uuid,recovery_key uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -30,7 +30,7 @@ export async function preparePaymentSecurity(pool: Pool) {
     RETURNS TABLE(id uuid,markets jsonb,discovery jsonb,automation jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
       IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT EXISTS(
         SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=current_setting('app.actor_id',true)) THEN RETURN; END IF;
-      RETURN QUERY SELECT p.id,p.snapshot->'quote'->'pricing'->'offer'->'markets',p.snapshot->'quote'->'initial'->'discovery',p.snapshot->'quote'->'initial'->'automation'
+      RETURN QUERY SELECT p.id,p.snapshot->'quote'->'pricing'->'offer'->'markets',coalesce(p.snapshot->'basis'->'discovery',p.snapshot->'quote'->'initial'->'discovery'),coalesce(p.snapshot->'basis'->'automation',p.snapshot->'quote'->'initial'->'automation')
       FROM public.subscription_period p WHERE p.business_id=tenant AND p.start<=at_time AND p.end>at_time ORDER BY p.end,p.id LIMIT 1;
     END $$;
     REVOKE ALL ON FUNCTION public.current_paid_scope(uuid,timestamptz) FROM PUBLIC;
@@ -50,5 +50,25 @@ export async function preparePaymentSecurity(pool: Pool) {
     REVOKE ALL ON FUNCTION public.payment_event_identity(text,text,text,text,uuid),public.capture_unmatched_payment_event(jsonb,timestamptz) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.payment_event_identity(text,text,text,text,uuid),public.capture_unmatched_payment_event(jsonb,timestamptz) TO app_runtime;
     GRANT EXECUTE ON FUNCTION public.payment_worker_authorized(uuid,uuid),public.pending_subscription_payments(text,text),public.subscription_payment_target(text,text,uuid) TO app_runtime;
+    CREATE OR REPLACE FUNCTION public.subscription_payment_reference_target(provider_key text,account_ref text,subscription_ref text)
+    RETURNS TABLE(id uuid,business_id uuid,recovery_key uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
+      RETURN QUERY SELECT a.id,a.business_id,a.recovery_key FROM public.subscription_payment a
+      WHERE a.started AND a.snapshot->'provider'->>'key'=provider_key AND a.snapshot->'provider'->>'account'=account_ref AND a.checkout->>'subscriptionId'=subscription_ref;
+    END $$;
+    CREATE OR REPLACE FUNCTION public.payment_renewal_context(action uuid,tenant uuid)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE country text; mode text; BEGIN
+      IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT public.payment_worker_authorized(action,tenant) THEN RETURN NULL; END IF;
+      SELECT (SELECT p.profile->'address'->>'country' FROM public.billing_profile_revision p WHERE p.business_id=tenant ORDER BY p.version DESC LIMIT 1), CASE WHEN a.snapshot->'provider'->>'mode'='live' THEN 'live' ELSE 'fixture' END INTO country,mode FROM public.subscription_payment a WHERE a.id=action AND a.business_id=tenant AND a.started;
+      IF NOT FOUND THEN RETURN NULL; END IF;
+      RETURN jsonb_build_object(
+        'history',coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.version) FROM public.billing_profile_revision p WHERE p.business_id=tenant),'[]'::jsonb),
+        'reviews',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.version) FROM public.billing_profile_review r WHERE r.business_id=tenant),'[]'::jsonb),
+        'files',coalesce((SELECT jsonb_agg(jsonb_build_object('id',f.id,'state',f.state,'sha256',f.sha256,'retentionUntil',f.retention_until)) FROM public.business_file f WHERE f.business_id=tenant AND EXISTS(SELECT 1 FROM public.billing_profile_revision p, jsonb_array_elements(p.evidence) e WHERE p.business_id=tenant AND e->>'fileId'=f.id::text)),'[]'::jsonb),
+        'revisions',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.key,r.version) FROM public.tax_rule_revision r WHERE r.rule->>'mode'=mode AND r.rule->>'customerCountry'=country AND EXISTS(SELECT 1 FROM public.subscription_payment a,jsonb_array_elements(a.snapshot->'quote'->'renewal'->'lines') l WHERE a.id=action AND l->>'kind'=r.rule->>'productCode')),'[]'::jsonb),
+        'decisions',coalesce((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.version,d.id) FROM public.tax_rule_decision d JOIN public.tax_rule_revision r ON r.id=d.revision_id WHERE r.rule->>'mode'=mode AND r.rule->>'customerCountry'=country),'[]'::jsonb)
+      );
+    END $$;
+    REVOKE ALL ON FUNCTION public.subscription_payment_reference_target(text,text,text),public.payment_renewal_context(uuid,uuid) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.subscription_payment_reference_target(text,text,text),public.payment_renewal_context(uuid,uuid) TO app_runtime;
   `);
 }
