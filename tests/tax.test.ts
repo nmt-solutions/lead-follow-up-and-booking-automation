@@ -303,6 +303,7 @@ describe("Subscription tax at the public application seam", () => {
       tax.resolve(owner, business.id, resolution),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const resolved = await tax.resolve(operator, business.id, resolution);
+    expect(resolved.reasons).toEqual([]);
     expect(resolved).toMatchObject({
       resolvesId: original.id,
       status: "calculated",

@@ -79,7 +79,9 @@ async function append(
       throw new ApplicationError("CONFLICT");
     return previous;
   }
-  const billing = await readBillingWorkspace(tx, businessId, at, true);
+  // The shared Business lock also serializes ordinary file mutation commands.
+  // Keep this evidence query read-only: tax operators have no file-update policy.
+  const billing = await readBillingWorkspace(tx, businessId, at);
   if (
     billing.version !== input.expectedProfileVersion ||
     billing.reviewVersion !== input.expectedReviewVersion

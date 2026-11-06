@@ -17,7 +17,6 @@ export async function readBillingWorkspace(
   tx: Transaction,
   businessId: string,
   at: Date,
-  lockEvidence = false,
 ) {
   const rows = await tx
     .select()
@@ -34,11 +33,10 @@ export async function readBillingWorkspace(
     reviews.map((row) => ({ ...row, at: row.at.toISOString() })),
   );
   for (const evidence of state.current?.evidence ?? []) {
-    const query = tx
+    const [file] = await tx
       .select()
       .from(businessFile)
       .where(eq(businessFile.id, evidence.fileId));
-    const [file] = lockEvidence ? await query.for("share") : await query;
     if (
       !file ||
       file.state !== "ready" ||
