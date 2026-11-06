@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import type {
@@ -8,19 +8,160 @@ import type {
   MetaCompletion,
   MetaObservation,
   WhatsAppReason,
+  MetaEvidenceReview,
+  MetaEvidenceRevocation,
+  MetaEvidenceView,
 } from "../models/whatsapp";
-import { whatsAppBilling } from "../models/whatsapp";
+import {
+  whatsAppBilling,
+  metaEvidenceReviewSchema,
+  metaEvidenceRevocationSchema,
+} from "../models/whatsapp";
 import { ApplicationError } from "../models/application-error";
 import type { MetaProvider } from "../whatsapp/provider";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { requireSalesSession } from "./sales-session";
-import { whatsAppConnection, whatsAppOauth, whatsAppEvent } from "./schema";
+import { hasMfa, operatorMfaLifetime } from "../auth/access";
+import {
+  whatsAppConnection,
+  whatsAppOauth,
+  whatsAppEvent,
+  whatsAppEvidence,
+  platformOperator,
+  membership,
+  session,
+  user,
+} from "./schema";
 
 type Connection = typeof whatsAppConnection.$inferSelect;
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 
 export function createWhatsAppRepository(database: Database, clock: Clock) {
+  async function reviewer<T>(
+    actor: WorkIdentity,
+    businessId: string,
+    operation: (tx: Transaction) => Promise<T>,
+  ) {
+    return scoped(
+      database,
+      actor,
+      businessId,
+      async (tx) => {
+        // Recheck persisted authority, session and factor inside the protected
+        // transaction. The INSERT policy also requires the current reviewer grant.
+        const [operator] = await tx
+          .select()
+          .from(platformOperator)
+          .where(eq(platformOperator.userId, actor.userId));
+        if (!operator?.whatsAppReview) throw new ApplicationError("FORBIDDEN");
+        const [currentSession] = await tx
+          .select({ token: session.token, expiresAt: session.expiresAt })
+          .from(session)
+          .innerJoin(user, eq(user.id, session.userId))
+          .where(
+            and(
+              eq(session.id, actor.sessionId),
+              eq(session.userId, actor.userId),
+            ),
+          );
+        if (!currentSession || currentSession.expiresAt <= clock.now())
+          throw new ApplicationError("UNAUTHENTICATED");
+        if (
+          !(await hasMfa(
+            tx,
+            currentSession.token,
+            clock.now(),
+            operatorMfaLifetime,
+          ))
+        )
+          throw new ApplicationError("MFA_REQUIRED");
+        const [member] = await tx
+          .select()
+          .from(membership)
+          .where(
+            and(
+              eq(membership.businessId, businessId),
+              eq(membership.userId, actor.userId),
+            ),
+          );
+        if (member) throw new ApplicationError("FORBIDDEN");
+        return operation(tx);
+      },
+      { lock: true },
+    );
+  }
+  async function evidence(
+    tx: Transaction,
+    businessId: string,
+    row: Connection | undefined,
+    provider: MetaProvider,
+  ): Promise<MetaEvidenceView> {
+    const rows = await tx
+      .select()
+      .from(whatsAppEvidence)
+      .where(eq(whatsAppEvidence.businessId, businessId))
+      .orderBy(asc(whatsAppEvidence.version));
+    const history = rows.map((r) => {
+      const review = metaEvidenceReviewSchema.safeParse(r.review);
+      const revocation = metaEvidenceRevocationSchema.safeParse(r.revocation);
+      return {
+        id: r.id,
+        version: r.version,
+        connectionId: r.connectionId,
+        actorId: r.actorId,
+        at: r.at.toISOString(),
+        review: review.success ? review.data : null,
+        revocation: revocation.success ? revocation.data : null,
+        invalid:
+          (r.review !== null && !review.success) ||
+          (r.revocation !== null && !revocation.success),
+      };
+    });
+    const latest = rows.filter((r) => r.review !== null).at(-1);
+    const parsed = metaEvidenceReviewSchema.safeParse(latest?.review);
+    const review = parsed.success ? parsed.data : null;
+    let status: MetaEvidenceView["status"] = "missing";
+    if (latest && !review) status = "stale";
+    if (latest && review) {
+      if (history.some((r) => r.version >= latest.version && r.invalid))
+        status = "stale";
+      else if (history.some((r) => r.revocation?.reviewId === latest.id))
+        status = "revoked";
+      else if (new Date(review.validUntil) <= clock.now()) status = "expired";
+      else if (
+        !row ||
+        latest.at > clock.now() ||
+        new Date(review.validUntil) <= latest.at ||
+        [review.controlEvidence, review.paymentEvidence].some(
+          (e) =>
+            new Date(e.observedAt) > latest.at ||
+            new Date(e.observedAt) < row.termsAcceptedAt,
+        ) ||
+        row.status !== "connected" ||
+        !row.credentials ||
+        !row.assets ||
+        row.id !== review.connectionId ||
+        latest.connectionId !== review.connectionId ||
+        latest.version !== review.expectedEvidenceVersion + 1 ||
+        row.version !== review.expectedVersion ||
+        row.providerKey !== review.providerKey ||
+        provider.key !== review.providerKey ||
+        row.configuration.requestedNumber !== review.requestedNumber ||
+        row.assets.portfolioId !== review.assets.portfolioId ||
+        row.assets.wabaId !== review.assets.wabaId ||
+        row.assets.phoneNumberId !== review.assets.phoneNumberId
+      )
+        status = "stale";
+      else status = "approved";
+    }
+    return {
+      version: rows.at(-1)?.version ?? 0,
+      status,
+      provenance: status === "approved" ? "assisted_review" : "unverified",
+      history,
+    };
+  }
   async function authorized<T>(
     actor: WorkIdentity,
     businessId: string,
@@ -91,57 +232,168 @@ export function createWhatsAppRepository(database: Database, clock: Clock) {
     if (!row) throw new ApplicationError("NOT_FOUND");
     if (row.version !== version) throw new ApplicationError("CONFLICT");
   }
+  async function workspace(
+    tx: Transaction,
+    businessId: string,
+    provider: MetaProvider,
+    canManage: boolean,
+  ): Promise<WhatsAppView> {
+    const row = await current(tx, businessId);
+    const paymentEvidence = await evidence(tx, businessId, row, provider);
+    const issues: string[] = [];
+    for (const [name, ready] of Object.entries(provider.setup))
+      if (!ready && name !== "coexistence") issues.push(name);
+    if (!row) issues.push("connection_required");
+    if (row?.status !== "connected") issues.push("authorization_required");
+    if (
+      !row?.observation ||
+      row.providerKey !== provider.key ||
+      new Date(row.observation.validUntil) <= clock.now()
+    )
+      issues.push("current_provider_check_required");
+    else
+      for (const [name, check] of Object.entries(row.observation.checks)) {
+        if (
+          check !== "confirmed" &&
+          !(
+            name === "customer_payment_method" &&
+            check === "unknown" &&
+            paymentEvidence.status === "approved"
+          )
+        )
+          issues.push(name);
+      }
+    if (
+      row?.configuration.numberSource === "business_app" &&
+      !provider.setup.coexistence
+    )
+      issues.push("unsupported_coexistence");
+    return {
+      canManage,
+      paymentEvidence,
+      setup: provider.setup,
+      connection: row
+        ? {
+            id: row.id,
+            version: row.version,
+            configuration: row.configuration,
+            status: row.status,
+            reason: row.reason,
+            termsAcceptedAt: row.termsAcceptedAt.toISOString(),
+            observation: row.observation,
+            assets: row.assets,
+            providerKey: row.providerKey,
+          }
+        : null,
+      readiness: {
+        onboardingReady: issues.length === 0,
+        automationReady: false,
+        issues,
+      },
+      billing: whatsAppBilling,
+    };
+  }
   return {
     ensureAccess: (actor: WorkIdentity, businessId: string) =>
       authorized(actor, businessId, async () => {}),
-    async workspace(
+    workspace(actor: WorkIdentity, businessId: string, provider: MetaProvider) {
+      return authorized(actor, businessId, (tx, canManage) =>
+        workspace(tx, businessId, provider, canManage),
+      );
+    },
+    reviewWorkspace(
       actor: WorkIdentity,
       businessId: string,
       provider: MetaProvider,
-    ): Promise<WhatsAppView> {
-      return authorized(actor, businessId, async (tx, canManage) => {
+    ) {
+      return reviewer(actor, businessId, (tx) =>
+        workspace(tx, businessId, provider, false),
+      );
+    },
+    approveEvidence(
+      actor: WorkIdentity,
+      businessId: string,
+      input: MetaEvidenceReview,
+      provider: MetaProvider,
+    ) {
+      return reviewer(actor, businessId, async (tx) => {
         const row = await current(tx, businessId);
-        const issues: string[] = [];
-        for (const [name, ready] of Object.entries(provider.setup))
-          if (!ready && name !== "coexistence") issues.push(name);
-        if (!row) issues.push("connection_required");
-        if (row?.status !== "connected") issues.push("authorization_required");
+        expected(row, input.expectedVersion);
+        const prior = await evidence(tx, businessId, row, provider);
         if (
-          !row?.observation ||
-          row.providerKey !== provider.key ||
-          new Date(row.observation.validUntil) <= clock.now()
+          prior.version !== input.expectedEvidenceVersion ||
+          row.id !== input.connectionId ||
+          row.providerKey !== input.providerKey ||
+          provider.key !== input.providerKey ||
+          row.status !== "connected" ||
+          !row.credentials ||
+          !row.assets ||
+          row.configuration.requestedNumber !== input.requestedNumber ||
+          row.assets.portfolioId !== input.assets.portfolioId ||
+          row.assets.wabaId !== input.assets.wabaId ||
+          row.assets.phoneNumberId !== input.assets.phoneNumberId
         )
-          issues.push("current_provider_check_required");
-        else
-          for (const [name, check] of Object.entries(row.observation.checks)) {
-            if (check !== "confirmed") issues.push(name);
-          }
+          throw new ApplicationError("CONFLICT");
         if (
-          row?.configuration.numberSource === "business_app" &&
-          !provider.setup.coexistence
+          !row.observation ||
+          new Date(row.observation.validUntil) <= clock.now() ||
+          row.observation.checks.customer_ownership !== "confirmed" ||
+          row.observation.checks.permissions !== "confirmed" ||
+          row.observation.checks.number_verified !== "confirmed"
         )
-          issues.push("unsupported_coexistence");
-        return {
-          canManage,
-          setup: provider.setup,
-          connection: row
-            ? {
-                id: row.id,
-                version: row.version,
-                configuration: row.configuration,
-                status: row.status,
-                reason: row.reason,
-                termsAcceptedAt: row.termsAcceptedAt.toISOString(),
-                observation: row.observation,
-              }
-            : null,
-          readiness: {
-            onboardingReady: issues.length === 0,
-            automationReady: false,
-            issues,
-          },
-          billing: whatsAppBilling,
-        };
+          throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+        if (
+          new Date(input.validUntil) <= clock.now() ||
+          [input.controlEvidence, input.paymentEvidence].some(
+            (e) =>
+              new Date(e.observedAt) > clock.now() ||
+              new Date(e.observedAt) < row.termsAcceptedAt,
+          )
+        )
+          throw new ApplicationError("INVALID_INPUT");
+        await tx.insert(whatsAppEvidence).values({
+          id: randomUUID(),
+          businessId,
+          connectionId: row.id,
+          version: prior.version + 1,
+          actorId: actor.userId,
+          sessionId: actor.sessionId,
+          at: clock.now(),
+          review: input,
+        });
+        return workspace(tx, businessId, provider, false);
+      });
+    },
+    revokeEvidence(
+      actor: WorkIdentity,
+      businessId: string,
+      input: MetaEvidenceRevocation,
+      provider: MetaProvider,
+    ) {
+      return reviewer(actor, businessId, async (tx) => {
+        const row = await current(tx, businessId);
+        expected(row, input.expectedVersion);
+        const prior = await evidence(tx, businessId, row, provider);
+        const approval = prior.history.find(
+          (e) => e.id === input.reviewId && e.review,
+        );
+        if (
+          prior.version !== input.expectedEvidenceVersion ||
+          !approval ||
+          prior.history.some((e) => e.revocation?.reviewId === input.reviewId)
+        )
+          throw new ApplicationError("CONFLICT");
+        await tx.insert(whatsAppEvidence).values({
+          id: randomUUID(),
+          businessId,
+          connectionId: row.id,
+          version: prior.version + 1,
+          actorId: actor.userId,
+          sessionId: actor.sessionId,
+          at: clock.now(),
+          revocation: input,
+        });
+        return workspace(tx, businessId, provider, false);
       });
     },
     save(

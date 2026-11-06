@@ -111,8 +111,62 @@ export const whatsAppBilling = {
   disclosure:
     "Your Business pays Meta directly using its own payment method. Meta messaging charges are separate from our automation subscription and allowances, and excluded from operator-paid spend. No prepaid Meta credit or paid BSP is included. Review current rates and billing in WhatsApp Manager.",
 } as const;
+// References point to redacted evidence held in the operator's access-controlled
+// case archive. Accept identifiers/digests only, never URLs, card details or tokens.
+const evidenceReferenceSchema = z.strictObject({
+  reference: z.string().regex(/^[A-Z][A-Z0-9]{1,15}-[A-Z0-9-]{6,64}$/),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  observedAt: z.iso.datetime(),
+});
+export const metaEvidenceReviewSchema = z.strictObject({
+  expectedVersion: z.number().int().positive(),
+  expectedEvidenceVersion: z.number().int().nonnegative(),
+  connectionId: z.uuid(),
+  assets: metaAssetsSchema,
+  providerKey: z.string().min(1).max(200),
+  requestedNumber: z.string().regex(/^\+[1-9][0-9]{6,14}$/),
+  controlEvidence: evidenceReferenceSchema,
+  paymentEvidence: evidenceReferenceSchema,
+  validUntil: z.iso.datetime(),
+  customerControlsAssets: z.literal(true),
+  customerPaysMetaDirectly: z.literal(true),
+  noPlatformCreditLine: z.literal(true),
+});
+export type MetaEvidenceReview = z.infer<typeof metaEvidenceReviewSchema>;
+export const metaEvidenceRevocationSchema = z.strictObject({
+  expectedVersion: z.number().int().positive(),
+  expectedEvidenceVersion: z.number().int().nonnegative(),
+  reviewId: z.uuid(),
+  reason: z.enum([
+    "payment_changed",
+    "control_changed",
+    "evidence_incorrect",
+    "customer_request",
+  ]),
+});
+export type MetaEvidenceRevocation = z.infer<
+  typeof metaEvidenceRevocationSchema
+>;
+export const metaEvidenceEventSchema = z.object({
+  invalid: z.boolean(),
+  id: z.uuid(),
+  version: z.number().int().positive(),
+  connectionId: z.uuid(),
+  actorId: z.string(),
+  at: z.iso.datetime(),
+  review: metaEvidenceReviewSchema.nullable(),
+  revocation: metaEvidenceRevocationSchema.nullable(),
+});
+export const metaEvidenceViewSchema = z.object({
+  version: z.number().int().nonnegative(),
+  status: z.enum(["missing", "approved", "expired", "revoked", "stale"]),
+  provenance: z.enum(["assisted_review", "unverified"]),
+  history: z.array(metaEvidenceEventSchema),
+});
+export type MetaEvidenceView = z.infer<typeof metaEvidenceViewSchema>;
 export const whatsAppViewSchema = z.object({
   canManage: z.boolean(),
+  paymentEvidence: metaEvidenceViewSchema,
   setup: whatsAppSetupSchema,
   connection: z
     .object({
@@ -122,6 +176,8 @@ export const whatsAppViewSchema = z.object({
       status: whatsAppStatusSchema,
       reason: whatsAppReasonSchema.nullable(),
       termsAcceptedAt: z.iso.datetime(),
+      assets: metaAssetsSchema.nullable(),
+      providerKey: z.string().nullable(),
       observation: metaObservationSchema.nullable(),
     })
     .nullable(),

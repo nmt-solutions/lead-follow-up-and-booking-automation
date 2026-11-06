@@ -7,6 +7,8 @@ import {
   metaCompletionSchema,
   metaTokenSchema,
   metaObservationSchema,
+  metaEvidenceReviewSchema,
+  metaEvidenceRevocationSchema,
   type MetaObservation,
   type WhatsAppReason,
 } from "../models/whatsapp";
@@ -85,6 +87,40 @@ export function createWhatsAppApplication<Credentials>(options: {
         : "provider_unavailable";
   }
   return {
+    async reviewWorkspace(credentials: Credentials, id: unknown) {
+      const c = await context(credentials, id);
+      return options.repository.reviewWorkspace(
+        c.actor,
+        c.businessId,
+        options.provider,
+      );
+    },
+    async approveEvidence(
+      credentials: Credentials,
+      id: unknown,
+      input: unknown,
+    ) {
+      const c = await context(credentials, id);
+      return options.repository.approveEvidence(
+        c.actor,
+        c.businessId,
+        parse(metaEvidenceReviewSchema, input),
+        options.provider,
+      );
+    },
+    async revokeEvidence(
+      credentials: Credentials,
+      id: unknown,
+      input: unknown,
+    ) {
+      const c = await context(credentials, id);
+      return options.repository.revokeEvidence(
+        c.actor,
+        c.businessId,
+        parse(metaEvidenceRevocationSchema, input),
+        options.provider,
+      );
+    },
     async workspace(credentials: Credentials, id: unknown) {
       const c = await context(credentials, id);
       return options.repository.workspace(

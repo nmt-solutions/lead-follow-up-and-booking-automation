@@ -13,6 +13,32 @@ export function createWhatsAppHttp(options: {
   const respond = createResponder(options.reportFailure);
   const body = createJsonBodyReader(options.origin, 16 * 1024);
   return {
+    reviewGet: (request: Request, businessId: string) =>
+      respond(async () =>
+        dataResponse(
+          await options.application.reviewWorkspace(
+            request.headers,
+            businessId,
+          ),
+        ),
+      ),
+    reviewCommand: (request: Request, businessId: string) =>
+      respond(async () => {
+        const parsed = z
+          .strictObject({
+            action: z.enum(["approveEvidence", "revokeEvidence"]),
+            input: z.unknown(),
+          })
+          .safeParse(await body(request));
+        if (!parsed.success) throw new ApplicationError("INVALID_INPUT");
+        return dataResponse(
+          await options.application[parsed.data.action](
+            request.headers,
+            businessId,
+            parsed.data.input,
+          ),
+        );
+      }),
     get: (request: Request, businessId: string) =>
       respond(async () =>
         dataResponse(

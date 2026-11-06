@@ -52,6 +52,455 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
     customerPaysMeta: true,
     termsVersion: "direct_meta_v1",
   };
+  let evidenceNumber = 410000;
+  async function paymentSetup(name: string) {
+    const f = await setup(`evidence-${name}`);
+    const m = metaFixture(h.clock);
+    m.checks.customer_payment_method = "unknown";
+    const a = app(m.provider);
+    await a.save(f.credentials, f.businessId, {
+      expectedVersion: 0,
+      configuration,
+    });
+    const start = await a.start(f.credentials, f.businessId, {
+      expectedVersion: 1,
+    });
+    const assets = {
+      portfolioId: "100001",
+      wabaId: "200001",
+      phoneNumberId: String(++evidenceNumber),
+    };
+    const state = await a.complete(f.credentials, f.businessId, {
+      state: start.state,
+      event: "FINISH",
+      code: "evidence-code",
+      assets,
+    });
+    const reviewer = await h.signIn(`reviewer-${name}@example.com`);
+    const reviewerActor = await h.authenticate(reviewer);
+    await h.admin.query(
+      "INSERT INTO platform_operator (user_id, whatsapp_review) VALUES ($1, true)",
+      [reviewerActor.userId],
+    );
+    const input = {
+      expectedVersion: start.version,
+      expectedEvidenceVersion: 0,
+      connectionId: state.connection?.id,
+      assets,
+      providerKey: m.provider.key,
+      requestedNumber: configuration.requestedNumber,
+      controlEvidence: {
+        reference: "META-CONTROL-2026-001",
+        sha256: "ab".repeat(32),
+        observedAt: h.clock.now().toISOString(),
+      },
+      paymentEvidence: {
+        reference: "META-BILLING-2026-001",
+        sha256: "cd".repeat(32),
+        observedAt: h.clock.now().toISOString(),
+      },
+      validUntil: "2026-11-05T09:02:00.000Z",
+      customerControlsAssets: true,
+      customerPaysMetaDirectly: true,
+      noPlatformCreditLine: true,
+    };
+    return { ...f, a, m, reviewer, reviewerActor, input };
+  }
+  it("fails closed on malformed persisted review evidence without exposing its contents", async () => {
+    const f = await paymentSetup("malformed-storage");
+    await f.a.approveEvidence(f.reviewer, f.businessId, f.input);
+    await h.admin.query(
+      "UPDATE whatsapp_evidence SET review = jsonb_set(review, '{validUntil}', '\"not-a-date\"') WHERE business_id=$1",
+      [f.businessId],
+    );
+    const state = await f.a.workspace(f.credentials, f.businessId);
+    expect(state.readiness.onboardingReady).toBe(false);
+    expect(state.paymentEvidence).toMatchObject({
+      status: "stale",
+      provenance: "unverified",
+    });
+    expect(JSON.stringify(state)).not.toContain("not-a-date");
+  });
+  it("expires and revokes attributable reviews without erasing history or falling back to older approvals", async () => {
+    const f = await paymentSetup("lifecycle");
+    expect(
+      (await f.a.workspace(f.credentials, f.businessId)).paymentEvidence.status,
+    ).toBe("missing");
+    const approved = await f.a.approveEvidence(
+      f.reviewer,
+      f.businessId,
+      f.input,
+    );
+    expect(approved.paymentEvidence.history[0]).toMatchObject({
+      actorId: f.reviewerActor.userId,
+      at: "2026-11-05T09:00:00.000Z",
+      review: {
+        assets: f.input.assets,
+        connectionId: f.input.connectionId,
+        expectedVersion: 2,
+      },
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    const expired = await f.a.workspace(f.credentials, f.businessId);
+    expect(expired.paymentEvidence.status).toBe("expired");
+    expect(expired.readiness.issues).toContain("customer_payment_method");
+    const renewed = await f.a.approveEvidence(f.reviewer, f.businessId, {
+      ...f.input,
+      expectedEvidenceVersion: 1,
+      validUntil: "2026-11-05T09:04:00.000Z",
+    });
+    expect(renewed.readiness.onboardingReady).toBe(true);
+    const revocation = {
+      expectedVersion: 2,
+      expectedEvidenceVersion: 2,
+      reviewId: renewed.paymentEvidence.history[1].id,
+      reason: "payment_changed",
+    };
+    await f.a.revokeEvidence(f.reviewer, f.businessId, revocation);
+    const revoked = await f.a.workspace(f.credentials, f.businessId);
+    expect(revoked.paymentEvidence).toMatchObject({
+      status: "revoked",
+      version: 3,
+      provenance: "unverified",
+    });
+    expect(revoked.paymentEvidence.history).toHaveLength(3);
+    expect(revoked.paymentEvidence.history[0]).toEqual(
+      approved.paymentEvidence.history[0],
+    );
+    expect(revoked.readiness.onboardingReady).toBe(false);
+    await expect(
+      f.a.revokeEvidence(f.reviewer, f.businessId, revocation),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+  it("invalidates review binding after scope changes, disconnect and provider replacement", async () => {
+    const f = await paymentSetup("binding-lifecycle");
+    await f.a.approveEvidence(f.reviewer, f.businessId, f.input);
+    expect(
+      (
+        await app({ ...f.m.provider, key: "different-app" }).workspace(
+          f.credentials,
+          f.businessId,
+        )
+      ).paymentEvidence.status,
+    ).toBe("stale");
+    await f.a.disconnect(f.credentials, f.businessId, { expectedVersion: 2 });
+    expect(
+      (await f.a.workspace(f.credentials, f.businessId)).paymentEvidence,
+    ).toMatchObject({ status: "stale", version: 1 });
+    await f.a.save(f.credentials, f.businessId, {
+      expectedVersion: 3,
+      configuration: {
+        ...configuration,
+        portfolioId: "100002",
+        requestedNumber: "+14155550124",
+      },
+    });
+    const state = await f.a.workspace(f.credentials, f.businessId);
+    expect(state.paymentEvidence.history).toHaveLength(1);
+    expect(state.readiness.onboardingReady).toBe(false);
+    await expect(
+      f.a.approveEvidence(f.reviewer, f.businessId, {
+        ...f.input,
+        expectedEvidenceVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+  it("rejects malformed, stale and mismatched reviews, foreign assets and customer self-authorization", async () => {
+    const f = await paymentSetup("invalid-input");
+    const other = await setup("evidence-foreign");
+    const invalid = [
+      {
+        ...f.input,
+        paymentEvidence: {
+          ...f.input.paymentEvidence,
+          reference: "https://billing.example/card?secret=123",
+        },
+      },
+      {
+        ...f.input,
+        controlEvidence: { ...f.input.controlEvidence, sha256: "unverified" },
+      },
+      {
+        ...f.input,
+        controlEvidence: {
+          ...f.input.controlEvidence,
+          observedAt: "2026-11-04T09:00:00.000Z",
+        },
+      },
+      {
+        ...f.input,
+        paymentEvidence: {
+          ...f.input.paymentEvidence,
+          observedAt: "2026-11-06T09:00:00.000Z",
+        },
+      },
+      { ...f.input, validUntil: "2026-11-05T09:00:00.000Z" },
+      { ...f.input, customerPaysMetaDirectly: false },
+      { ...f.input, cardNumber: "must-never-be-accepted" },
+    ];
+    for (const input of invalid)
+      await expect(
+        f.a.approveEvidence(f.reviewer, f.businessId, input),
+      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    for (const input of [
+      { ...f.input, expectedVersion: 1 },
+      { ...f.input, connectionId: crypto.randomUUID() },
+      { ...f.input, providerKey: "different-app" },
+      { ...f.input, requestedNumber: "+14155550125" },
+      ...["portfolioId", "wabaId", "phoneNumberId"].map((field) => ({
+        ...f.input,
+        assets: { ...f.input.assets, [field]: "999999" },
+      })),
+    ])
+      await expect(
+        f.a.approveEvidence(f.reviewer, f.businessId, input),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      f.a.approveEvidence(f.reviewer, other.businessId, f.input),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      f.a.workspace(other.credentials, f.businessId),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      f.a.approveEvidence(f.credentials, f.businessId, f.input),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const owner = await h.authenticate(f.credentials);
+    await h.admin.query(
+      "INSERT INTO platform_operator (user_id, whatsapp_review) VALUES ($1, true)",
+      [owner.userId],
+    );
+    await expect(
+      f.a.approveEvidence(f.credentials, f.businessId, f.input),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(
+      (await f.a.workspace(f.credentials, f.businessId)).paymentEvidence
+        .version,
+    ).toBe(0);
+  });
+  it.each(["grant", "mfa", "session", "scope"] as const)(
+    "rechecks %s races after public authentication and before appending a review",
+    async (kind) => {
+      const f = await paymentSetup(`race-${kind}`);
+      const raced = createWhatsAppApplication({
+        authenticate: async (credentials: Headers) => {
+          const actor = await h.access.authenticateForWork(credentials);
+          if (kind === "grant")
+            await h.admin.query(
+              "UPDATE platform_operator SET whatsapp_review=false WHERE user_id=$1",
+              [actor.userId],
+            );
+          if (kind === "mfa")
+            await h.admin.query(
+              "UPDATE session SET mfa_verified_at=null WHERE id=$1",
+              [actor.sessionId],
+            );
+          if (kind === "session")
+            await h.admin.query(
+              "UPDATE session SET expires_at=$2 WHERE id=$1",
+              [actor.sessionId, h.clock.now()],
+            );
+          if (kind === "scope")
+            await f.a.save(f.credentials, f.businessId, {
+              expectedVersion: 2,
+              configuration: {
+                ...configuration,
+                requestedNumber: "+14155550124",
+              },
+            });
+          return actor;
+        },
+        repository: createWhatsAppRepository(
+          runtimeDatabase(h.runtime),
+          h.clock,
+        ),
+        provider: f.m.provider,
+        clock: h.clock,
+        vault,
+      });
+      await expect(
+        raced.approveEvidence(f.reviewer, f.businessId, f.input),
+      ).rejects.toMatchObject({
+        code: {
+          grant: "FORBIDDEN",
+          mfa: "MFA_REQUIRED",
+          session: "UNAUTHENTICATED",
+          scope: "CONFLICT",
+        }[kind],
+      });
+      expect(
+        (await f.a.workspace(f.credentials, f.businessId)).paymentEvidence
+          .version,
+      ).toBe(0);
+    },
+  );
+  it("requires fresh reviewer MFA and serializes simultaneous approvals against the evidence version", async () => {
+    const f = await paymentSetup("concurrency");
+    const results = await Promise.allSettled([
+      f.a.approveEvidence(f.reviewer, f.businessId, f.input),
+      f.a.approveEvidence(f.reviewer, f.businessId, f.input),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({
+      reason: { code: "CONFLICT" },
+    });
+    h.clock.set("2026-11-05T09:15:00Z");
+    await expect(
+      f.a.reviewWorkspace(f.reviewer, f.businessId),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    await expect(
+      f.a.revokeEvidence(f.reviewer, f.businessId, {
+        expectedVersion: 2,
+        expectedEvidenceVersion: 1,
+        reviewId: (await f.a.workspace(f.credentials, f.businessId))
+          .paymentEvidence.history[0].id,
+        reason: "control_changed",
+      }),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    expect(
+      (await f.a.workspace(f.credentials, f.businessId)).paymentEvidence
+        .version,
+    ).toBe(1);
+  });
+  it("exposes authorized review commands with CSRF protection and safe validation failures", async () => {
+    const f = await paymentSetup("http");
+    const http = createWhatsAppHttp({
+      application: f.a,
+      origin: "http://localhost:3000",
+      reportFailure: (d) => h.diagnostics.push(d),
+    });
+    const request = (
+      credentials: Headers,
+      input: unknown,
+      origin = "http://localhost:3000",
+    ) =>
+      new Request("http://localhost:3000/api/platform/whatsapp", {
+        method: "POST",
+        headers: {
+          cookie: credentials.get("cookie") ?? "",
+          origin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "approveEvidence", input }),
+      });
+    expect(
+      (
+        await http.reviewCommand(
+          request(f.reviewer, f.input, "https://attacker.example"),
+          f.businessId,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await http.reviewCommand(request(f.credentials, f.input), f.businessId))
+        .status,
+    ).toBe(403);
+    const invalid = await http.reviewCommand(
+      request(f.reviewer, {
+        ...f.input,
+        paymentEvidence: { reference: "private-card-secret" },
+      }),
+      f.businessId,
+    );
+    expect(invalid.status).toBe(400);
+    expect(await invalid.text()).not.toContain("private-card-secret");
+    expect(
+      (await http.reviewCommand(request(f.reviewer, f.input), f.businessId))
+        .status,
+    ).toBe(200);
+    const state = await http.reviewGet(
+      new Request("http://localhost:3000/api/platform/whatsapp", {
+        headers: f.reviewer,
+      }),
+      f.businessId,
+    );
+    expect(state.status).toBe(200);
+    expect(await state.text()).not.toMatch(/secret-customer-token|sessionId/);
+    expect(JSON.stringify(h.diagnostics)).not.toContain("private-card-secret");
+  });
+  it("preserves immutable evidence and restores restricted grants and policy expressions after schema reapplication", async () => {
+    const f = await paymentSetup("schema-evidence");
+    await f.a.approveEvidence(f.reviewer, f.businessId, f.input);
+    const before = await f.a.workspace(f.credentials, f.businessId);
+    await h.admin.query(
+      "GRANT UPDATE (review) ON whatsapp_evidence TO app_runtime",
+    );
+    await h.admin.query(
+      "ALTER POLICY whatsapp_evidence_read ON whatsapp_evidence USING (true)",
+    );
+    await h.reapplySchema();
+    await verifyRuntimeRole(h.runtime);
+    const after = await app(f.m.provider).workspace(
+      f.credentials,
+      f.businessId,
+    );
+    expect(after.paymentEvidence).toEqual(before.paymentEvidence);
+    expect(after.readiness).toEqual({
+      onboardingReady: true,
+      automationReady: false,
+      issues: [],
+    });
+    expect(
+      (await h.runtime.query("SELECT id FROM whatsapp_evidence")).rows,
+    ).toEqual([]);
+    await expect(
+      h.runtime.query("UPDATE whatsapp_evidence SET review=review"),
+    ).rejects.toMatchObject({ code: "42501" });
+    await expect(
+      h.runtime.query("DELETE FROM whatsapp_evidence"),
+    ).rejects.toMatchObject({ code: "42501" });
+    await expect(
+      h.runtime.query("UPDATE platform_operator SET whatsapp_review=true"),
+    ).rejects.toMatchObject({ code: "42501" });
+    const owner = await h.access.authenticateForWork(f.credentials);
+    const client = await h.runtime.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true)",
+        [owner.userId, f.businessId],
+      );
+      await expect(
+        client.query(
+          "INSERT INTO whatsapp_evidence (id,business_id,connection_id,version,actor_id,session_id,at,review) VALUES ($1,$2,$3,2,$4,$5,$6,$7)",
+          [
+            crypto.randomUUID(),
+            f.businessId,
+            f.input.connectionId,
+            owner.userId,
+            owner.sessionId,
+            h.clock.now(),
+            JSON.stringify(f.input),
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    const other = await setup("schema-evidence-other");
+    await expect(
+      f.a.workspace(other.credentials, f.businessId),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it.each(["missing", "unsupported"] as const)(
+    "does not override an explicit %s payment result with an assisted review",
+    async (check) => {
+      const f = await paymentSetup(`payment-${check}`);
+      await f.a.approveEvidence(f.reviewer, f.businessId, f.input);
+      f.m.checks.customer_payment_method = check;
+      const state = await f.a.refresh(f.credentials, f.businessId, {
+        expectedVersion: 2,
+      });
+      expect(
+        state.connection?.observation?.checks.customer_payment_method,
+      ).toBe(check);
+      expect(state.readiness).toEqual({
+        onboardingReady: false,
+        automationReady: false,
+        issues: ["customer_payment_method"],
+      });
+    },
+  );
   it("persists assisted number control and transfer terms without turning partial setup into readiness", async () => {
     const f = await setup("terms");
     await app().save(f.credentials, f.businessId, {
@@ -629,12 +1078,112 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
       automationReady: false,
       issues: ["customer_payment_method"],
     });
+    const reviewer = await h.signIn("whatsapp-graph-reviewer@example.com");
+    const reviewerActor = await h.authenticate(reviewer);
+    await h.admin.query(
+      "INSERT INTO platform_operator (user_id, whatsapp_review) VALUES ($1, true)",
+      [reviewerActor.userId],
+    );
+    const review = await a.reviewWorkspace(reviewer, f.businessId);
+    if (!review.connection) throw new Error("Missing selected account");
+    const reviewInput = {
+      expectedVersion: start.version,
+      expectedEvidenceVersion: 0,
+      connectionId: review.connection.id,
+      assets: {
+        portfolioId: "100001",
+        wabaId: "200001",
+        phoneNumberId: "300007",
+      },
+      providerKey: composition.provider.key,
+      requestedNumber: "+14155550123",
+      controlEvidence: {
+        reference: "META-CONTROL-2026-001",
+        sha256: "ab".repeat(32),
+        observedAt: h.clock.now().toISOString(),
+      },
+      paymentEvidence: {
+        reference: "META-BILLING-2026-001",
+        sha256: "cd".repeat(32),
+        observedAt: h.clock.now().toISOString(),
+      },
+      validUntil: "2026-11-05T09:01:00.000Z",
+      customerControlsAssets: true,
+      customerPaysMetaDirectly: true,
+      noPlatformCreditLine: true,
+    };
+    await expect(
+      a.approveEvidence(reviewer, f.businessId, {
+        ...reviewInput,
+        paymentEvidence: {
+          ...reviewInput.paymentEvidence,
+          sha256: "not-a-digest",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(
+      a.approveEvidence(reviewer, f.businessId, {
+        ...reviewInput,
+        assets: { ...reviewInput.assets, wabaId: "900099" },
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await a.approveEvidence(reviewer, f.businessId, reviewInput);
+    const reviewed = await app(composition.provider).workspace(
+      f.credentials,
+      f.businessId,
+    );
+    expect(reviewed.readiness).toEqual({
+      onboardingReady: true,
+      automationReady: false,
+      issues: [],
+    });
+    expect(reviewed.paymentEvidence).toMatchObject({
+      status: "approved",
+      provenance: "assisted_review",
+      version: 1,
+    });
+    // Graph still reports only what it established; the review has separate provenance.
+    expect(
+      reviewed.connection?.observation?.checks.customer_payment_method,
+    ).toBe("unknown");
     await expect(
       a.register(f.credentials, f.businessId, {
         expectedVersion: start.version,
         pin: "123456",
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+    onBizApp = false;
+    const unsupportedAfterReview = await a.refresh(
+      f.credentials,
+      f.businessId,
+      { expectedVersion: start.version },
+    );
+    expect(unsupportedAfterReview.readiness.issues).toEqual(["coexistence"]);
+    onBizApp = true;
+    h.clock.set("2026-11-05T09:01:00Z");
+    const expiredReview = await a.refresh(f.credentials, f.businessId, {
+      expectedVersion: start.version,
+    });
+    expect(expiredReview.paymentEvidence.status).toBe("expired");
+    expect(expiredReview.readiness.issues).toEqual(["customer_payment_method"]);
+    const renewedReview = await a.approveEvidence(reviewer, f.businessId, {
+      ...reviewInput,
+      expectedEvidenceVersion: 1,
+      validUntil: "2026-11-05T09:02:00.000Z",
+    });
+    expect(renewedReview.readiness.onboardingReady).toBe(true);
+    const revokedReview = await a.revokeEvidence(reviewer, f.businessId, {
+      expectedVersion: start.version,
+      expectedEvidenceVersion: 2,
+      reviewId: renewedReview.paymentEvidence.history[1].id,
+      reason: "payment_changed",
+    });
+    expect(revokedReview.paymentEvidence.status).toBe("revoked");
+    expect(revokedReview.readiness).toEqual({
+      onboardingReady: false,
+      automationReady: false,
+      issues: ["customer_payment_method"],
+    });
   });
   it("does not exchange codes for partial, expired or superseded signup sessions", async () => {
     const f = await setup("partial");

@@ -29,6 +29,7 @@ import {
   AlertDialogAction,
 } from "./ui/alert-dialog";
 import { MetaSignup, metaSignupSchema } from "./meta-signup";
+import { WhatsAppEvidenceStatus } from "./whatsapp-evidence-status";
 
 const issueLabels: Record<string, string> = {
   configured:
@@ -57,7 +58,7 @@ const issueLabels: Record<string, string> = {
   permissions:
     "Reconnect and grant the required business and WhatsApp permissions.",
   customer_payment_method:
-    "Add your own payment method in WhatsApp Manager. Customer-paid billing still needs account-specific verification; sign-in alone cannot confirm it.",
+    "Add your own payment method in WhatsApp Manager, then ask the onboarding operator to review your account-specific billing evidence below.",
   coexistence:
     "Meta has not confirmed the requested Business App coexistence path for this number.",
 };
@@ -425,6 +426,38 @@ export function WhatsAppManager({
             )}
           </div>
           {feedbackFor("read")}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Customer control and direct Meta payment</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <WhatsAppEvidenceStatus evidence={state.paymentEvidence} />
+          <p className="text-sm text-muted-foreground">
+            For assisted review, share this Business ID with your onboarding
+            operator:{" "}
+            <span className="font-medium text-foreground wrap-anywhere">
+              {businessId}
+            </span>
+            . Show your customer portfolio, WhatsApp account and number control,
+            and Meta billing settings identifying your Business as the direct
+            payer. Use the agreed secure support channel for redacted documents;
+            never send card numbers, security codes, OTPs or access tokens.
+          </p>
+          {c?.assets && (
+            <p className="text-sm wrap-anywhere">
+              Selected portfolio {c.assets.portfolioId} · WhatsApp account{" "}
+              {c.assets.wabaId} · Number {c.assets.phoneNumberId} · Connection
+              version {c.version}
+            </p>
+          )}
+          <p className="text-sm text-muted-foreground">
+            The operator records the review in Platform → WhatsApp evidence.
+            Reload saved status after review. Changed terms, reconnection or
+            local disconnection require a new review; expired or revoked
+            evidence cannot complete onboarding.
+          </p>
         </CardContent>
       </Card>
       <Card>
