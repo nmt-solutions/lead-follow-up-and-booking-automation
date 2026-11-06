@@ -17,6 +17,7 @@ import type {
   MailboxAuthorizationStore,
 } from "../models/mailbox-authorization";
 import { invalidateMailboxVisibility } from "./mailbox-visibility";
+import { recordSenderConnectionFailure } from "./sender-health-repository";
 
 /** Current-state authorization and local atomic storage only. Provider I/O belongs to the application. */
 export function createMailboxAuthorizationRepository(
@@ -103,6 +104,19 @@ export function createMailboxAuthorizationRepository(
                     eq(grants.id, mailboxId),
                     eq(grants.businessId, businessId),
                   ),
+                );
+              if (
+                change.reason === "revoked" ||
+                change.reason === "insufficient" ||
+                change.status === "reconnect_required" ||
+                change.status === "insufficient"
+              )
+                await recordSenderConnectionFailure(
+                  tx,
+                  businessId,
+                  policy.connectionId,
+                  clock.now(),
+                  change.reason === "revoked" ? "revoked" : "insufficient",
                 );
             },
             async state(hash) {

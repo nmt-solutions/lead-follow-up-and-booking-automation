@@ -42,6 +42,7 @@ export const capabilities: Record<BusinessRole, readonly BusinessCapability[]> =
     salesperson: ["profile.read", "sales.work", "files.read"],
   };
 export const platformCapabilitySchema = z.enum([
+  "sender-health.manage",
   "whatsapp.review",
   "pricing.manage",
   "tax.manage",

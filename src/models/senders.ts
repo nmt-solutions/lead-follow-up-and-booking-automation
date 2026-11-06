@@ -134,6 +134,7 @@ export const senderObservationSchema = z.strictObject({
 export type SenderObservation = z.infer<typeof senderObservationSchema>;
 export type SenderBinding = SenderObservation["binding"];
 export type SenderInspection = {
+  healthProof?: { observedAt: string; validUntil: string } | null;
   requestedAt: string;
   previousEvidenceId: string | null;
   binding: SenderBinding;

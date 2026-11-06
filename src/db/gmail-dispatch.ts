@@ -3,6 +3,7 @@ import type { MailEnvelope, MailDispatchAccess } from "../models/mail-dispatch";
 import type { Transaction } from "./scope";
 import { gmailGrant, mailboxPolicy, senderConnection } from "./schema";
 import { invalidateMailboxVisibility } from "./mailbox-visibility";
+import { recordSenderConnectionFailure } from "./sender-health-repository";
 import { currentMailbox } from "./email-handoff-observations";
 import { gmailReadScope, gmailSendScope } from "../models/gmail";
 
@@ -89,6 +90,7 @@ export async function gmailDispatchAccess(
   previousSubject: string | null,
   confirm: MailDispatchAccess["confirm"],
   replyParent?: MailDispatchAccess["replyParent"],
+  now: () => Date = () => new Date(),
 ): Promise<MailDispatchAccess> {
   const policies = await tx
     .select()
@@ -154,6 +156,14 @@ export async function gmailDispatchAccess(
               eq(gmailGrant.businessId, envelope.businessId),
               eq(gmailGrant.id, policy.id),
             ),
+          );
+        if (change.reason === "revoked" || change.reason === "insufficient")
+          await recordSenderConnectionFailure(
+            tx,
+            envelope.businessId,
+            policy.connectionId,
+            now(),
+            change.reason,
           );
       },
       invalidate: () =>

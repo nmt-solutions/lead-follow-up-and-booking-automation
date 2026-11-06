@@ -5,6 +5,7 @@ import type {
   MailboxMetadata,
 } from "../models/mailboxes";
 import type { WorkIdentity } from "../models/discovery";
+import type { HealthPayload } from "../models/sender-health";
 import type { TaxRule, TaxCalculation } from "../models/tax";
 import type {
   PaymentSnapshot,
@@ -56,6 +57,7 @@ import type {
 import {
   bigint,
   boolean,
+  bigserial,
   check,
   ForeignKey,
   foreignKey,
@@ -1048,6 +1050,7 @@ export const platformOperator = pgTable(
     emailPolicy: boolean("email_policy").notNull().default(false),
     pricing: boolean("pricing").notNull().default(false),
     whatsAppReview: boolean("whatsapp_review").notNull().default(false),
+    senderHealth: boolean("sender_health").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {
@@ -1867,7 +1870,14 @@ function senderPolicies(name: string, mutable: boolean) {
     pgPolicy(`${name}_read`, {
       for: "select",
       to: appRuntime,
-      using: inboxScope,
+      using: [
+        "sender_identity",
+        "sender_connection",
+        "sender_reply_route",
+        "mailbox_policy",
+      ].includes(name)
+        ? sql`(${inboxScope}) or (business_id = nullif(current_setting('app.business_id', true), '')::uuid and exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id', true) and o.sender_health))`
+        : inboxScope,
     }),
     pgPolicy(`${name}_insert`, {
       for: "insert",
@@ -1955,6 +1965,47 @@ export const senderObservation = pgTable(
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
   },
   () => [...senderPolicies("sender_observation", false)],
+).enableRLS();
+
+const senderHealthOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id', true) and o.sender_health)`;
+export const senderHealthRecord = pgTable(
+  "sender_health_record",
+  {
+    position: bigserial("position", { mode: "number" }).notNull(),
+    ...inboxColumns(),
+    identityId: uuid("identity_id").notNull(),
+    kind: text("kind").$type<HealthPayload["kind"]>().notNull(),
+    eventKey: text("event_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    payload: jsonb("payload").$type<HealthPayload>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("sender_health_record_scope").on(t.id, t.businessId),
+    uniqueIndex("sender_health_record_event").on(
+      t.businessId,
+      t.identityId,
+      t.kind,
+      t.eventKey,
+    ),
+    check(
+      "sender_health_record_kind",
+      sql`${t.kind} in ('policy','evidence','incident','failure','repair','alert','acknowledgement') and ${t.kind}=${t.payload}->>'kind'`,
+    ),
+    pgPolicy("sender_health_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${inboxScope} and (${t.kind}<>'alert' or ${t.payload}->>'audience'='business')) or ${senderHealthOperator}`,
+    }),
+    pgPolicy("sender_health_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${t.businessId}=nullif(current_setting('app.business_id', true),'')::uuid and ${t.actorId}=current_setting('app.actor_id',true) and (${senderHealthOperator} or (public.current_business_role() is not null and ${t.kind} in ('incident','failure','alert','acknowledgement')))`,
+    }),
+  ],
 ).enableRLS();
 function inboxPolicies(name: string) {
   return [
@@ -2367,6 +2418,14 @@ export const mailboxScopeForeignKeys = [
   ),
 ];
 export const senderScopeForeignKeys = [
+  new ForeignKey(
+    senderHealthRecord,
+    foreignKey({
+      name: "sender_health_identity_scope",
+      columns: [senderHealthRecord.identityId, senderHealthRecord.businessId],
+      foreignColumns: [senderIdentity.id, senderIdentity.businessId],
+    }),
+  ),
   new ForeignKey(
     senderReplyRoute,
     foreignKey({

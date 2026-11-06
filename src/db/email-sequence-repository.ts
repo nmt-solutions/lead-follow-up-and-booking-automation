@@ -1365,6 +1365,8 @@ export function createEmailSequenceRepository(
               sequenceDue(revision.snapshot.timing!, at) <= at
             );
           },
+          undefined,
+          () => clock.now(),
         );
         let result: unknown;
         try {

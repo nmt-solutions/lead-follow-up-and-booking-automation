@@ -990,6 +990,7 @@ export function createOpportunityRepository(
                   ...current.email.envelope.parent,
                   subject: current.email.envelope.subject,
                 },
+                () => clock.now(),
               )
             : undefined;
           let providerResult:
