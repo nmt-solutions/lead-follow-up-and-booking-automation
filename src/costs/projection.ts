@@ -44,7 +44,11 @@ function value(source: CostSource, planning: CostPlanning | null) {
         new Date(r.freshUntil).getTime() >=
           new Date(source.observedAt).getTime(),
     )
-    .sort((a, b) => Number(b.model !== null) - Number(a.model !== null))[0];
+    .sort(
+      (a, b) =>
+        Number(b.model !== null) - Number(a.model !== null) ||
+        new Date(b.effectiveAt).getTime() - new Date(a.effectiveAt).getTime(),
+    )[0];
   if (!rate)
     return { amount: null, pricing: "Missing rate or provider amount" };
   if (rate.inputPerMillion && rate.outputPerMillion) {

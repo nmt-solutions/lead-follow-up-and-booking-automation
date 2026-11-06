@@ -692,6 +692,82 @@ describe("Operator costs at the public application seam", () => {
     ).toBe("3000000");
   });
 
+  it("values usage with the model rate effective at each observation across a mid-month price change", async () => {
+    const f = await operator("cost-effective-rates@example.com");
+    for (const day of ["03", "20"]) {
+      await app().record(f.headers, {
+        sourceId: `evidence:effective-rate-${day}`,
+        expectedVersion: 0,
+        source: {
+          month: "2026-04",
+          provider: "openai",
+          category: "ai",
+          kind: "consumption",
+          funding: "byok",
+          amount: null,
+          quantity: 1,
+          unit: "attempt",
+          businessId: null,
+          runId: null,
+          allocation: "Platform AI usage",
+          evidence: `Reviewed usage on April ${day}`,
+          observedAt: `2026-04-${day}T00:00:00Z`,
+          freshUntil: "2026-05-01T00:00:00Z",
+          plan: null,
+          status: "unpriced",
+          details: {
+            model: "openai/cost-model",
+            inputTokens: 1000000,
+            outputTokens: 0,
+          },
+        },
+        reason: "Effective-rate regression fixture",
+        retentionSeconds: 3600,
+      });
+    }
+    const common = {
+      provider: "openai",
+      unit: "attempt",
+      model: "openai/cost-model",
+      pricePerUnit: null,
+      outputPerMillion: { currency: "INR", micros: "0" },
+      freshUntil: "2026-05-01T00:00:00Z",
+      evidence: "Reviewed effective price fixture",
+    };
+    await app().configure(f.headers, {
+      month: "2026-04",
+      expectedVersion: 0,
+      usdToInr: null,
+      conversionEvidence: null,
+      conversionObservedAt: null,
+      forecast: "none",
+      assumptions: "Only observed usage at its effective model price",
+      retentionSeconds: 3600,
+      rates: [
+        {
+          ...common,
+          effectiveAt: "2026-04-01T00:00:00Z",
+          inputPerMillion: { currency: "INR", micros: "2000000" },
+        },
+        {
+          ...common,
+          effectiveAt: "2026-04-15T00:00:00Z",
+          inputPerMillion: { currency: "INR", micros: "3000000" },
+        },
+      ],
+    });
+    const state = await app().workspace(f.headers, "2026-04");
+    expect(state.sources.map((r) => r.valuedAmount?.micros).sort()).toEqual([
+      "2000000",
+      "3000000",
+    ]);
+    expect(state.totals.operatorMicros).toBe("5000000");
+    await h.reapplySchema();
+    expect(
+      (await app().workspace(f.headers, "2026-04")).totals.operatorMicros,
+    ).toBe("5000000");
+  });
+
   it("uses trusted database expiry for durable owner delegation despite a caller clock jump", async () => {
     const f = await operator("cost-expiry@example.com");
     let effects = 0;

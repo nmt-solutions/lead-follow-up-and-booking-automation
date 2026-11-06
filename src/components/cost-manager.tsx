@@ -214,6 +214,14 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
             </dd>
           </div>
         </dl>
+        <dl>
+          <dt className="text-sm text-muted-foreground">
+            Incurred operator costs in original currencies
+          </dt>
+          <dd className="font-medium">
+            {breakdown(state.totals.operatorByCurrency)}
+          </dd>
+        </dl>
         <p>
           {state.totals.unpriced} unpriced operator sources ·{" "}
           {state.totals.unconverted} without INR conversion ·{" "}
@@ -869,7 +877,9 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
                     (r) =>
                       r.provider !== newRate.provider ||
                       r.unit !== newRate.unit ||
-                      r.model !== newRate.model,
+                      r.model !== newRate.model ||
+                      new Date(r.effectiveAt).getTime() !==
+                        new Date(newRate.effectiveAt).getTime(),
                   ),
                   newRate,
                 ];
@@ -939,7 +949,9 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
             <p className="text-sm">
               An effective rate estimates missing provider amounts. It never
               replaces observed money. Enter a unit rate, or both token rates
-              per million; no rate or free band is supplied.
+              per million; no rate or free band is supplied. A new effective
+              date preserves earlier rates. The same date corrects that rate in
+              the new planning version.
             </p>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Provider key" name="rateProvider" />
