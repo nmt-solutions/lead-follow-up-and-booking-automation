@@ -256,11 +256,7 @@ function sameMailIntent(
   a: OpportunityMailEnvelope,
   b: OpportunityMailEnvelope,
 ) {
-  const { emailEligibility: _a, ...left } = a;
-  const { emailEligibility: _b, ...right } = b;
-  void _a;
-  void _b;
-  return isDeepStrictEqual(left, right);
+  return isDeepStrictEqual(a, b);
 }
 
 export function createOpportunityRepository(
@@ -627,6 +623,7 @@ export function createOpportunityRepository(
         tx: Transaction,
         action: Action,
         role: BusinessRole,
+        intentOnly = false,
       ) {
         const failure = await sessionFailure(tx, action, role);
         if (failure)
@@ -636,7 +633,7 @@ export function createOpportunityRepository(
           return { action: await cancel(tx, stopped), failure: null };
         const need = await needAt(tx, businessId, action.opportunityId);
         const ctx = await messageContext(tx, businessId, action.messageId);
-        if (action.inquiryRunId) await lockInquiryProfile(tx);
+        if (action.inquiryRunId && !intentOnly) await lockInquiryProfile(tx);
         const inquiry = action.inquiryRunId
           ? await inquiryDispatchContext(
               tx,
@@ -695,7 +692,7 @@ export function createOpportunityRepository(
               )
             : null;
         let eligibility =
-          ctx.connection.channel === "email"
+          ctx.connection.channel === "email" && !intentOnly
             ? await evaluateEmailAction(
                 tx,
                 businessId,
@@ -752,7 +749,7 @@ export function createOpportunityRepository(
           if (
             !inquiry?.reply ||
             !sender?.sender ||
-            !eligibility ||
+            (!intentOnly && !eligibility) ||
             !native ||
             ctx.connection.mode !== "mailbox" ||
             native.direction !== "incoming" ||
@@ -823,7 +820,6 @@ export function createOpportunityRepository(
               threadRef: ctx.message.content.conversationRef,
               internetMessageId: native.internetMessageId,
             },
-            emailEligibility: emailDispatchAuthorization(eligibility),
           };
           if (action.email && !sameMailIntent(action.email.envelope, email))
             return {
@@ -860,18 +856,38 @@ export function createOpportunityRepository(
             throw new ApplicationError("FORBIDDEN");
           if (row.state !== "pending" || row.dueAt > now())
             return { action: row, acquired: false, failure: null };
-          const allowed = await authorize(tx, row, role);
-          if (!allowed.dispatch) return { ...allowed, acquired: false };
+          let email: OpportunityMailEnvelope | undefined;
+          if (
+            provider.emailIdentity?.adapterKey === gmailSequenceKey &&
+            row.inquiryRunId
+          ) {
+            // Prepare the immutable reply intent without holding global policy/profile locks across commitment.
+            // Full authorization belongs to the locked provider boundary below, and repeats after refresh.
+            const allowed = await authorize(tx, row, role, true);
+            if (!allowed.dispatch) return { ...allowed, acquired: false };
+            email = allowed.email;
+          } else {
+            const failure = await sessionFailure(tx, row, role);
+            if (failure)
+              return {
+                action: await cancel(tx, "authorization_revoked"),
+                acquired: false,
+                failure,
+              };
+            const ctx = await messageContext(tx, businessId, row.messageId);
+            if (!provider.channels.includes(ctx.connection.channel))
+              throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+          }
           // Commit the exact intent BEFORE transport. A crash or result-write failure cannot erase correlation.
           const [committed] = await tx
             .update(opportunityDueAction)
             .set({
               state: "committed",
               reason: "dispatch_unconfirmed",
-              ...(allowed.email
+              ...(email
                 ? {
                     email: {
-                      envelope: allowed.email,
+                      envelope: email,
                       result: null,
                       sent: null,
                     },
