@@ -27,7 +27,11 @@ import {
   emailSequenceAction,
   emailSequenceRun,
 } from "./schema";
-import { responseSender, identityView } from "./sender-repository";
+import {
+  responseSender,
+  responseSenderUse,
+  identityView,
+} from "./sender-repository";
 
 export const emailPolicyLock = "email-market-policies";
 export async function lockEmailPolicies(tx: Transaction, write = false) {
@@ -357,7 +361,7 @@ export async function evaluateEmailAction(
           c.source!.connection.id,
           at,
           c.purpose === "inquiry_response"
-            ? "inbound"
+            ? responseSenderUse(c.source!.message)
             : "existing_conversation",
         );
   const checks: EligibilityCheck[] = [];

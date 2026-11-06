@@ -86,6 +86,7 @@ import type {
 } from "../models/ai";
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { InquirySnapshot, InquiryResult } from "../models/inquiries";
+import type { OpportunityMail } from "../models/opportunity-mail";
 import type { RfqRecord } from "../models/rfq";
 import type {
   BookingConfiguration,
@@ -2340,6 +2341,7 @@ export const opportunityDueAction = pgTable(
     associationVersion: integer("association_version").notNull(),
     policyVersion: integer("policy_version").notNull(),
     inquiryRunId: uuid("inquiry_run_id"),
+    email: jsonb("email").$type<OpportunityMail>(),
     evaluation: jsonb("evaluation").$type<
       QueueOpportunityAction["evaluation"] | null
     >(),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { opportunityMailEvidenceSchema } from "./opportunity-mail";
 import {
   informationalReplyTemplates,
   validQualificationValue,
@@ -70,6 +71,13 @@ export const inquiryResultSchema = z.strictObject({
 });
 export type InquiryResult = z.infer<typeof inquiryResultSchema>;
 export const inquiryRunSchema = inquiryResultSchema.extend({
+  reply: z.strictObject({
+    nativeGmail: z.boolean(),
+    recipient: z.string(),
+    subject: z.string(),
+    fromAddress: z.string().nullable(),
+    replyTo: z.string().nullable(),
+  }),
   id: z.uuid(),
   messageId: z.uuid(),
   actorId: z.string(),
@@ -83,6 +91,7 @@ export const inquiryRunSchema = inquiryResultSchema.extend({
       state: z.enum(["pending", "committed", "dispatched", "cancelled"]),
       reason: z.string().nullable(),
       dueAt: z.iso.datetime(),
+      email: opportunityMailEvidenceSchema.nullable().optional(),
     })
     .nullable(),
 });

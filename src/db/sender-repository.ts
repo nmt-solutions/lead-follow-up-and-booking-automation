@@ -36,6 +36,7 @@ import {
   senderIdentity,
   senderObservation,
   mailboxPolicy,
+  inboxMessage,
 } from "./schema";
 
 type Save<T> = { id: string | null; expectedVersion: number; configuration: T };
@@ -253,6 +254,19 @@ export async function identityView(
       mailboxIssues,
     ),
   };
+}
+
+/** Native reply continuity determines the intended use even when an imported event is a direct inquiry. */
+export function responseSenderUse(
+  message: Pick<
+    typeof inboxMessage.$inferSelect,
+    "content" | "mailboxMetadata"
+  >,
+): SenderUse {
+  return message.content.kind === "direct_inquiry" &&
+    !message.mailboxMetadata?.native?.inReplyTo
+    ? "inbound"
+    : "existing_conversation";
 }
 
 /** Current explicit response selection is the identity bound to this inbox's reply route.

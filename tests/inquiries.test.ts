@@ -32,6 +32,16 @@ import {
   configureEmailFixture,
   eligibilityApplication,
 } from "./support/email-eligibility";
+import { gmailFixture } from "./support/gmail";
+import { gmailSendScope } from "../src/models/gmail";
+import { createMailboxApplication } from "../src/application/mailboxes";
+import { createMailboxRepository } from "../src/db/mailbox-repository";
+import { unavailableMailboxProvider } from "../src/mailboxes/provider";
+import { createGmailApplication } from "../src/application/gmail";
+import { createGmailConnection } from "../src/gmail/connection";
+import { createGmailProvider } from "../src/gmail/provider";
+import { createGmailOpportunityMail } from "../src/gmail/opportunity-mail";
+import { createGmailSenderAdapter } from "../src/gmail/sender";
 
 describe("Inquiry handling at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -84,6 +94,8 @@ describe("Inquiry handling at the persisted application seam", () => {
     suffix: string,
     goal: "rfq" | "booking" = "rfq",
     activateProfile = true,
+    google?: ReturnType<typeof gmailFixture>,
+    evidenceUntil = "2028-01-01T00:00:00Z",
   ) {
     h.clock.set("2026-11-05T09:00:00Z");
     const credentials = await h.signIn(`inquiry-${suffix}@example.com`);
@@ -141,25 +153,116 @@ describe("Inquiry handling at the persisted application seam", () => {
       expectedVersion: 1,
       note: "Approved",
     });
-    const connection = await inbox.addConnection(credentials, business.id, {
+    let connection = await inbox.addConnection(credentials, business.id, {
       label: "Selected import",
       channel: "email",
       conversationRefs: [],
       manualRepliesObservable: true,
     });
-    await readySender(h, credentials, business.id, connection.id);
-    async function capture(ref: string, text: string) {
-      await inbox.capture(credentials, business.id, connection.id, {
-        eventId: `event-${ref}`,
-        messageRef: ref,
-        conversationRef: suffix,
-        senderRef: "buyer@example.net",
-        senderName: "Buyer",
-        subject: "Steel",
-        text,
-        kind: "direct_inquiry",
-        occurredAt: h.clock.now().toISOString(),
+    const sender = await readySender(
+      h,
+      credentials,
+      business.id,
+      connection.id,
+    );
+    let synchronize: (() => Promise<unknown>) | undefined;
+    let reauthorize: (() => Promise<void>) | undefined;
+    let readAuthorization:
+      (() => Promise<{ read: boolean; send: boolean }>) | undefined;
+    let mailboxes:
+      ReturnType<typeof createMailboxApplication<Headers>> | undefined;
+    let nativeMailbox:
+      import("../src/models/mailboxes").MailboxView | undefined;
+    if (google) {
+      mailboxes = createMailboxApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createMailboxRepository(database, h.clock),
+        provider: unavailableMailboxProvider,
+        clock: h.clock,
       });
+      nativeMailbox = await mailboxes.save(credentials, business.id, {
+        id: null,
+        expectedVersion: 0,
+        configuration: {
+          connectionId: sender.connection.id,
+          requestedRead: true,
+          requestedSend: true,
+          enabled: true,
+          scope: { kind: "folders", refs: ["Label_sales"] },
+          history: null,
+          salesSubjectTerms: ["steel"],
+        },
+      });
+      const nativeConnection = createGmailConnection(database, {
+        clock: h.clock,
+        configuration: google.configuration,
+        fetch: google.fetch,
+      });
+      const gmail = createGmailApplication({
+        access: h.access,
+        connection: nativeConnection,
+      });
+      const oauth = await gmail.start(
+        credentials,
+        business.id,
+        nativeMailbox.id,
+      );
+      await gmail.callback(credentials, business.id, nativeMailbox.id, {
+        state: new URL(oauth.authorizationUrl).searchParams.get("state"),
+        code: "fixture-code",
+      });
+      const authorizedMailboxId = nativeMailbox.id;
+      readAuthorization = () =>
+        gmail.read(credentials, business.id, authorizedMailboxId);
+      reauthorize = async () => {
+        const oauth = await gmail.start(
+          credentials,
+          business.id,
+          authorizedMailboxId,
+        );
+        await gmail.callback(credentials, business.id, authorizedMailboxId, {
+          state: new URL(oauth.authorizationUrl).searchParams.get("state"),
+          code: "fixture-code",
+        });
+      };
+      const sync = createMailboxApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createMailboxRepository(database, h.clock),
+        provider: createGmailProvider(nativeConnection, h.clock),
+        clock: h.clock,
+        enqueue: async () => {},
+      });
+      const mailboxId = nativeMailbox.id;
+      synchronize = async () => {
+        const work = await sync.queue(credentials, business.id, mailboxId, {
+          mode: "incremental",
+        });
+        let state = await sync.execute(work);
+        for (let i = 0; state?.status === "partial" && i < 10; i++)
+          state = await sync.execute(work);
+        return state;
+      };
+      connection = { ...connection, id: mailboxId };
+    }
+    async function capture(ref: string, text: string) {
+      if (google) {
+        google.add(ref, { text, at: h.clock.now().toISOString() });
+        google.pages.set("Label_sales", {
+          messages: [{ id: ref, threadId: "abc123" }],
+        });
+        await synchronize!();
+      } else
+        await inbox.capture(credentials, business.id, connection.id, {
+          eventId: `event-${ref}`,
+          messageRef: ref,
+          conversationRef: suffix,
+          senderRef: "buyer@example.net",
+          senderName: "Buyer",
+          subject: "Steel",
+          text,
+          kind: "direct_inquiry",
+          occurredAt: h.clock.now().toISOString(),
+        });
       const ws = await inbox.workspace(credentials, business.id);
       const conversation = await inbox.conversation(
         credentials,
@@ -169,24 +272,83 @@ describe("Inquiry handling at the persisted application seam", () => {
       return conversation.messages.find((m) => m.messageRef === ref)!;
     }
     const first = await capture("first", "Delivery?\nQuantity: 500");
+    if (google && mailboxes && nativeMailbox) {
+      nativeMailbox = await mailboxes.save(credentials, business.id, {
+        id: nativeMailbox.id,
+        expectedVersion: nativeMailbox.version,
+        configuration: {
+          ...nativeMailbox.configuration,
+          scope: { kind: "mailbox" },
+        },
+      });
+      await synchronize!();
+      await sender.app.saveReplyRoute(credentials, business.id, {
+        id: sender.route.id,
+        expectedVersion: sender.route.version,
+        configuration: {
+          ...sender.route.configuration,
+          inboxConnectionId: nativeMailbox.id,
+        },
+      });
+      sender.adapter.key = "gmail-sequence-v1";
+      sender.adapter.mode = "live";
+      sender.adapter.inspect = createGmailSenderAdapter({
+        clock: h.clock,
+        evidence: [
+          {
+            businessId: business.id,
+            account: google.control.email,
+            observedAt: "2026-11-01T00:00:00Z",
+            validUntil: evidenceUntil,
+            reference: "https://operator.example/synthetic-inquiry-proof",
+            checks: {
+              spf: "pass",
+              dkim: "pass",
+              dmarc_alignment: "pass",
+              health: "pass",
+            },
+          },
+        ],
+      }).inspect;
+      await sender.app.check(credentials, business.id, sender.identity.id, {
+        expectedVersion: sender.identity.version,
+      });
+    }
     const ws = await inbox.workspace(credentials, business.id);
     const need = ws.opportunities[0];
-    await configureEmailFixture(h, credentials, business.id, need.id);
+    await configureEmailFixture(
+      h,
+      credentials,
+      business.id,
+      need.id,
+      google ? "buyer@example.com" : "buyer@example.net",
+    );
     const effects: OpportunityDispatch[] = [];
     let failAfterSend = false;
+    const opportunityRepository = createOpportunityRepository(
+      database,
+      h.clock,
+    );
+    const provider = google
+      ? createGmailOpportunityMail({
+          configuration: google.configuration,
+          fetch: google.fetch,
+          clock: h.clock,
+        })
+      : {
+          emailIdentity: fixtureMailBinding,
+          channels: ["email", "whatsapp"] as const,
+          async dispatch(action: OpportunityDispatch) {
+            effects.push(action);
+            if (failAfterSend) throw new Error("private-channel-error");
+          },
+        };
     const opportunities = createOpportunityApplication({
       authenticate: h.authenticate,
       authenticateForWork: h.access.authenticateForWork,
-      repository: createOpportunityRepository(database, h.clock),
+      repository: opportunityRepository,
       clock: h.clock,
-      provider: {
-        emailIdentity: fixtureMailBinding,
-        channels: ["email", "whatsapp"],
-        async dispatch(action) {
-          effects.push(action);
-          if (failAfterSend) throw new Error("private-channel-error");
-        },
-      },
+      provider,
     });
     const calls: Parameters<AiProvider["generate"]>[0][] = [];
     let answer: unknown = {
@@ -280,7 +442,8 @@ describe("Inquiry handling at the persisted application seam", () => {
       authenticateForWork: h.access.authenticateForWork,
       repository: createInquiryRepository(database, h.clock),
       ai,
-      opportunities,
+      opportunityRepository,
+      provider,
       clock: h.clock,
     });
     return {
@@ -306,6 +469,22 @@ describe("Inquiry handling at the persisted application seam", () => {
       ai,
       profileId,
       config: localConfig,
+      sender,
+      synchronize,
+      reauthorize,
+      readAuthorization,
+      mailboxes,
+      nativeMailbox,
+      restart: () =>
+        createInquiryApplication({
+          authenticate: h.authenticate,
+          authenticateForWork: h.access.authenticateForWork,
+          repository: createInquiryRepository(database, h.clock),
+          ai,
+          opportunityRepository: createOpportunityRepository(database, h.clock),
+          provider,
+          clock: h.clock,
+        }),
       failAfterSend() {
         failAfterSend = true;
       },
@@ -1650,5 +1829,748 @@ describe("Inquiry handling at the persisted application seam", () => {
       await h.admin.query("ALTER TABLE inquiry_run FORCE ROW LEVEL SECURITY");
     }
     await verifyRuntimeRole(h.runtime);
+  });
+  it("sends one exact grounded ordinary Gmail inquiry reply through the guarded public command", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await fixture("native-reply", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    expect(ready).toMatchObject({
+      status: "ready",
+      reply: {
+        nativeGmail: true,
+        recipient: "buyer@example.com",
+        subject: "Steel inquiry",
+        fromAddress: "sales@supplier.example",
+        replyTo: "sales@supplier.example",
+      },
+    });
+    const [result, concurrent] = await Promise.all([
+      f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+      f.restart().dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+    ]);
+    expect(concurrent.action?.state).toBe("dispatched");
+    expect(google.sends).toHaveLength(1);
+    expect(google.sends[0]).toContain("To: buyer@example.com\r\n");
+    expect(google.sends[0]).toContain("In-Reply-To: <first@example.com>\r\n");
+    expect(google.sends[0]).toContain("Reply-To: sales@supplier.example\r\n");
+    expect(google.sends[0]).toContain("<sales@supplier.example>\r\n");
+    expect(
+      Buffer.from(
+        google.sends[0].split("\r\n\r\n")[1].replace(/\r\n/g, ""),
+        "base64",
+      ).toString("utf8"),
+    ).toBe('Collection only.\r\n\r\nPlease provide "Email".');
+    expect(
+      google.calls.find((c) => c.url.pathname.endsWith("/messages/send"))?.body
+        .threadId,
+    ).toBe("abc123");
+    expect(result.action).toMatchObject({
+      state: "dispatched",
+      email: {
+        result: {
+          status: "accepted",
+          receipt: {
+            businessId: f.business.id,
+            messageRef: "gmail-sent-1",
+            threadRef: "abc123",
+            recipient: "buyer@example.com",
+            evidence: "provider_response",
+          },
+        },
+        sent: null,
+      },
+    });
+    await f
+      .restart()
+      .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    expect(google.sends).toHaveLength(1);
+  });
+  it("keeps lost acceptance committed across restart and reconciles only the exact authorized Sent reply without resending", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    google.control.sendLost = true;
+    const f = await fixture("native-unknown", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    const unknown = await f.app.dispatch(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      ready.id,
+    );
+    expect(unknown.action).toMatchObject({
+      state: "committed",
+      email: { result: { status: "unknown" } },
+    });
+    await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    expect(
+      (await f.app.reconcile(f.credentials, f.business.id, f.need.id, ready.id))
+        .action?.state,
+    ).toBe("committed");
+    const sent = google.messages.get("gmail-sent-1")!;
+    sent.internalDate = String(h.clock.now().getTime());
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "gmail-sent-1", threadId: "abc123" } },
+          ],
+        },
+      ],
+    });
+    await f.synchronize!();
+    const reconciled = await f.app.reconcile(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      ready.id,
+    );
+    expect(reconciled.action).toMatchObject({
+      state: "dispatched",
+      email: {
+        result: {
+          status: "accepted",
+          receipt: {
+            evidence: "sent_folder",
+            messageRef: "gmail-sent-1",
+            threadRef: "abc123",
+          },
+        },
+        sent: {
+          provider: "gmail",
+          messageRef: "gmail-sent-1",
+          inReplyTo: "<first@example.com>",
+        },
+      },
+    });
+    expect(google.sends).toHaveLength(1);
+    const control = await f.opportunities.read(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+    );
+    expect(control.state).toBe("automation");
+  });
+  it("associates a native buyer reply to the same inquiry even before its application Sent message is synchronized", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await fixture("native-continuity", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    const reference = /Message-ID: (.+)\r\n/.exec(google.sends[0])![1];
+    google.add("buyer-next", {
+      reply: reference,
+      at: h.clock.now().toISOString(),
+      text: "Email: buyer@example.com",
+    });
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "buyer-next", threadId: "abc123" } },
+          ],
+        },
+      ],
+    });
+    await f.synchronize!();
+    const workspace = await f.inbox.workspace(f.credentials, f.business.id);
+    const conversation = await f.inbox.conversation(
+      f.credentials,
+      f.business.id,
+      workspace.conversations[0].id,
+    );
+    expect(
+      conversation.messages.find((m) => m.messageRef === "buyer-next"),
+    ).toMatchObject({ opportunityId: f.need.id });
+    expect(workspace.opportunities).toHaveLength(1);
+  });
+  it.each(["malformed", "server_error"] as const)(
+    "retains %s acceptance without a second transport after restart",
+    async (failure) => {
+      const google = gmailFixture();
+      google.control.scopes += ` ${gmailSendScope}`;
+      const f = await fixture(`native-${failure}`, "rfq", true, google);
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      if (failure === "malformed")
+        google.control.sendResponse = { id: "only-message-id" };
+      else google.control.apiError = 503;
+      const result = await f.app.dispatch(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(result.action).toMatchObject({
+        state: "committed",
+        email: { result: { status: "unknown" } },
+      });
+      await f
+        .restart()
+        .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      expect(
+        google.calls.filter((c) => c.url.pathname.endsWith("/messages/send")),
+      ).toHaveLength(1);
+      expect(
+        (
+          await f.app.process(f.credentials, f.business.id, f.need.id, {
+            messageId: f.first.id,
+          })
+        ).id,
+      ).toBe(ready.id);
+    },
+  );
+  it("preserves the committed intent after failed result persistence and recovers exact Sent evidence", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await fixture("native-result-write", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    await h.admin
+      .query(`CREATE FUNCTION fail_inquiry_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.id = '${ready.action!.id}' AND NEW.state = 'dispatched' THEN RAISE EXCEPTION 'synthetic result persistence failure'; END IF;
+      RETURN NEW; END $$;
+      CREATE TRIGGER fail_inquiry_result BEFORE UPDATE ON opportunity_due_action FOR EACH ROW EXECUTE FUNCTION fail_inquiry_result()`);
+    try {
+      await expect(
+        f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+      ).rejects.toThrow();
+    } finally {
+      await h.admin.query(
+        "DROP TRIGGER fail_inquiry_result ON opportunity_due_action; DROP FUNCTION fail_inquiry_result()",
+      );
+    }
+    const app = f.restart();
+    expect(
+      (await app.dispatch(f.credentials, f.business.id, f.need.id, ready.id))
+        .action,
+    ).toMatchObject({ state: "committed", email: { result: null } });
+    google.messages.get("gmail-sent-1")!.internalDate = String(
+      h.clock.now().getTime(),
+    );
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "gmail-sent-1", threadId: "abc123" } },
+          ],
+        },
+      ],
+    });
+    await f.synchronize!();
+    expect(
+      (await app.reconcile(f.credentials, f.business.id, f.need.id, ready.id))
+        .action,
+    ).toMatchObject({
+      state: "dispatched",
+      email: {
+        result: { status: "accepted", receipt: { evidence: "sent_folder" } },
+      },
+    });
+    expect(google.sends).toHaveLength(1);
+  });
+  it.each(["expired_health", "lost_send_grant", "lost_read_grant"] as const)(
+    "checks %s again after native token refresh before transport",
+    async (change) => {
+      const google = gmailFixture();
+      google.control.scopes += ` ${gmailSendScope}`;
+      google.control.expiresIn = 90;
+      const f = await fixture(
+        `native-refresh-${change}`,
+        "rfq",
+        true,
+        google,
+        "2026-11-05T09:01:00Z",
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      h.clock.set("2026-11-05T09:00:40Z");
+      google.control.beforeRefresh = async () => {
+        if (change === "expired_health") h.clock.set("2026-11-05T09:01:01Z");
+        if (change === "lost_send_grant")
+          google.control.scopes = google.control.scopes.replace(
+            gmailSendScope,
+            "",
+          );
+        if (change === "lost_read_grant")
+          google.control.scopes = `openid email ${gmailSendScope}`;
+      };
+      const result = await f.app.dispatch(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(result.action?.state).toBe("cancelled");
+      expect(google.control.refreshes).toBe(1);
+      expect(google.sends).toEqual([]);
+    },
+  );
+  it.each([
+    "wrong_body",
+    "wrong_parent",
+    "wrong_reply_route",
+    "duplicate_id",
+    "removed_sent",
+    "revoked_read",
+    "stale_sync",
+  ] as const)("does not reconcile %s Sent evidence", async (evidence) => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    google.control.sendLost = true;
+    const f = await fixture(`native-evidence-${evidence}`, "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    const sent = google.messages.get("gmail-sent-1")!;
+    sent.internalDate = String(h.clock.now().getTime());
+    const headers = (
+      sent.payload as { headers: { name: string; value: string }[] }
+    ).headers;
+    if (evidence === "wrong_body")
+      (sent.payload as { body: { data: string } }).body.data =
+        Buffer.from("Changed content").toString("base64url");
+    if (evidence === "wrong_parent")
+      headers.find((h) => h.name === "In-Reply-To")!.value =
+        "<other@example.com>";
+    if (evidence === "wrong_reply_route")
+      headers.find((h) => h.name === "Reply-To")!.value = "other@example.com";
+    const refs = [{ id: "gmail-sent-1", threadId: "abc123" }];
+    if (evidence === "duplicate_id") {
+      google.messages.set("duplicate-sent", {
+        ...structuredClone(sent),
+        id: "duplicate-sent",
+      });
+      refs.push({ id: "duplicate-sent", threadId: "abc123" });
+    }
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: refs.map((message) => ({ message })),
+        },
+      ],
+    });
+    await f.synchronize!();
+    if (evidence === "removed_sent") {
+      sent.labelIds = ["INBOX"];
+      google.histories.set("18446744073709551631", {
+        historyId: "18446744073709551632",
+        history: [
+          {
+            id: "18446744073709551632",
+            labelsRemoved: [
+              {
+                message: { id: "gmail-sent-1", threadId: "abc123" },
+                labelIds: ["SENT"],
+              },
+            ],
+          },
+        ],
+      });
+      await f.synchronize!();
+    }
+    if (evidence === "revoked_read")
+      await f.mailboxes!.save(f.credentials, f.business.id, {
+        id: f.nativeMailbox!.id,
+        expectedVersion: f.nativeMailbox!.version,
+        configuration: {
+          ...f.nativeMailbox!.configuration,
+          requestedRead: false,
+        },
+      });
+    if (evidence === "stale_sync") h.clock.set("2026-11-05T09:05:01Z");
+    expect(
+      (await f.app.reconcile(f.credentials, f.business.id, f.need.id, ready.id))
+        .action,
+    ).toMatchObject({
+      state: "committed",
+      email: { result: { status: "unknown" }, sent: null },
+    });
+    expect(google.sends).toHaveLength(1);
+  });
+  it.each([
+    "send_selection",
+    "actual_send_grant",
+    "takeover",
+    "authority",
+    "suppression",
+    "stale_sync",
+    "reading_scope",
+    "identity_disabled",
+  ] as const)(
+    "blocks an approved native reply after current %s changes",
+    async (change) => {
+      const google = gmailFixture();
+      google.control.scopes += ` ${gmailSendScope}`;
+      const f = await fixture(`native-gate-${change}`, "rfq", true, google);
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      if (change === "send_selection" || change === "reading_scope")
+        await f.mailboxes!.save(f.credentials, f.business.id, {
+          id: f.nativeMailbox!.id,
+          expectedVersion: f.nativeMailbox!.version,
+          configuration: {
+            ...f.nativeMailbox!.configuration,
+            ...(change === "send_selection"
+              ? { requestedSend: false }
+              : { scope: { kind: "threads", refs: ["other-thread"] } }),
+          },
+        });
+      if (change === "actual_send_grant") {
+        google.control.scopes = google.control.scopes.replace(
+          gmailSendScope,
+          "",
+        );
+        await f.reauthorize!();
+        await f.synchronize!();
+        expect(f.nativeMailbox!.configuration.requestedSend).toBe(true);
+      }
+      if (change === "takeover") {
+        const control = await f.opportunities.read(
+          f.credentials,
+          f.business.id,
+          f.need.id,
+        );
+        await f.opportunities.change(f.credentials, f.business.id, f.need.id, {
+          command: "takeover",
+          expectedVersion: control.version,
+          reason: "Handle personally",
+          nextAction: "Call buyer",
+        });
+      }
+      if (change === "authority") {
+        const authority = createCommercialAuthorityApplication({
+          authenticate: h.authenticate,
+          authenticatePrivileged: h.access.authenticatePrivileged,
+          repository: createCommercialAuthorityRepository(
+            runtimeDatabase(h.runtime),
+          ),
+          clock: h.clock,
+        });
+        const current = await authority.workspace(f.credentials, f.business.id);
+        await authority.save(f.credentials, f.business.id, {
+          expectedVersion: current.version,
+          policy: current.policy,
+          note: "Withdraw the prepared authority generation",
+        });
+      }
+      if (change === "suppression")
+        await eligibilityApplication(h).suppress(f.credentials, f.business.id, {
+          requestKey: randomUUID(),
+          recipient: "buyer@example.com",
+          scope: "recipient_email",
+          opportunityId: null,
+          effectiveAt: h.clock.now().toISOString(),
+          reference: "Synthetic opt-out before sending",
+        });
+      if (change === "stale_sync") h.clock.set("2026-11-05T09:05:01Z");
+      if (change === "identity_disabled")
+        await f.sender.app.saveIdentity(f.credentials, f.business.id, {
+          id: f.sender.identity.id,
+          expectedVersion: f.sender.identity.version,
+          configuration: { ...f.sender.identity.configuration, enabled: false },
+        });
+      const result = await f.app.dispatch(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(result.action?.state).toBe("cancelled");
+      expect(google.sends).toEqual([]);
+      expect(
+        google.calls.filter((c) => c.url.pathname.endsWith("/messages/send")),
+      ).toEqual([]);
+    },
+  );
+  it.each(["revoked", "mfa_expired"] as const)(
+    "rechecks %s sessions after native refresh and commits cancellation before returning the safe error",
+    async (mode) => {
+      const google = gmailFixture();
+      google.control.scopes += ` ${gmailSendScope}`;
+      google.control.expiresIn = 90;
+      const f = await fixture(`native-session-${mode}`, "rfq", true, google);
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      h.clock.set("2026-11-05T09:00:40Z");
+      google.control.beforeRefresh = async () => {
+        if (mode === "revoked") await h.signOut(f.credentials);
+        else h.clock.set("2026-11-05T22:00:00Z");
+      };
+      await expect(
+        f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+      ).rejects.toMatchObject({
+        code: mode === "revoked" ? "UNAUTHENTICATED" : "MFA_REQUIRED",
+      });
+      expect(google.control.refreshes).toBe(1);
+      expect(google.sends).toEqual([]);
+      h.clock.set("2026-11-05T09:00:40Z");
+      const current =
+        mode === "revoked"
+          ? await h.signIn(`inquiry-native-session-${mode}@example.com`)
+          : f.credentials;
+      expect(
+        (await f.app.read(current, f.business.id, f.need.id)).runs[0].action,
+      ).toMatchObject({ state: "cancelled", reason: "authorization_revoked" });
+    },
+  );
+
+  it.each([401, 403, 429])(
+    "records native %s rejection without retrying and keeps unrelated reading permission honest",
+    async (status) => {
+      const google = gmailFixture();
+      google.control.scopes += ` ${gmailSendScope}`;
+      const f = await fixture(`native-denial-${status}`, "rfq", true, google);
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      google.control.apiError = status;
+      const result = await f.app.dispatch(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(result.action).toMatchObject({
+        state: "cancelled",
+        email: {
+          result: {
+            status: "not_accepted",
+            reason: status === 429 ? "rate_limited" : "rejected",
+          },
+          sent: null,
+        },
+      });
+      await f
+        .restart()
+        .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      expect(
+        google.calls.filter((c) => c.url.pathname.endsWith("/messages/send")),
+      ).toHaveLength(1);
+      expect(await f.readAuthorization!()).toMatchObject({
+        read: status !== 401,
+        send: status === 429,
+      });
+      const workspace = await f.inbox.workspace(f.credentials, f.business.id);
+      expect(workspace.opportunities).toHaveLength(1);
+    },
+  );
+  it("keeps native dispatch and evidence recovery scoped to the authenticated Business and validates the recovery HTTP command", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await fixture("native-isolation", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    const outsider = await h.signIn("native-outsider@example.com");
+    await expect(
+      f.app.dispatch(outsider, f.business.id, f.need.id, ready.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      f.app.reconcile(outsider, f.business.id, f.need.id, ready.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      f.app.dispatch(f.credentials, f.business.id, randomUUID(), ready.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const diagnostics: unknown[] = [];
+    const http = createInquiryHttp({
+      application: f.app,
+      origin: "http://localhost:3000",
+      reportFailure: (d) => diagnostics.push(d),
+    });
+    const request = (body: unknown, credentials = f.credentials) => {
+      const headers = new Headers(credentials);
+      headers.set("origin", "http://localhost:3000");
+      headers.set("content-type", "application/json");
+      return new Request("http://localhost:3000/api/inquiry/reconcile", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+    };
+    const invalid = await http.reconcile(
+      request({ sendAgain: true }),
+      f.business.id,
+      f.need.id,
+      ready.id,
+    );
+    expect(await invalid.json()).toMatchObject({
+      success: false,
+      code: "INVALID_INPUT",
+    });
+    google.control.sendLost = true;
+    const response = await http.dispatch(
+      request({}),
+      f.business.id,
+      f.need.id,
+      ready.id,
+    );
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { action: { state: "committed" } },
+    });
+    const observed = await http.reconcile(
+      request({}),
+      f.business.id,
+      f.need.id,
+      ready.id,
+    );
+    expect(await observed.json()).toMatchObject({
+      success: true,
+      data: { action: { state: "committed", email: { sent: null } } },
+    });
+    expect(JSON.stringify(diagnostics)).not.toMatch(
+      /fixture-access|fixture-refresh|fixture-secret|private-gmail/,
+    );
+    expect(google.sends).toHaveLength(1);
+  });
+  it("requires existing-conversation sender use for a native reply rather than treating every Gmail message as a new inquiry", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await fixture("native-existing-use", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    const reference = /Message-ID: (.+)\r\n/.exec(google.sends[0])![1];
+    google.add("buyer-following", {
+      reply: reference,
+      at: h.clock.now().toISOString(),
+      text: "Email: buyer@example.com",
+    });
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "buyer-following", threadId: "abc123" } },
+          ],
+        },
+      ],
+    });
+    await f.synchronize!();
+    const identity = await f.sender.app.saveIdentity(
+      f.credentials,
+      f.business.id,
+      {
+        id: f.sender.identity.id,
+        expectedVersion: f.sender.identity.version,
+        configuration: {
+          ...f.sender.identity.configuration,
+          uses: ["inbound"],
+        },
+      },
+    );
+    await f.sender.app.check(f.credentials, f.business.id, identity.id, {
+      expectedVersion: identity.version,
+    });
+    const state = await f.app.read(f.credentials, f.business.id, f.need.id);
+    const next = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: state.latestMessageId,
+    });
+    expect(next.status).toBe("ready");
+    const blocked = await f.app.dispatch(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      next.id,
+    );
+    expect(blocked.action).toMatchObject({
+      state: "cancelled",
+      reason: "sender_not_ready",
+    });
+    expect(google.sends).toHaveLength(1);
+    const permitted = await f.sender.app.saveIdentity(
+      f.credentials,
+      f.business.id,
+      {
+        id: identity.id,
+        expectedVersion: identity.version,
+        configuration: {
+          ...identity.configuration,
+          uses: ["existing_conversation"],
+        },
+      },
+    );
+    await f.sender.app.check(f.credentials, f.business.id, permitted.id, {
+      expectedVersion: permitted.version,
+    });
+    const control = await f.opportunities.read(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+    );
+    await f.opportunities.change(f.credentials, f.business.id, f.need.id, {
+      command: "takeover",
+      expectedVersion: control.version,
+      reason: "Review corrected sender use",
+      nextAction: "Hand back after checking setup",
+    });
+    await handback(f);
+    const reevaluated = await f.app.process(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      { messageId: state.latestMessageId },
+    );
+    expect(
+      (
+        await f.app.dispatch(
+          f.credentials,
+          f.business.id,
+          f.need.id,
+          reevaluated.id,
+        )
+      ).action?.state,
+    ).toBe("dispatched");
+    expect(google.sends).toHaveLength(2);
   });
 });

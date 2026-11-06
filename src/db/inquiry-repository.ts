@@ -30,9 +30,11 @@ import {
   writeControl,
 } from "./opportunity-control-repository";
 import { readCommercialPolicy } from "./commercial-authority-repository";
+import { responseSender, responseSenderUse } from "./sender-repository";
+import { gmailSequenceKey } from "../gmail/sequence-mail";
 
 type Run = typeof inquiryRun.$inferSelect;
-async function view(tx: Transaction, row: Run): Promise<InquiryRun> {
+async function view(tx: Transaction, row: Run, at: Date): Promise<InquiryRun> {
   const [action] = await tx
     .select()
     .from(opportunityDueAction)
@@ -42,7 +44,43 @@ async function view(tx: Transaction, row: Run): Promise<InquiryRun> {
         eq(opportunityDueAction.inquiryRunId, row.id),
       ),
     );
+  const [source] = await tx
+    .select({ message: inboxMessage, connection: inboxConnection })
+    .from(inboxMessage)
+    .innerJoin(
+      inboxConnection,
+      eq(inboxConnection.id, inboxMessage.connectionId),
+    )
+    .where(
+      and(
+        eq(inboxMessage.businessId, row.businessId),
+        eq(inboxMessage.id, row.messageId),
+      ),
+    );
+  const sender =
+    source.connection.channel === "email"
+      ? await responseSender(
+          tx,
+          row.businessId,
+          source.connection.id,
+          at,
+          responseSenderUse(source.message),
+        )
+      : null;
   return {
+    reply: {
+      nativeGmail:
+        source.connection.mode === "mailbox" &&
+        sender?.sender?.adapterKey === gmailSequenceKey,
+      recipient: source.message.content.senderRef,
+      subject: source.message.content.subject,
+      fromAddress:
+        action?.email?.envelope.fromAddress ??
+        sender?.sender?.fromAddress ??
+        null,
+      replyTo:
+        action?.email?.envelope.replyTo ?? sender?.sender?.replyTo ?? null,
+    },
     ...row.result,
     id: row.id,
     messageId: row.messageId,
@@ -57,6 +95,9 @@ async function view(tx: Transaction, row: Run): Promise<InquiryRun> {
           state: action.state,
           reason: action.reason,
           dueAt: action.dueAt.toISOString(),
+          email: action.email
+            ? { result: action.email.result, sent: action.email.sent }
+            : null,
         }
       : null,
   };
@@ -129,7 +170,7 @@ export function createInquiryRepository(database: Database, clock: Clock) {
           context.need.ownerId === actor.userId;
         const result = [];
         for (const row of await runs(tx, businessId, id))
-          result.push(await view(tx, row));
+          result.push(await view(tx, row, clock.now()));
         return {
           runs: result,
           canProcess,
@@ -159,10 +200,10 @@ export function createInquiryRepository(database: Database, clock: Clock) {
             row: latest,
             context,
             previousFacts: [],
-            result: await view(tx, latest),
+            result: await view(tx, latest, clock.now()),
           };
         for (const row of history.filter((v) => v.messageId === messageId)) {
-          const existing = await view(tx, row);
+          const existing = await view(tx, row, clock.now());
           // A delivered or ambiguous action can never be regenerated for the same inbound message.
           if (
             existing.action &&
@@ -212,7 +253,7 @@ export function createInquiryRepository(database: Database, clock: Clock) {
             row: existing,
             context,
             previousFacts: [],
-            result: await view(tx, existing),
+            result: await view(tx, existing, clock.now()),
           };
         // Cancel stale pending drafts, never revive them on retry or handback.
         await tx
@@ -267,7 +308,7 @@ export function createInquiryRepository(database: Database, clock: Clock) {
           row,
           context,
           previousFacts: [...facts.values()],
-          result: await view(tx, row),
+          result: await view(tx, row, clock.now()),
         };
       });
     },
@@ -326,7 +367,8 @@ export function createInquiryRepository(database: Database, clock: Clock) {
         const row = await ownedRun(tx, businessId, opportunityId, id);
         if (row.actorId !== actor.userId || row.sessionId !== actor.sessionId)
           throw new ApplicationError("FORBIDDEN");
-        if (row.result.status !== "processing") return view(tx, row);
+        if (row.result.status !== "processing")
+          return view(tx, row, clock.now());
         const context = await inquiryContext(
           tx,
           businessId,
@@ -442,7 +484,7 @@ export function createInquiryRepository(database: Database, clock: Clock) {
             createdAt: clock.now(),
           });
         }
-        return view(tx, saved);
+        return view(tx, saved, clock.now());
       });
     },
     action(
@@ -455,7 +497,7 @@ export function createInquiryRepository(database: Database, clock: Clock) {
         const row = await ownedRun(tx, businessId, opportunityId, id);
         if (row.actorId !== actor.userId)
           throw new ApplicationError("FORBIDDEN");
-        return view(tx, row);
+        return view(tx, row, clock.now());
       });
     },
   };

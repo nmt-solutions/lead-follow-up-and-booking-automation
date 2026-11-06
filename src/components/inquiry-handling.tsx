@@ -24,13 +24,81 @@ export function InquiryHandling({
   state: InquiryWorkspace;
 }) {
   const router = useRouter();
-  const [pending, setPending] = useState(false);
+  const [working, setWorking] = useState<string | null>(null);
+  const pending = working !== null;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"success" | "warning">(
+    "success",
+  );
   const [recovery, setRecovery] = useState<string | null>(null);
+  async function delivery(runId: string, command: "dispatch" | "reconcile") {
+    setWorking(`${runId}:${command}`);
+    setError("");
+    setNotice("");
+    setRecovery(null);
+    try {
+      const response = await fetch(
+        `/api/businesses/${businessId}/opportunities/${opportunityId}/inquiries/${runId}/${command}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        },
+      );
+      const result = responseSchema.safeParse(await response.json());
+      if (!result.success) {
+        setError(
+          "The result could not be confirmed. Reload to inspect saved evidence before taking further action.",
+        );
+        return;
+      }
+      if (!response.ok || !result.data.success) {
+        const code = result.data.success ? "" : result.data.code;
+        setRecovery(
+          code === "MFA_REQUIRED"
+            ? "/security"
+            : code === "UNAUTHENTICATED"
+              ? "/sign-in"
+              : null,
+        );
+        setError(
+          code === "MFA_REQUIRED"
+            ? "Verify your session in Security, then reload."
+            : code === "UNAUTHENTICATED"
+              ? "Sign in again, then reload."
+              : code === "CHANNEL_SETUP_REQUIRED"
+                ? "Gmail delivery requires a configured native connection. Review sender and mailbox setup."
+                : "The action could not complete. Reload to review its saved state, ownership and setup.",
+        );
+        router.refresh();
+        return;
+      }
+      const action = result.data.data.action;
+      setNoticeTone(action?.state === "dispatched" ? "success" : "warning");
+      setNotice(
+        action?.email?.sent
+          ? "Exact Sent-folder evidence saved. Delivery remains unconfirmed."
+          : action?.email?.result?.status === "accepted"
+            ? "Gmail accepted the prepared reply. Delivery remains unconfirmed."
+            : action?.state === "committed"
+              ? "Acceptance remains unknown. Synchronize the selected mailbox, then check Sent evidence. This action will not resend."
+              : action?.state === "cancelled"
+                ? `Sending stopped: ${action.reason?.replaceAll("_", " ") ?? "current authorization failed"}. Review setup and current inquiry context.`
+                : "No new Sent evidence was confirmed. Synchronize the selected mailbox and check again.",
+      );
+      router.refresh();
+    } catch {
+      setError(
+        "The request could not be confirmed. Reload to inspect the saved action; do not send a duplicate manually.",
+      );
+    } finally {
+      setWorking(null);
+    }
+  }
   async function process() {
     if (!state.latestMessageId) return;
-    setPending(true);
+    setWorking("evaluate");
     setError("");
     setNotice("");
     setRecovery(null);
@@ -68,6 +136,9 @@ export function InquiryHandling({
         );
         return;
       }
+      setNoticeTone(
+        result.data.data.status === "ready" ? "success" : "warning",
+      );
       setNotice(
         result.data.data.status === "ready"
           ? "Grounded response saved. Delivery is still pending."
@@ -79,7 +150,7 @@ export function InquiryHandling({
         "The request could not be confirmed. Reload to inspect persisted work before retrying.",
       );
     } finally {
-      setPending(false);
+      setWorking(null);
     }
   }
   return (
@@ -95,12 +166,21 @@ export function InquiryHandling({
         type="button"
         disabled={pending || !state.canProcess || !state.latestMessageId}
         onClick={process}
-        aria-busy={pending}
+        aria-busy={working === "evaluate"}
       >
-        {pending ? "Evaluating inquiry…" : "Evaluate latest inquiry"}
+        {working === "evaluate"
+          ? "Evaluating inquiry…"
+          : "Evaluate latest inquiry"}
       </Button>
       {notice && (
-        <p role="status" className="text-sm text-success">
+        <p
+          role="status"
+          className={
+            noticeTone === "warning"
+              ? "text-sm text-warning"
+              : "text-sm text-success"
+          }
+        >
           {notice}
         </p>
       )}
@@ -124,11 +204,18 @@ export function InquiryHandling({
         </Alert>
       )}
       <p className="text-sm text-muted-foreground">
-        Live channel delivery is not configured. Responses remain unsent. Review
-        and send manually through your selected channel, then record the manual
-        reply in this conversation.
+        Review the exact response and recipient before sending through the
+        selected Gmail account. Sending requires separate authorization and
+        current sender, reply visibility and recipient checks. Other channel
+        responses require a manual reply recorded in this conversation.
       </p>
       <div className="flex flex-wrap gap-x-4 text-sm">
+        <Link
+          className="inline-flex min-h-11 items-center text-primary underline"
+          href={`/businesses/${businessId}/mailboxes`}
+        >
+          Synchronize selected mailbox
+        </Link>
         <Link
           className="inline-flex min-h-11 items-center text-primary underline"
           href={`/businesses/${businessId}/senders`}
@@ -179,6 +266,30 @@ export function InquiryHandling({
                 . {run.reason.replaceAll("_", " ")}
               </p>
               {run.body && <p className="whitespace-pre-wrap">{run.body}</p>}
+              {run.body && (
+                <dl className="space-y-1 text-sm wrap-anywhere">
+                  <div>
+                    <dt className="inline font-medium">To: </dt>
+                    <dd className="inline">{run.reply.recipient}</dd>
+                  </div>
+                  <div>
+                    <dt className="inline font-medium">Subject: </dt>
+                    <dd className="inline">{run.reply.subject}</dd>
+                  </div>
+                  <div>
+                    <dt className="inline font-medium">From: </dt>
+                    <dd className="inline">
+                      {run.reply.fromAddress ?? "Sender setup required"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="inline font-medium">Reply to: </dt>
+                    <dd className="inline">
+                      {run.reply.replyTo ?? "Reply setup required"}
+                    </dd>
+                  </div>
+                </dl>
+              )}
               {run.ownerId && (
                 <p className="text-sm">
                   Accountable person: {run.ownerName ?? run.ownerId}. Escalation
@@ -189,14 +300,86 @@ export function InquiryHandling({
                 Next action: {run.nextAction}
               </p>
               <p className="text-sm text-muted-foreground">
-                Delivery:{" "}
+                Action:{" "}
                 {run.action
                   ? `${run.action.state}${run.action.reason ? ` (${run.action.reason.replaceAll("_", " ")})` : ""}`
                   : "No outbound action"}
                 .{" "}
                 {run.action?.state === "committed" &&
-                  "Acceptance is unconfirmed. Reconcile with the provider before any manual retry."}
+                  "Acceptance is unknown. This action will not resend. Synchronize the selected mailbox and check Sent evidence before any manual action."}
               </p>
+              {run.action?.email && (
+                <div className="space-y-2 text-sm wrap-anywhere">
+                  <p>
+                    Provider acceptance:{" "}
+                    {run.action.email.result?.status === "accepted"
+                      ? run.action.email.result.receipt.evidence ===
+                        "sent_folder"
+                        ? "Reconciled from exact Sent-folder evidence"
+                        : "Confirmed by Gmail response"
+                      : run.action.email.result?.status === "not_accepted"
+                        ? `Not accepted (${run.action.email.result.reason.replaceAll("_", " ")})`
+                        : run.action.state === "cancelled"
+                          ? "Not attempted; current checks blocked transport"
+                          : "Unknown"}
+                    .
+                  </p>
+                  <p>
+                    Sent-folder observation:{" "}
+                    {run.action.email.sent
+                      ? `Observed message ${run.action.email.sent.messageRef} in thread ${run.action.email.sent.threadRef}`
+                      : "Not confirmed"}
+                    .
+                  </p>
+                  <p>
+                    Delivery: unconfirmed. Acceptance and Sent-folder
+                    observations do not establish delivery.
+                  </p>
+                  {run.action.email.result?.status === "accepted" && (
+                    <p>
+                      Gmail message:{" "}
+                      {run.action.email.result.receipt.messageRef} · Thread:{" "}
+                      {run.action.email.result.receipt.threadRef}
+                    </p>
+                  )}
+                </div>
+              )}
+              {run.action?.state === "pending" && run.status === "ready" && (
+                <div className="space-y-2">
+                  <Button
+                    type="button"
+                    disabled={
+                      pending || !state.canProcess || !run.reply.nativeGmail
+                    }
+                    aria-busy={working === `${run.id}:dispatch`}
+                    onClick={() => delivery(run.id, "dispatch")}
+                  >
+                    {working === `${run.id}:dispatch`
+                      ? "Sending prepared reply?"
+                      : "Send prepared Gmail reply"}
+                  </Button>
+                  {!run.reply.nativeGmail && (
+                    <p className="text-sm text-muted-foreground">
+                      A current native Gmail sender and reply route are
+                      required. Review sender and mailbox setup, then reload.
+                    </p>
+                  )}
+                </div>
+              )}
+              {run.action?.email &&
+                ["committed", "dispatched"].includes(run.action.state) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={pending}
+                    aria-busy={working === `${run.id}:reconcile`}
+                    onClick={() => delivery(run.id, "reconcile")}
+                  >
+                    {working === `${run.id}:reconcile`
+                      ? "Checking Sent evidence?"
+                      : "Check Sent evidence"}
+                  </Button>
+                )}
               {run.facts.length > 0 && (
                 <dl className="space-y-2">
                   {run.facts.map((fact) => (

@@ -6,6 +6,7 @@ import type { MailboxBatch } from "../models/mailboxes";
 import { selectedMetadata } from "../models/mailboxes";
 import { writeControl } from "./opportunity-control-repository";
 import { resolveMailReference } from "./mailbox-reference";
+import { isOpportunityMailObservation } from "./opportunity-mail";
 import {
   sequenceReference,
   observeSequenceSent,
@@ -33,7 +34,10 @@ export async function retainMailManual(
   )
     throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
   const { work } = batch.snapshot;
-  if (await observeSequenceSent(tx, batch, selected, at)) {
+  if (
+    (await isOpportunityMailObservation(tx, batch, selected)) ||
+    (await observeSequenceSent(tx, batch, selected, at))
+  ) {
     await retainMailObservation(tx, batch, selected, at);
     await tx
       .update(gmailManualMessage)
