@@ -52,6 +52,8 @@ import { handoffSource } from "../application/email-handoff-policy";
 import { incomingInquirySchema } from "../models/inbox";
 import { captureInboxInquiry } from "./inbox-repository";
 import { sequenceReference } from "./email-sequence-observations";
+import { gmailDispatchAccess } from "./gmail-dispatch";
+import { gmailSequenceKey } from "../gmail/sequence-mail";
 
 type Run = typeof emailSequenceRun.$inferSelect;
 type Action = typeof emailSequenceAction.$inferSelect;
@@ -808,6 +810,89 @@ export function createEmailSequenceRepository(
             !["committed", "unknown"].includes(a.state)
           )
             return;
+          // Search absence cannot prove non-acceptance. Only an exact, currently authorized
+          // observation from the existing selected sync can account for a lost Gmail response.
+          if (provider.key === gmailSequenceKey) {
+            const observations = await tx
+              .select()
+              .from(emailSequenceEvent)
+              .where(
+                and(
+                  eq(emailSequenceEvent.businessId, businessId),
+                  eq(emailSequenceEvent.actionId, a.id),
+                  eq(emailSequenceEvent.kind, "sent_folder_observed"),
+                ),
+              );
+            const matches = observations.filter(
+              (e) =>
+                e.attemptId === a.attemptId &&
+                e.source?.provider === "gmail" &&
+                e.source.connectionId === attempt.envelope.connectionId &&
+                e.source.internetMessageId ===
+                  attempt.envelope.internetMessageId,
+            );
+            if (matches.length === 1) {
+              const source = matches[0].source!;
+              const [policy] = await tx
+                .select()
+                .from(mailboxPolicy)
+                .where(
+                  and(
+                    eq(mailboxPolicy.businessId, businessId),
+                    eq(mailboxPolicy.id, source.mailboxId),
+                  ),
+                );
+              const current = policy
+                ? await currentMailbox(tx, businessId, policy, clock.now())
+                : null;
+              const [retained] = await tx
+                .select()
+                .from(gmailManualMessage)
+                .where(
+                  and(
+                    eq(gmailManualMessage.businessId, businessId),
+                    eq(gmailManualMessage.mailboxId, source.mailboxId),
+                    eq(gmailManualMessage.messageRef, source.messageRef),
+                  ),
+                );
+              const fresh =
+                current && retained
+                  ? handoffSource(current, {
+                      id: retained.id,
+                      event: retained.content,
+                      metadata: retained.currentMetadata ?? retained.metadata,
+                      generation: retained.nativeSyncGeneration,
+                    })
+                  : null;
+              const metadata = retained?.currentMetadata ?? retained?.metadata;
+              if (
+                fresh &&
+                fresh.threadRef === source.threadRef &&
+                fresh.internetMessageId === source.internetMessageId &&
+                metadata?.native?.direction === "manual_reply" &&
+                metadata.native.from === attempt.envelope.fromAddress &&
+                metadata.native.to.length === 1 &&
+                metadata.native.to[0] === attempt.envelope.recipient &&
+                metadata.folderRefs.includes("SENT")
+              ) {
+                result = {
+                  status: "accepted",
+                  receipt: {
+                    businessId,
+                    actionId: a.id,
+                    attemptId: a.attemptId,
+                    connectionId: attempt.envelope.connectionId,
+                    recipient: attempt.envelope.recipient,
+                    messageRef: source.messageRef,
+                    threadRef: source.threadRef,
+                    internetMessageId: source.internetMessageId,
+                    acceptedAt: source.occurredAt,
+                    evidence: "sent_folder",
+                  },
+                };
+              }
+            }
+          }
           const parsed = sequenceResultSchema.safeParse(result);
           await actionUpdate(tx, a, { recoveryAt: clock.now() });
           if (!parsed.success || parsed.data.status === "unknown") {
@@ -1199,6 +1284,40 @@ export function createEmailSequenceRepository(
           );
           return;
         }
+        const previous =
+          (await load(tx, input.businessId, run.id)).actions.find(
+            (a) =>
+              a.contactId === action.contactId &&
+              a.stepIndex === action.stepIndex - 1,
+          )?.receipt ?? null;
+        const access = await gmailDispatchAccess(
+          tx,
+          claim.envelope,
+          previous,
+          action.stepIndex
+            ? revision.snapshot.steps[action.stepIndex - 1].subject
+            : null,
+          async () => {
+            const current = await evaluateSequence(tx, {
+              actor: input.identity,
+              businessId: input.businessId,
+              revision,
+              action: {
+                contactId: action.contactId,
+                stepIndex: action.stepIndex,
+                opportunityId: action.opportunityId,
+                id: action.id,
+              },
+              provider,
+            });
+            const at = clock.now();
+            return (
+              current.reason === null &&
+              !signal.aborted &&
+              sequenceDue(revision.snapshot.timing!, at) <= at
+            );
+          },
+        );
         let result: unknown;
         try {
           result = await sequenceMailCall(
@@ -1211,6 +1330,7 @@ export function createEmailSequenceRepository(
                   ),
                 },
                 s,
+                access,
               ),
             signal,
           );
@@ -1326,7 +1446,9 @@ export function createEmailSequenceRepository(
       run,
       "provider_accepted",
       action,
-      null,
+      result.receipt.evidence === "sent_folder"
+        ? "sent_folder_reconciliation"
+        : null,
       null,
       result.receipt,
     );

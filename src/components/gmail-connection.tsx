@@ -139,7 +139,9 @@ export function GmailConnection({
       <p className="text-sm text-muted-foreground">
         Save the reading and sending requests below, then open Google consent.
         Calendar access and app sign-in do not grant mailbox access. Sending
-        messages is a later capability.
+        requires a separate grant, a ready sending identity and reply route, and
+        an explicitly started approved sequence. This does not change the
+        selected mail or authorize historical imports.
       </p>
       {state && (
         <p>

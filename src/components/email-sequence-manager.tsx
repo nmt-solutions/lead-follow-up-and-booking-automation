@@ -153,7 +153,9 @@ export function EmailSequenceManager({
                 ? "Not configured"
                 : state.provider.mode === "fixture"
                   ? "Deterministic test adapter"
-                  : "Production adapter"}
+                  : state.provider.key === "gmail-sequence-v1"
+                    ? "Gmail"
+                    : "Production adapter"}
             </strong>
             . Durable queue:{" "}
             <strong>
@@ -186,6 +188,12 @@ export function EmailSequenceManager({
             Refresh sequence state
           </Button>
           <div className="flex flex-wrap gap-4 text-sm">
+            <Link
+              href={`/businesses/${businessId}/mailboxes`}
+              className="inline-flex min-h-11 items-center text-primary underline"
+            >
+              Review mailbox permissions and reply visibility
+            </Link>
             <Link
               href="/security"
               target="_blank"
@@ -394,10 +402,14 @@ export function EmailSequenceManager({
                       </p>
                     )}
                     {a.receipt && (
-                      <p className="text-sm">
-                        Provider accepted at {a.receipt.acceptedAt}. Message
-                        reference: {a.receipt.messageRef}. Delivery is
-                        unconfirmed.
+                      <p className="break-words text-sm">
+                        {a.receipt.evidence === "sent_folder"
+                          ? "Acceptance reconciled from the Sent folder"
+                          : "Provider accepted"}{" "}
+                        at {a.receipt.acceptedAt}. Message reference:{" "}
+                        {a.receipt.messageRef}. Thread: {a.receipt.threadRef}.
+                        Delivery is unconfirmed; acceptance and a Sent-folder
+                        observation do not establish delivery.
                       </p>
                     )}
                     <details>
@@ -502,6 +514,9 @@ export function EmailSequenceManager({
                     {e.actorId}
                     {e.receipt
                       ? ` · provider message ${e.receipt.messageRef}`
+                      : ""}
+                    {e.receipt?.evidence === "sent_folder"
+                      ? " · reconciled from the Sent folder"
                       : ""}
                     {e.source && (
                       <p className="mt-2">

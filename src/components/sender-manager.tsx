@@ -378,6 +378,23 @@ export function SenderManager({
                       : "Verification alone does not establish two-way mail access."}
                   </p>
                 )}
+                {row.evidence?.adapterKey === "gmail-sequence-v1" && (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Gmail reply readiness covers exact references from approved
+                    sequences. General mailbox completeness and historical
+                    imports remain separate.
+                  </p>
+                )}
+                {row.evidence?.verificationReference && (
+                  <a
+                    href={row.evidence.verificationReference}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-11 items-center text-sm text-primary underline"
+                  >
+                    Review sender verification record (new tab)
+                  </a>
+                )}
               </details>
               {state.canManage && (
                 <div className="flex flex-wrap gap-3">

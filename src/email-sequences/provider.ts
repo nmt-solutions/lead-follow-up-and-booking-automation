@@ -1,5 +1,8 @@
 import { ApplicationError } from "../models/application-error";
 import type { SequenceMailProvider } from "../models/email-sequences";
+import { configuredGmail } from "../gmail/configuration";
+import { createGmailSequenceMail } from "../gmail/sequence-mail";
+import type { Clock } from "../models/business";
 
 /** Mailbox login and sync do not activate Gmail/Graph dispatch or authoritative reconciliation.
  * Production has no fixture or transactional-mail fallback. */
@@ -13,6 +16,20 @@ export const unavailableSequenceMail: SequenceMailProvider = {
     return { status: "unknown" };
   },
 };
+export function configuredSequenceMail(options: {
+  env: Readonly<Record<string, string | undefined>>;
+  clock: Clock;
+  fetch: typeof fetch;
+}): SequenceMailProvider {
+  const configuration = configuredGmail(options.env);
+  return configuration
+    ? createGmailSequenceMail({
+        configuration,
+        clock: options.clock,
+        fetch: options.fetch,
+      })
+    : unavailableSequenceMail;
+}
 /** An external-I/O deadline only. Trigger owns persisted timing and retries. */
 export async function sequenceMailCall(
   operation: (signal: AbortSignal) => Promise<unknown>,
