@@ -5,7 +5,8 @@ import type {
   MailboxMetadata,
 } from "../models/mailboxes";
 import type { WorkIdentity } from "../models/discovery";
-import type { GmailStatus, GmailManual } from "../models/gmail";
+import type { MailboxAuthorizationStatus } from "../models/mailbox-authorization";
+import type { MailManual } from "../models/mail-native";
 import type {
   MicrosoftCalendarStatus,
   MicrosoftIdentity,
@@ -1497,6 +1498,7 @@ export const mailboxJob = pgTable(
   {
     ...inboxColumns(),
     mailboxId: uuid("mailbox_id").notNull(),
+    successorId: uuid("successor_id"),
     policyVersion: integer("policy_version").notNull(),
     identity: jsonb("identity").$type<WorkIdentity>().notNull(),
     state: jsonb("state").$type<MailboxJobState>().notNull(),
@@ -1632,6 +1634,11 @@ export const inboxMessage = pgTable(
       table.connectionId,
       table.messageRef,
     ),
+    uniqueIndex("inbox_message_mailbox_scope").on(
+      table.id,
+      table.businessId,
+      table.connectionId,
+    ),
     uniqueIndex("inbox_message_scope").on(
       table.id,
       table.businessId,
@@ -1763,6 +1770,22 @@ export const inboxOpportunityHistory = pgTable(
 
 // Installed after unique indexes by secureDatabase, matching the pinned push contract.
 export const mailboxScopeForeignKeys = [
+  new ForeignKey(
+    mailboxJob,
+    foreignKey({
+      name: "mailbox_job_successor_scope",
+      columns: [
+        mailboxJob.successorId,
+        mailboxJob.businessId,
+        mailboxJob.mailboxId,
+      ],
+      foreignColumns: [
+        mailboxJob.id,
+        mailboxJob.businessId,
+        mailboxJob.mailboxId,
+      ],
+    }),
+  ),
   new ForeignKey(
     mailboxPolicy,
     foreignKey({
@@ -2433,7 +2456,7 @@ export const commercialScopeForeignKeys = [
   ),
 ];
 
-function googlePolicies(name: string, privileged: boolean) {
+function integrationPolicies(name: string, privileged: boolean) {
   const access = privileged ? inboxWrite : inboxScope;
   return [
     pgPolicy(`${name}_read`, { for: "select", to: appRuntime, using: access }),
@@ -2450,12 +2473,129 @@ function googlePolicies(name: string, privileged: boolean) {
     }),
   ];
 }
+export const mailboxAppMessage = pgTable(
+  "mailbox_app_message",
+  {
+    ...inboxColumns(),
+    mailboxId: uuid("mailbox_id").notNull(),
+    messageRef: text("message_ref").notNull(),
+    internetMessageId: text("internet_message_id").notNull(),
+    replyToMessageId: uuid("reply_to_message_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("mailbox_app_message_ref").on(t.mailboxId, t.messageRef),
+    uniqueIndex("mailbox_app_message_internet_ref").on(
+      t.mailboxId,
+      t.internetMessageId,
+    ),
+    ...integrationPolicies("mailbox_app_message", false).filter(
+      (policy) => policy.for !== "update",
+    ),
+  ],
+).enableRLS();
+export const mailboxAppMessageScopeForeignKeys = [
+  new ForeignKey(
+    mailboxAppMessage,
+    foreignKey({
+      name: "mailbox_app_message_mailbox_scope",
+      columns: [mailboxAppMessage.mailboxId, mailboxAppMessage.businessId],
+      foreignColumns: [mailboxPolicy.id, mailboxPolicy.businessId],
+    }),
+  ),
+  new ForeignKey(
+    mailboxAppMessage,
+    foreignKey({
+      name: "mailbox_app_message_reply_scope",
+      columns: [
+        mailboxAppMessage.replyToMessageId,
+        mailboxAppMessage.businessId,
+        mailboxAppMessage.mailboxId,
+      ],
+      foreignColumns: [
+        inboxMessage.id,
+        inboxMessage.businessId,
+        inboxMessage.connectionId,
+      ],
+    }),
+  ),
+];
+export const microsoftMailGrant = pgTable(
+  "microsoft_mail_grant",
+  {
+    ...inboxColumns(),
+    generation: integer("generation").notNull(),
+    status: text("status").$type<MailboxAuthorizationStatus>().notNull(),
+    reason: text("reason"),
+    accountSubject: text("account_subject"),
+    credentials: text("credentials"),
+    rejectedCredentials: text("rejected_credentials"),
+    scopes: jsonb("scopes").$type<string[]>().notNull(),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+  },
+  (t) => [
+    uniqueIndex("microsoft_mail_grant_scope").on(t.id, t.businessId),
+    check("microsoft_mail_generation", sql`${t.generation} > 0`),
+    check(
+      "microsoft_mail_status",
+      sql`${t.status} in ('connecting','connected','reconnect_required','insufficient','revocation_pending','disconnected')`,
+    ),
+    ...integrationPolicies("microsoft_mail_grant", true),
+  ],
+).enableRLS();
+export const microsoftMailOauth = pgTable(
+  "microsoft_mail_oauth",
+  {
+    ...inboxColumns(),
+    mailboxId: uuid("mailbox_id").notNull(),
+    generation: integer("generation").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    stateHash: text("state_hash").notNull(),
+    verifier: text("verifier").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumed: boolean("consumed").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("microsoft_mail_oauth_state").on(t.stateHash),
+    ...integrationPolicies("microsoft_mail_oauth", true),
+  ],
+).enableRLS();
+export const microsoftMailScopeForeignKeys = [
+  new ForeignKey(
+    microsoftMailGrant,
+    foreignKey({
+      name: "microsoft_mail_grant_mailbox_scope",
+      columns: [microsoftMailGrant.id, microsoftMailGrant.businessId],
+      foreignColumns: [mailboxPolicy.id, mailboxPolicy.businessId],
+    }),
+  ),
+  new ForeignKey(
+    microsoftMailOauth,
+    foreignKey({
+      name: "microsoft_mail_oauth_grant_scope",
+      columns: [microsoftMailOauth.mailboxId, microsoftMailOauth.businessId],
+      foreignColumns: [microsoftMailGrant.id, microsoftMailGrant.businessId],
+    }),
+  ),
+];
 export const gmailGrant = pgTable(
   "gmail_grant",
   {
     ...inboxColumns(),
     generation: integer("generation").notNull(),
-    status: text("status").$type<GmailStatus>().notNull(),
+    status: text("status").$type<MailboxAuthorizationStatus>().notNull(),
     reason: text("reason"),
     accountSubject: text("account_subject"),
     credentials: text("credentials"),
@@ -2473,7 +2613,7 @@ export const gmailGrant = pgTable(
       "gmail_status",
       sql`${t.status} in ('connecting','connected','reconnect_required','insufficient','revocation_pending','disconnected')`,
     ),
-    ...googlePolicies("gmail_grant", true),
+    ...integrationPolicies("gmail_grant", true),
   ],
 ).enableRLS();
 export const gmailOauth = pgTable(
@@ -2496,7 +2636,7 @@ export const gmailOauth = pgTable(
   },
   (t) => [
     uniqueIndex("gmail_oauth_state").on(t.stateHash),
-    ...googlePolicies("gmail_oauth", true),
+    ...integrationPolicies("gmail_oauth", true),
   ],
 ).enableRLS();
 export const gmailScopeForeignKeys = [
@@ -2525,7 +2665,7 @@ export const gmailManualMessage = pgTable(
     messageRef: text("message_ref").notNull(),
     policyVersion: integer("policy_version").notNull(),
     metadata: jsonb("metadata").$type<MailboxMetadata>().notNull(),
-    content: jsonb("content").$type<GmailManual>().notNull(),
+    content: jsonb("content").$type<MailManual>().notNull(),
     fingerprint: text("fingerprint").notNull(),
     conversationId: uuid("conversation_id"),
     opportunityId: uuid("opportunity_id"),
@@ -2618,7 +2758,7 @@ export const googleCalendarGrant = pgTable(
       "google_calendar_status",
       sql`${t.status} in ('connecting','selection_required','ready','reconnect_required','insufficient','revocation_pending','disconnected')`,
     ),
-    ...googlePolicies("google_calendar_grant", false),
+    ...integrationPolicies("google_calendar_grant", false),
   ],
 ).enableRLS();
 export const googleCalendarOauth = pgTable(
@@ -2641,7 +2781,7 @@ export const googleCalendarOauth = pgTable(
   },
   (t) => [
     uniqueIndex("google_calendar_oauth_state").on(t.stateHash),
-    ...googlePolicies("google_calendar_oauth", true),
+    ...integrationPolicies("google_calendar_oauth", true),
   ],
 ).enableRLS();
 export const googleCalendarScopeForeignKeys = [
@@ -2688,7 +2828,7 @@ export const microsoftCalendarGrant = pgTable(
       "microsoft_calendar_status",
       sql`${t.status} in ('connecting','selection_required','ready','reconnect_required','insufficient','disconnected')`,
     ),
-    ...googlePolicies("microsoft_calendar_grant", false),
+    ...integrationPolicies("microsoft_calendar_grant", false),
   ],
 ).enableRLS();
 export const microsoftCalendarOauth = pgTable(
@@ -2711,7 +2851,7 @@ export const microsoftCalendarOauth = pgTable(
   },
   (t) => [
     uniqueIndex("microsoft_calendar_oauth_state").on(t.stateHash),
-    ...googlePolicies("microsoft_calendar_oauth", true),
+    ...integrationPolicies("microsoft_calendar_oauth", true),
   ],
 ).enableRLS();
 export const microsoftCalendarScopeForeignKeys = [

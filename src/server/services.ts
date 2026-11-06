@@ -3,7 +3,11 @@ import { createMailboxApplication } from "../application/mailboxes";
 import { createMailboxRepository } from "../db/mailbox-repository";
 import { createMailboxHttp } from "../http/mailboxes";
 import { createGmailConnection } from "../gmail/connection";
-import { createGmailProvider } from "../gmail/provider";
+import { createNativeMailboxProvider } from "../mailboxes/provider";
+import { createMicrosoftMailConnection } from "../microsoft-mail/connection";
+import { createMicrosoftMailApplication } from "../application/microsoft-mail";
+import { configuredMicrosoftMail } from "../microsoft-mail/configuration";
+import { createMicrosoftMailHttpHandlers } from "../http/microsoft-mail";
 import { createGmailApplication } from "../application/gmail";
 import { configuredGmail } from "../gmail/configuration";
 import { createGmailHttpHandlers } from "../http/gmail";
@@ -127,14 +131,11 @@ async function composeServices() {
     repository: createMailboxRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
-    provider: createGmailProvider(
-      createGmailConnection(runtimeDatabase(pool), {
-        clock: { now: () => new Date() },
-        configuration: configuredGmail(process.env),
-        fetch,
-      }),
-      { now: () => new Date() },
-    ),
+    provider: createNativeMailboxProvider(runtimeDatabase(pool), {
+      clock: { now: () => new Date() },
+      env: process.env,
+      fetch,
+    }),
     clock: { now: () => new Date() },
     enqueue: configuredMailboxQueue(process.env),
   });
@@ -151,6 +152,18 @@ async function composeServices() {
     connection: createGmailConnection(runtimeDatabase(pool), {
       clock: { now: () => new Date() },
       configuration: configuredGmail(process.env),
+      fetch,
+    }),
+    queueInitialSync: (credentials, businessId, mailboxId) =>
+      mailboxes.queue(credentials, businessId, mailboxId, {
+        mode: "incremental",
+      }),
+  });
+  const microsoftMail = createMicrosoftMailApplication({
+    access,
+    connection: createMicrosoftMailConnection(runtimeDatabase(pool), {
+      clock: { now: () => new Date() },
+      configuration: configuredMicrosoftMail(process.env),
       fetch,
     }),
     queueInitialSync: (credentials, businessId, mailboxId) =>
@@ -333,8 +346,14 @@ async function composeServices() {
     }),
     senders,
     gmail,
+    microsoftMail,
     gmailHttp: createGmailHttpHandlers({
       application: gmail,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
+    microsoftMailHttp: createMicrosoftMailHttpHandlers({
+      application: microsoftMail,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
       reportFailure,
     }),

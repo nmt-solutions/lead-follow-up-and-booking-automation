@@ -4,7 +4,7 @@ import { ApplicationError } from "../models/application-error";
 import { businessIdSchema, type Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import { incomingInquirySchema } from "../models/inbox";
-import { gmailManualSchema } from "../models/gmail";
+import { mailManualSchema } from "../models/mail-native";
 import {
   mailboxGrantSchema,
   MailboxFailure,
@@ -95,6 +95,16 @@ export function createMailboxApplication<Credentials>(dependencies: {
       const work = parse(mailboxWorkSchema, input);
       const snapshot = await repository.prepare(work);
       if (!snapshot) return null;
+      if (snapshot.retryAt && new Date(snapshot.retryAt) > clock.now())
+        return repository.fail(
+          snapshot,
+          "rate_limited",
+          snapshot.permissionObservation ?? undefined,
+          Math.ceil(
+            (new Date(snapshot.retryAt).getTime() - clock.now().getTime()) /
+              1000,
+          ),
+        );
       let grant: MailboxGrant | undefined;
       try {
         signal.throwIfAborted();
@@ -165,7 +175,7 @@ export function createMailboxApplication<Credentials>(dependencies: {
           if (mode === "history" && selected.length >= remaining)
             throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
           const event = parse(
-            z.union([incomingInquirySchema, gmailManualSchema]),
+            z.union([incomingInquirySchema, mailManualSchema]),
             await provider.read(snapshot, metadata, signal),
             true,
           );
@@ -261,6 +271,7 @@ export function createMailboxApplication<Credentials>(dependencies: {
                 error.code === "INVALID_PROVIDER_RESPONSE"
               ? undefined
               : grant,
+          error instanceof MailboxFailure ? error.retryAfterSeconds : undefined,
         );
       }
     },

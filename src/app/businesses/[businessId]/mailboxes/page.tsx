@@ -29,7 +29,23 @@ export default async function MailboxesPage({
             ),
           )
         : {};
-      return { workspace, gmailConnections };
+      const microsoftConnections = workspace.canManage
+        ? Object.fromEntries(
+            await Promise.all(
+              workspace.mailboxes
+                .filter((m) => m.provider === "microsoft")
+                .map(async (m) => [
+                  m.id,
+                  await services.microsoftMail.read(
+                    credentials,
+                    businessId,
+                    m.id,
+                  ),
+                ]),
+            ),
+          )
+        : {};
+      return { workspace, gmailConnections, microsoftConnections };
     } catch (error: unknown) {
       return pageFailure(error);
     }
@@ -49,6 +65,7 @@ export default async function MailboxesPage({
         businessId={businessId}
         initialState={state.workspace}
         gmailConnections={state.gmailConnections}
+        microsoftConnections={state.microsoftConnections}
       />
     </div>
   );

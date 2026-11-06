@@ -5,15 +5,16 @@ import { ApplicationError } from "../models/application-error";
 import type { MailboxBatch } from "../models/mailboxes";
 import { selectedMetadata } from "../models/mailboxes";
 import { writeControl } from "./opportunity-control-repository";
-import { resolveGmailReference } from "./gmail-reference";
+import { resolveMailReference } from "./mailbox-reference";
 import {
   gmailManualMessage,
   inboxOpportunity,
   opportunityControlHistory,
   opportunityManualEvent,
+  mailboxAppMessage,
 } from "./schema";
 
-export async function retainGmailManual(
+export async function retainMailManual(
   tx: Transaction,
   batch: MailboxBatch,
   selected: MailboxBatch["selected"][number],
@@ -28,6 +29,18 @@ export async function retainGmailManual(
   )
     throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
   const { work } = batch.snapshot;
+  const [appSend] = await tx
+    .select()
+    .from(mailboxAppMessage)
+    .where(
+      and(
+        eq(mailboxAppMessage.businessId, work.businessId),
+        eq(mailboxAppMessage.mailboxId, work.mailboxId),
+        eq(mailboxAppMessage.messageRef, event.messageRef),
+        eq(mailboxAppMessage.internetMessageId, event.native.internetMessageId),
+      ),
+    );
+  if (appSend) return "duplicate";
   const fingerprint = createHash("sha256")
     .update(JSON.stringify(event))
     .digest("hex");
@@ -62,7 +75,7 @@ export async function retainGmailManual(
   return "captured";
 }
 /** Deferred exact RFC reply references handle reordered pages without inventing a buyer/Opportunity. */
-export async function applyGmailManual(
+export async function applyMailManual(
   tx: Transaction,
   batch: MailboxBatch,
   at: Date,
@@ -93,7 +106,7 @@ export async function applyGmailManual(
       continue;
     const event = manual.content;
     if (!event.native.inReplyTo) continue;
-    const original = await resolveGmailReference(
+    const original = await resolveMailReference(
       tx,
       work.businessId,
       work.mailboxId,
@@ -134,14 +147,13 @@ export async function applyGmailManual(
         work.businessId,
         need,
         {
-          reason: "Manual Gmail reply observed in the selected mail",
-          nextAction:
-            "Continue with the buyer in Gmail or explicitly hand this Opportunity back",
+          reason: `Manual ${snapshot.provider === "microsoft" ? "Outlook" : "Gmail"} reply observed in the selected mail`,
+          nextAction: `Continue with the buyer in ${snapshot.provider === "microsoft" ? "Outlook" : "Gmail"} or explicitly hand this Opportunity back`,
         },
         "manual_reply",
         at,
         null,
-        `gmail:${event.messageRef}`,
+        `${snapshot.provider}:${event.messageRef}`,
       );
       await tx.insert(opportunityManualEvent).values({
         id: randomUUID(),
@@ -167,7 +179,7 @@ export async function applyGmailManual(
   }
 }
 
-export async function gmailManualHistory(
+export async function mailManualHistory(
   tx: Transaction,
   businessId: string,
   conversationId: string,

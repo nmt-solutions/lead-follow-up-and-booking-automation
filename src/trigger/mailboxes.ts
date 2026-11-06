@@ -22,14 +22,22 @@ export const synchronizeMailbox = task({
             result.reason === "limit_reached"
           ) {
             if (
-              (!result || (result.status === "completed" && !result.reason)) &&
+              (!result || result.status === "completed") &&
               process.env.MAILBOX_WORKER_DEPLOYMENT_CONFIRMED === "true"
             )
-              await tasks.trigger("poll-selected-gmail", parsed.data, {
+              await tasks.trigger("poll-selected-mailbox", parsed.data, {
                 delay: "60s",
-                idempotencyKey: `gmail-poll:${parsed.data.jobId}`,
+                idempotencyKey: `mailbox-poll:${parsed.data.jobId}`,
                 idempotencyKeyTTL: "7d",
               });
+            return result;
+          }
+          if (result.reason === "rate_limited" && result.retryAt) {
+            await tasks.trigger("synchronize-selected-mailbox", parsed.data, {
+              delay: new Date(result.retryAt),
+              idempotencyKey: `mailbox-throttle:${result.id}:${result.retryAt}`,
+              idempotencyKeyTTL: "7d",
+            });
             return result;
           }
           if (
@@ -63,21 +71,21 @@ export const synchronizeMailbox = task({
 });
 
 /** Trigger owns the delayed continuation. No web-process timer, public push endpoint or worker activation. */
-export const pollSelectedGmail = task({
-  id: "poll-selected-gmail",
+export const pollSelectedMailbox = task({
+  id: "poll-selected-mailbox",
   queue: { concurrencyLimit: 4 },
   retry: { maxAttempts: 3 },
   maxDuration: 60,
   run: async (payload: unknown) => {
     const parsed = mailboxWorkSchema.safeParse(payload);
     if (!parsed.success)
-      throw new AbortTaskRunError("Invalid Gmail continuation");
+      throw new AbortTaskRunError("Invalid mailbox continuation");
     try {
       return await withMailboxWorker(async (app) => {
         const next = await app.repeat(parsed.data);
         if (next)
           await tasks.trigger("synchronize-selected-mailbox", next, {
-            idempotencyKey: `gmail-sync:${next.jobId}`,
+            idempotencyKey: `mailbox-sync:${next.jobId}`,
             idempotencyKeyTTL: "7d",
           });
         return { queued: Boolean(next) };
@@ -88,8 +96,24 @@ export const pollSelectedGmail = task({
           "Mailbox permission or session changed; review synchronization",
         );
       throw new Error(
-        "Gmail continuation unavailable; resume saved synchronization",
+        "Mailbox continuation unavailable; resume saved synchronization",
       );
     }
+  },
+});
+
+/** Preserve already queued #29 task IDs across deployment; authority is checked by the shared continuation. */
+export const pollSelectedGmail = task({
+  id: "poll-selected-gmail",
+  retry: { maxAttempts: 3 },
+  run: async (payload: unknown) => {
+    const parsed = mailboxWorkSchema.safeParse(payload);
+    if (!parsed.success)
+      throw new AbortTaskRunError("Invalid mailbox continuation");
+    await tasks.trigger("poll-selected-mailbox", parsed.data, {
+      idempotencyKey: `mailbox-poll:${parsed.data.jobId}`,
+      idempotencyKeyTTL: "7d",
+    });
+    return { queued: true };
   },
 });

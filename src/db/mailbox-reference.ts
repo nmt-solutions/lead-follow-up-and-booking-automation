@@ -6,12 +6,13 @@ import {
   inboxMessageLink,
   inboxAssociation,
   inboxConversation,
+  mailboxAppMessage,
 } from "./schema";
 
 /** Follow exact retained RFC references to a received message's CURRENT association.
  * Sent observations are provenance, never a second buyer identity or a frozen association.
  */
-export async function resolveGmailReference(
+export async function resolveMailReference(
   tx: Transaction,
   businessId: string,
   mailboxId: string,
@@ -67,7 +68,41 @@ export async function resolveGmailReference(
         sql`${gmailManualMessage.content}->'native'->>'internetMessageId' = ${reference}`,
       ),
     );
-  if (received.length + sent.length > 1) return { status: "ambiguous" };
+  const appSent = await tx
+    .select({ replyToMessageId: mailboxAppMessage.replyToMessageId })
+    .from(mailboxAppMessage)
+    .where(
+      and(
+        eq(mailboxAppMessage.businessId, businessId),
+        eq(mailboxAppMessage.mailboxId, mailboxId),
+        eq(mailboxAppMessage.internetMessageId, reference),
+      ),
+    );
+  if (received.length + sent.length + appSent.length > 1)
+    return { status: "ambiguous" };
+  if (appSent[0]) {
+    const [source] = await tx
+      .select()
+      .from(inboxMessage)
+      .where(
+        and(
+          eq(inboxMessage.id, appSent[0].replyToMessageId),
+          eq(inboxMessage.businessId, businessId),
+          eq(inboxMessage.connectionId, mailboxId),
+        ),
+      );
+    const sourceRef = source?.mailboxMetadata?.native?.internetMessageId;
+    if (!sourceRef) return { status: "missing" };
+    return resolveMailReference(
+      tx,
+      businessId,
+      mailboxId,
+      sourceRef,
+      participants,
+      thread,
+      visited,
+    );
+  }
   const original = received[0];
   if (original) {
     if (
@@ -91,7 +126,7 @@ export async function resolveGmailReference(
     !manual.content.native.to.some((to) => participants.includes(to))
   )
     return { status: "missing" };
-  const resolved = await resolveGmailReference(
+  const resolved = await resolveMailReference(
     tx,
     businessId,
     mailboxId,

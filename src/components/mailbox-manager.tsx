@@ -19,6 +19,8 @@ import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { GmailConnection } from "./gmail-connection";
 import type { GmailView } from "@/models/gmail";
+import { MicrosoftMailConnection } from "./microsoft-mail-connection";
+import type { MicrosoftMailView } from "@/models/microsoft-mail";
 
 const resultSchema = z.discriminatedUnion("success", [
   z.object({ success: z.literal(true), data: z.unknown() }),
@@ -38,11 +40,11 @@ const reasons = {
   manual_reply_review:
     "A selected manual reply cannot yet be matched to an exact received message and Opportunity. Review the retained reply and chosen history bounds; affected follow-ups remain paused.",
   rate_limited:
-    "Gmail limited this request. Follow-ups are paused; retry later from the saved checkpoint.",
+    "The mail provider limited this request. Follow-ups are paused; retry later from the saved checkpoint.",
   cursor_recovery:
     "Catching up or recovering available selected mail; follow-ups are paused. Any unrecoverable history gap stays visible after recovery.",
   history_gap:
-    "Available selected mail was recovered, but Gmail cannot prove deleted or missing history. Follow-ups remain paused. After review, disable reading and save, then re-enable and save to approve a new mail boundary. Existing history stays available.",
+    "Available selected mail was recovered, but the provider cannot prove deleted or missing history. Follow-ups remain paused. After review, disable reading and save, then re-enable and save to approve a new mail boundary. Existing history stays available.",
   interrupted:
     "This sync was interrupted. No unfinished page was saved. Resume when you are ready.",
   authorization_required:
@@ -65,10 +67,12 @@ export function MailboxManager({
   businessId,
   initialState,
   gmailConnections = {},
+  microsoftConnections = {},
 }: {
   businessId: string;
   initialState: MailboxWorkspace;
   gmailConnections?: Record<string, GmailView>;
+  microsoftConnections?: Record<string, MicrosoftMailView>;
 }) {
   const [state, setState] = useState(initialState);
   const [pending, setPending] = useState(false);
@@ -196,6 +200,21 @@ export function MailboxManager({
             </p>
           </CardHeader>
           <CardContent className="space-y-5">
+            {mailbox.provider === "microsoft" && state.canManage && (
+              <MicrosoftMailConnection
+                businessId={businessId}
+                mailboxId={mailbox.id}
+                initialState={microsoftConnections[mailbox.id]}
+                enabled={
+                  mailbox.configuration.enabled &&
+                  (mailbox.configuration.requestedRead ||
+                    mailbox.configuration.requestedSend)
+                }
+                onChanged={async () =>
+                  setState(mailboxWorkspaceSchema.parse(await request(base)))
+                }
+              />
+            )}
             {mailbox.provider === "gmail" && state.canManage && (
               <GmailConnection
                 businessId={businessId}
@@ -363,6 +382,11 @@ export function MailboxManager({
                   {job.reason && (
                     <p className="text-sm text-muted-foreground">
                       {reasons[job.reason]}
+                    </p>
+                  )}
+                  {job.retryAt && job.reason === "rate_limited" && (
+                    <p className="text-sm">
+                      Retry after {new Date(job.retryAt).toLocaleString()}.
                     </p>
                   )}
                 </div>
@@ -578,7 +602,7 @@ function MailboxForm({
         )}
         <div className="space-y-2">
           <Label htmlFor={`${prefix}-sales-terms`}>
-            Gmail sales subject phrases — one per line
+            Sales subject phrases — one per line
           </Label>
           <Textarea
             id={`${prefix}-sales-terms`}
@@ -586,13 +610,13 @@ function MailboxForm({
             defaultValue={config?.salesSubjectTerms?.join("\n") ?? ""}
           />
           <p className="text-sm text-muted-foreground">
-            For new Gmail inquiries in selected labels, require an addressed,
-            non-automated message whose subject contains one of these phrases
-            (3–80 characters; up to 20 phrases). Labels alone do not prove sales
-            relevance. Empty means new label-only inquiries stay excluded. Exact
-            selected threads and already imported threads supply explicit sales
-            context. Whole-mailbox mode processes established threads only.
-            Bodies of unknown mail are never fetched.
+            For new inquiries in selected folders or labels, require an
+            addressed, non-automated message whose subject contains one of these
+            phrases (3–80 characters; up to 20 phrases). Folder selection alone
+            does not prove sales relevance. Empty means new folder-only
+            inquiries stay excluded. Exact selected threads and already imported
+            threads supply explicit sales context. Whole-mailbox mode processes
+            established threads only. Bodies of unknown mail are never fetched.
           </p>
         </div>
         <fieldset className="space-y-4 rounded-xl border border-border p-4">

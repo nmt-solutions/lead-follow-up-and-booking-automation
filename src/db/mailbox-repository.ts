@@ -16,7 +16,7 @@ import { captureInboxInquiry } from "./inbox-repository";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { requireSalesSession } from "./sales-session";
-import { retainGmailManual, applyGmailManual } from "./gmail-intake";
+import { retainMailManual, applyMailManual } from "./mailbox-intake";
 import { pauseMailboxFollowups } from "./mailbox-visibility";
 import {
   inboxConnection,
@@ -27,10 +27,54 @@ import {
   inboxConversation,
   gmailManualMessage,
   gmailGrant,
+  microsoftMailGrant,
+  mailboxAppMessage,
   inboxMessage,
 } from "./schema";
 
 type Policy = typeof mailboxPolicy.$inferSelect;
+async function createJob(
+  tx: Transaction,
+  identity: WorkIdentity,
+  policy: Policy,
+  mode: "incremental" | "history",
+  at: Date,
+): Promise<MailboxWork> {
+  const id = randomUUID();
+  const state: MailboxJobState = {
+    id,
+    mode,
+    policyVersion: policy.version,
+    status: "queued",
+    reason: null,
+    checkpoint: 0,
+    considered: 0,
+    captured: 0,
+    duplicates: 0,
+    excluded: 0,
+  };
+  await tx
+    .insert(mailboxJob)
+    .values({
+      id,
+      businessId: policy.businessId,
+      mailboxId: policy.id,
+      policyVersion: policy.version,
+      identity,
+      state,
+      cursor: mode === "incremental" ? policy.cursor : null,
+      seen: [],
+      createdBy: identity.userId,
+      createdAt: at,
+    });
+  return {
+    businessId: policy.businessId,
+    mailboxId: policy.id,
+    jobId: id,
+    policyVersion: policy.version,
+    identity,
+  };
+}
 
 async function policyAt(tx: Transaction, businessId: string, id: string) {
   const [row] = await tx
@@ -270,18 +314,17 @@ export function createMailboxRepository(
       connection.configuration.provider !== policy.provider
     )
       throw new ApplicationError("CONFLICT");
-    const [oauth] =
-      policy.provider === "gmail"
-        ? await tx
-            .select()
-            .from(gmailGrant)
-            .where(
-              and(
-                eq(gmailGrant.id, policy.id),
-                eq(gmailGrant.businessId, work.businessId),
-              ),
-            )
-        : [];
+    const grantTable =
+      policy.provider === "gmail" ? gmailGrant : microsoftMailGrant;
+    const [oauth] = await tx
+      .select()
+      .from(grantTable)
+      .where(
+        and(
+          eq(grantTable.id, policy.id),
+          eq(grantTable.businessId, work.businessId),
+        ),
+      );
     return { policy, job, oauth };
   }
   return {
@@ -478,88 +521,69 @@ export function createMailboxRepository(
             identity,
           };
         }
-        const id = randomUUID();
-        const state: MailboxJobState = {
-          id,
-          mode,
-          policyVersion: policy.version,
-          status: "queued",
-          reason: null,
-          checkpoint: 0,
-          considered: 0,
-          captured: 0,
-          duplicates: 0,
-          excluded: 0,
-        };
-        await tx.insert(mailboxJob).values({
-          id,
-          businessId,
-          mailboxId,
-          policyVersion: policy.version,
-          identity,
-          state,
-          cursor: mode === "incremental" ? policy.cursor : null,
-          seen: [],
-          createdBy: identity.userId,
-          createdAt: clock.now(),
-        });
-        return {
-          businessId,
-          mailboxId,
-          jobId: id,
-          policyVersion: policy.version,
-          identity,
-        };
+        return createJob(tx, identity, policy, mode, clock.now());
       });
     },
     async repeat(work) {
-      const continuation = await access(
-        work.identity,
-        work.businessId,
-        true,
-        async (tx) => {
-          const { policy, job, oauth } = await loadWork(tx, work);
-          if (
-            policy.provider !== "gmail" ||
-            oauth?.status !== "connected" ||
-            job.state.mode !== "incremental" ||
-            job.state.status !== "completed" ||
-            job.state.reason
+      return access(work.identity, work.businessId, true, async (tx) => {
+        const { policy, job, oauth } = await loadWork(tx, work);
+        if (
+          oauth?.status !== "connected" ||
+          job.state.mode !== "incremental" ||
+          job.state.status !== "completed" ||
+          (job.state.reason &&
+            !["history_gap", "manual_reply_review"].includes(job.state.reason))
+        )
+          return null;
+        const latest = await tx
+          .select()
+          .from(mailboxJob)
+          .where(
+            and(
+              eq(mailboxJob.businessId, work.businessId),
+              eq(mailboxJob.mailboxId, work.mailboxId),
+              eq(mailboxJob.policyVersion, work.policyVersion),
+            ),
           )
-            return null;
-          const latest = await tx
-            .select()
-            .from(mailboxJob)
+          .orderBy(desc(mailboxJob.createdAt), desc(mailboxJob.id));
+        const active = latest.find(
+          (j) =>
+            j.state.mode === "incremental" &&
+            j.state.status !== "completed" &&
+            j.state.reason !== "scope_changed",
+        );
+        const successor = job.successorId
+          ? latest.find((j) => j.id === job.successorId)
+          : undefined;
+        if (successor)
+          return isDeepStrictEqual(successor.identity, work.identity)
+            ? { ...work, jobId: successor.id }
+            : null;
+        if (job.cursor !== policy.cursor) return null;
+        const next =
+          active && isDeepStrictEqual(active.identity, work.identity)
+            ? { ...work, jobId: active.id }
+            : active
+              ? null
+              : await createJob(
+                  tx,
+                  work.identity,
+                  policy,
+                  "incremental",
+                  clock.now(),
+                );
+        if (next)
+          await tx
+            .update(mailboxJob)
+            .set({ successorId: next.jobId })
             .where(
               and(
+                eq(mailboxJob.id, job.id),
                 eq(mailboxJob.businessId, work.businessId),
-                eq(mailboxJob.mailboxId, work.mailboxId),
-                eq(mailboxJob.policyVersion, work.policyVersion),
               ),
-            )
-            .orderBy(desc(mailboxJob.createdAt), desc(mailboxJob.id));
-          const active = latest.find(
-            (j) =>
-              j.state.mode === "incremental" &&
-              j.state.status !== "completed" &&
-              j.state.reason !== "scope_changed",
-          );
-          if (active && isDeepStrictEqual(active.identity, work.identity))
-            return { ...work, jobId: active.id };
-          return latest.find((j) => j.state.mode === "incremental")?.id ===
-            work.jobId
-            ? true
-            : null;
-        },
-      );
-      return continuation === true
-        ? this.queue(
-            work.identity,
-            work.businessId,
-            work.mailboxId,
-            "incremental",
-          )
-        : continuation;
+            );
+        return next;
+      });
     },
     prepare(work) {
       return access(work.identity, work.businessId, true, async (tx) => {
@@ -573,6 +597,18 @@ export function createMailboxRepository(
             and(
               eq(inboxConversation.businessId, work.businessId),
               eq(inboxConversation.connectionId, policy.id),
+            ),
+          );
+        const appMessages = await tx
+          .select({
+            messageRef: mailboxAppMessage.messageRef,
+            internetMessageId: mailboxAppMessage.internetMessageId,
+          })
+          .from(mailboxAppMessage)
+          .where(
+            and(
+              eq(mailboxAppMessage.businessId, work.businessId),
+              eq(mailboxAppMessage.mailboxId, policy.id),
             ),
           );
         await tx
@@ -603,6 +639,8 @@ export function createMailboxRepository(
           seen: job.seen,
           knownThreads: conversations.map((c) => c.ref),
           oauthGeneration: oauth?.generation ?? null,
+          appMessages,
+          retryAt: job.state.retryAt,
         };
       });
     },
@@ -660,7 +698,7 @@ export function createMailboxRepository(
         )) {
           const { event, metadata } = selected;
           if (event.kind === "manual_reply") {
-            const result = await retainGmailManual(
+            const result = await retainMailManual(
               tx,
               batch,
               selected,
@@ -689,7 +727,7 @@ export function createMailboxRepository(
           if (result.status === "captured") captured++;
           else if (result.status === "duplicate") duplicates++;
         }
-        await applyGmailManual(tx, batch, clock.now());
+        await applyMailManual(tx, batch, clock.now());
         const unresolved = await tx
           .select({ metadata: gmailManualMessage.metadata })
           .from(gmailManualMessage)
@@ -747,7 +785,10 @@ export function createMailboxRepository(
             ...(job.state.mode === "incremental"
               ? {
                   visibility,
-                  lastSyncedAt: clock.now(),
+                  lastSyncedAt:
+                    page.hasMore && visibility === "current"
+                      ? policy.lastSyncedAt
+                      : clock.now(),
                   completeReplyCapture: page.completeReplyCapture ?? true,
                 }
               : {}),
@@ -804,7 +845,7 @@ export function createMailboxRepository(
         { lock: true },
       );
     },
-    fail(snapshot, reason, grant) {
+    fail(snapshot, reason, grant, retryAfterSeconds) {
       const { work, checkpoint } = snapshot;
       return access(work.identity, work.businessId, true, async (tx) => {
         const { policy, job, oauth } = await loadWork(tx, work);
@@ -826,6 +867,13 @@ export function createMailboxRepository(
               ? "partial"
               : "blocked",
           reason,
+          retryAt:
+            reason === "rate_limited" && retryAfterSeconds
+              ? new Date(
+                  clock.now().getTime() +
+                    Math.min(86400, Math.max(1, retryAfterSeconds)) * 1000,
+                ).toISOString()
+              : null,
         };
         await tx
           .update(mailboxJob)

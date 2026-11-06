@@ -1,6 +1,6 @@
 # Mailbox processing (#28)
 
-Read this contract when implementing Microsoft Graph (#30) or changing mailbox synchronization. Native Gmail consent, supported metadata rules, recovery and activation procedures are in [Gmail synchronization](gmail.md). The conventional application seam is `createMailboxApplication`; PostgreSQL owns policy versions, checkpoints and deduplication. Trigger.dev owns durable execution and retries.
+Read this contract before changing mailbox synchronization. Native consent, metadata rules, recovery and activation procedures are in [Gmail synchronization](gmail.md) and [Microsoft synchronization](microsoft-mail.md). The conventional application seam is `createMailboxApplication`; PostgreSQL owns policy versions, checkpoints and deduplication. Trigger.dev owns durable execution and retries.
 
 ## Consent and ownership
 
@@ -14,7 +14,7 @@ New-mail processing begins at the recorded boundary. Changing scope/read access 
 
 ## Provider contract
 
-`MailboxProvider` is server supplied. HTTP accepts settings and sync requests, never permission observations, cursor values, events or readiness flags. Web and worker composition now select the gated native Gmail adapter; Microsoft remains unavailable until #30. No sending or AI classification is activated. Deterministic adapters exercise the same application contract against real persistence.
+`MailboxProvider` is server supplied. HTTP accepts settings and sync requests, never permission observations, cursor values, events or readiness flags. Shared web/worker composition routes each immutable mailbox identity to its independently gated native Gmail or Graph adapter. No sending or AI classification is activated. Deterministic adapters exercise the same application contract against real persistence.
 
 1. `inspect` establishes current permission for the exact provider/account. It distinguishes read and send, and supplies a revision and expiring observation. A native adapter must validate its Business-owned token/account binding and surface revocation or insufficient permission truthfully.
 2. `list` fetches metadata before bodies, bound to the selected account, scope, mode, time bounds, persisted cursor and page limit. Gmail adapters should use label/thread metadata and Graph adapters should use folder/thread metadata and provider-supported filtering. The application independently filters metadata. At most 100 metadata entries are accepted per page; history pages also respect the remaining global message allowance.
@@ -36,4 +36,4 @@ Changing mailbox scope invalidates #27 reply-route proof. General reply routes c
 
 ## Human verification
 
-UI validation and user acceptance remain pending. In Business → Mailbox processing, select a Business mailbox identity, request read/send separately, save a folder/label or thread selection and reload. Expect the same settings and history off. Opt into history with a past UTC interval and count, save, then start it. With the current unavailable native adapters, expect a reviewable blocked/setup-required job with no captured content or invented grants. Disable processing or reading and save; new sync requests must be unavailable while existing inbox correspondence stays readable. Verify layout, keyboard operation, larger text and both appearances yourself.
+UI validation and user acceptance remain pending. In Business → Mailbox processing, select a Business mailbox identity, request read/send separately, save a folder/label or thread selection and reload. Expect the same settings and history off. Connect with the provider-specific procedure above. Without approved provider/worker setup, expect a reviewable blocked/setup-required or worker-required job with no invented grants. Opt into history with a past UTC interval and count, save, then start it. Disable processing or reading and save; new sync requests must be unavailable while existing inbox correspondence stays readable. Verify layout, keyboard operation, larger text and both appearances yourself.

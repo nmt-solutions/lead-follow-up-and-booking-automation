@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { WorkIdentity } from "./discovery";
 import type { IncomingInquiry } from "./inbox";
-import { gmailNativeSchema, type GmailManual } from "./gmail";
+import { mailNativeSchema, type MailManual } from "./mail-native";
 
 export { MailboxFailure } from "./mailbox-failure";
 
@@ -81,6 +81,12 @@ export const mailboxGrantSchema = z.strictObject({
   availableThreads: z.array(ref).max(1000),
   observedAt: z.iso.datetime({ offset: true }),
   validUntil: z.iso.datetime({ offset: true }),
+  microsoft: z
+    .strictObject({
+      sentFolderRef: ref,
+      excludedFolderRefs: z.array(ref).max(10),
+    })
+    .optional(),
 });
 export const mailboxMetadataSchema = z.strictObject({
   messageRef: ref,
@@ -88,7 +94,7 @@ export const mailboxMetadataSchema = z.strictObject({
   folderRefs: z.array(ref).max(100),
   occurredAt: z.iso.datetime({ offset: true }),
   relevance: z.enum(["sales", "unrelated", "unknown"]),
-  native: gmailNativeSchema.optional(),
+  native: mailNativeSchema.optional(),
 });
 const cursor = z
   .string()
@@ -164,6 +170,8 @@ export type MailboxSnapshot = {
   seen: string[];
   knownThreads?: string[];
   oauthGeneration?: number | null;
+  appMessages?: { messageRef: string; internetMessageId: string }[];
+  retryAt?: string | null;
 };
 export type MailboxProvider = {
   key: string;
@@ -186,7 +194,7 @@ export type MailboxBatch = {
   page: MailboxPage;
   selected: {
     metadata: MailboxMetadata;
-    event: IncomingInquiry | GmailManual;
+    event: IncomingInquiry | MailManual;
   }[];
   seen: string[];
   excluded: number;
@@ -218,6 +226,7 @@ export type MailboxRepository = {
     snapshot: MailboxSnapshot,
     reason: NonNullable<MailboxJobState["reason"]>,
     grant?: MailboxGrant,
+    retryAfterSeconds?: number,
   ): Promise<MailboxJobState>;
 };
 
@@ -274,6 +283,7 @@ export function permissionAllows(
 }
 
 const jobStateSchema = z.object({
+  retryAt: z.iso.datetime({ offset: true }).nullable().optional(),
   id: z.uuid(),
   mode: z.enum(["incremental", "history"]),
   policyVersion: z.number().int(),

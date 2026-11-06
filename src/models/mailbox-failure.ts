@@ -5,6 +5,7 @@ export class MailboxFailure extends Error {
       | "permission_required"
       | "invalid_provider_response"
       | "provider_unavailable",
+    readonly retryAfterSeconds?: number,
   ) {
     super(condition);
   }

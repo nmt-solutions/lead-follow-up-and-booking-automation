@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { WorkIdentity } from "./discovery";
-import type { MailboxConfiguration } from "./mailboxes";
+import { mailboxAuthorizationStatusSchema as gmailStatusSchema } from "./mailbox-authorization";
+
 import { MailboxFailure } from "./mailbox-failure";
 export type GmailFailureReason =
   | "revoked"
@@ -43,22 +43,8 @@ export type GmailAuthorizationProvider = {
   revoke(token: string): Promise<void>;
   api(path: string, accessToken: string, signal: AbortSignal): Promise<unknown>;
 };
-export type GmailCredentialVault = {
-  encrypt(value: string, context: string): string;
-  decrypt(value: string, context: string): string;
-};
-
 export const gmailReadScope = "https://www.googleapis.com/auth/gmail.readonly";
 export const gmailSendScope = "https://www.googleapis.com/auth/gmail.send";
-export const gmailStatusSchema = z.enum([
-  "connecting",
-  "connected",
-  "reconnect_required",
-  "insufficient",
-  "revocation_pending",
-  "disconnected",
-]);
-export type GmailStatus = z.infer<typeof gmailStatusSchema>;
 export const gmailViewSchema = z.object({
   configured: z.boolean(),
   status: gmailStatusSchema.nullable(),
@@ -87,86 +73,20 @@ export const gmailCallbackSchema = z
     error: z.string().min(1).max(256).optional(),
   })
   .refine((v) => Boolean(v.code) !== Boolean(v.error));
-export type GmailStoredGrant = {
-  id: string;
-  businessId: string;
-  generation: number;
-  status: GmailStatus;
-  reason: string | null;
-  accountSubject: string | null;
-  credentials: string | null;
-  rejectedCredentials: string | null;
-  scopes: string[];
-  authorizedAt: Date | null;
-  actorId: string;
-};
-export type GmailStoredState = {
-  id: string;
-  businessId: string;
-  mailboxId: string;
-  generation: number;
-  policyVersion: number;
-  stateHash: string;
-  verifier: string;
-  actorId: string;
-  sessionId: string;
-  expiresAt: Date;
-  consumed: boolean;
-};
-export type GmailPolicy = {
-  id: string;
-  businessId: string;
-  version: number;
-  account: string;
-  configuration: MailboxConfiguration;
-};
-export type GmailStore = {
-  policy: GmailPolicy;
-  grant: GmailStoredGrant | undefined;
-  processingEnabled: boolean;
-  createGrant(): Promise<GmailStoredGrant>;
-  updateGrant(
-    change: Partial<Omit<GmailStoredGrant, "id" | "businessId" | "actorId">>,
-  ): Promise<void>;
-  state(hash: string): Promise<GmailStoredState | undefined>;
-  createState(state: Omit<GmailStoredState, "consumed">): Promise<void>;
-  consumeState(id: string): Promise<void>;
-  invalidate(): Promise<void>;
-};
-export type GmailRepository = {
-  withMailbox<T>(
-    identity: WorkIdentity,
-    businessId: string,
-    mailboxId: string,
-    operation: (store: GmailStore) => Promise<T>,
-  ): Promise<T>;
-};
+export {
+  mailNativeSchema as gmailNativeSchema,
+  mailManualSchema as gmailManualSchema,
+  type MailNative as GmailNative,
+  type MailManual as GmailManual,
+} from "./mail-native";
 
-const headerRef = z
-  .string()
-  .min(3)
-  .max(998)
-  .regex(/^<[^<>\s\u0000-\u001f\u007f]+>$/);
-export const gmailNativeSchema = z.strictObject({
-  direction: z.enum(["incoming", "manual_reply"]),
-  internetMessageId: headerRef,
-  inReplyTo: headerRef.nullable(),
-  from: z.email().max(254),
-  to: z.array(z.email().max(254)).min(1).max(50),
-});
-export type GmailNative = z.infer<typeof gmailNativeSchema>;
-export const gmailManualSchema = z.strictObject({
-  kind: z.literal("manual_reply"),
-  eventId: z.string().min(1).max(256),
-  messageRef: z.string().min(1).max(256),
-  conversationRef: z.string().min(1).max(256),
-  subject: z.string().min(1).max(500),
-  text: z
-    .string()
-    .min(1)
-    .max(20000)
-    .refine((v) => !v.includes("\0")),
-  occurredAt: z.iso.datetime({ offset: true }),
-  native: gmailNativeSchema,
-});
-export type GmailManual = z.infer<typeof gmailManualSchema>;
+export {
+  mailboxAuthorizationStatusSchema as gmailStatusSchema,
+  type MailboxAuthorizationStatus as GmailStatus,
+  type MailboxCredentialVault as GmailCredentialVault,
+  type MailboxStoredGrant as GmailStoredGrant,
+  type MailboxStoredState as GmailStoredState,
+  type MailboxAuthorizationPolicy as GmailPolicy,
+  type MailboxAuthorizationStore as GmailStore,
+  type MailboxAuthorizationRepository as GmailRepository,
+} from "./mailbox-authorization";

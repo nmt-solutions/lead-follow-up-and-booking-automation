@@ -1,5 +1,5 @@
 import type { MailboxMetadata } from "../models/mailboxes";
-import { resolveGmailReference } from "./gmail-reference";
+import { resolveMailReference } from "./mailbox-reference";
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { stopOpportunityFollowups } from "./opportunity-followups";
@@ -227,7 +227,7 @@ export async function captureInboxInquiry(
   const nativeReply = authorization?.metadata.native?.inReplyTo;
   const nativeReference =
     !event.replyToMessageRef && nativeReply
-      ? await resolveGmailReference(tx, businessId, connectionId, nativeReply, [
+      ? await resolveMailReference(tx, businessId, connectionId, nativeReply, [
           event.senderRef.toLowerCase(),
         ])
       : null;

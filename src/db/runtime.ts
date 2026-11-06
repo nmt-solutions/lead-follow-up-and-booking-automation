@@ -14,6 +14,15 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user, c.relowner, 'MEMBER')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('microsoft_mail_grant','microsoft_mail_oauth','mailbox_app_message'))
+      AND (SELECT count(*) = 8 AND bool_and('app_runtime' = ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL ELSE false END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('microsoft_mail_grant','microsoft_mail_oauth','mailbox_app_message'))
+      AND (SELECT count(*) = 4 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conname IN ('microsoft_mail_grant_mailbox_scope','microsoft_mail_oauth_grant_scope','mailbox_app_message_mailbox_scope','mailbox_app_message_reply_scope'))
+      AND NOT has_table_privilege(current_user, 'public.microsoft_mail_grant', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.microsoft_mail_oauth', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.mailbox_app_message', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.microsoft_mail_grant', 'business_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.microsoft_mail_oauth', 'verifier', 'UPDATE')
+      AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname='mailbox_job_successor_scope' AND contype='f' AND convalidated)
       AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
