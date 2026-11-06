@@ -185,17 +185,27 @@ export function createWhatsAppSendingRepository(
     rows: Row[],
     permission: Row | undefined,
     peer: string,
+    opportunityId: string,
   ) {
     if (!permission || permission.data.kind !== "permission")
       return "whatsapp_permission_required";
     const p = permission.data.permission,
       at = clock.now();
     if (
-      rows.some(
-        (r) =>
-          r.data.kind === "revoke_permission" &&
-          r.data.permissionId === permission.id,
-      )
+      rows.some((r) => {
+        if (r.data.kind !== "revoke_permission") return false;
+        const revokedId = r.data.permissionId;
+        const source = rows.find((v) => v.id === revokedId)?.data;
+        if (source?.kind !== "permission") return false;
+        const withdrawn = source.permission;
+        return (
+          withdrawn.peer === peer &&
+          withdrawn.purpose === p.purpose &&
+          (!withdrawn.opportunityId ||
+            withdrawn.opportunityId === opportunityId) &&
+          (new Date(p.observedAt) <= r.at || p.sha256 === withdrawn.sha256)
+        );
+      })
     )
       return "whatsapp_permission_revoked";
     if (new Date(p.observedAt) > at || new Date(p.validUntil) <= at)
@@ -602,6 +612,7 @@ export function createWhatsAppSendingRepository(
       rows,
       permission,
       recipient.peer,
+      action.opportunityId,
     );
     if (permissionBlock || !permission)
       return {
@@ -720,6 +731,7 @@ export function createWhatsAppSendingRepository(
       rows,
       permission,
       reply.recipientRef,
+      action.opportunityId,
     );
     if (reason || !permission)
       return { reason: reason ?? "whatsapp_permission_required", intent: null };

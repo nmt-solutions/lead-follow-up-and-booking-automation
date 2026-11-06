@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
 import { metaSendingFixture } from "./support/meta-sending";
 import { verifyRuntimeRole } from "../src/db/runtime";
+import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 import { createWhatsAppSendingHttp } from "../src/http/whatsapp-sending";
 
 describe("WhatsApp sends through current public application commands", () => {
@@ -23,6 +24,21 @@ describe("WhatsApp sends through current public application commands", () => {
       reason: "whatsapp_permission_required",
     });
     expect(f.sent).toEqual([]);
+  });
+  it("pauses outbound ledger writes before removing scoped foreign keys during schema preparation", async () => {
+    try {
+      await prepareDatabaseRole(h.admin);
+      expect(
+        (
+          await h.runtime.query(
+            "SELECT has_table_privilege(current_user,'public.whatsapp_outbound','INSERT') AS writable",
+          )
+        ).rows[0].writable,
+      ).toBe(false);
+    } finally {
+      await secureDatabase(h.admin);
+    }
+    await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
   });
   it("sends the persisted ordinary reply and parent once, retaining acceptance separately from delivery", async () => {
     const f = await metaSendingFixture(h, "ordinary");
@@ -742,6 +758,23 @@ describe("WhatsApp sends through current public application commands", () => {
       await f.control.dispatch(f.credentials, f.businessId, action.id),
     ).toMatchObject({ state: "dispatched" });
     expect(f.sent).toHaveLength(1);
+  });
+  it("honors withdrawal when the same consent artifact was recorded more than once", async () => {
+    const f = await metaSendingFixture(h, "duplicate-consent");
+    const first = await f.permission();
+    await f.permission();
+    const action = await f.groundedReply();
+    await f.app.revokePermission(f.credentials, f.businessId, {
+      permissionId: first.permissions[0].id,
+      reason: "Recipient withdrew the consent evidenced by this artifact",
+    });
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, action.id),
+    ).toMatchObject({
+      state: "cancelled",
+      reason: "whatsapp_permission_revoked",
+    });
+    expect(f.sent).toHaveLength(0);
   });
   it("does not attribute acceptance from a copyable action marker without the private committed provider correlation reference", async () => {
     const f = await metaSendingFixture(h, "marker-only");

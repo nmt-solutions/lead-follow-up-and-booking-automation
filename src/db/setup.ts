@@ -471,6 +471,10 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.whatsapp_evidence FROM app_runtime;
         REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON public.whatsapp_evidence FROM app_runtime;
       END IF;
+      IF to_regclass('public.whatsapp_outbound') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_outbound FROM app_runtime;
+        REVOKE ALL PRIVILEGES (id,business_id,connection_id,key,actor_id,at,data,position) ON public.whatsapp_outbound FROM app_runtime;
+      END IF;
       IF to_regclass('public.microsoft_mail_grant') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.microsoft_mail_grant, public.microsoft_mail_oauth FROM app_runtime;
       END IF;
