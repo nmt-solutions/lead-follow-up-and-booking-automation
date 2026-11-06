@@ -13,7 +13,12 @@ import {
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { requireBillingReviewer } from "./billing-access";
 
-async function read(tx: Transaction, businessId: string, at: Date) {
+export async function readBillingWorkspace(
+  tx: Transaction,
+  businessId: string,
+  at: Date,
+  lockEvidence = false,
+) {
   const rows = await tx
     .select()
     .from(billingProfileRevision)
@@ -29,10 +34,11 @@ async function read(tx: Transaction, businessId: string, at: Date) {
     reviews.map((row) => ({ ...row, at: row.at.toISOString() })),
   );
   for (const evidence of state.current?.evidence ?? []) {
-    const [file] = await tx
+    const query = tx
       .select()
       .from(businessFile)
       .where(eq(businessFile.id, evidence.fileId));
+    const [file] = lockEvidence ? await query.for("share") : await query;
     if (
       !file ||
       file.state !== "ready" ||
@@ -46,6 +52,7 @@ async function read(tx: Transaction, businessId: string, at: Date) {
   }
   return state;
 }
+const read = readBillingWorkspace;
 async function actorName(tx: Transaction, actorId: string) {
   const [identity] = await tx
     .select({ name: user.name })

@@ -14,6 +14,21 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user,c.relowner,'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relname IN ('tax_rule_revision','tax_rule_decision','tax_calculation'))
+      AND (SELECT count(*) = 6 AND bool_and('app_runtime'=ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname='public' AND tablename IN ('tax_rule_revision','tax_rule_decision','tax_calculation'))
+      AND NOT has_table_privilege(current_user,'public.tax_rule_revision','UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user,'public.tax_rule_decision','UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user,'public.tax_calculation','UPDATE,DELETE,TRUNCATE')
+      AND NOT has_any_column_privilege(current_user,'public.tax_rule_revision','UPDATE')
+      AND NOT has_any_column_privilege(current_user,'public.tax_rule_decision','UPDATE')
+      AND NOT has_any_column_privilege(current_user,'public.tax_calculation','UPDATE')
+      AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname='tax_calculation_resolution_scope' AND contype='f' AND convalidated)
       AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace

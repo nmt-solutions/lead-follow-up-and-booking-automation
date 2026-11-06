@@ -7,6 +7,9 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "tax_rule_revision",
+    "tax_rule_decision",
+    "tax_calculation",
     "billing_profile_revision",
     "billing_profile_review",
     "email_sequence_policy",

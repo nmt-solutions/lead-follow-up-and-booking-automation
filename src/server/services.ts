@@ -88,6 +88,9 @@ import { createFileApplication } from "../application/files";
 import { createBillingApplication } from "../application/billing";
 import { createBillingRepository } from "../db/billing-repository";
 import { createBillingHttp } from "../http/billing";
+import { createTaxApplication } from "../application/tax";
+import { createTaxRepository } from "../db/tax-repository";
+import { createTaxHttp } from "../http/tax";
 import { createFileRepository } from "../db/file-repository";
 import { createFilesHttp } from "../http/files";
 import { filesConfiguration } from "./files-configuration";
@@ -252,6 +255,13 @@ async function composeServices() {
     authenticatePlatform,
     repository: createBillingRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
+  });
+  const tax = createTaxApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createTaxRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    mode: "live",
   });
   const billingReviewFiles = createFileApplication({
     authenticate: authenticatePlatform,
@@ -518,6 +528,12 @@ async function composeServices() {
     team,
     files,
     billing,
+    tax,
+    taxHttp: createTaxHttp({
+      application: tax,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     billingReviewFiles,
     billingHttp: createBillingHttp({
       application: billing,

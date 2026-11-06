@@ -39,6 +39,12 @@ export default async function BillingPage({
           {data.profile.name}
         </p>
         <h1 className="page-title">Billing profile and evidence</h1>
+        <Link
+          href={`/businesses/${businessId}/tax`}
+          className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Subscription tax preview and review history
+        </Link>
         <p className="mt-3 text-muted-foreground">
           Maintain the legal details for your platform subscription. Owners and
           Admins can submit changes; authorized tax operators review supporting
