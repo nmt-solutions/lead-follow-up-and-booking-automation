@@ -187,7 +187,7 @@ export const whatsAppViewSchema = z.object({
     automationReady: z.boolean(),
     inboundReady: z.boolean(),
     manualVisibilityReady: z.boolean(),
-    sendingReady: z.literal(false),
+    sendingReady: z.boolean(),
     issues: z.array(z.string()),
   }),
   intake: metaIntakeViewSchema,

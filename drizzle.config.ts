@@ -13,6 +13,7 @@ export default defineConfig({
     "seller_document_request",
     "seller_document_access",
     "seller_document_storage",
+    "whatsapp_outbound",
     "subscription_payment",
     "subscription_payment_event",
     "subscription_payment_history",

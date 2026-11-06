@@ -68,7 +68,7 @@ export function InquiryHandling({
             : code === "UNAUTHENTICATED"
               ? "Sign in again, then reload."
               : code === "CHANNEL_SETUP_REQUIRED"
-                ? "Native email delivery requires a configured native connection. Review sender and mailbox setup."
+                ? "Sending requires a configured native channel. Review sender, WhatsApp and reply-capture setup."
                 : "The action could not complete. Reload to review its saved state, ownership and setup.",
         );
         router.refresh();
@@ -81,13 +81,16 @@ export function InquiryHandling({
           ? "Exact Sent-folder evidence saved. Delivery remains unconfirmed."
           : action?.email?.result?.status === "accepted"
             ? "The provider accepted the prepared reply. Delivery remains unconfirmed."
-            : action?.email?.result?.status === "accepted_pending_identity"
-              ? "Microsoft accepted processing. Native message identity and delivery remain unconfirmed. Synchronize the selected mailbox and check Sent evidence; this action will not resend."
-              : action?.state === "committed"
-                ? "Acceptance remains unknown. Synchronize the selected mailbox, then check Sent evidence. This action will not resend."
-                : action?.state === "cancelled"
-                  ? `Sending stopped: ${action.reason?.replaceAll("_", " ") ?? "current authorization failed"}. Review setup and current inquiry context.`
-                  : "No new Sent evidence was confirmed. Synchronize the selected mailbox and check again.",
+            : action?.state === "dispatched" &&
+                action.reason?.startsWith("whatsapp_")
+              ? "Meta accepted the saved WhatsApp reply. Review WhatsApp message evidence for Sent, delivery and read status."
+              : action?.email?.result?.status === "accepted_pending_identity"
+                ? "Microsoft accepted processing. Native message identity and delivery remain unconfirmed. Synchronize the selected mailbox and check Sent evidence; this action will not resend."
+                : action?.state === "committed"
+                  ? "Acceptance remains unknown. Review native mailbox or WhatsApp provider evidence. This action will not resend."
+                  : action?.state === "cancelled"
+                    ? `Sending stopped: ${action.reason?.replaceAll("_", " ") ?? "current authorization failed"}. Review setup and current inquiry context.`
+                    : "No new Sent evidence was confirmed. Synchronize the selected mailbox and check again.",
       );
       router.refresh();
     } catch {
@@ -207,12 +210,18 @@ export function InquiryHandling({
       )}
       <p className="text-sm text-muted-foreground">
         Review the exact response and recipient before sending through the
-        selected Gmail or Microsoft account. Sending requires separate
-        authorization and current sender, reply visibility and recipient checks.
-        Other channel responses require a manual reply recorded in this
-        conversation.
+        selected native channel. Sending requires current authority, paid
+        automation, sender, reply visibility and recipient checks. WhatsApp
+        additionally requires permission and an open customer service window or
+        an exact matching approved template.
       </p>
       <div className="flex flex-wrap gap-x-4 text-sm">
+        <Link
+          className="inline-flex min-h-11 items-center text-primary underline"
+          href={`/businesses/${businessId}/whatsapp/sending`}
+        >
+          Review WhatsApp permission and message evidence
+        </Link>
         <Link
           className="inline-flex min-h-11 items-center text-primary underline"
           href={`/businesses/${businessId}/mailboxes`}
