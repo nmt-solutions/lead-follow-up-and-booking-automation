@@ -85,6 +85,9 @@ import { createTeamHttp } from "../http/team";
 import { createInvitationMailer } from "../auth/invitation-mailer";
 import { invitationTokens } from "../auth/invitation-tokens";
 import { createFileApplication } from "../application/files";
+import { createBillingApplication } from "../application/billing";
+import { createBillingRepository } from "../db/billing-repository";
+import { createBillingHttp } from "../http/billing";
 import { createFileRepository } from "../db/file-repository";
 import { createFilesHttp } from "../http/files";
 import { filesConfiguration } from "./files-configuration";
@@ -243,6 +246,20 @@ async function composeServices() {
       from: environment.AUTH_EMAIL_FROM,
     }),
     origin: environment.BETTER_AUTH_URL,
+  });
+  const billing = createBillingApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createBillingRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+  });
+  const billingReviewFiles = createFileApplication({
+    authenticate: authenticatePlatform,
+    repository: createFileRepository(runtimeDatabase(pool), {
+      billingReview: true,
+    }),
+    clock: { now: () => new Date() },
+    ...filesConfiguration(),
   });
   const files = createFileApplication({
     authenticate,
@@ -500,6 +517,18 @@ async function composeServices() {
     application,
     team,
     files,
+    billing,
+    billingReviewFiles,
+    billingHttp: createBillingHttp({
+      application: billing,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
+    billingReviewFilesHttp: createFilesHttp({
+      application: billingReviewFiles,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     knowledge,
     commercialAuthority,
     discovery,
