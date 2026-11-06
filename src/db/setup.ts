@@ -52,6 +52,10 @@ import {
   knowledgeRevision,
   billingProfileRevision,
   billingProfileReview,
+  taxRuleRevision,
+  taxRuleDecision,
+  taxCalculation,
+  taxScopeForeignKeys,
   subscriptionPricingRevision,
   subscriptionQuote,
   commercialAuthorityRevision,
@@ -350,6 +354,15 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.billing_profile_review') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.billing_profile_review FROM app_runtime;
       END IF;
+      IF to_regclass('public.tax_rule_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.tax_rule_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.tax_rule_decision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.tax_rule_decision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.tax_calculation') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.tax_calculation FROM app_runtime;
+      END IF;
       IF to_regclass('public.commercial_authority_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.commercial_authority_revision FROM app_runtime;
       END IF;
@@ -516,6 +529,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...taxScopeForeignKeys,
     ...emailSequenceScopeForeignKeys,
     ...mailboxScopeForeignKeys,
     ...gmailScopeForeignKeys,
@@ -572,6 +586,7 @@ export async function secureDatabase(pool: Pool) {
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...taxScopeForeignKeys,
       ...emailSequenceScopeForeignKeys,
       ...mailboxScopeForeignKeys,
       ...gmailScopeForeignKeys,
@@ -689,6 +704,9 @@ export async function secureDatabase(pool: Pool) {
       knowledgeRevision,
       billingProfileRevision,
       billingProfileReview,
+      taxRuleRevision,
+      taxRuleDecision,
+      taxCalculation,
       subscriptionPricingRevision,
       subscriptionQuote,
       commercialAuthorityRevision,
@@ -949,6 +967,11 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON billing_profile_review FROM app_runtime;
       GRANT SELECT, INSERT ON billing_profile_review TO app_runtime;
       ALTER TABLE billing_profile_review FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON tax_rule_revision, tax_rule_decision, tax_calculation FROM app_runtime;
+      GRANT SELECT, INSERT ON tax_rule_revision, tax_rule_decision, tax_calculation TO app_runtime;
+      ALTER TABLE tax_rule_revision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE tax_rule_decision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE tax_calculation FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON commercial_authority_revision FROM app_runtime;
       GRANT SELECT, INSERT ON commercial_authority_revision TO app_runtime;
       ALTER TABLE commercial_authority_revision FORCE ROW LEVEL SECURITY;

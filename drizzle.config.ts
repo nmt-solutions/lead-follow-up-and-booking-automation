@@ -8,6 +8,9 @@ export default defineConfig({
   schemaFilter: ["public"],
   tablesFilter: [
     "whatsapp_evidence",
+    "tax_rule_revision",
+    "tax_rule_decision",
+    "tax_calculation",
     "subscription_pricing_revision",
     "subscription_quote",
     "whatsapp_connection",
