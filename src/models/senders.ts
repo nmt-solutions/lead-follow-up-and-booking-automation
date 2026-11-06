@@ -120,6 +120,11 @@ export const senderObservationSchema = z.strictObject({
   binding: senderBindingSchema,
   observedAt: z.iso.datetime({ offset: true }),
   validUntil: z.iso.datetime({ offset: true }),
+  verificationReference: z
+    .url()
+    .max(2000)
+    .regex(/^https:\/\//)
+    .optional(),
   checks: senderChecksSchema,
   approvedUses: z
     .array(senderUseSchema)
@@ -136,6 +141,7 @@ export type SenderInspection = {
   connection: SenderConnection | null;
   replyRoute: ReplyRoute | null;
   replyConnection: SenderConnection | null;
+  nativeGmail?: { send: boolean; reply: boolean };
 };
 export function sameSenderBinding(a: SenderBinding, b: SenderBinding) {
   return Object.entries(a).every(

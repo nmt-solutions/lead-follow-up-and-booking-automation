@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { WorkIdentity } from "./discovery";
 import type { EmailDispatchAuthorization } from "./email-eligibility";
 import { mailObservationSourceSchema } from "./mail-evidence";
+import type { MailboxAuthorizationStore } from "./mailbox-authorization";
 
 const positive = z.number().int().positive().max(2147483646);
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -85,6 +86,7 @@ export const sequenceReceiptSchema = z.strictObject({
   internetMessageId: z.string().min(1).max(256),
   threadRef: z.string().min(1).max(256),
   acceptedAt: z.iso.datetime(),
+  evidence: z.enum(["provider_response", "sent_folder"]).optional(),
 });
 export type SequenceReceipt = z.infer<typeof sequenceReceiptSchema>;
 export const sequenceResultSchema = z.discriminatedUnion("status", [
@@ -130,8 +132,22 @@ export type SequenceEnvelope = {
 export type SequenceMailProvider = {
   key: string;
   mode: "fixture" | "live" | "unconfigured";
-  send(envelope: SequenceEnvelope, signal: AbortSignal): Promise<unknown>;
+  send(
+    envelope: SequenceEnvelope,
+    signal: AbortSignal,
+    access?: SequenceMailAccess,
+  ): Promise<unknown>;
   reconcile(envelope: SequenceEnvelope, signal: AbortSignal): Promise<unknown>;
+};
+/** Invocation-local authority under the dispatch lock. Credentials never enter the persisted envelope. */
+export type SequenceMailAccess = {
+  gmail: Pick<
+    MailboxAuthorizationStore,
+    "policy" | "grant" | "processingEnabled" | "updateGrant" | "invalidate"
+  > | null;
+  previousReceipt: SequenceReceipt | null;
+  previousSubject: string | null;
+  confirm(): Promise<boolean>;
 };
 export type SequenceQueue = {
   enqueue(work: SequenceWork, dueAt: Date): Promise<string>;

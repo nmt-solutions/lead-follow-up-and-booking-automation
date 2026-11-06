@@ -22,7 +22,11 @@ import { createEmailSequenceApplication } from "../application/email-sequences";
 import { createEmailSequenceRepository } from "../db/email-sequence-repository";
 import { createEmailSequenceHttp } from "../http/email-sequences";
 import { configuredSequenceQueue } from "../email-sequences/queue";
-import { unavailableSequenceMail } from "../email-sequences/provider";
+import { configuredSequenceMail } from "../email-sequences/provider";
+import {
+  configuredGmailSenderEvidence,
+  createGmailSenderAdapter,
+} from "../gmail/sender";
 import { createCampaignApplication } from "../application/campaigns";
 import { createCampaignRepository } from "../db/campaign-repository";
 import { createCampaignHttp } from "../http/campaigns";
@@ -155,7 +159,11 @@ async function composeServices() {
       now: () => new Date(),
     }),
     clock: { now: () => new Date() },
-    provider: unavailableSequenceMail,
+    provider: configuredSequenceMail({
+      env: process.env,
+      clock: { now: () => new Date() },
+      fetch,
+    }),
     queue: configuredSequenceQueue(process.env),
   });
   const emailHandoffs = createEmailHandoffApplication({
@@ -189,7 +197,12 @@ async function composeServices() {
     repository: createSenderRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
-    adapter: unavailableSenderAdapter,
+    adapter: configuredGmail(process.env)
+      ? createGmailSenderAdapter({
+          clock: { now: () => new Date() },
+          evidence: configuredGmailSenderEvidence(process.env),
+        })
+      : unavailableSenderAdapter,
     clock: { now: () => new Date() },
   });
   const gmail = createGmailApplication({

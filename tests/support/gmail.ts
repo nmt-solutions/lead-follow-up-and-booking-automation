@@ -1,5 +1,6 @@
 import type { GmailConfiguration } from "../../src/gmail/configuration";
 import { gmailReadScope } from "../../src/models/gmail";
+import { z } from "zod";
 
 export function gmailFixture() {
   const configuration: GmailConfiguration = {
@@ -15,6 +16,7 @@ export function gmailFixture() {
   const pages = new Map<string, unknown>();
   const histories = new Map<string, unknown>();
   const bodyReads: string[] = [];
+  const sends: string[] = [];
   const control = {
     scopes: `openid email ${gmailReadScope}`,
     subject: "gmail-subject",
@@ -23,6 +25,9 @@ export function gmailFixture() {
     apiError: 0,
     revokeError: 0,
     refreshes: 0,
+    expiresIn: 3600,
+    sendLost: false,
+    sendResponse: undefined as unknown,
     beforeRefresh: undefined as (() => Promise<void>) | undefined,
     beforeBody: undefined as (() => Promise<void>) | undefined,
     beforeToken: undefined as (() => Promise<void>) | undefined,
@@ -32,7 +37,9 @@ export function gmailFixture() {
     const body =
       init?.body instanceof URLSearchParams
         ? Object.fromEntries(init.body)
-        : {};
+        : typeof init?.body === "string"
+          ? z.record(z.string(), z.string()).parse(JSON.parse(init.body))
+          : {};
     calls.push({ url, body, method: init?.method ?? "GET" });
     const response = (data: unknown, status = 200) =>
       new Response(JSON.stringify(data), { status });
@@ -48,7 +55,7 @@ export function gmailFixture() {
         access_token: "fixture-access",
         refresh_token: "fixture-refresh",
         token_type: "Bearer",
-        expires_in: 3600,
+        expires_in: control.expiresIn,
         scope: control.scopes,
       });
     }
@@ -74,6 +81,41 @@ export function gmailFixture() {
         },
         control.apiError,
       );
+    if (url.pathname.endsWith("/messages/send")) {
+      const inputBody = z
+        .object({ raw: z.string(), threadId: z.string().optional() })
+        .parse(body);
+      const raw = Buffer.from(inputBody.raw, "base64url").toString("utf8");
+      sends.push(raw);
+      const [headers, ...content] = raw.split("\r\n\r\n");
+      const id = `gmail-sent-${sends.length}`,
+        threadId = inputBody.threadId ?? `gmail-thread-${sends.length}`;
+      messages.set(id, {
+        id,
+        threadId,
+        labelIds: ["SENT"],
+        internalDate: String(Date.now()),
+        sizeEstimate: 1000,
+        payload: {
+          mimeType: "text/plain",
+          headers: headers
+            .replace(/\r\n /g, " ")
+            .split("\r\n")
+            .map((line) => ({
+              name: line.slice(0, line.indexOf(":")),
+              value: line.slice(line.indexOf(":") + 1).trim(),
+            })),
+          body: {
+            size: 100,
+            data: Buffer.from(content.join("\r\n\r\n"), "base64").toString(
+              "base64url",
+            ),
+          },
+        },
+      });
+      if (control.sendLost) throw new Error("private-gmail-response-lost");
+      return response(control.sendResponse ?? { id, threadId });
+    }
     if (url.pathname.endsWith("/profile"))
       return response({
         emailAddress: control.email,
@@ -204,6 +246,7 @@ export function gmailFixture() {
     pages,
     histories,
     bodyReads,
+    sends,
     add,
     fetch: fetcher,
   };
