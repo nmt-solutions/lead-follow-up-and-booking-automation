@@ -20,6 +20,11 @@ import type {
   SenderRecord,
 } from "../models/senders";
 import { senderReadiness } from "../senders/readiness";
+import { gmailSequenceKey } from "../gmail/sequence-mail";
+import {
+  gmailSendingAuthorized,
+  gmailSequenceReplyReady,
+} from "./gmail-dispatch";
 import { requireSalesSession } from "./sales-session";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
@@ -116,6 +121,29 @@ export async function inspectionAt(
     connection,
     replyRoute,
     replyConnection,
+    ...(connection?.configuration.provider === "gmail"
+      ? {
+          nativeGmail: {
+            send: await gmailSendingAuthorized(
+              tx,
+              businessId,
+              connection.id,
+              config.fromAddress,
+            ),
+            reply: Boolean(
+              replyRoute &&
+              replyConnection &&
+              (await gmailSequenceReplyReady(
+                tx,
+                businessId,
+                replyRoute.configuration.inboxConnectionId,
+                replyConnection.id,
+                requestedAt,
+              )),
+            ),
+          },
+        }
+      : {}),
   };
 }
 export async function identityView(
@@ -164,13 +192,23 @@ export async function identityView(
           ),
         )
     : [];
+  const gmailSequence =
+    (adapter?.key ?? latest?.evidence.adapterKey) === gmailSequenceKey;
   const mailboxIssues =
-    mailbox &&
-    (!mailbox.configuration.enabled ||
-      !mailbox.configuration.requestedSend ||
-      mailbox.grant?.send !== "granted" ||
-      new Date(mailbox.grant.validUntil) <= at ||
-      mailbox.connectionVersion !== context.connection?.version)
+    (gmailSequence &&
+      (!context.connection ||
+        !(await gmailSendingAuthorized(
+          tx,
+          businessId,
+          context.connection.id,
+          row.configuration.fromAddress,
+        )))) ||
+    (mailbox &&
+      (!mailbox.configuration.enabled ||
+        !mailbox.configuration.requestedSend ||
+        mailbox.grant?.send !== "granted" ||
+        new Date(mailbox.grant.validUntil) <= at ||
+        mailbox.connectionVersion !== context.connection?.version))
       ? [
           {
             code: "mailbox_send_not_authorized",
@@ -194,14 +232,22 @@ export async function identityView(
       Boolean(
         inbox?.active &&
         inbox.channel === "email" &&
-        (inbox.mode === "normalized_import" ||
-          (await mailboxReplyReady(
-            tx,
-            businessId,
-            inbox.id,
-            at,
-            context.replyConnection?.id ?? "",
-          ))),
+        (gmailSequence
+          ? await gmailSequenceReplyReady(
+              tx,
+              businessId,
+              inbox.id,
+              context.replyConnection?.id ?? "",
+              at,
+            )
+          : inbox.mode === "normalized_import" ||
+            (await mailboxReplyReady(
+              tx,
+              businessId,
+              inbox.id,
+              at,
+              context.replyConnection?.id ?? "",
+            ))),
       ),
       adapter,
       mailboxIssues,

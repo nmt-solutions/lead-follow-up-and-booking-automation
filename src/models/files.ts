@@ -26,6 +26,7 @@ export const filePolicySchema = filePolicyFields.refine(
 );
 export type FilePolicy = z.infer<typeof filePolicySchema>;
 export const uploadInputSchema = z.strictObject({
+  purpose: z.enum(["general", "billing"]).default("general"),
   name: z
     .string()
     .trim()
@@ -45,6 +46,7 @@ export const fileStateSchema = z.enum([
 ]);
 export type FileState = z.infer<typeof fileStateSchema>;
 export const fileViewSchema = z.object({
+  purpose: z.enum(["general", "billing"]),
   id: z.uuid(),
   businessId: z.uuid(),
   ownerId: z.string(),

@@ -19,6 +19,19 @@ export async function verifyRuntimeRole(
       AND (SELECT count(*) = 2 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conname IN ('whatsapp_oauth_connection_scope','whatsapp_event_connection_scope'))
       AND NOT has_column_privilege(current_user,'public.whatsapp_connection','business_id','UPDATE')
       AND NOT has_column_privilege(current_user,'public.whatsapp_oauth','state_hash','UPDATE')
+      AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relname IN ('billing_profile_revision','billing_profile_review'))
+      AND (SELECT count(*) = 4 AND bool_and('app_runtime' = ANY(roles)
+        AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+          WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname='public' AND tablename IN ('billing_profile_revision','billing_profile_review'))
+      AND NOT has_table_privilege(current_user, 'public.billing_profile_revision', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.billing_profile_review', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_any_column_privilege(current_user, 'public.billing_profile_revision', 'UPDATE')
+      AND NOT has_any_column_privilege(current_user, 'public.billing_profile_review', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.business_file', 'purpose', 'UPDATE')
       AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user, c.relowner, 'MEMBER')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('microsoft_mail_grant','microsoft_mail_oauth','mailbox_app_message'))
       AND (SELECT count(*) = 8 AND bool_and('app_runtime' = ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL ELSE false END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('microsoft_mail_grant','microsoft_mail_oauth','mailbox_app_message'))
       AND (SELECT count(*) = 4 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conname IN ('microsoft_mail_grant_mailbox_scope','microsoft_mail_oauth_grant_scope','mailbox_app_message_mailbox_scope','mailbox_app_message_reply_scope'))

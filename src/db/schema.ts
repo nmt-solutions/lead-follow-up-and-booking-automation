@@ -66,6 +66,11 @@ import type { BusinessRole, Invitation } from "../models/team";
 import type { SavedConfiguration } from "../models/configuration";
 import type { FileState } from "../models/files";
 import type {
+  BillingProfile,
+  BillingRevision,
+  BillingReview,
+} from "../models/billing";
+import type {
   AiProfile,
   AiSample,
   AiOutput,
@@ -366,6 +371,93 @@ export const commercialAuthorityRevision = pgTable(
     }),
   ],
 ).enableRLS();
+const taxOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.tax)`;
+const billingOperatorScope = sql`current_setting('app.billing_review', true) = 'true' and (${taxOperatorScope})`;
+export const billingProfileRevision = pgTable(
+  "billing_profile_revision",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    version: integer("version").notNull(),
+    profile: jsonb("profile").$type<BillingProfile>().notNull(),
+    evidence: jsonb("evidence").$type<BillingRevision["evidence"]>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_profile_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check("billing_profile_version_positive", sql`${table.version} > 0`),
+    pgPolicy("billing_profile_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${billingOperatorScope})`,
+    }),
+    pgPolicy("billing_profile_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${table.actorId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+export const billingProfileReview = pgTable(
+  "billing_profile_review",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => billingProfileRevision.id),
+    profileVersion: integer("profile_version").notNull(),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<BillingReview["outcome"]>().notNull(),
+    findings: jsonb("findings").$type<string[]>().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_review_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check(
+      "billing_review_version_positive",
+      sql`${table.version} > 0 and ${table.profileVersion} > 0`,
+    ),
+    check(
+      "billing_review_outcome",
+      sql`${table.outcome} in ('reviewed','missing','conflicting')`,
+    ),
+    pgPolicy("billing_review_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${billingOperatorScope})`,
+    }),
+    pgPolicy("billing_review_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${billingOperatorScope}) and ${table.actorId} = current_setting('app.actor_id', true)
+        and ${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+        and exists (select 1 from public.billing_profile_revision p where p.id = ${table.profileId} and p.business_id = ${table.businessId} and p.version = ${table.profileVersion})`,
+    }),
+  ],
+).enableRLS();
+
 export const knowledgeRevision = pgTable(
   "knowledge_revision",
   {
@@ -790,7 +882,7 @@ export const aiExecutionScopeForeignKeys = [
   ),
 ];
 
-const fileBusinessScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
+const fileBusinessScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and (public.current_business_role() is not null or (${billingOperatorScope}))`;
 const fileOwnerScope = sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.business_file'::regclass)`;
 export const businessFile = pgTable(
   "business_file",
@@ -803,6 +895,10 @@ export const businessFile = pgTable(
       .notNull()
       .references(() => user.id),
     name: text("name").notNull(),
+    purpose: text("purpose")
+      .$type<"general" | "billing">()
+      .notNull()
+      .default("general"),
     contentType: text("content_type").notNull(),
     size: bigint("size", { mode: "number" }).notNull(),
     accountScope: text("account_scope").notNull(),
@@ -832,13 +928,17 @@ export const businessFile = pgTable(
     ),
     check("business_file_size", sql`${table.size} > 0`),
     check(
+      "business_file_purpose",
+      sql`${table.purpose} in ('general', 'billing')`,
+    ),
+    check(
       "business_file_state",
       sql`${table.state} in ('pending','uploading','ready','failed','deleting','deleted')`,
     ),
     pgPolicy("file_read", {
       for: "select",
       to: appRuntime,
-      using: fileBusinessScope,
+      using: sql`(${fileBusinessScope}) and ((${table.purpose} = 'general' and public.current_business_role() is not null) or (${table.purpose} = 'billing' and (public.current_business_role() in ('owner','admin') or (${billingOperatorScope}))))`,
     }),
     pgPolicy("file_insert", {
       for: "insert",
@@ -880,7 +980,7 @@ export const fileAccess = pgTable(
     pgPolicy("file_access_scope", {
       for: "all",
       to: appRuntime,
-      using: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true)`,
+      using: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId})`,
       withCheck: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId})`,
     }),
     pgPolicy("file_access_system", {
@@ -911,7 +1011,7 @@ export const fileUsage = pgTable(
     pgPolicy("file_usage_scope", {
       for: "all",
       to: appRuntime,
-      using: fileBusinessScope,
+      using: sql`(${fileBusinessScope}) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId})`,
       withCheck: sql`(${fileBusinessScope}) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId} and f.account_scope = ${table.accountScope})`,
     }),
     pgPolicy("file_usage_system", {

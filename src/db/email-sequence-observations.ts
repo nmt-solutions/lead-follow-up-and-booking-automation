@@ -86,7 +86,9 @@ export async function sequenceMailboxReferences(
       ),
     );
   return rows.flatMap(({ envelope: e }) =>
-    e && e.replyConnectionId === connectionId && e.replyTo === account
+    e &&
+    ((e.replyConnectionId === connectionId && e.replyTo === account) ||
+      (e.connectionId === connectionId && e.fromAddress === account))
       ? [
           {
             internetMessageId: e.internetMessageId,
@@ -138,7 +140,9 @@ export async function sequenceReference(
       !(
         envelope.replyInboxId === connectionId ||
         (mailbox?.connectionId === envelope.replyConnectionId &&
-          mailbox.account === envelope.replyTo)
+          mailbox.account === envelope.replyTo) ||
+        (mailbox?.connectionId === envelope.connectionId &&
+          mailbox.account === envelope.fromAddress)
       ) ||
       !participants.includes(envelope.recipient)
     )
@@ -310,7 +314,10 @@ export async function observeSequenceSent(
     event.subject !== e.subject ||
     event.text.replace(/\r\n|\r/g, "\n") !== e.body.replace(/\r\n|\r/g, "\n") ||
     new Date(event.occurredAt) < original.reservedAt ||
-    native.internetMessageId !== e.internetMessageId
+    native.internetMessageId !== e.internetMessageId ||
+    (original.action.receipt &&
+      (original.action.receipt.messageRef !== event.messageRef ||
+        original.action.receipt.threadRef !== event.conversationRef))
   )
     return false;
   const [seen] = await tx

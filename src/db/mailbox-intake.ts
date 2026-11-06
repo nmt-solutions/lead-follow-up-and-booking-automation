@@ -33,7 +33,20 @@ export async function retainMailManual(
   )
     throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
   const { work } = batch.snapshot;
-  if (await observeSequenceSent(tx, batch, selected, at)) return "duplicate";
+  if (await observeSequenceSent(tx, batch, selected, at)) {
+    await retainMailObservation(tx, batch, selected, at);
+    await tx
+      .update(gmailManualMessage)
+      .set({ state: "applied" })
+      .where(
+        and(
+          eq(gmailManualMessage.businessId, work.businessId),
+          eq(gmailManualMessage.mailboxId, work.mailboxId),
+          eq(gmailManualMessage.messageRef, event.messageRef),
+        ),
+      );
+    return "duplicate";
+  }
   const [appSend] = await tx
     .select()
     .from(mailboxAppMessage)

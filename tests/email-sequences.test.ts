@@ -27,6 +27,8 @@ import { createCommercialAuthorityApplication } from "../src/application/commerc
 import { createCommercialAuthorityRepository } from "../src/db/commercial-authority-repository";
 import { createOpportunityApplication } from "../src/application/opportunity-control";
 import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
+import { createGmailSequenceMail } from "../src/gmail/sequence-mail";
+import { createGmailSenderAdapter } from "../src/gmail/sender";
 
 describe("Approved email sequences at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -36,8 +38,104 @@ describe("Approved email sequences at the persisted application seam", () => {
   afterAll(async () => {
     await h.close();
   });
-  async function setup(multiple = false, at?: string, timing?: SequenceTiming) {
+  async function setup(
+    multiple = false,
+    at?: string,
+    timing?: SequenceTiming,
+    google?: ReturnType<typeof gmailFixture>,
+    message?: { subject: string; body: string },
+  ) {
     const f = await campaignFixture(h, { multipleSources: multiple, at });
+    let native:
+      { mailboxId: string; synchronize(): Promise<unknown> } | undefined;
+    if (google) {
+      const database = runtimeDatabase(h.runtime);
+      const settings = createMailboxApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createMailboxRepository(database, h.clock),
+        clock: h.clock,
+        provider: unavailableMailboxProvider,
+      });
+      const mailbox = await settings.save(f.owner, f.business.id, {
+        id: null,
+        expectedVersion: 0,
+        configuration: {
+          connectionId: f.sender.connection.id,
+          requestedRead: true,
+          requestedSend: true,
+          enabled: true,
+          scope: { kind: "mailbox" },
+          history: null,
+          salesSubjectTerms: ["steel"],
+        },
+      });
+      const connection = createGmailConnection(database, {
+        clock: h.clock,
+        configuration: google.configuration,
+        fetch: google.fetch,
+      });
+      const auth = createGmailApplication({ access: h.access, connection });
+      const oauth = await auth.start(f.owner, f.business.id, mailbox.id);
+      await auth.callback(f.owner, f.business.id, mailbox.id, {
+        state: new URL(oauth.authorizationUrl).searchParams.get("state"),
+        code: "fixture-code",
+      });
+      const sync = createMailboxApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createMailboxRepository(database, h.clock),
+        clock: h.clock,
+        provider: createGmailProvider(connection, h.clock),
+        enqueue: async () => {},
+      });
+      native = {
+        mailboxId: mailbox.id,
+        async synchronize() {
+          const work = await sync.queue(f.owner, f.business.id, mailbox.id, {
+            mode: "incremental",
+          });
+          let state = await sync.execute(work);
+          for (let i = 0; state?.status === "partial" && i < 10; i++)
+            state = await sync.execute(work);
+          return state;
+        },
+      };
+      await native.synchronize();
+      f.sender.route = await f.sender.app.saveReplyRoute(
+        f.owner,
+        f.business.id,
+        {
+          id: f.sender.route.id,
+          expectedVersion: f.sender.route.version,
+          configuration: {
+            ...f.sender.route.configuration,
+            inboxConnectionId: mailbox.id,
+          },
+        },
+      );
+      f.sender.adapter.key = "gmail-sequence-v1";
+      f.sender.adapter.mode = "live";
+      f.sender.adapter.inspect = createGmailSenderAdapter({
+        clock: h.clock,
+        evidence: [
+          {
+            businessId: f.business.id,
+            account: google.control.email,
+            observedAt: "2026-11-01T00:00:00Z",
+            validUntil: "2028-01-01T00:00:00Z",
+            reference: "https://operator.example/synthetic-proof",
+            checks: {
+              spf: "pass",
+              dkim: "pass",
+              dmarc_alignment: "pass",
+              health: "pass",
+            },
+          },
+        ],
+      }).inspect;
+      await f.sender.app.check(f.owner, f.business.id, f.sender.identity.id, {
+        expectedVersion: f.sender.identity.version,
+      });
+    }
     const draft = {
       ...f.draft(),
       timing: {
@@ -50,6 +148,7 @@ describe("Approved email sequences at the persisted application seam", () => {
       },
     };
     if (timing) draft.timing = timing;
+    if (message) draft.steps[0] = { ...draft.steps[0], ...message };
     if (multiple) draft.recipients = draft.recipients.slice(0, 2);
     const revision = (await f.app.save(f.owner, f.business.id, draft))
       .campaigns[0].revisions[0];
@@ -134,7 +233,16 @@ describe("Approved email sequences at the persisted application seam", () => {
         if (this.cancelFails) throw new Error("private-cancellation-error");
       },
     };
-    const newApp = (provider: SequenceMailProvider = mail.provider) =>
+    const gmailProvider = google
+      ? createGmailSequenceMail({
+          configuration: google.configuration,
+          fetch: google.fetch,
+          clock: h.clock,
+        })
+      : null;
+    const newApp = (
+      provider: SequenceMailProvider = gmailProvider ?? mail.provider,
+    ) =>
       createEmailSequenceApplication({
         authenticate: h.access.authenticateForWork,
         repository: createEmailSequenceRepository(
@@ -150,8 +258,8 @@ describe("Approved email sequences at the persisted application seam", () => {
       expectedVersion: 0,
       policy: {
         enabled: true,
-        adapterKey: mail.provider.key,
-        mode: "fixture",
+        adapterKey: gmailProvider?.key ?? mail.provider.key,
+        mode: gmailProvider ? "live" : "fixture",
         periodStart: "2026-11-01T00:00:00Z",
         periodEnd: "2028-01-01T00:00:00Z",
         maxProviderCalls: 10,
@@ -159,8 +267,386 @@ describe("Approved email sequences at the persisted application seam", () => {
         note: "Explicit fixture allowance and pacing",
       },
     });
-    return { ...f, revision, mail, queued, app, newApp, eligibility, queue };
+    return {
+      ...f,
+      revision,
+      mail,
+      queued,
+      app,
+      newApp,
+      eligibility,
+      queue,
+      native,
+    };
   }
+  it("sends an approved Gmail action exactly once with native identity and separate acceptance evidence", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    const started = await f.app.start(
+      f.owner,
+      f.business.id,
+      f.ref(f.revision),
+    );
+    const job = f.queued.shift()!;
+    await f.app.execute(job.work);
+    await f.newApp().execute(job.work);
+    const state = await f.app.workspace(f.owner, f.business.id);
+    expect(state.runs[0].recipients[0].actions[0]).toMatchObject({
+      state: "accepted",
+      attempts: 1,
+      receipt: {
+        businessId: f.business.id,
+        actionId: started.runs[0].recipients[0].actions[0].id,
+        connectionId: f.sender.connection.id,
+        messageRef: "gmail-sent-1",
+        threadRef: "gmail-thread-1",
+        evidence: "provider_response",
+      },
+    });
+    expect(
+      google.calls.filter((c) => c.url.pathname.endsWith("/messages/send")),
+    ).toHaveLength(1);
+    expect(
+      state.runs[0].history.some((e) => e.kind === "sent_folder_observed"),
+    ).toBe(false);
+    expect(google.sends[0]).toContain("To: purchasing@fabricator.example\r\n");
+    expect(google.sends[0]).toContain("Reply-To: sales@supplier.example\r\n");
+    expect(google.sends[0]).toContain("X-Platform-Disclosure:");
+    google.add("native-buyer-reply", {
+      at: "2026-11-05T14:00:01Z",
+      from: "purchasing@fabricator.example",
+      reply: state.runs[0].recipients[0].actions[0].receipt!.internetMessageId,
+      thread: "gmail-thread-1",
+      text: "Could you share specifications?",
+      labels: ["INBOX"],
+    });
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "gmail-sent-1" } },
+            { message: { id: "native-buyer-reply" } },
+          ],
+        },
+      ],
+    });
+    h.clock.set("2026-11-05T14:00:02Z");
+    await f.native!.synchronize();
+    const observed = await f.app.workspace(f.owner, f.business.id);
+    expect(observed.runs[0].recipients[0].actions[1].state).toBe("cancelled");
+    expect(
+      observed.runs[0].history.find((e) => e.kind === "reply_observed")?.reply
+        ?.text,
+    ).toBe("Could you share specifications?");
+    expect(
+      observed.runs[0].history.filter((e) => e.kind === "sent_folder_observed"),
+    ).toHaveLength(1);
+    expect(google.sends).toHaveLength(1);
+  });
+  it.each([401, 403, 429, 503])(
+    "accounts for Gmail HTTP %s without retrying a message implicitly",
+    async (status) => {
+      const google = gmailFixture();
+      google.control.scopes += ` ${gmailSendScope}`;
+      const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+      await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+      google.control.apiError = status;
+      const job = f.queued.shift()!;
+      await f.app.execute(job.work);
+      await f.newApp().execute(job.work);
+      const state = await f.app.workspace(f.owner, f.business.id);
+      expect(state.runs[0].recipients[0].actions[0]).toMatchObject({
+        state: status === 503 ? "unknown" : "failed",
+        reason:
+          status === 503
+            ? "acceptance_unknown"
+            : status === 429
+              ? "rate_limited"
+              : "rejected",
+        receipt: null,
+        attempts: 1,
+      });
+      expect(
+        google.calls.filter((c) => c.url.pathname.endsWith("/messages/send")),
+      ).toHaveLength(1);
+      expect(JSON.stringify(state)).not.toMatch(
+        /fixture-access|fixture-refresh|private-gmail/,
+      );
+      if (status === 403) {
+        const authorization = createGmailApplication({
+          access: h.access,
+          connection: createGmailConnection(runtimeDatabase(h.runtime), {
+            clock: h.clock,
+            configuration: google.configuration,
+            fetch: google.fetch,
+          }),
+        });
+        expect(
+          await authorization.read(f.owner, f.business.id, f.native!.mailboxId),
+        ).toMatchObject({ read: true, send: false });
+      }
+    },
+  );
+  it("requires a separate send grant and current attributable sender proof", async () => {
+    const google = gmailFixture();
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    await expect(
+      f.app.start(f.owner, f.business.id, f.ref(f.revision)),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(google.sends).toHaveLength(0);
+    expect(
+      new URL(google.calls.find((c) => c.url.pathname.endsWith("/token"))!.url)
+        .hostname,
+    ).toBe("oauth2.googleapis.com");
+    f.sender.adapter.inspect = createGmailSenderAdapter({
+      clock: h.clock,
+      evidence: [],
+    }).inspect;
+    const identity = await f.sender.app.check(
+      f.owner,
+      f.business.id,
+      f.sender.identity.id,
+      { expectedVersion: f.sender.identity.version },
+    );
+    expect(identity.readiness.ready).toBe(false);
+    expect(identity.evidence?.checks.spf).toBe("unknown");
+  });
+  it("blocks a separately revoked Gmail sending selection after enqueue", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    const settings = createMailboxApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createMailboxRepository(runtimeDatabase(h.runtime), h.clock),
+      clock: h.clock,
+      provider: unavailableMailboxProvider,
+    });
+    const mailbox = (await settings.workspace(f.owner, f.business.id))
+      .mailboxes[0];
+    await settings.save(f.owner, f.business.id, {
+      id: mailbox.id,
+      expectedVersion: mailbox.version,
+      configuration: { ...mailbox.configuration, requestedSend: false },
+    });
+    await f.app.execute(f.queued.shift()!.work);
+    expect(google.sends).toHaveLength(0);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[0].state,
+    ).toBe("paused");
+  });
+  it("refreshes Gmail credentials under the dispatch lock and stops on token loss before sending", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    google.control.expiresIn = 90;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    h.clock.set("2026-11-05T14:00:31Z");
+    google.control.tokenError = 400;
+    await f.app.execute(f.queued.shift()!.work);
+    expect(google.sends).toHaveLength(0);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[0].state,
+    ).toBe("failed");
+    const connection = createGmailApplication({
+      access: h.access,
+      connection: createGmailConnection(runtimeDatabase(h.runtime), {
+        clock: h.clock,
+        configuration: google.configuration,
+        fetch: google.fetch,
+      }),
+    });
+    expect(
+      await connection.read(f.owner, f.business.id, f.native!.mailboxId),
+    ).toMatchObject({ status: "reconnect_required", send: false });
+  });
+  it("rechecks current reply visibility after Gmail refresh before crossing the transport boundary", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    google.control.expiresIn = 90;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    h.clock.set("2026-11-05T14:00:31Z");
+    google.control.beforeRefresh = async () => {
+      h.clock.set("2026-11-05T14:06:00Z");
+    };
+    await f.app.execute(f.queued.shift()!.work);
+    expect(google.sends).toHaveLength(0);
+  });
+  it("keeps a malformed Gmail acceptance response unresolved and fences forged Business work", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    const job = f.queued.shift()!;
+    await expect(
+      f.app.execute({ ...job.work, businessId: crypto.randomUUID() }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    google.control.sendResponse = { id: "private-gmail-response" };
+    await f.app.execute(job.work);
+    await f.newApp().execute(job.work);
+    const state = await f.app.workspace(f.owner, f.business.id);
+    expect(state.runs[0].recipients[0].actions[0].state).toBe("unknown");
+    expect(google.sends).toHaveLength(1);
+    expect(JSON.stringify(state)).not.toContain("private-gmail-response");
+  });
+  it("reconciles a lost Gmail response only from an exact selected Sent observation without blind resend or history access", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    const job = f.queued.shift()!;
+    google.control.sendLost = true;
+    await f.app.execute(job.work);
+    await f.newApp().execute(job.work);
+    let state = await f.app.workspace(f.owner, f.business.id);
+    expect(state.runs[0].recipients[0].actions[0].state).toBe("unknown");
+    expect(google.sends).toHaveLength(1);
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [{ message: { id: "gmail-sent-1" } }],
+        },
+      ],
+    });
+    h.clock.set("2026-11-05T14:00:01Z");
+    await f.native!.synchronize();
+    await f.newApp().execute(job.work);
+    state = await f.app.workspace(f.owner, f.business.id);
+    expect(
+      state.runs[0].history.filter((e) => e.kind === "sent_folder_observed"),
+    ).toHaveLength(1);
+    expect(state.runs[0].recipients[0].actions[0]).toMatchObject({
+      state: "accepted",
+      receipt: {
+        evidence: "sent_folder",
+        messageRef: "gmail-sent-1",
+        threadRef: "gmail-thread-1",
+      },
+    });
+    expect(
+      state.runs[0].history.filter((e) => e.kind === "sent_folder_observed"),
+    ).toHaveLength(1);
+    expect(google.sends).toHaveLength(1);
+    expect(
+      (
+        await createMailboxApplication({
+          authenticate: h.access.authenticateForWork,
+          repository: createMailboxRepository(
+            runtimeDatabase(h.runtime),
+            h.clock,
+          ),
+          clock: h.clock,
+          provider: unavailableMailboxProvider,
+        }).workspace(f.owner, f.business.id)
+      ).mailboxes[0].configuration.history,
+    ).toBeNull();
+  });
+  it("correlates UTF-8 Gmail messages with folded MIME headers and preserves their exact approved content", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google, {
+      subject:
+        "Galvanized steel — café procurement and fabrication specification enquiry",
+      body: "Specifications: café façade.\nPlease review the approved scope.",
+    });
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    google.control.sendLost = true;
+    const job = f.queued.shift()!;
+    await f.app.execute(job.work);
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [{ message: { id: "gmail-sent-1" } }],
+        },
+      ],
+    });
+    h.clock.set("2026-11-05T14:00:01Z");
+    await f.native!.synchronize();
+    await f.app.execute(job.work);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[0].state,
+    ).toBe("accepted");
+  });
+  it("keeps matching-subject Gmail follow-ups in their native thread with exact RFC references", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google, {
+      subject: "Steel supply follow-up",
+      body: "Approved opening message.",
+    });
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    await f.app.execute(f.queued.shift()!.work);
+    const receipt = (await f.app.workspace(f.owner, f.business.id)).runs[0]
+      .recipients[0].actions[0].receipt!;
+    h.clock.set("2026-11-09T14:00:00Z");
+    await h.reverifyAuthenticator(f.owner);
+    await f.native!.synchronize();
+    await f.newApp().execute(f.queued.shift()!.work);
+    expect(google.sends).toHaveLength(2);
+    expect(google.sends[1]).toContain(
+      `In-Reply-To: ${receipt.internetMessageId}\r\n`,
+    );
+    expect(
+      google.calls.filter((c) => c.url.pathname.endsWith("/messages/send"))[1]
+        .body.threadId,
+    ).toBe("gmail-thread-1");
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[1].receipt?.threadRef,
+    ).toBe("gmail-thread-1");
+  });
+  it("leaves conflicting exact Gmail Sent observations unresolved", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    google.control.sendLost = true;
+    const job = f.queued.shift()!;
+    await f.app.execute(job.work);
+    const internetId = /^Message-ID: (.+)\r$/m.exec(google.sends[0])![1];
+    const duplicate = google.add("duplicate-send", {
+      at: "2026-11-05T14:00:00Z",
+      from: google.control.email,
+      to: "purchasing@fabricator.example",
+      labels: ["SENT"],
+      internetId,
+      text: f.revision.snapshot.steps[0].body,
+    });
+    duplicate.payload.headers.find((h) => h.name === "Subject")!.value =
+      f.revision.snapshot.steps[0].subject;
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "gmail-sent-1" } },
+            { message: { id: "duplicate-send" } },
+          ],
+        },
+      ],
+    });
+    h.clock.set("2026-11-05T14:00:01Z");
+    await f.native!.synchronize();
+    await f.app.execute(job.work);
+    const state = await f.app.workspace(f.owner, f.business.id);
+    expect(
+      state.runs[0].history.filter((e) => e.kind === "sent_folder_observed"),
+    ).toHaveLength(2);
+    expect(state.runs[0].recipients[0].actions[0].state).toBe("unknown");
+    expect(google.sends).toHaveLength(1);
+  });
   it("starts explicitly, retains jobs across restart and sends only the immutable approved messages within local timing", async () => {
     const f = await setup();
     expect(f.queued).toHaveLength(0);

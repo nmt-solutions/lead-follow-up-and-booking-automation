@@ -26,7 +26,11 @@ import { createEmailSequenceApplication } from "../application/email-sequences";
 import { createEmailSequenceRepository } from "../db/email-sequence-repository";
 import { createEmailSequenceHttp } from "../http/email-sequences";
 import { configuredSequenceQueue } from "../email-sequences/queue";
-import { unavailableSequenceMail } from "../email-sequences/provider";
+import { configuredSequenceMail } from "../email-sequences/provider";
+import {
+  configuredGmailSenderEvidence,
+  createGmailSenderAdapter,
+} from "../gmail/sender";
 import { createCampaignApplication } from "../application/campaigns";
 import { createCampaignRepository } from "../db/campaign-repository";
 import { createCampaignHttp } from "../http/campaigns";
@@ -85,6 +89,9 @@ import { createTeamHttp } from "../http/team";
 import { createInvitationMailer } from "../auth/invitation-mailer";
 import { invitationTokens } from "../auth/invitation-tokens";
 import { createFileApplication } from "../application/files";
+import { createBillingApplication } from "../application/billing";
+import { createBillingRepository } from "../db/billing-repository";
+import { createBillingHttp } from "../http/billing";
 import { createFileRepository } from "../db/file-repository";
 import { createFilesHttp } from "../http/files";
 import { filesConfiguration } from "./files-configuration";
@@ -156,7 +163,11 @@ async function composeServices() {
       now: () => new Date(),
     }),
     clock: { now: () => new Date() },
-    provider: unavailableSequenceMail,
+    provider: configuredSequenceMail({
+      env: process.env,
+      clock: { now: () => new Date() },
+      fetch,
+    }),
     queue: configuredSequenceQueue(process.env),
   });
   const emailHandoffs = createEmailHandoffApplication({
@@ -190,7 +201,12 @@ async function composeServices() {
     repository: createSenderRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
-    adapter: unavailableSenderAdapter,
+    adapter: configuredGmail(process.env)
+      ? createGmailSenderAdapter({
+          clock: { now: () => new Date() },
+          evidence: configuredGmailSenderEvidence(process.env),
+        })
+      : unavailableSenderAdapter,
     clock: { now: () => new Date() },
   });
   const gmail = createGmailApplication({
@@ -234,6 +250,20 @@ async function composeServices() {
       from: environment.AUTH_EMAIL_FROM,
     }),
     origin: environment.BETTER_AUTH_URL,
+  });
+  const billing = createBillingApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createBillingRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+  });
+  const billingReviewFiles = createFileApplication({
+    authenticate: authenticatePlatform,
+    repository: createFileRepository(runtimeDatabase(pool), {
+      billingReview: true,
+    }),
+    clock: { now: () => new Date() },
+    ...filesConfiguration(),
   });
   const files = createFileApplication({
     authenticate,
@@ -511,6 +541,18 @@ async function composeServices() {
     application,
     team,
     files,
+    billing,
+    billingReviewFiles,
+    billingHttp: createBillingHttp({
+      application: billing,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
+    billingReviewFilesHttp: createFilesHttp({
+      application: billingReviewFiles,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     knowledge,
     commercialAuthority,
     discovery,

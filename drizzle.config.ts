@@ -10,6 +10,8 @@ export default defineConfig({
     "whatsapp_connection",
     "whatsapp_oauth",
     "whatsapp_event",
+    "billing_profile_revision",
+    "billing_profile_review",
     "email_sequence_policy",
     "email_sequence_run",
     "email_sequence_action",
