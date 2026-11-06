@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { WhatsAppManualAssociation } from "@/components/whatsapp-manual-association";
 import {
   OpportunityControl,
   ManualReplyRecord,
@@ -91,7 +92,9 @@ export default async function ConversationPage({
         </Link>
         <p className="mt-3 text-muted-foreground">
           {conversation.connection.label} · {conversation.connection.channel} ·
-          Received-message import
+          {conversation.connection.mode === "meta"
+            ? "Signed Meta intake"
+            : "Received-message import"}
           {!conversation.connection.active &&
             " · Import revoked; history available"}
         </p>
@@ -269,10 +272,10 @@ export default async function ConversationPage({
       />
       <section aria-labelledby="messages-title" className="space-y-4">
         {conversation.manualReplies.length > 0 && (
-          <section aria-label="Observed Gmail replies" className="space-y-4">
-            <h2 className="text-xl font-semibold">Manual Gmail replies</h2>
+          <section aria-label="Observed manual replies" className="space-y-4">
+            <h2 className="text-xl font-semibold">Observed manual replies</h2>
             <p className="text-sm text-muted-foreground">
-              Observed only within the selected mail and time bounds. A reply
+              Observed only within the selected channel and time bounds. A reply
               assigned to this purchasing need uses the same cross-channel human
               takeover until explicit handback.
             </p>
@@ -290,7 +293,9 @@ export default async function ConversationPage({
                     UTC ·{" "}
                     {reply.state === "applied"
                       ? "Human takeover recorded"
-                      : "Historical reply retained; newer control preserved"}
+                      : reply.state === "pending"
+                        ? "Purchasing need requires review"
+                        : "Historical reply retained; newer control preserved"}
                   </p>
                 </CardHeader>
                 <CardContent>
@@ -300,6 +305,14 @@ export default async function ConversationPage({
                   >
                     {reply.text}
                   </p>
+                  {conversation.connection.mode === "meta" &&
+                    reply.state === "pending" && (
+                      <WhatsAppManualAssociation
+                        businessId={businessId}
+                        receiptId={reply.id}
+                        messages={conversation.messages}
+                      />
+                    )}
                 </CardContent>
               </Card>
             ))}

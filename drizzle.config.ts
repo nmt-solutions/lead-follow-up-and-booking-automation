@@ -12,6 +12,8 @@ export default defineConfig({
     "subscription_payment_history",
     "subscription_period",
     "subscription_usage",
+    "whatsapp_intake",
+    "whatsapp_receipt",
     "whatsapp_evidence",
     "tax_rule_revision",
     "tax_rule_decision",

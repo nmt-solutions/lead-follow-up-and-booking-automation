@@ -440,6 +440,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
     expect(after.readiness).toEqual({
       onboardingReady: true,
       automationReady: false,
+      inboundReady: false,
+      manualVisibilityReady: false,
+      sendingReady: false,
       issues: [],
     });
     expect(
@@ -500,6 +503,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
       expect(state.readiness).toEqual({
         onboardingReady: false,
         automationReady: false,
+        inboundReady: false,
+        manualVisibilityReady: false,
+        sendingReady: false,
         issues: ["customer_payment_method"],
       });
     },
@@ -601,6 +607,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
     expect(state.readiness).toMatchObject({
       onboardingReady: true,
       automationReady: false,
+      inboundReady: false,
+      manualVisibilityReady: false,
+      sendingReady: false,
       issues: [],
     });
     expect(JSON.stringify(state)).not.toMatch(
@@ -825,6 +834,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
     expect(result.readiness).toMatchObject({
       onboardingReady: false,
       automationReady: false,
+      inboundReady: false,
+      manualVisibilityReady: false,
+      sendingReady: false,
       issues: ["number_registered", "customer_payment_method"],
     });
     expect(requests.map((r) => r.path)).toContain(
@@ -1079,6 +1091,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
     expect(supported.readiness).toMatchObject({
       onboardingReady: false,
       automationReady: false,
+      inboundReady: false,
+      manualVisibilityReady: false,
+      sendingReady: false,
       issues: ["customer_payment_method"],
     });
     const reviewer = await h.signIn("whatsapp-graph-reviewer@example.com");
@@ -1138,6 +1153,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
     expect(reviewed.readiness).toEqual({
       onboardingReady: true,
       automationReady: false,
+      inboundReady: false,
+      manualVisibilityReady: false,
+      sendingReady: false,
       issues: [],
     });
     expect(reviewed.paymentEvidence).toMatchObject({
@@ -1185,6 +1203,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
     expect(revokedReview.readiness).toEqual({
       onboardingReady: false,
       automationReady: false,
+      inboundReady: false,
+      manualVisibilityReady: false,
+      sendingReady: false,
       issues: ["customer_payment_method"],
     });
   });
