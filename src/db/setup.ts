@@ -68,6 +68,7 @@ import {
   subscriptionPaymentHistory,
   subscriptionPeriod,
   subscriptionUsage,
+  subscriptionPaymentScopeForeignKeys,
   commercialAuthorityRevision,
   discoveryConfiguration,
   discoveryRun,
@@ -362,6 +363,10 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.subscription_quote') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.subscription_quote FROM app_runtime;
       END IF;
+      IF to_regclass('public.subscription_payment') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.subscription_payment, public.subscription_payment_event, public.subscription_payment_history, public.subscription_period, public.subscription_usage FROM app_runtime;
+        REVOKE UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON public.subscription_payment FROM app_runtime;
+      END IF;
       IF to_regclass('public.billing_profile_review') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.billing_profile_review FROM app_runtime;
       END IF;
@@ -554,6 +559,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...subscriptionPaymentScopeForeignKeys,
     ...taxScopeForeignKeys,
     ...emailSequenceScopeForeignKeys,
     ...mailboxScopeForeignKeys,
@@ -612,6 +618,7 @@ export async function secureDatabase(pool: Pool) {
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...subscriptionPaymentScopeForeignKeys,
       ...taxScopeForeignKeys,
       ...emailSequenceScopeForeignKeys,
       ...mailboxScopeForeignKeys,

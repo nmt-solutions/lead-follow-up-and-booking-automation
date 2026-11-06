@@ -785,11 +785,6 @@ export const subscriptionPaymentEvent = pgTable(
       "subscription_payment_event_optional_scope",
       sql`(${t.businessId} is null)=(${t.actionId} is null)`,
     ),
-    foreignKey({
-      name: "subscription_payment_event_scope",
-      columns: [t.actionId, t.businessId],
-      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
-    }),
     ...paymentHistoryPolicies("subscription_payment_event", sql`${t.actionId}`),
   ],
 ).enableRLS();
@@ -811,11 +806,6 @@ export const subscriptionPaymentHistory = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (t) => [
-    foreignKey({
-      name: "subscription_payment_history_scope",
-      columns: [t.actionId, t.businessId],
-      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
-    }),
     ...paymentHistoryPolicies(
       "subscription_payment_history",
       sql`${t.actionId}`,
@@ -844,11 +834,6 @@ export const subscriptionPeriod = pgTable(
     ),
     unique("subscription_period_scope").on(t.id, t.businessId),
     check("subscription_period_window", sql`${t.end}>${t.start}`),
-    foreignKey({
-      name: "subscription_period_action_scope",
-      columns: [t.actionId, t.businessId],
-      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
-    }),
     ...paymentHistoryPolicies("subscription_period", sql`${t.actionId}`),
   ],
 ).enableRLS();
@@ -871,11 +856,6 @@ export const subscriptionUsage = pgTable(
       t.operationId,
     ),
     check("subscription_usage_positive", sql`${t.quantity}>0`),
-    foreignKey({
-      name: "subscription_usage_period_scope",
-      columns: [t.periodId, t.businessId],
-      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
-    }),
     pgPolicy("subscription_usage_read", {
       for: "select",
       to: appRuntime,
@@ -888,6 +868,49 @@ export const subscriptionUsage = pgTable(
     }),
   ],
 ).enableRLS();
+
+// Reconcile these composite keys after the pinned push replaces referenced
+// UNIQUE constraints, while financial runtime access remains paused.
+export const subscriptionPaymentScopeForeignKeys = [
+  new ForeignKey(
+    subscriptionPaymentEvent,
+    foreignKey({
+      name: "subscription_payment_event_scope",
+      columns: [
+        subscriptionPaymentEvent.actionId,
+        subscriptionPaymentEvent.businessId,
+      ],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    subscriptionPaymentHistory,
+    foreignKey({
+      name: "subscription_payment_history_scope",
+      columns: [
+        subscriptionPaymentHistory.actionId,
+        subscriptionPaymentHistory.businessId,
+      ],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    subscriptionPeriod,
+    foreignKey({
+      name: "subscription_period_action_scope",
+      columns: [subscriptionPeriod.actionId, subscriptionPeriod.businessId],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    subscriptionUsage,
+    foreignKey({
+      name: "subscription_usage_period_scope",
+      columns: [subscriptionUsage.periodId, subscriptionUsage.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+];
 
 export const knowledgeRevision = pgTable(
   "knowledge_revision",
