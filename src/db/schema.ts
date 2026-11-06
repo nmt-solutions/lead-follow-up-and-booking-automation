@@ -1,3 +1,4 @@
+import type { MailAcceptance } from "../models/mail-dispatch";
 import type {
   MailboxConfiguration,
   MailboxGrant,
@@ -4166,6 +4167,9 @@ export const emailSequenceAction = pgTable(
     recoveryAt: timestamp("recovery_at", { withTimezone: true }),
     attemptId: uuid("attempt_id"),
     receipt: jsonb("receipt").$type<SequenceReceipt>(),
+    processingAcceptance: jsonb(
+      "processing_acceptance",
+    ).$type<MailAcceptance>(),
     queueState: text("queue_state")
       .$type<"none" | "pending" | "enqueued" | "failed">()
       .notNull(),
@@ -4211,6 +4215,9 @@ export const emailSequenceEvent = pgTable(
     attemptId: uuid("attempt_id"),
     envelope: jsonb("envelope").$type<SequenceEnvelope>(),
     receipt: jsonb("receipt").$type<SequenceReceipt>(),
+    processingAcceptance: jsonb(
+      "processing_acceptance",
+    ).$type<MailAcceptance>(),
   },
   (t) => [
     uniqueIndex("email_sequence_reservation_once")

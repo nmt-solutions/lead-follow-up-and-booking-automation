@@ -116,6 +116,7 @@ export type OpportunityDispatch = {
  * Implementations must bound/cancel I/O and make one call per committed action. An RFC Message-ID is correlation, not provider deduplication.
  */
 export type OpportunityActionProvider = {
+  selectEmail?(key: string): OpportunityActionProvider;
   emailIdentity?: { adapterKey: string; mode: "fixture" | "live" };
   channels: readonly ("email" | "whatsapp")[];
   dispatch(

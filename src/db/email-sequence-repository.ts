@@ -20,7 +20,10 @@ import {
   type classifySequenceReplySchema,
 } from "../models/email-sequences";
 import { sequenceDue } from "../email-sequences/timing";
-import { sequenceMailCall } from "../email-sequences/provider";
+import {
+  sequenceMailCall,
+  selectSequenceMail,
+} from "../email-sequences/provider";
 import { createCampaignRepository } from "./campaign-repository";
 import {
   createSequenceGate,
@@ -42,6 +45,7 @@ import {
   emailSequenceEvent,
   emailSequencePolicy,
   inboxOpportunity,
+  inboxMessage,
   platformOperator,
   session,
   gmailManualMessage,
@@ -52,7 +56,9 @@ import { handoffSource } from "../application/email-handoff-policy";
 import { incomingInquirySchema } from "../models/inbox";
 import { captureInboxInquiry } from "./inbox-repository";
 import { sequenceReference } from "./email-sequence-observations";
-import { gmailDispatchAccess } from "./gmail-dispatch";
+import { nativeDispatchAccess } from "./native-mail-dispatch";
+import { microsoftTransportKey } from "../microsoft-mail/transport";
+import { exactSequenceSent } from "./email-sequence-observations";
 import { gmailSequenceKey } from "../gmail/sequence-mail";
 
 type Run = typeof emailSequenceRun.$inferSelect;
@@ -97,6 +103,7 @@ export function createEmailSequenceRepository(
     envelope: SequenceEnvelope | null = null,
     receipt: Action["receipt"] = null,
     note: string | null = null,
+    source: SequenceWorkspace["runs"][number]["history"][number]["source"] = null,
   ) {
     await tx.insert(emailSequenceEvent).values({
       id: randomUUID(),
@@ -109,6 +116,7 @@ export function createEmailSequenceRepository(
       envelope,
       receipt,
       note,
+      source,
       actorId: actor.userId,
       at: clock.now(),
     });
@@ -225,6 +233,14 @@ export function createEmailSequenceRepository(
     queueReady: boolean,
   ): Promise<SequenceWorkspace> {
     const policy = await sequencePolicyAt(tx, businessId);
+    const adapters = provider.adapters;
+    if (!policy?.configuration.adapterKeys)
+      provider = selectSequenceMail(
+        provider,
+        policy?.configuration.adapterKey ??
+          provider.adapters?.[0]?.key ??
+          provider.key,
+      );
     const usage = policy
       ? await sequenceUsage(tx, businessId, policy.configuration)
       : { reserved: 0, remaining: 0 };
@@ -241,7 +257,15 @@ export function createEmailSequenceRepository(
       )
         setupIssues.push("allowance_period_inactive");
       if (
-        policy.configuration.adapterKey !== provider.key ||
+        (policy.configuration.adapterKeys
+          ? policy.configuration.adapterKeys.some((key) => {
+              const selected = selectSequenceMail(provider, key);
+              return (
+                selected.key !== key ||
+                selected.mode !== policy.configuration.mode
+              );
+            })
+          : policy.configuration.adapterKey !== provider.key) ||
         policy.configuration.mode !== provider.mode
       )
         setupIssues.push("allowance_adapter_changed");
@@ -317,6 +341,7 @@ export function createEmailSequenceRepository(
                 (e) => e.actionId === a.id && e.kind === "attempt_reserved",
               ).length,
               receipt: a.receipt,
+              processingAcceptance: a.processingAcceptance,
             })),
         })),
         history: history.map((e) => {
@@ -339,6 +364,7 @@ export function createEmailSequenceRepository(
             at: e.at.toISOString(),
             actorId: e.actorId,
             receipt: e.receipt,
+            processingAcceptance: e.processingAcceptance,
             source: e.source,
             note: e.note,
             reviewNeeded:
@@ -359,6 +385,7 @@ export function createEmailSequenceRepository(
     }
     return {
       provider: { key: provider.key, mode: provider.mode },
+      adapters,
       queueReady,
       setupIssues,
       canConfigure: operator?.emailPolicy ?? false,
@@ -786,16 +813,20 @@ export function createEmailSequenceRepository(
           });
       });
       for (const attempt of attempts) {
+        const mailProvider = selectSequenceMail(
+          provider,
+          attempt.envelope.adapterKey,
+        );
         if (
-          provider.mode === "unconfigured" ||
-          provider.key !== attempt.envelope.adapterKey ||
-          provider.mode !== attempt.envelope.adapterMode
+          mailProvider.mode === "unconfigured" ||
+          mailProvider.key !== attempt.envelope.adapterKey ||
+          mailProvider.mode !== attempt.envelope.adapterMode
         )
           continue;
         let result: unknown;
         try {
           result = await sequenceMailCall(
-            (s) => provider.reconcile(attempt.envelope, s),
+            (s) => mailProvider.reconcile(attempt.envelope, s),
             signal,
           );
         } catch {
@@ -810,9 +841,13 @@ export function createEmailSequenceRepository(
             !["committed", "unknown"].includes(a.state)
           )
             return;
+          let reconciledSource: SequenceWorkspace["runs"][number]["history"][number]["source"] =
+            null;
           // Search absence cannot prove non-acceptance. Only an exact, currently authorized
-          // observation from the existing selected sync can account for a lost Gmail response.
-          if (provider.key === gmailSequenceKey) {
+          // observation from the existing selected sync can account for an unresolved native identity.
+          if (
+            [gmailSequenceKey, microsoftTransportKey].includes(mailProvider.key)
+          ) {
             const observations = await tx
               .select()
               .from(emailSequenceEvent)
@@ -826,7 +861,10 @@ export function createEmailSequenceRepository(
             const matches = observations.filter(
               (e) =>
                 e.attemptId === a.attemptId &&
-                e.source?.provider === "gmail" &&
+                e.source?.provider ===
+                  (mailProvider.key === microsoftTransportKey
+                    ? "microsoft"
+                    : "gmail") &&
                 e.source.connectionId === attempt.envelope.connectionId &&
                 e.source.internetMessageId ===
                   attempt.envelope.internetMessageId,
@@ -867,14 +905,58 @@ export function createEmailSequenceRepository(
               const metadata = retained?.currentMetadata ?? retained?.metadata;
               if (
                 fresh &&
+                fresh.provider === source.provider &&
+                fresh.connectionId === attempt.envelope.connectionId &&
+                policy?.account === attempt.envelope.fromAddress &&
                 fresh.threadRef === source.threadRef &&
                 fresh.internetMessageId === source.internetMessageId &&
                 metadata?.native?.direction === "manual_reply" &&
                 metadata.native.from === attempt.envelope.fromAddress &&
                 metadata.native.to.length === 1 &&
                 metadata.native.to[0] === attempt.envelope.recipient &&
-                metadata.folderRefs.includes("SENT")
+                exactSequenceSent(
+                  attempt.envelope,
+                  retained!.content,
+                  metadata,
+                  policy!.provider === "gmail"
+                    ? "SENT"
+                    : (policy!.grant?.microsoft?.sentFolderRef ?? ""),
+                  clock.now(),
+                ) &&
+                (
+                  await tx
+                    .select()
+                    .from(gmailManualMessage)
+                    .where(
+                      and(
+                        eq(gmailManualMessage.businessId, businessId),
+                        eq(gmailManualMessage.mailboxId, source.mailboxId),
+                      ),
+                    )
+                ).filter(
+                  (r) =>
+                    (r.currentMetadata ?? r.metadata).native
+                      ?.internetMessageId ===
+                    attempt.envelope.internetMessageId,
+                ).length === 1 &&
+                !(
+                  await tx
+                    .select()
+                    .from(inboxMessage)
+                    .where(
+                      and(
+                        eq(inboxMessage.businessId, businessId),
+                        eq(inboxMessage.connectionId, source.mailboxId),
+                      ),
+                    )
+                ).some(
+                  (r) =>
+                    (r.mailboxCurrentMetadata ?? r.mailboxMetadata)?.native
+                      ?.internetMessageId ===
+                    attempt.envelope.internetMessageId,
+                )
               ) {
+                reconciledSource = fresh;
                 result = {
                   status: "accepted",
                   receipt: {
@@ -883,10 +965,10 @@ export function createEmailSequenceRepository(
                     attemptId: a.attemptId,
                     connectionId: attempt.envelope.connectionId,
                     recipient: attempt.envelope.recipient,
-                    messageRef: source.messageRef,
-                    threadRef: source.threadRef,
-                    internetMessageId: source.internetMessageId,
-                    acceptedAt: source.occurredAt,
+                    messageRef: fresh.messageRef,
+                    threadRef: fresh.threadRef,
+                    internetMessageId: fresh.internetMessageId,
+                    acceptedAt: fresh.occurredAt,
                     evidence: "sent_folder",
                   },
                 };
@@ -906,7 +988,16 @@ export function createEmailSequenceRepository(
             );
             return;
           }
-          await settle(tx, actor, run, a, revision, result, attempt.envelope);
+          await settle(
+            tx,
+            actor,
+            run,
+            a,
+            revision,
+            result,
+            attempt.envelope,
+            reconciledSource,
+          );
           await event(tx, actor, run, "reconciled", a);
         });
       }
@@ -1136,7 +1227,7 @@ export function createEmailSequenceRepository(
             queueState: "none",
           });
           const envelope: SequenceEnvelope = {
-            adapterKey: provider.key,
+            adapterKey: gate.sender.evidence!.adapterKey,
             adapterMode:
               gate.sender.evidence!.mode === "fixture" ? "fixture" : "live",
             reservedAt: clock.now().toISOString(),
@@ -1164,6 +1255,29 @@ export function createEmailSequenceRepository(
               revision.snapshot.senderContext.replyRoute!.configuration.address,
             platformDisclosure: gate.sender.identification.platformDisclosure,
             internetMessageId: `<${attemptId}@${revision.snapshot.sender.fromAddress.split("@")[1]}>`,
+            ...(action.stepIndex &&
+            c.actions.find(
+              (a) =>
+                a.contactId === action.contactId &&
+                a.stepIndex === action.stepIndex - 1,
+            )?.receipt
+              ? {
+                  parent: {
+                    internetMessageId: c.actions.find(
+                      (a) =>
+                        a.contactId === action.contactId &&
+                        a.stepIndex === action.stepIndex - 1,
+                    )!.receipt!.internetMessageId,
+                    threadRef: c.actions.find(
+                      (a) =>
+                        a.contactId === action.contactId &&
+                        a.stepIndex === action.stepIndex - 1,
+                    )!.receipt!.threadRef,
+                    subject:
+                      revision.snapshot.steps[action.stepIndex - 1].subject,
+                  },
+                }
+              : {}),
             emailEligibility: emailDispatchAuthorization(gate.eligibility),
           };
           await event(
@@ -1290,7 +1404,7 @@ export function createEmailSequenceRepository(
               a.contactId === action.contactId &&
               a.stepIndex === action.stepIndex - 1,
           )?.receipt ?? null;
-        const access = await gmailDispatchAccess(
+        const access = await nativeDispatchAccess(
           tx,
           claim.envelope,
           previous,
@@ -1311,8 +1425,23 @@ export function createEmailSequenceRepository(
               provider,
             });
             const at = clock.now();
+            if (current.reason !== null) return false;
+            const currentUsage = await sequenceUsage(
+              tx,
+              input.businessId,
+              current.policy,
+            );
+            const currentReservation = currentUsage.events.find(
+              (e) =>
+                e.attemptId === action.attemptId &&
+                e.kind === "attempt_reserved",
+            );
             return (
-              current.reason === null &&
+              Boolean(
+                currentReservation &&
+                currentReservation.at >= new Date(current.policy.periodStart) &&
+                currentUsage.reserved <= current.policy.maxProviderCalls,
+              ) &&
               !signal.aborted &&
               sequenceDue(revision.snapshot.timing!, at) <= at
             );
@@ -1360,6 +1489,7 @@ export function createEmailSequenceRepository(
     revision: Awaited<ReturnType<typeof sequenceRevision>>,
     raw: unknown,
     envelope: SequenceEnvelope,
+    source: SequenceWorkspace["runs"][number]["history"][number]["source"] = null,
   ) {
     const parsed = sequenceResultSchema.safeParse(raw);
     let result = parsed.success ? parsed.data : { status: "unknown" as const };
@@ -1375,6 +1505,40 @@ export function createEmailSequenceRepository(
         new Date(result.receipt.acceptedAt) < new Date(envelope.reservedAt))
     )
       result = { status: "unknown" };
+    if (result.status === "accepted_pending_identity") {
+      const a = result.acceptance;
+      if (
+        envelope.adapterKey !== "microsoft-mail-send-v1" ||
+        a.businessId !== run.businessId ||
+        a.actionId !== action.id ||
+        a.attemptId !== action.attemptId ||
+        a.connectionId !== envelope.connectionId ||
+        a.recipient !== envelope.recipient ||
+        a.submittedInternetMessageId !== envelope.internetMessageId ||
+        new Date(a.acceptedAt) < new Date(envelope.reservedAt) ||
+        new Date(a.acceptedAt) > clock.now()
+      )
+        result = { status: "unknown" };
+      else {
+        await actionUpdate(tx, action, {
+          state: "committed",
+          reason: "provider_accepted_identity_pending",
+          processingAcceptance: a,
+        });
+        await tx.insert(emailSequenceEvent).values({
+          id: randomUUID(),
+          businessId: run.businessId,
+          runId: run.id,
+          actionId: action.id,
+          attemptId: action.attemptId,
+          kind: "provider_accepted_identity_pending",
+          processingAcceptance: a,
+          actorId: actor.userId,
+          at: clock.now(),
+        });
+        return;
+      }
+    }
     if (result.status === "unknown") {
       await actionUpdate(tx, action, {
         state: "unknown",
@@ -1453,6 +1617,8 @@ export function createEmailSequenceRepository(
         : null,
       null,
       result.receipt,
+      null,
+      source,
     );
     const [next] = await tx
       .select()

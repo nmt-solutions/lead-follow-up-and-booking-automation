@@ -175,6 +175,7 @@ export async function verifyRuntimeRole(
       AND NOT has_table_privilege(current_user,'public.email_sequence_event','UPDATE,DELETE,TRUNCATE')
       AND NOT has_table_privilege(current_user,'public.email_sequence_policy','UPDATE,DELETE,TRUNCATE')
       AND NOT has_column_privilege(current_user,'public.email_sequence_run','revision_id','UPDATE')
+      AND has_column_privilege(current_user,'public.email_sequence_action','processing_acceptance','UPDATE')
       AND NOT has_column_privilege(current_user,'public.email_sequence_action','contact_id','UPDATE')
       AND NOT has_column_privilege(current_user, 'public.inbox_opportunity', 'title', 'UPDATE')
       AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity

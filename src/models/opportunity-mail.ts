@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { mailResultSchema } from "./mail-dispatch";
+import { mailResultSchema, mailAcceptanceSchema } from "./mail-dispatch";
 import { mailObservationSourceSchema } from "./mail-evidence";
 
 /** One immutable ordinary reply intent. The commitment ID is also its sole attempt ID.
@@ -26,10 +26,16 @@ export type OpportunityMailEnvelope = {
   subject: string;
   body: string;
   internetMessageId: string;
-  parent: { messageRef: string; threadRef: string; internetMessageId: string };
+  parent: {
+    messageRef: string;
+    threadRef: string;
+    internetMessageId: string;
+    text?: string;
+  };
 };
 export const opportunityMailEvidenceSchema = z.strictObject({
   result: mailResultSchema.nullable(),
+  processingAcceptance: mailAcceptanceSchema.nullable().optional(),
   sent: mailObservationSourceSchema.nullable(),
 });
 export type OpportunityMail = z.infer<typeof opportunityMailEvidenceSchema> & {

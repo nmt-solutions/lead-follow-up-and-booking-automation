@@ -519,6 +519,9 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.email_sequence_policy, public.email_sequence_run, public.email_sequence_action, public.email_sequence_event FROM app_runtime;
         REVOKE UPDATE (identity,state,version,reason) ON public.email_sequence_run FROM app_runtime;
         REVOKE UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,queue_state,queue_run_id,recovery_at,identity,control_version) ON public.email_sequence_action FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='email_sequence_action' AND column_name='processing_acceptance') THEN
+          REVOKE UPDATE (processing_acceptance) ON public.email_sequence_action FROM app_runtime;
+        END IF;
       END IF;
       IF to_regclass('public.inbox_opportunity') IS NOT NULL THEN
         REVOKE UPDATE (stage,buyer_id) ON public.inbox_opportunity FROM app_runtime;
@@ -784,7 +787,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON email_sequence_policy, email_sequence_run, email_sequence_action, email_sequence_event FROM app_runtime;
       GRANT SELECT, INSERT ON email_sequence_policy, email_sequence_run, email_sequence_action, email_sequence_event TO app_runtime;
       GRANT UPDATE (identity,state,version,reason) ON email_sequence_run TO app_runtime;
-      GRANT UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,queue_state,queue_run_id,recovery_at,identity,control_version) ON email_sequence_action TO app_runtime;
+      GRANT UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,processing_acceptance,queue_state,queue_run_id,recovery_at,identity,control_version) ON email_sequence_action TO app_runtime;
       ALTER TABLE email_sequence_policy FORCE ROW LEVEL SECURITY;
       ALTER TABLE email_sequence_run FORCE ROW LEVEL SECURITY;
       ALTER TABLE email_sequence_action FORCE ROW LEVEL SECURITY;
