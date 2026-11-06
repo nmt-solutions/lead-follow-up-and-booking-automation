@@ -1227,6 +1227,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) TO app_runtime;
     `);
+    await preparePaymentSecurity(client);
     await client.query(`
       CREATE OR REPLACE FUNCTION public.pending_meta_outbound()
       RETURNS TABLE(business_id uuid,action_id uuid,actor_id text,session_id text)
@@ -1240,7 +1241,6 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL ON FUNCTION public.pending_meta_outbound() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
     `);
-    await preparePaymentSecurity(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");
