@@ -5,7 +5,7 @@ import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { createEmailSequenceRepository } from "../db/email-sequence-repository";
 import { createEmailSequenceApplication } from "../application/email-sequences";
 import { configuredSequenceQueue } from "./queue";
-import { unavailableSequenceMail } from "./provider";
+import { configuredSequenceMail } from "./provider";
 
 export async function withEmailSequenceWorker<T>(
   operation: (
@@ -32,7 +32,7 @@ export async function withEmailSequenceWorker<T>(
         },
         repository: createEmailSequenceRepository(runtimeDatabase(pool), clock),
         clock,
-        provider: unavailableSequenceMail,
+        provider: configuredSequenceMail({ env: process.env, clock, fetch }),
         queue: configuredSequenceQueue(process.env),
       }),
     );

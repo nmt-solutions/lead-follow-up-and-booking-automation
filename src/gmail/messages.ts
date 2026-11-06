@@ -128,27 +128,30 @@ export function gmailMetadata(
   };
 }
 function decodedHeader(value: string) {
-  return value.replace(
-    /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
-    (_match: string, charset: string, kind: string, data: string) => {
-      try {
-        const bytes =
-          kind.toLowerCase() === "b"
-            ? Buffer.from(data, "base64")
-            : Buffer.from(
-                data
-                  .replace(/_/g, " ")
-                  .replace(/=([0-9a-f]{2})/gi, (_: string, hex: string) =>
-                    String.fromCharCode(parseInt(hex, 16)),
-                  ),
-                "binary",
-              );
-        return new TextDecoder(charset, { fatal: true }).decode(bytes);
-      } catch {
-        throw new GmailFailure("invalid_response");
-      }
-    },
-  );
+  // RFC 2047 section 6.2: folding whitespace between adjacent encoded words is not display text.
+  return value
+    .replace(/(\?=)[ \t]+(?==\?)/g, "$1")
+    .replace(
+      /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
+      (_match: string, charset: string, kind: string, data: string) => {
+        try {
+          const bytes =
+            kind.toLowerCase() === "b"
+              ? Buffer.from(data, "base64")
+              : Buffer.from(
+                  data
+                    .replace(/_/g, " ")
+                    .replace(/=([0-9a-f]{2})/gi, (_: string, hex: string) =>
+                      String.fromCharCode(parseInt(hex, 16)),
+                    ),
+                  "binary",
+                );
+          return new TextDecoder(charset, { fatal: true }).decode(bytes);
+        } catch {
+          throw new GmailFailure("invalid_response");
+        }
+      },
+    );
 }
 function plainBody(raw: unknown) {
   let count = 0;

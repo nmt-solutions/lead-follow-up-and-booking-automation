@@ -139,6 +139,25 @@ export function createGmailHttp(
         signal,
       );
     },
+    send(
+      raw: string,
+      threadId: string | undefined,
+      accessToken: string,
+      signal: AbortSignal,
+    ) {
+      return request(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ raw, ...(threadId ? { threadId } : {}) }),
+        },
+        signal,
+      );
+    },
     async revoke(token: string) {
       try {
         await request("https://oauth2.googleapis.com/revoke", {
