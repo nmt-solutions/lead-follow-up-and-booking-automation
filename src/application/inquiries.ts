@@ -11,7 +11,8 @@ import {
 } from "../models/inquiries";
 import type { createInquiryRepository } from "../db/inquiry-repository";
 import type { createAiApplication } from "./ai";
-import type { createOpportunityApplication } from "./opportunity-control";
+import type { OpportunityRepository } from "./opportunity-control";
+import type { OpportunityActionProvider } from "../models/opportunity-control";
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);
@@ -29,10 +30,8 @@ export function createInquiryApplication<Credentials>(dependencies: {
     ReturnType<typeof createAiApplication<Credentials>>,
     "executeWorkflow"
   >;
-  opportunities: Pick<
-    ReturnType<typeof createOpportunityApplication<Credentials>>,
-    "dispatch"
-  >;
+  opportunityRepository: OpportunityRepository;
+  provider: OpportunityActionProvider;
   clock: Clock;
 }) {
   async function context(
@@ -51,6 +50,28 @@ export function createInquiryApplication<Credentials>(dependencies: {
     };
   }
   return {
+    async reconcile(
+      credentials: Credentials,
+      businessId: unknown,
+      opportunityId: unknown,
+      runId: unknown,
+    ) {
+      const c = await context(credentials, businessId, opportunityId);
+      const id = parse(z.uuid(), runId);
+      const result = await dependencies.repository.action(
+        c.actor,
+        c.businessId,
+        c.id,
+        id,
+      );
+      if (!result.action) throw new ApplicationError("CONFLICT");
+      await dependencies.opportunityRepository.reconcile(
+        c.actor,
+        c.businessId,
+        result.action.id,
+      );
+      return dependencies.repository.action(c.actor, c.businessId, c.id, id);
+    },
     async read(
       credentials: Credentials,
       businessId: unknown,
@@ -186,10 +207,12 @@ export function createInquiryApplication<Credentials>(dependencies: {
         id,
       );
       if (!result.action) throw new ApplicationError("CONFLICT");
-      await dependencies.opportunities.dispatch(
-        credentials,
+      await dependencies.opportunityRepository.dispatch(
+        c.actor,
         c.businessId,
         result.action.id,
+        dependencies.clock.now,
+        dependencies.provider,
       );
       return dependencies.repository.action(c.actor, c.businessId, c.id, id);
     },

@@ -379,6 +379,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.opportunity_control_history') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.opportunity_control_history, public.opportunity_manual_event, public.opportunity_due_action FROM app_runtime;
         REVOKE ALL PRIVILEGES (state, reason) ON public.opportunity_due_action FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='opportunity_due_action' AND column_name='email') THEN
+          REVOKE UPDATE (email) ON public.opportunity_due_action FROM app_runtime;
+        END IF;
         REVOKE ALL PRIVILEGES (owner_id, handoff_reason, next_action, control_state, control_version, policy_version) ON public.inbox_opportunity FROM app_runtime;
       END IF;
       IF to_regclass('public.inquiry_run') IS NOT NULL THEN
@@ -798,7 +801,33 @@ export async function secureDatabase(pool: Pool) {
       GRANT UPDATE (stage, buyer_id) ON inbox_opportunity TO app_runtime;
       REVOKE ALL PRIVILEGES ON opportunity_control_history, opportunity_manual_event, opportunity_due_action FROM app_runtime;
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
-      GRANT UPDATE (state, reason) ON opportunity_due_action TO app_runtime;
+      GRANT UPDATE (state, reason, email) ON opportunity_due_action TO app_runtime;
+      CREATE OR REPLACE FUNCTION public.protect_opportunity_mail() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog, public AS $protect$
+      BEGIN
+        IF TG_OP = 'INSERT' THEN
+          IF NEW.email IS NOT NULL THEN RAISE EXCEPTION 'Mail intent requires a durable commitment'; END IF;
+          RETURN NEW;
+        END IF;
+        IF OLD.email IS NOT NULL AND (NEW.email IS NULL OR NEW.email->'envelope' IS DISTINCT FROM OLD.email->'envelope')
+          THEN RAISE EXCEPTION 'Committed mail intent is immutable'; END IF;
+        IF OLD.email IS NOT NULL AND NEW.state = 'pending'
+          THEN RAISE EXCEPTION 'Committed mail cannot be retried'; END IF;
+        IF OLD.email IS NULL AND NEW.email IS NOT NULL AND (
+          OLD.state <> 'pending' OR NEW.state <> 'committed' OR
+          NEW.email->'envelope'->>'actionId' IS DISTINCT FROM NEW.id::text OR
+          NEW.email->'envelope'->>'attemptId' IS DISTINCT FROM NEW.id::text OR
+          NEW.email->'envelope'->>'businessId' IS DISTINCT FROM NEW.business_id::text OR
+          NEW.email->'envelope'->>'opportunityId' IS DISTINCT FROM NEW.opportunity_id::text OR
+          NEW.email->'envelope'->>'mailboxId' IS DISTINCT FROM NEW.connection_id::text OR
+          NEW.email->'envelope'->>'messageId' IS DISTINCT FROM NEW.message_id::text OR
+          NEW.email->'result' IS DISTINCT FROM 'null'::jsonb OR NEW.email->'sent' IS DISTINCT FROM 'null'::jsonb)
+          THEN RAISE EXCEPTION 'Mail intent requires its exact durable commitment'; END IF;
+        RETURN NEW;
+      END $protect$;
+      DROP TRIGGER IF EXISTS protect_opportunity_mail ON public.opportunity_due_action;
+      CREATE TRIGGER protect_opportunity_mail BEFORE INSERT OR UPDATE ON public.opportunity_due_action
+        FOR EACH ROW EXECUTE FUNCTION public.protect_opportunity_mail();
       REVOKE ALL PRIVILEGES ON inquiry_run FROM app_runtime;
       GRANT SELECT, INSERT ON inquiry_run TO app_runtime;
       GRANT UPDATE (result, execution_id) ON inquiry_run TO app_runtime;

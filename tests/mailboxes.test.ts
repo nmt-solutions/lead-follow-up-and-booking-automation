@@ -1,3 +1,4 @@
+import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
@@ -334,7 +335,12 @@ describe("Mailbox processing at the persisted application seam", () => {
           throw new Error("Unexpected model use");
         },
       },
-      opportunities: {
+      opportunityRepository: createOpportunityRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      provider: {
+        channels: [],
         async dispatch() {
           throw new Error("Unexpected send");
         },

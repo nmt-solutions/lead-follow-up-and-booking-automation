@@ -10,6 +10,7 @@ export const mailNativeSchema = z.strictObject({
   inReplyTo: headerRef.nullable(),
   from: z.email().max(254),
   to: z.array(z.email().max(254)).min(1).max(50),
+  replyTo: z.array(z.email().max(254)).min(1).max(50).optional(),
 });
 export type MailNative = z.infer<typeof mailNativeSchema>;
 export const mailManualSchema = z.strictObject({

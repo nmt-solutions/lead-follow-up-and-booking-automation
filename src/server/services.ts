@@ -1,3 +1,4 @@
+import { createGmailOpportunityMail } from "../gmail/opportunity-mail";
 import { configuredMailboxQueue } from "../mailboxes/queue";
 import { createMailboxApplication } from "../application/mailboxes";
 import { createMailboxRepository } from "../db/mailbox-repository";
@@ -310,21 +311,29 @@ async function composeServices() {
     clock: { now: () => new Date() },
     adapter: normalizedInquiryAdapter,
   });
+  const opportunityRepository = createOpportunityRepository(
+    runtimeDatabase(pool),
+    { now: () => new Date() },
+  );
+  const gmailConfiguration = configuredGmail(process.env);
+  const inquiryProvider = gmailConfiguration
+    ? createGmailOpportunityMail({
+        configuration: gmailConfiguration,
+        fetch,
+        clock: { now: () => new Date() },
+      })
+    : {
+        channels: [],
+        async dispatch() {
+          throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+        },
+      };
   const opportunities = createOpportunityApplication({
     authenticate,
     authenticateForWork: access.authenticateForWork,
-    repository: createOpportunityRepository(runtimeDatabase(pool), {
-      now: () => new Date(),
-    }),
+    repository: opportunityRepository,
     clock: { now: () => new Date() },
-    // Response generation uses the shared approved AI service. Live channel
-    // transports remain unavailable until separately configured integration work.
-    provider: {
-      channels: [],
-      async dispatch() {
-        throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
-      },
-    },
+    provider: inquiryProvider,
   });
   const inquiries = createInquiryApplication({
     authenticate,
@@ -334,7 +343,8 @@ async function composeServices() {
     }),
     clock: { now: () => new Date() },
     ai,
-    opportunities,
+    opportunityRepository,
+    provider: inquiryProvider,
   });
   const rfqs = createRfqApplication({
     authenticate,
