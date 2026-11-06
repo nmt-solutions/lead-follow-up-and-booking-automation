@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { preparePaymentSecurity } from "./payment-security";
 import { prepareSellerDocumentSecurity } from "./seller-document-security";
+import { prepareCostSecurity } from "./cost-security";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -53,6 +54,12 @@ import {
   invitation,
   teamAudit,
   platformOperator,
+  costRecord,
+  costPlanningRevision,
+  costScan,
+  costBudgetRevision,
+  costAlert,
+  costNotificationEvent,
   businessFile,
   fileAccess,
   fileUsage,
@@ -202,6 +209,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
+  await prepareCostSecurity(pool);
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
     RETURNS TABLE(payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -358,6 +366,25 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.platform_operator') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.platform_operator FROM app_runtime;
       END IF;
+      IF to_regclass('public.operator_cost_record') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_record FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_planning') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_planning FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_scan') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_scan FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_budget') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_budget FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_alert') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_alert FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_notification_event') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_notification_event FROM app_runtime;
+      END IF;
+      REVOKE ALL ON FUNCTION public.operator_cost_native(text),public.cost_worker_authorized(text),public.cost_owner_email(text),public.cost_attribution_valid(text,text),public.operator_cost_work(),public.cost_claim_alert(uuid),public.cost_alert_deliverable(uuid,uuid),public.cost_finish_alert(uuid,uuid,text) FROM app_runtime;
       IF to_regclass('public.business_file') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.business_file, public.file_access, public.file_usage FROM app_runtime;
       END IF;
@@ -412,6 +439,7 @@ export async function prepareDatabaseRole(pool: Pool) {
       END IF;
       IF to_regclass('public.discovery_run') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.discovery_configuration, public.discovery_run, public.discovery_prospect, public.discovery_result, public.discovery_usage FROM app_runtime;
+        IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='discovery_usage' AND column_name='provider_cost') THEN REVOKE UPDATE(provider_cost) ON public.discovery_usage FROM app_runtime; END IF;
         REVOKE ALL PRIVILEGES (status, stop_reason, used, completed_steps, updated_at) ON public.discovery_run FROM app_runtime;
         REVOKE ALL PRIVILEGES (outcome) ON public.discovery_usage FROM app_runtime;
       END IF;
@@ -778,6 +806,12 @@ export async function secureDatabase(pool: Pool) {
       invitation,
       teamAudit,
       platformOperator,
+      costRecord,
+      costPlanningRevision,
+      costScan,
+      costBudgetRevision,
+      costAlert,
+      costNotificationEvent,
       businessFile,
       fileAccess,
       fileUsage,
@@ -1069,6 +1103,18 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON business, membership, invitation, team_audit, platform_operator FROM app_runtime;
       GRANT SELECT, INSERT ON membership, business, invitation, team_audit TO app_runtime;
       GRANT SELECT ON platform_operator TO app_runtime;
+      REVOKE ALL PRIVILEGES ON operator_cost_record FROM app_runtime;
+      GRANT SELECT,INSERT ON operator_cost_record TO app_runtime;
+      ALTER TABLE operator_cost_record FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON operator_cost_planning,operator_cost_scan FROM app_runtime;
+      GRANT SELECT,INSERT ON operator_cost_planning,operator_cost_scan TO app_runtime;
+      ALTER TABLE operator_cost_planning FORCE ROW LEVEL SECURITY;
+      ALTER TABLE operator_cost_scan FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON operator_cost_budget,operator_cost_alert,operator_cost_notification_event FROM app_runtime;
+      GRANT SELECT,INSERT ON operator_cost_budget,operator_cost_alert,operator_cost_notification_event TO app_runtime;
+      ALTER TABLE operator_cost_budget FORCE ROW LEVEL SECURITY;
+      ALTER TABLE operator_cost_alert FORCE ROW LEVEL SECURITY;
+      ALTER TABLE operator_cost_notification_event FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON email_market_policy, email_recipient_revision, email_suppression, email_eligibility_evaluation, email_action_review TO app_runtime;
       ALTER TABLE email_market_policy FORCE ROW LEVEL SECURITY;
       ALTER TABLE email_recipient_revision FORCE ROW LEVEL SECURITY;
@@ -1155,6 +1201,14 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON discovery_run, discovery_prospect, discovery_result, discovery_usage TO app_runtime;
       GRANT UPDATE (status, stop_reason, used, completed_steps, updated_at) ON discovery_run TO app_runtime;
       GRANT UPDATE (outcome) ON discovery_usage TO app_runtime;
+      GRANT UPDATE (provider_cost) ON discovery_usage TO app_runtime;
+      CREATE OR REPLACE FUNCTION public.protect_discovery_provider_cost() RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$ BEGIN
+        IF OLD.provider_cost IS NOT NULL AND NEW.provider_cost IS DISTINCT FROM OLD.provider_cost THEN RAISE EXCEPTION 'Provider cost observation is immutable'; END IF;
+        RETURN NEW;
+      END $$;
+      DROP TRIGGER IF EXISTS protect_discovery_provider_cost ON public.discovery_usage;
+      CREATE TRIGGER protect_discovery_provider_cost BEFORE UPDATE ON public.discovery_usage FOR EACH ROW EXECUTE FUNCTION public.protect_discovery_provider_cost();
+      REVOKE ALL ON FUNCTION public.protect_discovery_provider_cost() FROM PUBLIC;
       GRANT UPDATE (returned_results, source_url, checked_at, check_order) ON discovery_usage TO app_runtime;
       REVOKE ALL PRIVILEGES ON discovery_prospect_alias, discovery_observation FROM app_runtime;
       GRANT SELECT, INSERT ON discovery_prospect_alias, discovery_observation TO app_runtime;
@@ -1228,6 +1282,7 @@ export async function secureDatabase(pool: Pool) {
       GRANT EXECUTE ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) TO app_runtime;
     `);
     await preparePaymentSecurity(client);
+    await prepareCostSecurity(client);
     await client.query(`
       CREATE OR REPLACE FUNCTION public.pending_meta_outbound()
       RETURNS TABLE(business_id uuid,action_id uuid,actor_id text,session_id text)

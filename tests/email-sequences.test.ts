@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { sequenceWorkspaceSchema } from "../src/models/email-sequences";
 import { createHarness } from "./support/harness";
+import { readOperatorCosts } from "./support/costs";
 import { campaignFixture } from "./support/campaigns";
 import { eligibilityApplication } from "./support/email-eligibility";
 import { runtimeDatabase, verifyRuntimeRole } from "../src/db/runtime";
@@ -447,6 +448,39 @@ describe("Approved email sequences at the persisted application seam", () => {
     await ga.execute(g.queued[0].work);
     expect(graph.sends).toHaveLength(1);
     expect(google.sends).toHaveLength(1);
+    const costs = await readOperatorCosts(h, g.owner);
+    expect(
+      costs.sources.filter(
+        (r) =>
+          r.source.businessId === g.business.id &&
+          r.sourceId.startsWith("native:sequence-mail:"),
+      ),
+    ).toMatchObject([
+      {
+        source: {
+          provider: "gmail-sequence-v1",
+          quantity: 1,
+          unit: "send_attempt",
+          amount: null,
+        },
+      },
+    ]);
+    expect(
+      costs.sources.filter(
+        (r) =>
+          r.source.businessId === m.business.id &&
+          r.sourceId.startsWith("native:sequence-mail:"),
+      ),
+    ).toMatchObject([
+      {
+        source: {
+          provider: "microsoft-mail-send-v1",
+          quantity: 1,
+          unit: "send_attempt",
+          amount: null,
+        },
+      },
+    ]);
   });
   it("resolves Microsoft sequence acceptance only from exact authorized Sent evidence and sends the next approved follow-up once", async () => {
     const graph = microsoftMailFixture(h.clock);

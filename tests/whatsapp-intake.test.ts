@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
+import { readOperatorCosts } from "./support/costs";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase, verifyRuntimeRole } from "../src/db/runtime";
 import { persistPaidSubscription } from "./support/paid-subscription";
@@ -652,6 +653,23 @@ describe("Signed Meta intake through real restricted persistence", () => {
         (r) => r.kind === "status",
       ),
     ).toMatchObject([{ messageRef: "wamid.outbound", status: "delivered" }]);
+    const costs = await readOperatorCosts(h, f.credentials);
+    const channelCosts = costs.sources.filter(
+      (r) =>
+        r.source.businessId === f.businessId && r.source.provider === "meta",
+    );
+    expect(channelCosts).toHaveLength(1);
+    expect(channelCosts[0]).toMatchObject({
+      included: false,
+      source: {
+        kind: "customer_paid_meta",
+        funding: "customer_meta",
+        amount: null,
+      },
+    });
+    expect(JSON.stringify(channelCosts)).not.toMatch(
+      /919876543210|wamid.outbound/,
+    );
     expect(
       (await f.app.workspace(f.credentials, f.businessId)).manualObserved,
     ).toBe(false);
