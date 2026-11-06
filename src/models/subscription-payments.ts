@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  lifecycleSchema,
+  lifecycleEventSchema,
+  type LifecyclePolicy,
+  type LifecycleObservation,
+  type recoveryCheckoutSchema,
+} from "./subscription-lifecycle";
 import { Temporal } from "@js-temporal/polyfill";
 import {
   subscriptionQuoteSchema,
@@ -124,6 +131,13 @@ export const paymentObservationSchema = z.strictObject({
   periodStart: z.iso.datetime().nullable(),
   periodEnd: z.iso.datetime().nullable(),
   checkout: checkoutReferenceSchema.nullable().default(null),
+  native: z
+    .strictObject({
+      event: z.string().min(1).max(100),
+      status: z.string().max(50).nullable(),
+      occurredAt: z.iso.datetime().nullable(),
+    })
+    .optional(),
   review: z
     .strictObject({
       invoiceId: ref,
@@ -184,6 +198,8 @@ export const paymentActionSchema = z.object({
     })
     .nullable()
     .optional(),
+  lifecycle: lifecycleSchema.nullable().optional(),
+  lifecycleEvents: z.array(lifecycleEventSchema).default([]),
   actorId: z.string(),
   at: z.iso.datetime(),
   history: z
@@ -270,6 +286,15 @@ export class PaymentCreationNotAttempted extends Error {
  * Creation must use this exact persisted operation key. A timeout must NEVER be retried as a new charge.
  * #45 implements this contract with native Razorpay, without browser/session authority. */
 export type PaymentGateway = {
+  lifecyclePolicy?: LifecyclePolicy;
+  updatePayment?(
+    action: PaymentAction,
+  ): Promise<z.infer<typeof recoveryCheckoutSchema>>;
+  cancel?(
+    action: PaymentAction,
+    timing: "immediate" | "cycle_end",
+    authorize: () => Promise<void>,
+  ): Promise<LifecycleObservation>;
   key: string;
   account: string;
   mode: "fixture" | "test" | "live" | "unconfigured";
@@ -281,6 +306,7 @@ export type PaymentGateway = {
     checkout: CheckoutReference | null;
     observations: PaymentObservation[];
     recovery: PaymentAction["recovery"];
+    lifecycle?: LifecycleObservation;
   }>;
   supports(currency: "INR" | "USD"): boolean;
   create(input: {

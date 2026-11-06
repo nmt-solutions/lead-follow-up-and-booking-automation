@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  lifecycleObservationSchema,
+  lifecycleCommandSchema,
+  recoveryCheckoutSchema,
+} from "../models/subscription-lifecycle";
 import type { Actor, Clock } from "../models/business";
 import { businessIdSchema } from "../models/business";
 import {
@@ -60,6 +65,14 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         parse(paymentActionSchema.shape.recovery, result.recovery) ?? null,
         d.clock.now(),
       );
+      await d.repository.lifecycle(
+        work,
+        d.clock.now(),
+        d.gateway.lifecyclePolicy,
+        result.lifecycle
+          ? parse(lifecycleObservationSchema, result.lifecycle)
+          : undefined,
+      );
       return d.repository.readWork(work);
     }
     let observation = null;
@@ -74,9 +87,102 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
     } catch {
       /* Unknown outcomes stay durable and recoverable; creation is never retried here. */
     }
-    return d.repository.reconcile(work, observation, d.clock.now());
+    await d.repository.reconcile(work, observation, d.clock.now());
+    await d.repository.lifecycle(
+      work,
+      d.clock.now(),
+      d.gateway.lifecyclePolicy,
+    );
+    return d.repository.readWork(work);
   }
   return {
+    async updatePayment(
+      credentials: Credentials,
+      businessId: unknown,
+      value: unknown,
+    ) {
+      const id = parse(businessIdSchema, businessId),
+        input = parse(lifecycleCommandSchema, value);
+      const work = await d.repository.authorizeWork(
+        await d.authenticate(credentials),
+        id,
+        input.actionId,
+        d.clock.now(),
+      );
+      const action = await d.repository.readWork(work);
+      if (
+        action.snapshot.provider.key !== d.gateway.key ||
+        action.snapshot.provider.account !== d.gateway.account ||
+        action.snapshot.provider.mode !== d.gateway.mode
+      )
+        throw new ApplicationError("SETUP_REQUIRED");
+      if (!d.gateway.updatePayment)
+        throw new ApplicationError("SETUP_REQUIRED");
+      const checkout = parse(
+        recoveryCheckoutSchema,
+        await d.gateway.updatePayment(action),
+      );
+      if (checkout.subscription_id !== action.checkout?.subscriptionId)
+        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      await d.repository.paymentMethodPrepared(
+        await d.authenticate(credentials),
+        id,
+        input.actionId,
+        input.requestKey,
+        d.clock.now(),
+        d.gateway,
+      );
+      return checkout;
+    },
+    async cancel(
+      credentials: Credentials,
+      businessId: unknown,
+      value: unknown,
+    ) {
+      const id = parse(businessIdSchema, businessId),
+        input = parse(lifecycleCommandSchema, value);
+      const result = await d.repository.beginCancellation(
+        await d.authenticate(credentials),
+        id,
+        input.actionId,
+        input.requestKey,
+        d.clock.now(),
+        d.gateway,
+      );
+      if (!result.work) return result.action;
+      try {
+        const observation = parse(
+          lifecycleObservationSchema,
+          await d.gateway.cancel!(
+            result.action,
+            result.action.lifecycle!.cancellation!.timing,
+            async () => {
+              await d.repository.authorizeWork(
+                await d.authenticate(credentials),
+                id,
+                input.actionId,
+                d.clock.now(),
+              );
+            },
+          ),
+        );
+        await d.repository.cancellationResult(
+          result.work,
+          d.clock.now(),
+          d.gateway.lifecyclePolicy,
+          observation,
+        );
+      } catch {
+        /* Persisted intent remains unconfirmed. Recovery only polls; it NEVER repeats cancel. */
+      }
+      await d.repository.authorizeWork(
+        await d.authenticate(credentials),
+        id,
+        input.actionId,
+        d.clock.now(),
+      );
+      return d.repository.readWork(result.work);
+    },
     async prepare(
       credentials: Credentials,
       businessId: unknown,
@@ -164,6 +270,15 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
     async operatorQueue(credentials: Credentials) {
       return d.repository.operatorQueue(
         await d.authenticatePlatform(credentials),
+      );
+    },
+    /** Platform notifications (#59): stable persisted source IDs and exact channel/status; no email delivery assertion. */
+    async notificationFeed(credentials: Credentials) {
+      const actions = await d.repository.operatorQueue(
+        await d.authenticatePlatform(credentials),
+      );
+      return actions.flatMap((a) =>
+        a.lifecycleEvents.filter((e) => e.notice !== null),
       );
     },
     async unmatchedEvents(credentials: Credentials) {

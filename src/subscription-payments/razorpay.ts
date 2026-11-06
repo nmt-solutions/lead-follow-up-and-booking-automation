@@ -11,6 +11,7 @@ import type { RazorpayAccountReview } from "../models/razorpay-account";
 import type { Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import { PaymentCreationNotAttempted } from "../models/subscription-payments";
+import { lifecycleObservationSchema } from "../models/subscription-lifecycle";
 
 const id = (prefix: string) =>
   z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9]+$`));
@@ -25,6 +26,8 @@ const subscriptionSchema = z.object({
   notes: z.record(z.string(), z.string()),
   short_url: z.string(),
   created_at: z.number().int(),
+  current_end: z.number().int().nullable().optional(),
+  ended_at: z.number().int().nullable().optional(),
 });
 const money = z.number().int().nonnegative().safe();
 const invoiceSchema = z.object({
@@ -237,6 +240,51 @@ export function createRazorpayGateway(d: {
       sub.notes.account_review === s.provider.review?.id
     );
   }
+  function lifecycle(
+    sub: z.infer<typeof subscriptionSchema>,
+    action: PaymentAction,
+    unpaidPeriodStart: string | null = null,
+  ) {
+    return lifecycleObservationSchema.parse({
+      provider: "razorpay",
+      account,
+      operationKey: action.operationKey,
+      subscriptionId: sub.id,
+      status: sub.status,
+      currentEnd:
+        sub.current_end == null
+          ? null
+          : new Date(sub.current_end * 1000).toISOString(),
+      endedAt:
+        sub.ended_at == null
+          ? null
+          : new Date(sub.ended_at * 1000).toISOString(),
+      unpaidPeriodStart,
+      observedAt: d.clock.now().toISOString(),
+    });
+  }
+  async function currentSubscription(action: PaymentAction) {
+    if (
+      action.snapshot.provider.key !== "razorpay" ||
+      action.snapshot.provider.account !== account ||
+      action.snapshot.provider.mode !== review.mode ||
+      !action.checkout?.subscriptionId
+    )
+      throw new ApplicationError("SETUP_REQUIRED");
+    const sub = subscriptionSchema.parse(
+      await request(
+        `subscriptions/${id("sub").parse(action.checkout.subscriptionId)}`,
+      ),
+    );
+    if (
+      sub.id !== action.checkout.subscriptionId ||
+      !bound(sub, action) ||
+      (action.checkout.customerId &&
+        sub.customer_id !== action.checkout.customerId)
+    )
+      throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+    return sub;
+  }
   async function poll({ action }: { action: PaymentAction }) {
     const recovery = action.recovery ?? {
       subscriptionSkip: 0,
@@ -310,6 +358,22 @@ export function createRazorpayGateway(d: {
     if (page.count !== page.items.length)
       throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
     const observations: PaymentObservation[] = [];
+    const unpaid = page.items
+      .filter(
+        (i) =>
+          i.status === "issued" &&
+          i.amount_due > 0 &&
+          i.billing_start !== null &&
+          i.subscription_id === sub.id &&
+          i.customer_id === sub.customer_id &&
+          i.currency === action.snapshot.quote.currency &&
+          i.line_items.length === 1 &&
+          i.line_items[0].type === "plan" &&
+          i.line_items[0].quantity === 1 &&
+          i.line_items[0].amount === i.amount &&
+          i.line_items[0].currency === i.currency,
+      )
+      .sort((a, b) => (b.billing_start ?? 0) - (a.billing_start ?? 0))[0];
     for (const invoice of page.items) {
       if (invoice.status !== "paid" || !invoice.payment_id) continue;
       const p = paymentSchema.parse(
@@ -388,6 +452,13 @@ export function createRazorpayGateway(d: {
       page.items.length === 20 ? recovery.invoiceSkip + 20 : 0;
     return {
       checkout: hosted,
+      lifecycle: lifecycle(
+        sub,
+        action,
+        unpaid?.billing_start == null
+          ? null
+          : new Date(unpaid.billing_start * 1000).toISOString(),
+      ),
       observations: observations.sort((a, b) =>
         (a.periodStart ?? "").localeCompare(b.periodStart ?? ""),
       ),
@@ -415,6 +486,48 @@ export function createRazorpayGateway(d: {
       }
     },
     poll,
+    async updatePayment(action) {
+      if (readiness().length) throw new ApplicationError("SETUP_REQUIRED");
+      const sub = await currentSubscription(action);
+      if (!["active", "pending", "halted"].includes(sub.status))
+        throw new ApplicationError("CONFLICT");
+      return {
+        script: "https://checkout.razorpay.com/v1/checkout.js",
+        key: d.keyId,
+        subscription_id: sub.id,
+        subscription_card_change: true,
+      };
+    },
+    async cancel(action, timing, authorize) {
+      if (readiness().length) throw new ApplicationError("SETUP_REQUIRED");
+      const sub = await currentSubscription(action);
+      if (["cancelled", "completed", "expired"].includes(sub.status))
+        return lifecycle(sub, action);
+      if (
+        timing === "cycle_end" &&
+        (!sub.current_end || sub.current_end * 1000 <= d.clock.now().getTime())
+      )
+        throw new ApplicationError("SETUP_REQUIRED");
+      await authorize();
+      const cancelled = subscriptionSchema.parse(
+        await request(`subscriptions/${sub.id}/cancel`, {
+          cancel_at_cycle_end: timing === "cycle_end",
+        }),
+      );
+      if (
+        cancelled.id !== sub.id ||
+        !bound(cancelled, action) ||
+        cancelled.customer_id !== sub.customer_id ||
+        (timing === "cycle_end" && cancelled.current_end !== sub.current_end)
+      )
+        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      if (
+        timing === "immediate" &&
+        (cancelled.status !== "cancelled" || cancelled.ended_at == null)
+      )
+        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      return lifecycle(cancelled, action);
+    },
     deferEvents: true,
     async create(input) {
       let mapping;
@@ -472,11 +585,13 @@ export function createRazorpayGateway(d: {
         .object({
           account_id: z.literal(review.account),
           event: z.string().min(1).max(100),
+          created_at: z.number().int().nonnegative().safe().optional(),
           payload: z.object({
             subscription: z
               .object({
                 entity: z.object({
                   id: id("sub"),
+                  status: lifecycleObservationSchema.shape.status.optional(),
                   notes: z
                     .union([
                       z.record(z.string(), z.string()),
@@ -534,6 +649,14 @@ export function createRazorpayGateway(d: {
           periodStart: null,
           periodEnd: null,
           checkout: null,
+          native: {
+            event: event.data.event,
+            status: sub?.status ?? null,
+            occurredAt:
+              event.data.created_at == null
+                ? null
+                : new Date(event.data.created_at * 1000).toISOString(),
+          },
         },
       };
     },
