@@ -245,8 +245,10 @@ export function OperationsPanel({
             <Link
               className="inline-flex min-h-11 items-center text-primary underline"
               href={recovery}
+              target="_blank"
+              rel="noreferrer noopener"
             >
-              Restore access
+              Restore access in a new tab
             </Link>
           )}
         </Alert>
@@ -557,6 +559,7 @@ export function OperationsPanel({
                 <div className="flex flex-wrap justify-end gap-3">
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction
+                    className="border border-input bg-card text-destructive hover:bg-muted active:bg-muted"
                     onClick={() =>
                       perform("prune", async () => {
                         const result = z
