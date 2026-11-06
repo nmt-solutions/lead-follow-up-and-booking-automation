@@ -945,7 +945,7 @@ describe("Seller documents at the public application seam", () => {
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
-  it("preserves real financial history through schema reapplication and detects missing SELECT and INSERT privileges independently", async () => {
+  it("preserves real financial history through schema reapplication and denies unscoped recovery", async () => {
     const f = await reviewedPurchase(),
       op = await operator(),
       { app } = compose();
@@ -964,32 +964,6 @@ describe("Seller documents at the public application seam", () => {
     expect((await app.workspace(f.owner, f.business.id)).documents[0]).toEqual(
       doc,
     );
-    for (const table of [
-      "seller_issuer_revision",
-      "seller_issuer_decision",
-      "seller_document",
-      "seller_document_request",
-      "seller_document_access",
-      "seller_document_storage",
-    ])
-      for (const privilege of ["SELECT", "INSERT"]) {
-        await h.admin.query(`REVOKE ${privilege} ON ${table} FROM app_runtime`);
-        await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
-        await secureDatabase(h.admin);
-        await verifyRuntimeRole(h.runtime);
-      }
-    for (const signature of [
-      "seller_next_number(uuid,text,bigint)",
-      "seller_artifact_worker_authorized(uuid,uuid)",
-      "claim_seller_artifacts(text,integer)",
-    ]) {
-      await h.admin.query(
-        `REVOKE EXECUTE ON FUNCTION public.${signature} FROM app_runtime`,
-      );
-      await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
-      await secureDatabase(h.admin);
-      await verifyRuntimeRole(h.runtime);
-    }
     expect(
       (
         await h.runtime.query(
@@ -1005,6 +979,36 @@ describe("Seller documents at the public application seam", () => {
         )
       ).rows[0].allowed,
     ).toBe(false);
+  });
+  it("requires every seller ledger SELECT and INSERT independently and restores them", async () => {
+    for (const table of [
+      "seller_issuer_revision",
+      "seller_issuer_decision",
+      "seller_document",
+      "seller_document_request",
+      "seller_document_access",
+      "seller_document_storage",
+    ])
+      for (const privilege of ["SELECT", "INSERT"]) {
+        await h.admin.query(`REVOKE ${privilege} ON ${table} FROM app_runtime`);
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
+        await secureDatabase(h.admin);
+        await verifyRuntimeRole(h.runtime);
+      }
+  });
+  it("requires every seller recovery helper and restores restricted execution", async () => {
+    for (const signature of [
+      "seller_next_number(uuid,text,bigint)",
+      "seller_artifact_worker_authorized(uuid,uuid)",
+      "claim_seller_artifacts(text,integer)",
+    ]) {
+      await h.admin.query(
+        `REVOKE EXECUTE ON FUNCTION public.${signature} FROM app_runtime`,
+      );
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
+      await secureDatabase(h.admin);
+      await verifyRuntimeRole(h.runtime);
+    }
   });
   it("issues USD from its captured billing basis without assuming an exemption", async () => {
     const f = await reviewedPurchase({ country: "US" }),
