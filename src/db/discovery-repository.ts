@@ -41,6 +41,7 @@ import {
   checkCurrent,
 } from "./discovery-state";
 import { coverageCounts } from "../discovery/evidence";
+import { reservePaidUsage, paidAllowance } from "./paid-access";
 import {
   consolidateViews,
   contactIdentities,
@@ -177,7 +178,7 @@ export function createDiscoveryRepository(
         const run = await ownedRun(tx, work);
         await requireWorkSession(tx, work, at);
         await schedules.checkScheduleForRun(tx, run);
-        await checkCurrent(tx, run);
+        await checkCurrent(tx, run, clock.now());
         if (run.status !== "running")
           throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
       });
@@ -190,7 +191,7 @@ export function createDiscoveryRepository(
           businessId,
           "sales.work",
         );
-        const { profile, policy } = await settings(tx, businessId);
+        const { profile, policy } = await settings(tx, businessId, clock.now());
         const markets = availableMarkets(profile, policy);
         const rows = await tx
           .select()
@@ -331,7 +332,9 @@ export function createDiscoveryRepository(
           canRun: role !== "salesperson",
           setup: [
             ...(!policy
-              ? ["Operator discovery configuration is missing or invalid."]
+              ? [
+                  "Active paid discovery scope, matching allowance units and operational configuration are required.",
+                ]
               : []),
             ...(!markets.length
               ? [
@@ -404,8 +407,20 @@ export function createDiscoveryRepository(
               },
             };
           }
-          const { profile, policy } = await settings(tx, businessId);
+          const { profile, policy } = await settings(
+            tx,
+            businessId,
+            clock.now(),
+          );
           if (!policy) throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
+          const paid = await paidAllowance(
+            tx,
+            businessId,
+            "discovery",
+            clock.now(),
+          );
+          if (!paid || input.budget > paid.remaining)
+            throw new ApplicationError("PAID_ACCESS_REQUIRED");
           if (
             input.budget > policy.maxRunBudget ||
             !input.markets.every((market) =>
@@ -524,7 +539,7 @@ export function createDiscoveryRepository(
             );
             status = "stopped";
           } else {
-            await checkCurrent(tx, run);
+            await checkCurrent(tx, run, clock.now());
             if (run.status !== "stopped")
               throw new ApplicationError("CONFLICT");
             if (input.action === "increase") {
@@ -692,7 +707,7 @@ export function createDiscoveryRepository(
               return null;
             }
           } else if (run.status !== "queued") return null;
-          await checkCurrent(tx, run);
+          await checkCurrent(tx, run, clock.now());
           await tx
             .update(discoveryRun)
             .set({
@@ -722,7 +737,7 @@ export function createDiscoveryRepository(
           const run = await ownedRun(tx, work);
           await requireWorkSession(tx, work, clock.now());
           if (run.status !== "running") return null;
-          await checkCurrent(tx, run);
+          await checkCurrent(tx, run, clock.now());
           await schedules.checkScheduleForRun(tx, run);
           const previous = await tx
             .select()
@@ -784,6 +799,15 @@ export function createDiscoveryRepository(
           if (!units) throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
           if (run.used + units > run.budget) return null;
           const id = randomUUID();
+          await reservePaidUsage(
+            tx,
+            work.businessId,
+            "discovery",
+            id,
+            units,
+            run.policy.allowanceUnit,
+            at,
+          );
           await tx
             .update(discoveryRun)
             .set({ used: run.used + units, updatedAt: at })

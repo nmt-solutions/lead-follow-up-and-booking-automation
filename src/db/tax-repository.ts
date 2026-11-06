@@ -29,7 +29,7 @@ async function actorName(tx: Transaction, actor: Actor) {
   if (!identity) throw new ApplicationError("UNAUTHENTICATED");
   return identity.name;
 }
-async function catalog(tx: Transaction) {
+export async function readTaxCatalog(tx: Transaction) {
   const revisions = await tx
     .select()
     .from(taxRuleRevision)
@@ -43,6 +43,7 @@ async function catalog(tx: Transaction) {
     decisions: decisions.map((row) => ({ ...row, at: row.at.toISOString() })),
   };
 }
+const catalog = readTaxCatalog;
 async function history(tx: Transaction, businessId: string) {
   return (
     await tx
@@ -57,7 +58,7 @@ async function lockRules(tx: Transaction) {
     sql`select pg_advisory_xact_lock(hashtextextended('subscription-tax-rules',0))`,
   );
 }
-async function append(
+export async function appendTaxCalculation(
   tx: Transaction,
   actor: Actor,
   businessId: string,
@@ -144,6 +145,7 @@ async function append(
   });
   return calculation;
 }
+const append = appendTaxCalculation;
 export function createTaxRepository(database: Database): TaxRepository {
   return {
     rules(actor) {

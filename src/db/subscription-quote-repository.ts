@@ -27,7 +27,7 @@ async function requirePricingOperator(tx: Transaction, actor: Actor) {
     .where(eq(platformOperator.userId, actor.userId));
   if (!operator?.pricing) throw new ApplicationError("FORBIDDEN");
 }
-async function catalog(tx: Transaction, at: Date) {
+export async function readPricingCatalog(tx: Transaction, at: Date) {
   const rows = await tx
     .select()
     .from(subscriptionPricingRevision)
@@ -46,6 +46,7 @@ async function catalog(tx: Transaction, at: Date) {
     history,
   };
 }
+const catalog = readPricingCatalog;
 
 export function createSubscriptionQuoteRepository(
   database: Database,

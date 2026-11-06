@@ -139,7 +139,7 @@ export function createCampaignRepository(database: Database, clock: Clock) {
       .where(eq(senderIdentity.businessId, businessId));
     const candidates = await campaignCandidates(tx, businessId, clock.now());
     const authority = await readCommercialPolicy(tx, businessId, false);
-    const { profile, policy } = await settings(tx, businessId),
+    const { profile, policy } = await settings(tx, businessId, clock.now()),
       markets = availableMarkets(profile, policy);
     const views: CampaignWorkspace["campaigns"][number]["revisions"] = [];
     for (const r of all) {

@@ -12,6 +12,7 @@ import {
 } from "../models/discovery";
 import type { BusinessProfile } from "../models/business";
 import { availableMarkets } from "../discovery/repository";
+import { paidAllowance } from "./paid-access";
 
 export async function requireWorkSession(
   tx: Transaction,
@@ -58,7 +59,7 @@ export function briefFor(
   };
 }
 
-export async function settings(tx: Transaction, businessId: string) {
+export async function settings(tx: Transaction, businessId: string, at: Date) {
   const [profile] = await tx
     .select()
     .from(business)
@@ -69,11 +70,29 @@ export async function settings(tx: Transaction, businessId: string) {
     .from(discoveryConfiguration)
     .where(eq(discoveryConfiguration.businessId, businessId));
   const parsed = discoveryPolicySchema.safeParse(configuration?.policy);
-  return { profile, policy: parsed.success ? parsed.data : null };
+  const paid = await paidAllowance(tx, businessId, "discovery", at);
+  const configured = parsed.success ? parsed.data : null;
+  const markets = paid?.period.markets ?? [];
+  const policy = configured
+    ? {
+        ...configured,
+        activeMarkets:
+          paid &&
+          paid.allowance.quantity > 0 &&
+          paid.allowance.unit === configured.allowanceUnit
+            ? configured.activeMarkets.filter((m) => markets.includes(m))
+            : [],
+      }
+    : null;
+  return { profile, policy: policy?.activeMarkets.length ? policy : null };
 }
 
-export async function checkCurrent(tx: Transaction, run: DiscoveryRun) {
-  const { profile, policy } = await settings(tx, run.businessId);
+export async function checkCurrent(
+  tx: Transaction,
+  run: DiscoveryRun,
+  at: Date,
+) {
+  const { profile, policy } = await settings(tx, run.businessId, at);
   if (
     !policy ||
     !isDeepStrictEqual(policy, run.policy) ||

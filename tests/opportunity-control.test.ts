@@ -1,3 +1,4 @@
+import { persistPaidSubscription } from "./support/paid-subscription";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
@@ -57,7 +58,11 @@ describe("Opportunity control at the persisted application seam", () => {
     await h?.close();
   });
 
-  async function setup(suffix: string, withSender = true) {
+  async function setup(
+    suffix: string,
+    withSender = true,
+    automationQuantity = 10000,
+  ) {
     h.clock.set("2026-11-05T09:00:00Z");
     const credentials = await h.signIn(`control-${suffix}@example.com`);
     const actor = await h.authenticate(credentials);
@@ -66,6 +71,11 @@ describe("Opportunity control at the persisted application seam", () => {
       offering: "Steel",
       homeMarket: "US",
       website: "",
+    });
+    await persistPaidSubscription(h, credentials, business.id, {
+      markets: ["US"],
+      discovery: { quantity: 0, unit: "research units" },
+      automation: { quantity: automationQuantity, unit: "provider calls" },
     });
     const connection = await inbox.addConnection(credentials, business.id, {
       label: "Selected email import",
@@ -100,6 +110,22 @@ describe("Opportunity control at the persisted application seam", () => {
     };
   }
 
+  it("preserves an incoming inquiry with zero acquisition scope while zero paid automation blocks dispatch", async () => {
+    const f = await setup("paid-automation-zero", true, 0);
+    await enable(f);
+    const action = await queue(f);
+    const before = outbound.length;
+    expect(
+      await app.dispatch(f.credentials, f.businessId, action.id),
+    ).toMatchObject({
+      state: "cancelled",
+      reason: "paid_automation_unavailable",
+    });
+    expect(outbound).toHaveLength(before);
+    expect(
+      (await inbox.workspace(f.credentials, f.businessId)).conversations,
+    ).toHaveLength(1);
+  });
   it("persists attributed takeover and next action, then requires an explicit versioned handback without granting commercial authority", async () => {
     const f = await setup("control");
     const initial = await app.read(f.credentials, f.businessId, f.need.id);

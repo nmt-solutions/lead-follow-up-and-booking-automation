@@ -99,7 +99,9 @@ export async function startPostgres() {
     });
     // The pinned CLI can print a database error and still exit zero.
     if (/^(?:error|Error):/m.test(`${pushed.stdout}\n${pushed.stderr}`))
-      throw new Error("The test schema push reported a database failure");
+      throw new Error(
+        `The test schema push reported a database failure: ${`${pushed.stdout}\n${pushed.stderr}`.match(/^(?:error|Error):[^\n]*/m)?.[0]}`,
+      );
     await secureDatabase(admin);
   }
   try {

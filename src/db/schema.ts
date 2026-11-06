@@ -8,6 +8,12 @@ import type { WorkIdentity } from "../models/discovery";
 import type { HealthPayload } from "../models/sender-health";
 import type { MetaActivity } from "../models/whatsapp-intake";
 import type { TaxRule, TaxCalculation } from "../models/tax";
+import type {
+  PaymentSnapshot,
+  CheckoutReference,
+  PaymentObservation,
+  PaymentAction,
+} from "../models/subscription-payments";
 import type { MailboxAuthorizationStatus } from "../models/mailbox-authorization";
 import type { MailManual } from "../models/mail-native";
 import type {
@@ -66,6 +72,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 import type { BusinessRole, Invitation } from "../models/team";
@@ -666,6 +673,217 @@ export const subscriptionQuote = pgTable(
       withCheck: sql`(${managerScope}) and ${t.actorId} = current_setting('app.actor_id', true)
     and exists (select 1 from public.billing_profile_revision p join public.billing_profile_review r on r.profile_id=p.id and r.business_id=p.business_id where p.id=${t.profileId} and p.business_id=${t.businessId} and r.id=${t.reviewId} and r.outcome='reviewed')
     and ${t.snapshot}->>'businessId'=${t.businessId}::text and ${t.snapshot}->>'id'=${t.id}::text`,
+    }),
+  ],
+).enableRLS();
+
+const paymentOperator = sql`exists (select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.reconciliation)`;
+const paymentOwner = sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.subscription_payment'::regclass)`;
+function paymentHistoryPolicies(name: string, action: ReturnType<typeof sql>) {
+  const scope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid`;
+  const worker = sql`public.payment_worker_authorized(${action},business_id)`;
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${paymentOperator}) or ((${scope}) and (public.current_business_role() in ('owner','admin') or (${worker})))`,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${scope}) and (${worker})`,
+    }),
+    pgPolicy(`${name}_system`, {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ];
+}
+export const subscriptionPayment = pgTable(
+  "subscription_payment",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    operationKey: uuid("operation_key").notNull(),
+    recoveryKey: uuid("recovery_key").notNull(),
+    quoteId: uuid("quote_id")
+      .notNull()
+      .references(() => subscriptionQuote.id),
+    snapshot: jsonb("snapshot").$type<PaymentSnapshot>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    state: text("state").$type<PaymentAction["state"]>().notNull(),
+    started: boolean("started").notNull().default(false),
+    reason: text("reason"),
+    checkout: jsonb("checkout").$type<CheckoutReference>(),
+    observation: jsonb("observation").$type<PaymentObservation>(),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+    reconciliationPending: boolean("reconciliation_pending")
+      .notNull()
+      .default(false),
+  },
+  (t) => [
+    uniqueIndex("subscription_payment_request").on(t.businessId, t.requestKey),
+    uniqueIndex("subscription_payment_operation").on(t.operationKey),
+    unique("subscription_payment_scope").on(t.id, t.businessId),
+    check(
+      "subscription_payment_snapshot_scope",
+      sql`${t.snapshot}->'quote'->>'businessId'=${t.businessId}::text and ${t.snapshot}->'quote'->>'id'=${t.quoteId}::text`,
+    ),
+    pgPolicy("subscription_payment_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${paymentOperator}) or (${managerScope}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.payment_worker_authorized(id,business_id))`,
+    }),
+    pgPolicy("subscription_payment_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${t.actorId}=current_setting('app.actor_id',true) and exists(select 1 from public.subscription_quote q where q.id=${t.quoteId} and q.business_id=${t.businessId})`,
+    }),
+    pgPolicy("subscription_payment_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${managerScope}) or public.payment_worker_authorized(id,business_id)`,
+      withCheck: sql`(${managerScope}) or public.payment_worker_authorized(id,business_id)`,
+    }),
+    pgPolicy("subscription_payment_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const subscriptionPaymentEvent = pgTable(
+  "subscription_payment_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id"),
+    actionId: uuid("action_id"),
+    provider: text("provider").notNull(),
+    account: text("account").notNull(),
+    eventId: text("event_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    observation: jsonb("observation").$type<PaymentObservation>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_payment_event_identity").on(
+      t.provider,
+      t.account,
+      t.eventId,
+    ),
+    check(
+      "subscription_payment_event_optional_scope",
+      sql`(${t.businessId} is null)=(${t.actionId} is null)`,
+    ),
+    foreignKey({
+      name: "subscription_payment_event_scope",
+      columns: [t.actionId, t.businessId],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+    ...paymentHistoryPolicies("subscription_payment_event", sql`${t.actionId}`),
+  ],
+).enableRLS();
+export const subscriptionPaymentHistory = pgTable(
+  "subscription_payment_history",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    kind: text("kind").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    detail: jsonb("detail")
+      .$type<{
+        state: PaymentAction["state"];
+        reason: string | null;
+        observation: PaymentObservation | null;
+      }>()
+      .notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "subscription_payment_history_scope",
+      columns: [t.actionId, t.businessId],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+    ...paymentHistoryPolicies(
+      "subscription_payment_history",
+      sql`${t.actionId}`,
+    ),
+  ],
+).enableRLS();
+export const subscriptionPeriod = pgTable(
+  "subscription_period",
+  {
+    id: uuid("id").primaryKey(),
+    actionId: uuid("action_id").notNull(),
+    businessId: uuid("business_id").notNull(),
+    provider: text("provider").notNull(),
+    account: text("account").notNull(),
+    paymentId: text("payment_id").notNull(),
+    start: timestamp("start", { withTimezone: true }).notNull(),
+    end: timestamp("end", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<PaymentSnapshot>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_period_action_once").on(t.actionId),
+    uniqueIndex("subscription_period_payment_once").on(
+      t.provider,
+      t.account,
+      t.paymentId,
+    ),
+    unique("subscription_period_scope").on(t.id, t.businessId),
+    check("subscription_period_window", sql`${t.end}>${t.start}`),
+    foreignKey({
+      name: "subscription_period_action_scope",
+      columns: [t.actionId, t.businessId],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+    ...paymentHistoryPolicies("subscription_period", sql`${t.actionId}`),
+  ],
+).enableRLS();
+export const subscriptionUsage = pgTable(
+  "subscription_usage",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    periodId: uuid("period_id").notNull(),
+    kind: text("kind").$type<"discovery" | "automation">().notNull(),
+    operationId: uuid("operation_id").notNull(),
+    quantity: integer("quantity").notNull(),
+    unit: text("unit").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_usage_operation").on(
+      t.businessId,
+      t.kind,
+      t.operationId,
+    ),
+    check("subscription_usage_positive", sql`${t.quantity}>0`),
+    foreignKey({
+      name: "subscription_usage_period_scope",
+      columns: [t.periodId, t.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+    pgPolicy("subscription_usage_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() is not null`,
+    }),
+    pgPolicy("subscription_usage_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() is not null`,
     }),
   ],
 ).enableRLS();

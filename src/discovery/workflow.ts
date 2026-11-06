@@ -460,6 +460,7 @@ export function exitReason(
     if (failure.value instanceof DiscoveryFailure) return failure.value.reason;
     if (
       failure.value.code === "DISCOVERY_SCOPE_INVALID" ||
+      failure.value.code === "PAID_ACCESS_REQUIRED" ||
       failure.value.code === "DISCOVERY_SETUP_REQUIRED"
     )
       return "configuration_changed";
