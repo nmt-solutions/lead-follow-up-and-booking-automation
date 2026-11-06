@@ -1,3 +1,12 @@
+import { microsoftFixture } from "./support/microsoft-calendar";
+import { createMicrosoftCalendarApplication } from "../src/application/microsoft-calendar";
+import { createMicrosoftCalendarRepository } from "../src/db/microsoft-calendar-repository";
+import {
+  createMicrosoftCalendarProvider,
+  microsoftProvenanceProperty,
+} from "../src/microsoft-calendar/provider";
+import { combineCalendarProviders } from "../src/appointments/providers";
+import { unavailableCalendarProvider } from "../src/appointments/provider";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
@@ -39,6 +48,7 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
       goal?: "booking" | "rfq";
       qualification?: KnowledgeConfiguration["qualification"];
       nativeGoogle?: boolean;
+      nativeMicrosoft?: "work" | "personal";
     } = {},
   ) {
     h.clock.set(options.now ?? "2026-11-05T09:00:00Z");
@@ -158,15 +168,67 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
     const googleRepository = googleOptions
       ? createGoogleCalendarRepository(db, googleOptions)
       : null;
+    const microsoft = options.nativeMicrosoft
+      ? microsoftFixture(h.clock)
+      : null;
+    if (microsoft && options.nativeMicrosoft === "work")
+      microsoft.control.tenant = "11111111-2222-4333-8444-555555555555";
+    const microsoftOptions = microsoft
+      ? {
+          configuration: microsoft.configuration,
+          clock: h.clock,
+          fetch: microsoft.fetch,
+        }
+      : null;
+    const microsoftApplication = microsoftOptions
+      ? createMicrosoftCalendarApplication({
+          database: db,
+          access: h.access,
+          ...microsoftOptions,
+        })
+      : null;
+    let microsoftConnectionId: string | null = null;
+    if (microsoftApplication && microsoft) {
+      const start = await microsoftApplication.start(credentials, business.id, {
+        returnPath: `/businesses/${business.id}/calendar`,
+      });
+      microsoft.control.nonce = new URL(
+        start.authorizationUrl,
+      ).searchParams.get("nonce")!;
+      await microsoftApplication.callback(credentials, business.id, {
+        state: new URL(start.authorizationUrl).searchParams.get("state"),
+        code: "fixture-code",
+      });
+      microsoftConnectionId = (
+        await microsoftApplication.select(credentials, business.id, {
+          calendarId: "primary",
+        })
+      ).connectionId;
+    }
+    const microsoftRepository = microsoftOptions
+      ? createMicrosoftCalendarRepository(db, microsoftOptions)
+      : null;
     const application = createAppointmentApplication({
       authenticateForWork: h.access.authenticateForWork,
       repository: createAppointmentRepository(db, h.clock),
       provider: calendar.provider,
-      ...(googleRepository
+      ...(googleRepository || microsoftRepository
         ? {
             providerForTransaction: (
               tx: Parameters<typeof createGoogleCalendarProvider>[1],
-            ) => createGoogleCalendarProvider(googleRepository, tx, h.clock),
+            ) =>
+              combineCalendarProviders(
+                googleRepository
+                  ? createGoogleCalendarProvider(googleRepository, tx, h.clock)
+                  : unavailableCalendarProvider,
+                microsoftRepository
+                  ? createMicrosoftCalendarProvider(
+                      microsoftRepository,
+                      tx,
+                      h.clock,
+                    )
+                  : unavailableCalendarProvider,
+              ),
           }
         : {}),
       clock: h.clock,
@@ -182,8 +244,13 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
       holdSeconds: 120,
       automationEnabled: false,
       calendar: {
-        connectionId: googleConnectionId ?? calendar.connectionId,
-        calendarId: googleConnectionId ? "dedicated@example.com" : "primary",
+        connectionId:
+          microsoftConnectionId ?? googleConnectionId ?? calendar.connectionId,
+        calendarId: microsoftConnectionId
+          ? "primary"
+          : googleConnectionId
+            ? "dedicated@example.com"
+            : "primary",
       },
       ...options.timing,
     };
@@ -215,9 +282,375 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
       connection,
       google,
       googleApplication,
+      microsoft,
+      microsoftApplication,
     };
   }
 
+  it.each(["work", "personal"] as const)(
+    "books and cancels on native Microsoft %s, storing an authoritative identity and never inviting attendees",
+    async (kind) => {
+      const f = await fixture({ nativeMicrosoft: kind });
+      expect((await f.slots()).slots.length).toBeGreaterThan(0);
+      const held = await request(f);
+      const booked = await f.application.book(
+        f.credentials,
+        f.business.id,
+        f.opportunity.id,
+        { appointmentId: held.id },
+      );
+      expect(booked.appointments[0]).toMatchObject({
+        status: "confirmed",
+        phase: "booked",
+        customerNotified: false,
+        event: { eventId: "immutable-1" },
+      });
+      const post = f.microsoft!.calls.find(
+        (c) => c.method === "POST" && c.url.endsWith("/events"),
+      )!;
+      expect(post.body).toMatchObject({
+        attendees: [],
+        isReminderOn: false,
+        isOnlineMeeting: false,
+        start: { dateTime: "2026-11-05T14:10:00.000", timeZone: "UTC" },
+        end: { dateTime: "2026-11-05T14:40:00.000", timeZone: "UTC" },
+      });
+      expect(post.headers.get("Prefer")).toContain('IdType="ImmutableId"');
+      expect(
+        f.microsoft!.calls.some((c) =>
+          c.url.endsWith("/me/calendar/getSchedule"),
+        ),
+      ).toBe(kind === "work");
+      expect(
+        f.microsoft!.calls.some((c) => c.url.includes("calendarView")),
+      ).toBe(true);
+      await f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+        appointmentId: held.id,
+      });
+      expect(f.microsoft!.events.size).toBe(1);
+      const cancelled = await f.application.cancel(
+        f.credentials,
+        f.business.id,
+        f.opportunity.id,
+        { appointmentId: held.id },
+      );
+      expect(cancelled.appointments[0]).toMatchObject({
+        status: "cancelled",
+        phase: "finished",
+      });
+      expect(
+        f
+          .microsoft!.calls.find((c) => c.method === "DELETE")!
+          .headers.get("If-Match"),
+      ).toBe('"revision-1"');
+    },
+  );
+  it("recovers Microsoft timeout acceptance by property lookup without another POST or transactionId query", async () => {
+    const f = await fixture({ nativeMicrosoft: "personal" });
+    const held = await request(f);
+    f.microsoft!.control.timeoutAfterCreate = true;
+    expect(
+      (
+        await f.application.book(
+          f.credentials,
+          f.business.id,
+          f.opportunity.id,
+          { appointmentId: held.id },
+        )
+      ).appointments[0],
+    ).toMatchObject({ status: "requested", phase: "ambiguous", event: null });
+    expect(
+      (
+        await f.application.reconcile(
+          f.credentials,
+          f.business.id,
+          f.opportunity.id,
+          { appointmentId: held.id },
+        )
+      ).appointments[0],
+    ).toMatchObject({ status: "confirmed", event: { eventId: "immutable-1" } });
+    expect(
+      f.microsoft!.calls.filter(
+        (c) => c.method === "POST" && c.url.endsWith("/events"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      f
+        .microsoft!.calls.filter((c) => c.method === "GET")
+        .some((c) => c.url.includes("transactionId")),
+    ).toBe(false);
+  });
+  it.each([401, 403, 429])(
+    "blocks native Microsoft %i before mutation and retains safe readiness",
+    async (status) => {
+      const f = await fixture({ nativeMicrosoft: "work" });
+      const held = await request(f);
+      f.microsoft!.control.apiError = status;
+      const result = await f.application.book(
+        f.credentials,
+        f.business.id,
+        f.opportunity.id,
+        { appointmentId: held.id },
+      );
+      expect(result.appointments[0]).toMatchObject({
+        status: "requested",
+        phase: "blocked",
+        event: null,
+      });
+      expect(f.microsoft!.events.size).toBe(0);
+      expect(
+        (await f.microsoftApplication!.read(f.credentials, f.business.id))
+          .status,
+      ).toBe(
+        status === 401
+          ? "reconnect_required"
+          : status === 403
+            ? "insufficient"
+            : "ready",
+      );
+    },
+  );
+  it("detects conflicts, duplicates and substituted Microsoft provenance without another event", async () => {
+    const f = await fixture({ nativeMicrosoft: "personal" });
+    const held = await request(f);
+    f.microsoft!.control.timeoutAfterCreate = true;
+    await f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+      appointmentId: held.id,
+    });
+    f.microsoft!.control.conflict = true;
+    expect(
+      (
+        await f.application.reconcile(
+          f.credentials,
+          f.business.id,
+          f.opportunity.id,
+          { appointmentId: held.id },
+        )
+      ).appointments[0],
+    ).toMatchObject({ phase: "conflict", status: "requested" });
+    f.microsoft!.control.conflict = false;
+    const event = f.microsoft!.events.get("immutable-1")!;
+    f.microsoft!.events.set("duplicate", { ...event, id: "duplicate" });
+    expect(
+      (
+        await f.application.reconcile(
+          f.credentials,
+          f.business.id,
+          f.opportunity.id,
+          { appointmentId: held.id },
+        )
+      ).appointments[0].status,
+    ).toBe("requested");
+    f.microsoft!.events.delete("duplicate");
+    f.microsoft!.events.set("immutable-1", {
+      ...event,
+      singleValueExtendedProperties: [
+        { id: microsoftProvenanceProperty, value: "foreign-business" },
+      ],
+    });
+    expect(
+      (
+        await f.application.reconcile(
+          f.credentials,
+          f.business.id,
+          f.opportunity.id,
+          { appointmentId: held.id },
+        )
+      ).appointments[0].status,
+    ).toBe("requested");
+    expect(
+      f.microsoft!.calls.filter(
+        (c) => c.method === "POST" && c.url.endsWith("/events"),
+      ),
+    ).toHaveLength(1);
+  });
+  it("uses every personal calendarView page, expanded recurrence and conservative busy semantics, rejecting hostile continuation URLs", async () => {
+    const f = await fixture({ nativeMicrosoft: "personal" });
+    f.microsoft!.control.secondPage = [
+      {
+        id: "recurrence-exception",
+        type: "exception",
+        showAs: "tentative",
+        isCancelled: false,
+        start: { dateTime: "2026-11-05T14:00:00.0000000", timeZone: "UTC" },
+        end: { dateTime: "2026-11-05T17:00:00.0000000", timeZone: "UTC" },
+      },
+    ];
+    expect((await f.slots()).slots).toHaveLength(0);
+    f.microsoft!.control.secondPage[0].showAs = "free";
+    expect((await f.slots()).slots.length).toBeGreaterThan(0);
+    f.microsoft!.control.badNextLink = true;
+    expect((await f.slots()).slots).toHaveLength(0);
+    expect(
+      f.microsoft!.calls.some(
+        (c) => c.url.includes("evil.example") || c.url.includes("getSchedule"),
+      ),
+    ).toBe(false);
+  });
+  it("recovers Microsoft acceptance after failed persistence without confirming before the event is durable", async () => {
+    const f = await fixture({ nativeMicrosoft: "work" });
+    const held = await request(f);
+    await h.admin.query(
+      `CREATE FUNCTION fail_microsoft_retention() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event IS NOT NULL THEN RAISE EXCEPTION 'fixture storage unavailable'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_microsoft_retention BEFORE UPDATE ON appointment FOR EACH ROW EXECUTE FUNCTION fail_microsoft_retention()`,
+    );
+    try {
+      await expect(
+        f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+          appointmentId: held.id,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await h.admin.query(
+        "DROP TRIGGER fail_microsoft_retention ON appointment; DROP FUNCTION fail_microsoft_retention()",
+      );
+    }
+    expect((await f.read()).appointments[0]).toMatchObject({
+      phase: "committed",
+      status: "requested",
+      event: null,
+    });
+    expect(
+      (
+        await f.application.reconcile(
+          f.credentials,
+          f.business.id,
+          f.opportunity.id,
+          { appointmentId: held.id },
+        )
+      ).appointments[0],
+    ).toMatchObject({ status: "confirmed", phase: "booked" });
+    expect(f.microsoft!.events.size).toBe(1);
+  });
+  it("converts an explicit Microsoft booking at the DST fold to the correct UTC payload and rejects an ambiguous wall time", async () => {
+    const f = await fixture({
+      nativeMicrosoft: "personal",
+      now: "2026-11-01T04:00:00Z",
+      timing: {
+        timeZone: "UTC",
+        hours: [{ weekday: 7, start: "04:00", end: "09:00" }],
+        bufferBeforeMinutes: 0,
+        slotStepMinutes: 30,
+      },
+    });
+    const input = {
+      requestKey: randomUUID(),
+      expectedVersion: 1,
+      mode: "manual",
+      customerTimeZone: "America/New_York",
+      localStart: "2026-11-01T01:30",
+      utcOffset: null,
+    };
+    await expect(
+      f.application.request(
+        f.credentials,
+        f.business.id,
+        f.opportunity.id,
+        input,
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    const held = (
+      await f.application.request(
+        f.credentials,
+        f.business.id,
+        f.opportunity.id,
+        { ...input, utcOffset: "-05:00" },
+      )
+    ).appointments[0];
+    expect(
+      (
+        await f.application.book(
+          f.credentials,
+          f.business.id,
+          f.opportunity.id,
+          { appointmentId: held.id },
+        )
+      ).appointments[0].status,
+    ).toBe("confirmed");
+    expect(
+      f.microsoft!.calls.find(
+        (c) => c.method === "POST" && c.url.endsWith("/events"),
+      )!.body,
+    ).toMatchObject({
+      start: { dateTime: "2026-11-01T06:30:00.000", timeZone: "UTC" },
+    });
+  });
+  it("keeps Microsoft 409 and malformed creation ambiguous without a blind duplicate", async () => {
+    for (const kind of ["conflict", "malformed"] as const) {
+      const f = await fixture({ nativeMicrosoft: "personal" });
+      const held = await request(f);
+      if (kind === "conflict") f.microsoft!.control.createError = 409;
+      else f.microsoft!.control.malformedCreate = true;
+      expect(
+        (
+          await f.application.book(
+            f.credentials,
+            f.business.id,
+            f.opportunity.id,
+            { appointmentId: held.id },
+          )
+        ).appointments[0],
+      ).toMatchObject({ status: "requested", phase: "ambiguous", event: null });
+      await f.application.reconcile(
+        f.credentials,
+        f.business.id,
+        f.opportunity.id,
+        { appointmentId: held.id },
+      );
+      await f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+        appointmentId: held.id,
+      });
+      expect(
+        f.microsoft!.calls.filter(
+          (c) => c.method === "POST" && c.url.endsWith("/events"),
+        ),
+      ).toHaveLength(1);
+    }
+  });
+
+  it.each(["google", "microsoft"] as const)(
+    "books on healthy %s when the other connected provider is unavailable",
+    async (healthy) => {
+      const f = await fixture({
+        nativeGoogle: true,
+        nativeMicrosoft: "personal",
+      });
+      let version = 1;
+      if (healthy === "google") {
+        const grant = await f.googleApplication!.read(
+          f.credentials,
+          f.business.id,
+        );
+        await f.application.configure(f.credentials, f.business.id, {
+          expectedVersion: 1,
+          configuration: {
+            ...f.configuration,
+            calendar: {
+              connectionId: grant.connectionId!,
+              calendarId: "dedicated@example.com",
+            },
+          },
+          note: "Use healthy Google",
+        });
+        version = 2;
+      }
+      const held = await request(f, { expectedVersion: version });
+      if (healthy === "google") f.microsoft!.control.apiError = 429;
+      else f.google!.control.apiError = 503;
+      expect(
+        (
+          await f.application.book(
+            f.credentials,
+            f.business.id,
+            f.opportunity.id,
+            { appointmentId: held.id },
+          )
+        ).appointments[0],
+      ).toMatchObject({ status: "confirmed", phase: "booked" });
+      const workspace = await f.read();
+      expect(workspace.setupReason).toBeNull();
+      expect(workspace.calendars).toHaveLength(1);
+    },
+  );
   it("cancels an unchanged native Google event expressed in the calendar offset", async () => {
     const f = await fixture({ nativeGoogle: true });
     f.google!.control.nativeOffset = true;

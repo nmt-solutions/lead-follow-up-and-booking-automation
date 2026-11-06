@@ -172,7 +172,7 @@ export const calendarLookupSchema = z.discriminatedUnion("status", [
 export type CalendarProvider = {
   available: boolean;
   listCalendars(
-    scope: { businessId: string },
+    scope: { businessId: string; provider?: "google" | "microsoft" },
     signal: AbortSignal,
   ): Promise<unknown>;
   availability(

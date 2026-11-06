@@ -1,3 +1,7 @@
+import type {
+  MicrosoftCalendarStatus,
+  MicrosoftIdentity,
+} from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
 import type { GoogleCalendarStatus } from "../models/google-calendar";
 import {
@@ -2207,6 +2211,79 @@ export const googleCalendarScopeForeignKeys = [
         googleCalendarOauth.businessId,
       ],
       foreignColumns: [googleCalendarGrant.id, googleCalendarGrant.businessId],
+    }),
+  ),
+];
+
+export const microsoftCalendarGrant = pgTable(
+  "microsoft_calendar_grant",
+  {
+    ...inboxColumns(),
+    generation: integer("generation").notNull(),
+    status: text("status").$type<MicrosoftCalendarStatus>().notNull(),
+    reason: text("reason"),
+    accountSubject: text("account_subject"),
+    accountEmail: text("account_email"),
+    accountKind: text("account_kind").$type<MicrosoftIdentity["accountKind"]>(),
+    tenantId: text("tenant_id"),
+    selectedCalendarId: text("selected_calendar_id"),
+    credentials: text("credentials"),
+    scopes: jsonb("scopes").$type<string[]>().notNull(),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("microsoft_calendar_active_business")
+      .on(t.businessId)
+      .where(sql`${t.status} <> 'disconnected'`),
+    uniqueIndex("microsoft_calendar_grant_scope").on(t.id, t.businessId),
+    check("microsoft_calendar_generation", sql`${t.generation} > 0`),
+    check(
+      "microsoft_calendar_status",
+      sql`${t.status} in ('connecting','selection_required','ready','reconnect_required','insufficient','disconnected')`,
+    ),
+    ...googlePolicies("microsoft_calendar_grant", false),
+  ],
+).enableRLS();
+export const microsoftCalendarOauth = pgTable(
+  "microsoft_calendar_oauth",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    generation: integer("generation").notNull(),
+    stateHash: text("state_hash").notNull(),
+    verifier: text("verifier").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id, { onDelete: "cascade" }),
+    returnPath: text("return_path").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumed: boolean("consumed").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("microsoft_calendar_oauth_state").on(t.stateHash),
+    ...googlePolicies("microsoft_calendar_oauth", true),
+  ],
+).enableRLS();
+export const microsoftCalendarScopeForeignKeys = [
+  new ForeignKey(
+    microsoftCalendarOauth,
+    foreignKey({
+      name: "microsoft_calendar_oauth_grant_scope",
+      columns: [
+        microsoftCalendarOauth.connectionId,
+        microsoftCalendarOauth.businessId,
+      ],
+      foreignColumns: [
+        microsoftCalendarGrant.id,
+        microsoftCalendarGrant.businessId,
+      ],
     }),
   ),
 ];

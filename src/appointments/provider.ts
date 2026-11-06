@@ -49,11 +49,13 @@ export async function calendarCatalog(
   provider: CalendarProvider,
   businessId: string,
   timeoutMs: number,
+  selectedProvider?: "google" | "microsoft",
 ) {
   if (!provider.available)
     throw new ApplicationError("CALENDAR_SETUP_REQUIRED");
   const raw = await calendarCall(
-    (s) => provider.listCalendars({ businessId }, s),
+    (s) =>
+      provider.listCalendars({ businessId, provider: selectedProvider }, s),
     timeoutMs,
   );
   const parsed = z.array(calendarDescriptorSchema).max(100).safeParse(raw);

@@ -4,6 +4,8 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { GoogleCalendarManager } from "@/components/google-calendar-manager";
 
+import { MicrosoftCalendarManager } from "@/components/microsoft-calendar-manager";
+
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Booking calendar" };
 export default async function CalendarPage({
@@ -17,6 +19,10 @@ export default async function CalendarPage({
       return {
         profile: await services.application.getProfile(credentials, businessId),
         calendar: await services.googleCalendar.read(credentials, businessId),
+        microsoft: await services.microsoftCalendar.read(
+          credentials,
+          businessId,
+        ),
       };
     } catch (error: unknown) {
       return pageFailure(error);
@@ -43,6 +49,10 @@ export default async function CalendarPage({
       <GoogleCalendarManager
         businessId={businessId}
         initialState={state.calendar}
+      />
+      <MicrosoftCalendarManager
+        businessId={businessId}
+        initialState={state.microsoft}
       />
     </div>
   );

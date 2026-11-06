@@ -256,6 +256,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         providerIn(dep, tx),
         businessId,
         dep.timeoutMs,
+        policy.calendar.provider,
       );
       const current = all.find(
         (c) =>

@@ -1,3 +1,9 @@
+import { createMicrosoftCalendarApplication } from "../application/microsoft-calendar";
+import { createMicrosoftCalendarRepository } from "../db/microsoft-calendar-repository";
+import { createMicrosoftCalendarProvider } from "../microsoft-calendar/provider";
+import { configuredMicrosoftCalendar } from "../microsoft-calendar/configuration";
+import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
+import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
 import { createAppointmentApplication } from "../application/appointments";
 import { createAppointmentRepository } from "../db/appointment-repository";
@@ -228,6 +234,20 @@ async function composeServices() {
     runtimeDatabase(pool),
     googleOptions,
   );
+  const microsoftOptions = {
+    configuration: configuredMicrosoftCalendar(process.env),
+    clock: googleOptions.clock,
+    fetch,
+  };
+  const microsoftCalendar = createMicrosoftCalendarApplication({
+    database: runtimeDatabase(pool),
+    access,
+    ...microsoftOptions,
+  });
+  const microsoftRepository = createMicrosoftCalendarRepository(
+    runtimeDatabase(pool),
+    microsoftOptions,
+  );
   const appointments = createAppointmentApplication({
     authenticateForWork: access.authenticateForWork,
     repository: createAppointmentRepository(runtimeDatabase(pool), {
@@ -236,10 +256,23 @@ async function composeServices() {
     clock: { now: () => new Date() },
     provider: unavailableCalendarProvider,
     providerForTransaction: (tx) =>
-      createGoogleCalendarProvider(googleRepository, tx, googleOptions.clock),
+      combineCalendarProviders(
+        createGoogleCalendarProvider(googleRepository, tx, googleOptions.clock),
+        createMicrosoftCalendarProvider(
+          microsoftRepository,
+          tx,
+          microsoftOptions.clock,
+        ),
+      ),
     timeoutMs: 5000,
   });
   return {
+    microsoftCalendar,
+    microsoftCalendarHttp: createMicrosoftCalendarHttp({
+      application: microsoftCalendar,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     googleCalendar,
     googleCalendarHttp: createGoogleCalendarHttp({
       application: googleCalendar,
