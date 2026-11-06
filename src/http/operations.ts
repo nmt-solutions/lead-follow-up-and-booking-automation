@@ -15,14 +15,13 @@ export function createOperationsHttp(d: {
     get: (request: Request, businessId: string | null, operator = false) =>
       respond(async () => {
         const url = new URL(request.url),
-          before = url.searchParams.get("before");
+          before = url.searchParams.get("before"),
+          limit = url.searchParams.get("limit");
         return dataResponse(
-          await app.workspace(
-            request.headers,
-            businessId,
-            operator,
-            before ? { before: Number(before) } : {},
-          ),
+          await app.workspace(request.headers, businessId, operator, {
+            ...(before ? { before: Number(before) } : {}),
+            ...(limit ? { limit: Number(limit) } : {}),
+          }),
         );
       }),
     command: (request: Request, businessId: string, operator = false) =>

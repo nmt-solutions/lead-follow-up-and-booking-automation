@@ -223,6 +223,13 @@ describe("Operations at the public application seam", () => {
         },
       });
     const app = mailbox();
+    function operations() {
+      return createOperationsApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createOperationsRepository(database, h.clock),
+        commands: { mailbox: mailbox() },
+      });
+    }
     const policy = await app.save(owner, business.id, {
       id: null,
       expectedVersion: 0,
@@ -235,6 +242,14 @@ describe("Operations at the public application seam", () => {
         history: null,
       },
     });
+    expect(
+      (await operations().workspace(owner, business.id)).resources.find(
+        (r) => r.source === "mailbox_scope" && r.id === policy.id,
+      ),
+    ).toMatchObject({
+      status: "unsafe",
+      context: { readRequested: true, sendRequested: false, permission: null },
+    });
     provider.add("first", "2026-11-05T09:01:00Z");
     provider.add("second", "2026-11-05T09:01:00Z");
     provider.pageSize = 1;
@@ -245,13 +260,6 @@ describe("Operations at the public application seam", () => {
     await app.execute(work);
     provider.failure = true;
     await app.execute(work);
-    function operations() {
-      return createOperationsApplication({
-        authenticate: h.access.authenticateForWork,
-        repository: createOperationsRepository(database, h.clock),
-        commands: { mailbox: mailbox() },
-      });
-    }
     const failed = await operations().workspace(owner, business.id);
     expect(failed.resources.find((r) => r.id === work.jobId)).toMatchObject({
       status: "partial",

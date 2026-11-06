@@ -4,6 +4,7 @@ export const operationSourceSchema = z.enum([
   "discovery",
   "queue",
   "mailbox",
+  "mailbox_scope",
   "sequence",
   "sequence_action",
   "sequence_history",
@@ -37,6 +38,11 @@ export const operationContextSchema = z.strictObject({
   captured: count,
   considered: count,
   retryAt: code,
+  readRequested: flag,
+  sendRequested: flag,
+  sendPermission: code,
+  completeReplyCapture: flag,
+  lastSyncedAt: code,
   approvedBudget: count,
   used: count,
   completedSteps: count,
@@ -48,6 +54,9 @@ export const operationContextSchema = z.strictObject({
   briefHash: code,
   policyId: id,
   bookingStatus: code,
+  appointmentId: id,
+  source: code,
+  sequence: count,
   provider: code,
   connectionId: id,
   authorityVersion: count,
@@ -132,6 +141,17 @@ export const recoverySchema = z.strictObject({
   requestKey: z.uuid(),
 });
 export type RecoveryCommand = z.infer<typeof recoverySchema>;
+export const recoveryResultSchema = z.object({
+  outcome: z.enum([
+    "queued",
+    "checked",
+    "escalated",
+    "unavailable",
+    "blocked",
+    "reconciliation_required",
+  ]),
+});
+export type RecoveryResult = z.infer<typeof recoveryResultSchema>;
 export const operationQuerySchema = z.strictObject({
   before: z.number().int().positive().optional(),
   limit: z.number().int().min(1).max(200).default(100),
@@ -192,7 +212,8 @@ export function operationLink(row: OperationSnapshot, operator: boolean) {
   const root = `/businesses/${row.businessId}`;
   if (row.source === "discovery" || row.source === "queue")
     return `${root}/discovery`;
-  if (row.source === "mailbox") return `${root}/mailboxes`;
+  if (row.source === "mailbox" || row.source === "mailbox_scope")
+    return `${root}/mailboxes`;
   if (row.source.startsWith("sequence") || row.source === "approval")
     return `${root}/campaigns`;
   if (row.source === "sender_health")
@@ -247,6 +268,8 @@ export function recoveryControls(
 export function responsibleNextAction(row: OperationSnapshot) {
   if (row.source === "sender_health")
     return "The sender-health operator must review current evidence and the selected incident. Acknowledgement or reconnecting does not repair health.";
+  if (row.source === "mailbox_scope")
+    return "The Business integration manager reviews the selected mailbox scope, independent read/send grants and current reply visibility. A recorded configuration does not authorize new sending or wider history.";
   if (row.source === "channel_observation")
     return "Review the signed native observation and its exact application association in WhatsApp. An unassociated status does not establish an application send or delivery.";
   if (row.source === "ownership")

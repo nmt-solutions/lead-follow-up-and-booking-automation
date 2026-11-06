@@ -4,6 +4,17 @@ import type { Pool, PoolClient } from "pg";
 // credential, cursor, message, financial snapshot or recovery capability here.
 const sources = [
   {
+    table: "mailbox_policy",
+    source: "mailbox_scope",
+    status: "r->>'visibility'",
+    reason:
+      "CASE WHEN r->'configuration'->>'enabled'<>'true' THEN 'channel_disabled' WHEN r->'configuration'->>'requestedRead'<>'true' THEN 'reading_not_requested' WHEN r->'permission_observation'->>'read' IS DISTINCT FROM 'granted' THEN 'read_permission_unobserved' WHEN r->>'visibility'<>'current' THEN 'reply_visibility_unsafe' ELSE NULL END",
+    owner: "r->>'created_by'",
+    at: "r->>'updated_at'",
+    context:
+      "jsonb_build_object('mailboxId',r->'id','connectionId',r->'connection_id','provider',r->'provider','version',r->'version','connectionVersion',r->'connection_version','readRequested',r->'configuration'->'requestedRead','sendRequested',r->'configuration'->'requestedSend','permission',r->'permission_observation'->'read','sendPermission',r->'permission_observation'->'send','completeReplyCapture',r->'complete_reply_capture','lastSyncedAt',r->'last_synced_at')",
+  },
+  {
     table: "mailbox_job",
     source: "mailbox",
     status: "r->'state'->>'status'",

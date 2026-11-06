@@ -1215,6 +1215,24 @@ describe("Inquiry handling at the persisted application seam", () => {
       (await f.app.dispatch(f.credentials, f.business.id, f.need.id, result.id))
         .action?.state,
     ).toBe("committed");
+    const monitoring = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { inquiries: f.restart() },
+    });
+    const committed = (
+      await f.restart().read(f.credentials, f.business.id, f.need.id)
+    ).runs.find((r) => r.id === result.id);
+    expect(
+      (
+        await monitoring.workspace(f.credentials, f.business.id)
+      ).notifications.some(
+        (n) => n.targetId === committed?.action?.id && !n.resolved,
+      ),
+    ).toBe(true);
     await h.reapplySchema();
     expect(
       (

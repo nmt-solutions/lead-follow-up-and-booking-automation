@@ -5,6 +5,7 @@ import Link from "next/link";
 import { z } from "zod";
 import {
   operationWorkspaceSchema,
+  recoveryResultSchema,
   diagnosticRetentionSchema,
   type OperationWorkspace,
   type RecoveryCommand,
@@ -63,6 +64,7 @@ const groups = [
     label: "Channels",
     sources: [
       "mailbox",
+      "mailbox_scope",
       "whatsapp",
       "whatsapp_intake",
       "whatsapp_action_history",
@@ -186,7 +188,7 @@ export function OperationsPanel({
     await perform(key, async () => {
       const requestKey = keys.current.get(key) ?? crypto.randomUUID();
       keys.current.set(key, requestKey);
-      const result = z.object({ outcome: z.string() }).parse(
+      const result = recoveryResultSchema.parse(
         await request(commandBase(row.businessId), {
           source: row.source,
           targetId: row.id,

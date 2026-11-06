@@ -3,6 +3,8 @@ import { ApplicationError } from "../models/application-error";
 import type { WorkIdentity } from "../models/discovery";
 import {
   recoverySchema,
+  recoveryResultSchema,
+  type RecoveryResult,
   recoveryControls,
   responsibleNextAction,
   operationLink,
@@ -245,7 +247,7 @@ export function createOperationsApplication<C>(d: {
       id: unknown,
       input: unknown,
       operator = false,
-    ) {
+    ): Promise<RecoveryResult> {
       const actor = await d.authenticate(credentials),
         businessId = parse(z.uuid(), id),
         command = parse(recoverySchema, input);
@@ -256,12 +258,12 @@ export function createOperationsApplication<C>(d: {
         operator,
       );
       if (start.replay)
-        return {
+        return parse(recoveryResultSchema, {
           outcome:
             start.event.outcome === "requested"
               ? "reconciliation_required"
               : start.event.outcome,
-        };
+        });
       if (command.action === "escalate") {
         await d.repository.finish(
           actor,
