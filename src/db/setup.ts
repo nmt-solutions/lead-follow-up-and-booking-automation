@@ -45,6 +45,8 @@ import {
   fileAccess,
   fileUsage,
   knowledgeRevision,
+  billingProfileRevision,
+  billingProfileReview,
   commercialAuthorityRevision,
   discoveryConfiguration,
   discoveryRun,
@@ -328,6 +330,12 @@ export async function prepareDatabaseRole(pool: Pool) {
       END IF;
       IF to_regclass('public.knowledge_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.knowledge_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.billing_profile_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.billing_profile_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.billing_profile_review') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.billing_profile_review FROM app_runtime;
       END IF;
       IF to_regclass('public.commercial_authority_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.commercial_authority_revision FROM app_runtime;
@@ -648,6 +656,8 @@ export async function secureDatabase(pool: Pool) {
       fileAccess,
       fileUsage,
       knowledgeRevision,
+      billingProfileRevision,
+      billingProfileReview,
       commercialAuthorityRevision,
       discoveryConfiguration,
       discoveryRun,
@@ -857,6 +867,12 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON knowledge_revision FROM app_runtime;
       GRANT SELECT, INSERT ON knowledge_revision TO app_runtime;
       ALTER TABLE knowledge_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON billing_profile_revision FROM app_runtime;
+      GRANT SELECT, INSERT ON billing_profile_revision TO app_runtime;
+      ALTER TABLE billing_profile_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON billing_profile_review FROM app_runtime;
+      GRANT SELECT, INSERT ON billing_profile_review TO app_runtime;
+      ALTER TABLE billing_profile_review FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON commercial_authority_revision FROM app_runtime;
       GRANT SELECT, INSERT ON commercial_authority_revision TO app_runtime;
       ALTER TABLE commercial_authority_revision FORCE ROW LEVEL SECURITY;

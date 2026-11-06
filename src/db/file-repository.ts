@@ -5,6 +5,8 @@ import { ApplicationError } from "../models/application-error";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { businessFile, fileAccess, fileUsage } from "./schema";
+import { requireBillingReviewer } from "./billing-access";
+import type { BusinessRole } from "../models/team";
 
 export type FileRecord = typeof businessFile.$inferSelect;
 type FileChange = Partial<
@@ -25,7 +27,16 @@ async function getFile(tx: Transaction, id: string, lock?: "update") {
   return file;
 }
 
-export function createFileRepository(database: Database) {
+export function createFileRepository(
+  database: Database,
+  options: { billingReview?: boolean } = {},
+) {
+  async function visibleFile(tx: Transaction, id: string, lock?: "update") {
+    const file = await getFile(tx, id, lock);
+    if (options.billingReview && file.purpose !== "billing")
+      throw new ApplicationError("NOT_FOUND");
+    return file;
+  }
   function access<T>(
     actor: Actor,
     businessId: string,
@@ -37,12 +48,18 @@ export function createFileRepository(database: Database) {
       actor,
       businessId,
       async (tx) => {
-        const role = await requireCapability(
-          tx,
-          actor,
-          businessId,
-          manage ? "files.manage" : "files.read",
-        );
+        let role: BusinessRole | null = null;
+        if (options.billingReview) {
+          if (manage) throw new ApplicationError("FORBIDDEN");
+          await requireBillingReviewer(tx, actor);
+        } else {
+          role = await requireCapability(
+            tx,
+            actor,
+            businessId,
+            manage ? "files.manage" : "files.read",
+          );
+        }
         return operation(tx).then((data) => ({ data, role }));
       },
       { lock: true },
@@ -54,8 +71,20 @@ export function createFileRepository(database: Database) {
         files: await tx
           .select()
           .from(businessFile)
+          .where(
+            options.billingReview
+              ? eq(businessFile.purpose, "billing")
+              : undefined,
+          )
           .orderBy(businessFile.createdAt, businessFile.id),
-        usage: await tx.select().from(fileUsage),
+        usage: await tx
+          .select()
+          .from(fileUsage)
+          .where(
+            options.billingReview
+              ? sql`exists (select 1 from public.business_file f where f.id = ${fileUsage.fileId} and f.business_id = ${fileUsage.businessId} and f.purpose = 'billing')`
+              : undefined,
+          ),
       }));
     },
     async create(actor: Actor, file: FileRecord) {
@@ -64,8 +93,9 @@ export function createFileRepository(database: Database) {
       });
     },
     async read(actor: Actor, businessId: string, id: string) {
-      return (await access(actor, businessId, false, (tx) => getFile(tx, id)))
-        .data;
+      return (
+        await access(actor, businessId, false, (tx) => visibleFile(tx, id))
+      ).data;
     },
     async change(
       actor: Actor,
@@ -79,7 +109,7 @@ export function createFileRepository(database: Database) {
           // Cleanup claims rows without the Business advisory lock. Lock the
           // current row before validating a transition so neither can overwrite
           // the other's lease or lifecycle state.
-          const previous = await getFile(tx, id, "update");
+          const previous = await visibleFile(tx, id, "update");
           const changes = update(previous);
           const [file] = await tx
             .update(businessFile)
@@ -106,7 +136,7 @@ export function createFileRepository(database: Database) {
       check: (file: FileRecord) => void,
     ) {
       await access(actor, businessId, false, async (tx) => {
-        check(await getFile(tx, id));
+        check(await visibleFile(tx, id));
         await tx
           .insert(fileAccess)
           .values({ ...grant, fileId: id, businessId, actorId: actor.userId });
@@ -122,7 +152,7 @@ export function createFileRepository(database: Database) {
     ) {
       return (
         await access(actor, businessId, false, async (tx) => {
-          const file = await getFile(tx, id);
+          const file = await visibleFile(tx, id);
           check(file);
           const [grant] = await tx
             .select()

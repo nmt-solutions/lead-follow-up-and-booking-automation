@@ -67,9 +67,15 @@ const stamp = (value: string) =>
 export function FileManager({
   businessId,
   initial,
+  purpose,
+  apiBase,
+  onListingChange,
 }: {
   businessId: string;
   initial: FileListing;
+  purpose?: "billing";
+  apiBase?: string;
+  onListingChange?(listing: FileListing): void;
 }) {
   const [listing, setListing] = useState(initial);
   const [file, setFile] = useState<File | null>(null);
@@ -77,15 +83,18 @@ export function FileManager({
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  const base = `/api/businesses/${businessId}/files`;
+  const base = apiBase ?? `/api/businesses/${businessId}/files`;
+  const visibleFiles = listing.files.filter(
+    (file) => !purpose || file.purpose === purpose,
+  );
   const policy = listing.policy;
   async function refresh() {
-    setListing(
-      await readResult(
-        await fetch(base, { cache: "no-store" }),
-        fileListingSchema,
-      ),
+    const next = await readResult(
+      await fetch(base, { cache: "no-store" }),
+      fileListingSchema,
     );
+    setListing(next);
+    onListingChange?.(next);
   }
   async function action(operation: () => Promise<void>) {
     setBusy(true);
@@ -155,10 +164,16 @@ export function FileManager({
       </p>
       <Card>
         <CardHeader>
-          <CardTitle>Upload a Business file</CardTitle>
+          <CardTitle>
+            {purpose === "billing"
+              ? "Private billing evidence"
+              : "Upload a Business file"}
+          </CardTitle>
           <CardDescription>
             Files belong to this Business. Owners and Admins can upload or
-            delete; current members can download available files.
+            delete. General files are available to current members. Billing
+            evidence is restricted to Owners, Admins and authorized tax
+            reviewers.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -184,6 +199,7 @@ export function FileManager({
                       name: file.name,
                       contentType: selectedType,
                       size: file.size,
+                      ...(purpose ? { purpose } : {}),
                     }),
                     uploadGrantSchema,
                   );
@@ -245,7 +261,7 @@ export function FileManager({
             id="files-heading"
             className="text-xl font-semibold tracking-tight"
           >
-            Business files
+            {purpose === "billing" ? "Billing documents" : "Business files"}
           </h2>
           <Button
             variant="outline"
@@ -259,14 +275,14 @@ export function FileManager({
             Refresh files
           </Button>
         </div>
-        {listing.files.length === 0 && (
+        {visibleFiles.length === 0 && (
           <p className="rounded-xl border border-border bg-card p-6 text-muted-foreground">
             No files yet. Upload an approved Business document when storage is
             activated.
           </p>
         )}
         <ul className="space-y-4">
-          {listing.files.map((file) => (
+          {visibleFiles.map((file) => (
             <li
               key={file.id}
               className="space-y-4 rounded-2xl border border-border bg-card p-6"
@@ -276,6 +292,7 @@ export function FileManager({
                   {file.name}
                 </h3>
                 <Badge>
+                  {file.purpose === "billing" && "Billing evidence · "}
                   {file.state === "ready" && !file.accessAvailable
                     ? "Access unavailable"
                     : stateNames[file.state]}
