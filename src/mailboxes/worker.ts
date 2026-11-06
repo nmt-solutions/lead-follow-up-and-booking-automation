@@ -4,7 +4,9 @@ import { createMailboxRepository } from "../db/mailbox-repository";
 import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { databaseConnectionUrl } from "../db/connection";
 import { ApplicationError } from "../models/application-error";
-import { unavailableMailboxProvider } from "./provider";
+import { configuredGmail } from "../gmail/configuration";
+import { createGmailConnection } from "../gmail/connection";
+import { createGmailProvider } from "../gmail/provider";
 
 export async function withMailboxWorker<T>(
   operation: (
@@ -32,7 +34,14 @@ export async function withMailboxWorker<T>(
           throw new ApplicationError("FORBIDDEN");
         },
         repository: createMailboxRepository(database, clock),
-        provider: unavailableMailboxProvider,
+        provider: createGmailProvider(
+          createGmailConnection(database, {
+            clock,
+            configuration: configuredGmail(process.env),
+            fetch,
+          }),
+          clock,
+        ),
         clock,
       }),
     );

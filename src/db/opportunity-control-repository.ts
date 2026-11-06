@@ -23,7 +23,11 @@ import { scoped, requireCapability, type Transaction } from "./scope";
 import { readCommercialPolicy } from "./commercial-authority-repository";
 import { inquiryDispatchContext, lockInquiryProfile } from "./inquiry-context";
 import { responseSender } from "./sender-repository";
-import { mailboxMessageAllowed } from "./mailbox-processing";
+import {
+  mailboxMessageAllowed,
+  opportunityRepliesVisible,
+} from "./mailbox-processing";
+import { committedFollowupStopReason } from "./opportunity-followups";
 import {
   membership,
   user,
@@ -599,6 +603,21 @@ export function createOpportunityRepository(
               action: await cancel(tx, "authorization_revoked"),
               failure,
             };
+          const [currentAction] = await tx
+            .select()
+            .from(opportunityDueAction)
+            .where(
+              and(
+                eq(opportunityDueAction.businessId, businessId),
+                eq(opportunityDueAction.id, actionId),
+              ),
+            );
+          if (!currentAction) throw new ApplicationError("NOT_FOUND");
+          if (currentAction.state !== "committed")
+            return { action: currentAction, failure: null };
+          const stopped = committedFollowupStopReason(currentAction.reason);
+          if (stopped)
+            return { action: await cancel(tx, stopped), failure: null };
           const need = await needAt(tx, businessId, action.opportunityId);
           const ctx = await messageContext(tx, businessId, action.messageId);
           if (action.inquiryRunId) await lockInquiryProfile(tx);
@@ -622,6 +641,12 @@ export function createOpportunityRepository(
             ctx.message.mailboxMetadata,
             now(),
           );
+          const replyVisible = await opportunityRepliesVisible(
+            tx,
+            businessId,
+            need.id,
+            now(),
+          );
           const reason =
             need.controlState !== "automation" ||
             need.controlVersion !== action.controlVersion ||
@@ -632,14 +657,16 @@ export function createOpportunityRepository(
                 ? "association_changed"
                 : !mailboxAllowed
                   ? "connection_revoked"
-                  : policy.version !== action.policyVersion
-                    ? "policy_changed"
-                    : (inquiry?.reason ??
-                      (decision && decision.status !== "permitted"
-                        ? decision.reason
-                        : !decision && !inquiry
-                          ? "missing_authority"
-                          : null));
+                  : !replyVisible
+                    ? "reply_visibility_unavailable"
+                    : policy.version !== action.policyVersion
+                      ? "policy_changed"
+                      : (inquiry?.reason ??
+                        (decision && decision.status !== "permitted"
+                          ? decision.reason
+                          : !decision && !inquiry
+                            ? "missing_authority"
+                            : null));
           if (reason)
             return { action: await cancel(tx, reason), failure: null };
           const sender =

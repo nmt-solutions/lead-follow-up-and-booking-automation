@@ -262,6 +262,43 @@ export default async function ConversationPage({
         workspace={workspace}
       />
       <section aria-labelledby="messages-title" className="space-y-4">
+        {conversation.manualReplies.length > 0 && (
+          <section aria-label="Observed Gmail replies" className="space-y-4">
+            <h2 className="text-xl font-semibold">Manual Gmail replies</h2>
+            <p className="text-sm text-muted-foreground">
+              Observed only within the selected mail and time bounds. A reply
+              assigned to this purchasing need uses the same cross-channel human
+              takeover until explicit handback.
+            </p>
+            {conversation.manualReplies.map((reply) => (
+              <Card key={reply.id}>
+                <CardHeader>
+                  <CardTitle className="wrap-anywhere">
+                    {reply.subject}
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    From {reply.from} ·{" "}
+                    {new Date(reply.occurredAt).toLocaleString("en-GB", {
+                      timeZone: "UTC",
+                    })}{" "}
+                    UTC ·{" "}
+                    {reply.state === "applied"
+                      ? "Human takeover recorded"
+                      : "Historical reply retained; newer control preserved"}
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <p
+                    className="whitespace-pre-wrap wrap-anywhere leading-relaxed"
+                    dir="auto"
+                  >
+                    {reply.text}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </section>
+        )}
         <h2 id="messages-title" className="text-xl font-semibold">
           Received messages
         </h2>

@@ -7,6 +7,9 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "gmail_grant",
+    "gmail_oauth",
+    "gmail_manual_message",
     "mailbox_policy",
     "mailbox_job",
     "sender_connection",

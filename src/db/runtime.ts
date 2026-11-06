@@ -14,6 +14,25 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relname IN ('gmail_grant','gmail_oauth','gmail_manual_message'))
+      AND (SELECT count(*) = 9 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
+        WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname='public' AND tablename IN ('gmail_grant','gmail_oauth','gmail_manual_message'))
+      AND (SELECT count(*) = 5 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f'
+        AND conname IN ('gmail_grant_mailbox_scope','gmail_oauth_grant_scope','gmail_manual_mailbox_scope','gmail_manual_conversation_scope','gmail_manual_opportunity_scope'))
+      AND NOT has_table_privilege(current_user, 'public.gmail_grant', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.gmail_oauth', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_table_privilege(current_user, 'public.gmail_manual_message', 'UPDATE,DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.gmail_grant', 'business_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.gmail_oauth', 'verifier', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.gmail_manual_message', 'content', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.inbox_message', 'content', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.inbox_message', 'mailbox_metadata', 'UPDATE')
       AND (SELECT count(*) = 4 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -60,7 +79,7 @@ export async function verifyRuntimeRole(
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relname IN ('inbox_connection','inbox_buyer','inbox_conversation','inbox_opportunity','inbox_message','inbox_event'))
-      AND (SELECT count(*) = 15 AND bool_and('app_runtime' = ANY(roles) AND CASE
+      AND (SELECT count(*) = 16 AND bool_and('app_runtime' = ANY(roles) AND CASE
         WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
         WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
         WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL

@@ -17,6 +17,8 @@ import { NativeSelect } from "./ui/native-select";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
+import { GmailConnection } from "./gmail-connection";
+import type { GmailView } from "@/models/gmail";
 
 const resultSchema = z.discriminatedUnion("success", [
   z.object({ success: z.literal(true), data: z.unknown() }),
@@ -31,6 +33,16 @@ class MailboxFormError extends Error {
   }
 }
 const reasons = {
+  worker_required:
+    "Mailbox authorization is separate from durable synchronization. Ask the operator to configure or restore the deployed mailbox worker, then resume this saved job.",
+  manual_reply_review:
+    "A selected manual reply cannot yet be matched to an exact received message and Opportunity. Review the retained reply and chosen history bounds; affected follow-ups remain paused.",
+  rate_limited:
+    "Gmail limited this request. Follow-ups are paused; retry later from the saved checkpoint.",
+  cursor_recovery:
+    "Catching up or recovering available selected mail; follow-ups are paused. Any unrecoverable history gap stays visible after recovery.",
+  history_gap:
+    "Available selected mail was recovered, but Gmail cannot prove deleted or missing history. Follow-ups remain paused. After review, disable reading and save, then re-enable and save to approve a new mail boundary. Existing history stays available.",
   interrupted:
     "This sync was interrupted. No unfinished page was saved. Resume when you are ready.",
   authorization_required:
@@ -52,9 +64,11 @@ const reasons = {
 export function MailboxManager({
   businessId,
   initialState,
+  gmailConnections = {},
 }: {
   businessId: string;
   initialState: MailboxWorkspace;
+  gmailConnections?: Record<string, GmailView>;
 }) {
   const [state, setState] = useState(initialState);
   const [pending, setPending] = useState(false);
@@ -182,6 +196,69 @@ export function MailboxManager({
             </p>
           </CardHeader>
           <CardContent className="space-y-5">
+            {mailbox.provider === "gmail" && state.canManage && (
+              <GmailConnection
+                businessId={businessId}
+                mailboxId={mailbox.id}
+                initialState={gmailConnections[mailbox.id]}
+                enabled={
+                  mailbox.configuration.enabled &&
+                  (mailbox.configuration.requestedRead ||
+                    mailbox.configuration.requestedSend)
+                }
+                onChanged={async () =>
+                  setState(mailboxWorkspaceSchema.parse(await request(base)))
+                }
+              />
+            )}
+            <p>
+              Reply visibility:{" "}
+              <strong>
+                {mailbox.visibility === "current"
+                  ? "Current within the selected scope"
+                  : mailbox.visibility === "recovering"
+                    ? "Catching up; follow-ups paused"
+                    : mailbox.visibility === "limited"
+                      ? "History gap; follow-ups paused"
+                      : "Unavailable or stale; follow-ups paused"}
+              </strong>
+              . Last synchronized:{" "}
+              {mailbox.lastSyncedAt
+                ? new Date(mailbox.lastSyncedAt).toLocaleString()
+                : "not yet"}
+              .
+            </p>
+            {mailbox.pendingManualReplies > 0 && (
+              <Alert>
+                {mailbox.pendingManualReplies} selected manual replies are
+                retained for review because their exact received-message
+                references are not yet associated. They have not been assigned
+                to a buyer or Opportunity by guesswork.
+              </Alert>
+            )}
+            {mailbox.manualReplyReview.map((reply) => (
+              <details
+                key={reply.id}
+                className="rounded-xl border border-border p-4"
+              >
+                <summary className="min-h-11 cursor-pointer font-medium">
+                  Review manual reply: {reply.subject}
+                </summary>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Occurred {new Date(reply.occurredAt).toLocaleString()}. Exact
+                  received-message header: {reply.inReplyTo ?? "unavailable"}.
+                  Locate this message in Gmail and explicitly approve the
+                  corresponding thread and history bounds if needed; no buyer
+                  association is inferred.
+                </p>
+                <p
+                  className="mt-3 whitespace-pre-wrap wrap-anywhere"
+                  dir="auto"
+                >
+                  {reply.text}
+                </p>
+              </details>
+            ))}
             <p>
               Requested: reading{" "}
               {mailbox.configuration.requestedRead ? "on" : "off"} · sending{" "}
@@ -200,7 +277,10 @@ export function MailboxManager({
             <p className="text-sm text-muted-foreground">
               Folder/label and thread selections capture only matching mail.
               These limited selections cannot establish complete reply capture
-              for a general sending route.
+              for a general sending route. Gmail INBOX-only selections usually
+              exclude sent replies. Include the selected sales label on sent
+              messages or select the exact thread to observe supported manual
+              replies.
             </p>
             <MailboxForm
               key={`${mailbox.id}-${mailbox.version}`}
@@ -356,6 +436,10 @@ function MailboxForm({
         enabled: form.has("enabled"),
         requestedRead: form.has("read"),
         requestedSend: form.has("send"),
+        salesSubjectTerms: read("salesSubjectTerms")
+          .split(/\r?\n/)
+          .map((v) => v.trim())
+          .filter(Boolean),
         scope:
           scope === "mailbox"
             ? { kind: "mailbox" }
@@ -492,6 +576,25 @@ function MailboxForm({
             </p>
           </div>
         )}
+        <div className="space-y-2">
+          <Label htmlFor={`${prefix}-sales-terms`}>
+            Gmail sales subject phrases — one per line
+          </Label>
+          <Textarea
+            id={`${prefix}-sales-terms`}
+            name="salesSubjectTerms"
+            defaultValue={config?.salesSubjectTerms?.join("\n") ?? ""}
+          />
+          <p className="text-sm text-muted-foreground">
+            For new Gmail inquiries in selected labels, require an addressed,
+            non-automated message whose subject contains one of these phrases
+            (3–80 characters; up to 20 phrases). Labels alone do not prove sales
+            relevance. Empty means new label-only inquiries stay excluded. Exact
+            selected threads and already imported threads supply explicit sales
+            context. Whole-mailbox mode processes established threads only.
+            Bodies of unknown mail are never fetched.
+          </p>
+        </div>
         <fieldset className="space-y-4 rounded-xl border border-border p-4">
           <legend className="px-2 font-medium">Optional history</legend>
           <label className="flex min-h-11 items-center gap-3">
@@ -553,10 +656,10 @@ function MailboxForm({
           )}
         </fieldset>
         <p className="text-sm text-muted-foreground">
-          Changing processing scope or read access stops older queued work and
-          starts a new-mail boundary. Already authorized correspondence remains
-          in your inbox. Unrelated and unselected content is excluded from
-          future automated processing.
+          Changing processing scope, subject phrases or read access stops older
+          queued work and starts a new-mail boundary. Already authorized
+          correspondence remains in your inbox. Unrelated and unselected content
+          is excluded from future automated processing.
         </p>
         <Button type="submit">
           {disabled ? "Save unavailable" : "Save processing selection"}

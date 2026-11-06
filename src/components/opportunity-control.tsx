@@ -449,11 +449,12 @@ export function ManualReplyRecord({
           </form>
         ) : (
           <p>
-            This connection{" "}
-            {conversation.connection.active
-              ? "does not support observable manual-reply records"
-              : "has been revoked"}
-            . Take over the Opportunity above to pause automation.
+            {!conversation.connection.active
+              ? "This connection has been revoked. "
+              : conversation.connection.mode === "mailbox"
+                ? "Use mailbox synchronization to observe supported manual replies within the selected scope. "
+                : "This import does not support manual-reply records. "}
+            Take over the Opportunity above to pause automation yourself.
           </p>
         )}
       </CardContent>

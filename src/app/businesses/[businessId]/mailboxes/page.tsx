@@ -11,9 +11,25 @@ export default async function MailboxesPage({
   const { businessId } = await params;
   const state = await (async () => {
     try {
-      return await (
-        await getServices()
-      ).mailboxes.workspace(await headers(), businessId);
+      const services = await getServices(),
+        credentials = await headers();
+      const workspace = await services.mailboxes.workspace(
+        credentials,
+        businessId,
+      );
+      const gmailConnections = workspace.canManage
+        ? Object.fromEntries(
+            await Promise.all(
+              workspace.mailboxes
+                .filter((m) => m.provider === "gmail")
+                .map(async (m) => [
+                  m.id,
+                  await services.gmail.read(credentials, businessId, m.id),
+                ]),
+            ),
+          )
+        : {};
+      return { workspace, gmailConnections };
     } catch (error: unknown) {
       return pageFailure(error);
     }
@@ -29,7 +45,11 @@ export default async function MailboxesPage({
         </Link>
         <h1 className="page-title">Mailbox processing</h1>
       </header>
-      <MailboxManager businessId={businessId} initialState={state} />
+      <MailboxManager
+        businessId={businessId}
+        initialState={state.workspace}
+        gmailConnections={state.gmailConnections}
+      />
     </div>
   );
 }

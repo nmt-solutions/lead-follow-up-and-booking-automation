@@ -1,6 +1,8 @@
 import type { MailboxMetadata } from "../models/mailboxes";
+import { resolveGmailReference } from "./gmail-reference";
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { stopOpportunityFollowups } from "./opportunity-followups";
 import type { InboxRepository } from "../application/inbox";
 import { ApplicationError } from "../models/application-error";
 import type { Actor } from "../models/business";
@@ -222,6 +224,13 @@ export async function captureInboxInquiry(
     );
   if (conversation && conversation.buyerId !== buyerId)
     throw new ApplicationError("CONFLICT");
+  const nativeReply = authorization?.metadata.native?.inReplyTo;
+  const nativeReference =
+    !event.replyToMessageRef && nativeReply
+      ? await resolveGmailReference(tx, businessId, connectionId, nativeReply, [
+          event.senderRef.toLowerCase(),
+        ])
+      : null;
   const replies = event.replyToMessageRef
     ? await tx
         .select({
@@ -243,11 +252,15 @@ export async function captureInboxInquiry(
           and(
             eq(inboxMessage.businessId, businessId),
             eq(inboxMessage.connectionId, connectionId),
-            eq(inboxMessage.messageRef, event.replyToMessageRef),
+            event.replyToMessageRef
+              ? eq(inboxMessage.messageRef, event.replyToMessageRef)
+              : sql`${inboxMessage.mailboxMetadata}->'native'->>'internetMessageId' = ${nativeReply}`,
           ),
         )
-    : [];
-  const reply = replies[0];
+    : nativeReference?.status === "resolved"
+      ? [nativeReference]
+      : [];
+  const reply = replies.length === 1 ? replies[0] : undefined;
   // An exact channel identity and received reply reference establish continuity; names/domains never do.
   const verifiedReply = reply?.originalBuyerId === buyerId ? reply : undefined;
   const effectiveBuyerId = verifiedReply?.buyerId ?? buyerId;
@@ -325,7 +338,10 @@ export async function captureInboxInquiry(
       .where(eq(inboxConversation.id, conversationId));
   }
   if (!association) throw new ApplicationError("CONFLICT");
-  let opportunityId = association.defaultOpportunityId;
+  let opportunityId =
+    replies.length > 1 || nativeReference?.status === "ambiguous"
+      ? null
+      : association.defaultOpportunityId;
   if (reply)
     opportunityId =
       reply.buyerId === association.buyerId ? reply.opportunityId : null;
@@ -389,5 +405,16 @@ export async function captureInboxInquiry(
     at,
   });
   await recordEvent(conversationId);
+  if (opportunityId) {
+    // New engagement invalidates pending unanswered work across the same purchasing need.
+    // An older historical import cannot cancel work based on a newer message.
+    await stopOpportunityFollowups(
+      tx,
+      businessId,
+      [opportunityId],
+      "buyer_replied",
+      event.occurredAt,
+    );
+  }
   return { status: "captured", conversationId };
 }

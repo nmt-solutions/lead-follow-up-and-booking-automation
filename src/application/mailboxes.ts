@@ -4,8 +4,10 @@ import { ApplicationError } from "../models/application-error";
 import { businessIdSchema, type Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import { incomingInquirySchema } from "../models/inbox";
+import { gmailManualSchema } from "../models/gmail";
 import {
   mailboxGrantSchema,
+  MailboxFailure,
   mailboxPageSchema,
   mailboxWorkSchema,
   saveMailboxSchema,
@@ -80,8 +82,12 @@ export function createMailboxApplication<Credentials>(dependencies: {
         try {
           await dependencies.enqueue(work);
         } catch {
-          /* Persisted queued work remains reviewable and retryable with the same bounds. */
+          const snapshot = await repository.prepare(work);
+          if (snapshot) await repository.fail(snapshot, "worker_required");
         }
+      } else if (provider.mode === "live") {
+        const snapshot = await repository.prepare(work);
+        if (snapshot) await repository.fail(snapshot, "worker_required");
       }
       return work;
     },
@@ -130,6 +136,7 @@ export function createMailboxApplication<Credentials>(dependencies: {
         if (
           !current ||
           current.checkpoint !== snapshot.checkpoint ||
+          current.oauthGeneration !== snapshot.oauthGeneration ||
           !isDeepStrictEqual(
             current.permissionObservation,
             snapshot.permissionObservation,
@@ -158,7 +165,7 @@ export function createMailboxApplication<Credentials>(dependencies: {
           if (mode === "history" && selected.length >= remaining)
             throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
           const event = parse(
-            incomingInquirySchema,
+            z.union([incomingInquirySchema, gmailManualSchema]),
             await provider.read(snapshot, metadata, signal),
             true,
           );
@@ -167,8 +174,11 @@ export function createMailboxApplication<Credentials>(dependencies: {
             event.conversationRef !== metadata.conversationRef ||
             new Date(event.occurredAt).getTime() !==
               new Date(metadata.occurredAt).getTime() ||
+            (event.kind === "manual_reply" &&
+              !isDeepStrictEqual(event.native, metadata.native)) ||
             (event.kind !== "direct_inquiry" &&
-              event.kind !== "buying_interest_reply")
+              event.kind !== "buying_interest_reply" &&
+              event.kind !== "manual_reply")
           )
             throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
           selected.push({
@@ -235,19 +245,27 @@ export function createMailboxApplication<Credentials>(dependencies: {
         }
         return await repository.fail(
           snapshot,
-          error instanceof ApplicationError &&
-            error.code === "CHANNEL_SETUP_REQUIRED"
-            ? "setup_required"
+          error instanceof MailboxFailure
+            ? error.condition
+            : error instanceof ApplicationError &&
+                error.code === "CHANNEL_SETUP_REQUIRED"
+              ? "setup_required"
+              : error instanceof ApplicationError &&
+                  error.code === "INVALID_PROVIDER_RESPONSE"
+                ? "invalid_provider_response"
+                : "provider_unavailable",
+          error instanceof MailboxFailure &&
+            error.condition === "permission_required"
+            ? undefined
             : error instanceof ApplicationError &&
                 error.code === "INVALID_PROVIDER_RESPONSE"
-              ? "invalid_provider_response"
-              : "provider_unavailable",
-          error instanceof ApplicationError &&
-            error.code === "INVALID_PROVIDER_RESPONSE"
-            ? undefined
-            : grant,
+              ? undefined
+              : grant,
         );
       }
+    },
+    async repeat(input: unknown) {
+      return repository.repeat(parse(mailboxWorkSchema, input));
     },
   };
 }

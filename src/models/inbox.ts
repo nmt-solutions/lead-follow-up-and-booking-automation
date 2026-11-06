@@ -96,6 +96,16 @@ export type InboxConversation = {
   opportunities: InboxOpportunity[];
   buyerConversations: InboxSummary[];
   history: AssociationHistory[];
+  manualReplies: {
+    id: string;
+    subject: string;
+    text: string;
+    from: string;
+    to: string[];
+    occurredAt: string;
+    state: "pending" | "applied" | "historical";
+    opportunityId: string | null;
+  }[];
   messages: (IncomingInquiry & {
     id: string;
     receivedAt: string;

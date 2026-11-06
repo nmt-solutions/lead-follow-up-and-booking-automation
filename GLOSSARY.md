@@ -83,6 +83,9 @@ The sales mailboxes or conversations a business has selected for the service to 
 **Historical correspondence import**:
 An explicitly authorized import of selected past sales mail within a chosen time range and message limit. Connecting a mailbox does not authorize this import.
 
+**Reply visibility**:
+The Business's ability to observe incoming and supported manual replies within its selected Mailbox scope. Missing access or an unresolved gap makes affected follow-ups unsafe even while previously captured correspondence remains available.
+
 **Email handoff**:
 A prepared email that a person opens in their own email application, reviews, and chooses whether to send. Preparing or opening it does not establish that it was sent.
 

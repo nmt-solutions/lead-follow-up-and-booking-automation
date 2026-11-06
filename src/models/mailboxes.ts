@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { WorkIdentity } from "./discovery";
 import type { IncomingInquiry } from "./inbox";
+import { gmailNativeSchema, type GmailManual } from "./gmail";
+
+export { MailboxFailure } from "./mailbox-failure";
 
 const ref = z
   .string()
@@ -32,6 +35,17 @@ export const mailboxConfigurationSchema = z.strictObject({
   enabled: z.boolean(),
   scope: mailboxScopeSchema,
   history: mailboxHistorySchema.nullable().default(null),
+  salesSubjectTerms: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(3)
+        .max(80)
+        .regex(/^[^\u0000-\u001f\u007f]+$/),
+    )
+    .max(20)
+    .optional(),
 });
 export const saveMailboxSchema = z
   .strictObject({
@@ -74,15 +88,23 @@ export const mailboxMetadataSchema = z.strictObject({
   folderRefs: z.array(ref).max(100),
   occurredAt: z.iso.datetime({ offset: true }),
   relevance: z.enum(["sales", "unrelated", "unknown"]),
+  native: gmailNativeSchema.optional(),
 });
+const cursor = z
+  .string()
+  .min(1)
+  .max(524288)
+  .regex(/^[^\u0000-\u001f\u007f]+$/);
 export const mailboxPageSchema = z.strictObject({
   provider: z.enum(["gmail", "microsoft"]),
   account: z.email(),
   grantRevision: ref,
-  cursor: ref.nullable(),
-  nextCursor: ref,
+  cursor: cursor.nullable(),
+  nextCursor: cursor,
   hasMore: z.boolean(),
   messages: z.array(mailboxMetadataSchema).max(100),
+  visibility: z.enum(["current", "recovering", "limited"]).optional(),
+  completeReplyCapture: z.boolean().optional(),
 });
 export type MailboxConfiguration = z.infer<typeof mailboxConfigurationSchema>;
 export type MailboxGrant = z.infer<typeof mailboxGrantSchema>;
@@ -98,6 +120,16 @@ export type MailboxView = {
   provider: "gmail" | "microsoft";
   configuration: MailboxConfiguration;
   incrementalSince: string;
+  visibility: "unsafe" | "current" | "recovering" | "limited";
+  lastSyncedAt: string | null;
+  pendingManualReplies: number;
+  manualReplyReview: {
+    id: string;
+    subject: string;
+    text: string;
+    occurredAt: string;
+    inReplyTo: string | null;
+  }[];
   grant: Pick<
     MailboxGrant,
     "read" | "send" | "observedAt" | "validUntil" | "folders" | "threads"
@@ -130,6 +162,8 @@ export type MailboxSnapshot = {
   limit: number;
   considered: number;
   seen: string[];
+  knownThreads?: string[];
+  oauthGeneration?: number | null;
 };
 export type MailboxProvider = {
   key: string;
@@ -150,7 +184,10 @@ export type MailboxBatch = {
   snapshot: MailboxSnapshot;
   grant: MailboxGrant;
   page: MailboxPage;
-  selected: { metadata: MailboxMetadata; event: IncomingInquiry }[];
+  selected: {
+    metadata: MailboxMetadata;
+    event: IncomingInquiry | GmailManual;
+  }[];
   seen: string[];
   excluded: number;
 };
@@ -171,6 +208,7 @@ export type MailboxRepository = {
     mode: "incremental" | "history",
   ): Promise<MailboxWork>;
   prepare(work: MailboxWork): Promise<MailboxSnapshot | null>;
+  repeat(work: MailboxWork): Promise<MailboxWork | null>;
   commit(batch: MailboxBatch): Promise<MailboxJobState>;
   stop(
     snapshot: MailboxSnapshot,
@@ -243,6 +281,7 @@ const jobStateSchema = z.object({
   reason: z
     .enum([
       "setup_required",
+      "worker_required",
       "permission_required",
       "scope_changed",
       "provider_unavailable",
@@ -250,6 +289,10 @@ const jobStateSchema = z.object({
       "limit_reached",
       "interrupted",
       "authorization_required",
+      "rate_limited",
+      "cursor_recovery",
+      "history_gap",
+      "manual_reply_review",
     ])
     .nullable(),
   checkpoint: z.number().int(),
@@ -278,6 +321,18 @@ export const mailboxWorkspaceSchema = z.object({
       provider: z.enum(["gmail", "microsoft"]),
       configuration: mailboxConfigurationSchema,
       incrementalSince: z.iso.datetime({ offset: true }),
+      visibility: z.enum(["unsafe", "current", "recovering", "limited"]),
+      lastSyncedAt: z.string().nullable(),
+      pendingManualReplies: z.number().int().nonnegative(),
+      manualReplyReview: z.array(
+        z.object({
+          id: z.uuid(),
+          subject: z.string(),
+          text: z.string(),
+          occurredAt: z.string(),
+          inReplyTo: z.string().nullable(),
+        }),
+      ),
       grant: mailboxGrantSchema
         .pick({
           read: true,

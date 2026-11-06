@@ -5,6 +5,7 @@ import type {
   MailboxMetadata,
 } from "../models/mailboxes";
 import type { WorkIdentity } from "../models/discovery";
+import type { GmailStatus, GmailManual } from "../models/gmail";
 import type {
   MicrosoftCalendarStatus,
   MicrosoftIdentity,
@@ -1417,7 +1418,9 @@ function inboxPolicies(name: string) {
             ? inboxScope
             : inboxWrite,
     }),
-    ...(["inbox_connection", "inbox_conversation"].includes(name)
+    ...(["inbox_connection", "inbox_conversation", "inbox_message"].includes(
+      name,
+    )
       ? [
           pgPolicy(`${name}_update`, {
             for: "update",
@@ -1473,6 +1476,14 @@ export const mailboxPolicy = pgTable(
     }).notNull(),
     cursor: text("cursor"),
     grant: jsonb("permission_observation").$type<MailboxGrant>(),
+    visibility: text("visibility")
+      .$type<"unsafe" | "current" | "recovering" | "limited">()
+      .notNull()
+      .default("unsafe"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    completeReplyCapture: boolean("complete_reply_capture")
+      .notNull()
+      .default(false),
   },
   (t) => [
     uniqueIndex("mailbox_policy_scope").on(t.id, t.businessId),
@@ -1610,6 +1621,9 @@ export const inboxMessage = pgTable(
     messageRef: text("message_ref").notNull(),
     content: jsonb("content").$type<IncomingInquiry>().notNull(),
     mailboxMetadata: jsonb("mailbox_metadata").$type<MailboxMetadata>(),
+    mailboxCurrentMetadata: jsonb(
+      "mailbox_current_metadata",
+    ).$type<MailboxMetadata>(),
     fingerprint: text("fingerprint").notNull(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
   },
@@ -2436,6 +2450,145 @@ function googlePolicies(name: string, privileged: boolean) {
     }),
   ];
 }
+export const gmailGrant = pgTable(
+  "gmail_grant",
+  {
+    ...inboxColumns(),
+    generation: integer("generation").notNull(),
+    status: text("status").$type<GmailStatus>().notNull(),
+    reason: text("reason"),
+    accountSubject: text("account_subject"),
+    credentials: text("credentials"),
+    rejectedCredentials: text("rejected_credentials"),
+    scopes: jsonb("scopes").$type<string[]>().notNull(),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+  },
+  (t) => [
+    uniqueIndex("gmail_grant_scope").on(t.id, t.businessId),
+    check("gmail_generation", sql`${t.generation} > 0`),
+    check(
+      "gmail_status",
+      sql`${t.status} in ('connecting','connected','reconnect_required','insufficient','revocation_pending','disconnected')`,
+    ),
+    ...googlePolicies("gmail_grant", true),
+  ],
+).enableRLS();
+export const gmailOauth = pgTable(
+  "gmail_oauth",
+  {
+    ...inboxColumns(),
+    mailboxId: uuid("mailbox_id").notNull(),
+    generation: integer("generation").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    stateHash: text("state_hash").notNull(),
+    verifier: text("verifier").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumed: boolean("consumed").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("gmail_oauth_state").on(t.stateHash),
+    ...googlePolicies("gmail_oauth", true),
+  ],
+).enableRLS();
+export const gmailScopeForeignKeys = [
+  new ForeignKey(
+    gmailGrant,
+    foreignKey({
+      name: "gmail_grant_mailbox_scope",
+      columns: [gmailGrant.id, gmailGrant.businessId],
+      foreignColumns: [mailboxPolicy.id, mailboxPolicy.businessId],
+    }),
+  ),
+  new ForeignKey(
+    gmailOauth,
+    foreignKey({
+      name: "gmail_oauth_grant_scope",
+      columns: [gmailOauth.mailboxId, gmailOauth.businessId],
+      foreignColumns: [gmailGrant.id, gmailGrant.businessId],
+    }),
+  ),
+];
+export const gmailManualMessage = pgTable(
+  "gmail_manual_message",
+  {
+    ...inboxColumns(),
+    mailboxId: uuid("mailbox_id").notNull(),
+    messageRef: text("message_ref").notNull(),
+    policyVersion: integer("policy_version").notNull(),
+    metadata: jsonb("metadata").$type<MailboxMetadata>().notNull(),
+    content: jsonb("content").$type<GmailManual>().notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    conversationId: uuid("conversation_id"),
+    opportunityId: uuid("opportunity_id"),
+    state: text("state")
+      .$type<"pending" | "applied" | "historical">()
+      .notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("gmail_manual_message_ref").on(t.mailboxId, t.messageRef),
+    pgPolicy("gmail_manual_message_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("gmail_manual_message_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxWrite}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("gmail_manual_message_update", {
+      for: "update",
+      to: appRuntime,
+      using: inboxWrite,
+      withCheck: inboxWrite,
+    }),
+  ],
+).enableRLS();
+export const gmailMessageScopeForeignKeys = [
+  new ForeignKey(
+    gmailManualMessage,
+    foreignKey({
+      name: "gmail_manual_mailbox_scope",
+      columns: [gmailManualMessage.mailboxId, gmailManualMessage.businessId],
+      foreignColumns: [mailboxPolicy.id, mailboxPolicy.businessId],
+    }),
+  ),
+  new ForeignKey(
+    gmailManualMessage,
+    foreignKey({
+      name: "gmail_manual_conversation_scope",
+      columns: [
+        gmailManualMessage.conversationId,
+        gmailManualMessage.businessId,
+      ],
+      foreignColumns: [inboxConversation.id, inboxConversation.businessId],
+    }),
+  ),
+  new ForeignKey(
+    gmailManualMessage,
+    foreignKey({
+      name: "gmail_manual_opportunity_scope",
+      columns: [
+        gmailManualMessage.opportunityId,
+        gmailManualMessage.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+];
 export const googleCalendarGrant = pgTable(
   "google_calendar_grant",
   {

@@ -10,7 +10,49 @@ import {
   senderConnection,
   inboxConnection,
   mailboxJob,
+  inboxMessage,
+  inboxMessageLink,
 } from "./schema";
+
+/** Reply visibility belongs to the purchasing need, including a due action on another channel. */
+export async function opportunityRepliesVisible(
+  tx: Transaction,
+  businessId: string,
+  opportunityId: string,
+  at: Date,
+) {
+  const messages = await tx
+    .select({
+      connectionId: inboxMessage.connectionId,
+      metadata: inboxMessage.mailboxMetadata,
+      current: inboxMessage.mailboxCurrentMetadata,
+    })
+    .from(inboxMessage)
+    .innerJoin(inboxMessageLink, eq(inboxMessage.id, inboxMessageLink.id))
+    .innerJoin(
+      inboxConnection,
+      eq(inboxConnection.id, inboxMessage.connectionId),
+    )
+    .where(
+      and(
+        eq(inboxMessage.businessId, businessId),
+        eq(inboxMessageLink.opportunityId, opportunityId),
+        eq(inboxConnection.mode, "mailbox"),
+      ),
+    );
+  for (const message of messages)
+    if (
+      !(await mailboxMessageAllowed(
+        tx,
+        businessId,
+        message.connectionId,
+        message.current ?? message.metadata,
+        at,
+      ))
+    )
+      return false;
+  return true;
+}
 
 /** Already imported correspondence remains readable. Future automated use follows current scope. */
 export async function mailboxMessageAllowed(
@@ -31,6 +73,19 @@ export async function mailboxMessageAllowed(
     );
   if (!inbox?.active) return false;
   if (inbox.mode === "normalized_import") return true;
+  if (metadata) {
+    const [message] = await tx
+      .select({ current: inboxMessage.mailboxCurrentMetadata })
+      .from(inboxMessage)
+      .where(
+        and(
+          eq(inboxMessage.businessId, businessId),
+          eq(inboxMessage.connectionId, connectionId),
+          eq(inboxMessage.messageRef, metadata.messageRef),
+        ),
+      );
+    metadata = message?.current ?? metadata;
+  }
   const [policy] = await tx
     .select()
     .from(mailboxPolicy)
@@ -44,6 +99,9 @@ export async function mailboxMessageAllowed(
     !policy ||
     !metadata ||
     !policy.grant ||
+    policy.visibility !== "current" ||
+    !policy.lastSyncedAt ||
+    policy.lastSyncedAt.getTime() + 300000 <= at.getTime() ||
     !permissionAllows(policy.configuration, policy.grant, at)
   )
     return false;
@@ -85,6 +143,10 @@ export async function mailboxReplyReady(
   if (!policy || policy.connectionId !== replyConnectionId) return false;
   if (
     policy.configuration.scope.kind !== "mailbox" ||
+    !policy.completeReplyCapture ||
+    policy.visibility !== "current" ||
+    !policy.lastSyncedAt ||
+    policy.lastSyncedAt.getTime() + 300000 <= at.getTime() ||
     !policy.grant ||
     !permissionAllows(policy.configuration, policy.grant, at)
   )

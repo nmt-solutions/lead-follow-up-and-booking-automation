@@ -2,7 +2,11 @@ import { configuredMailboxQueue } from "../mailboxes/queue";
 import { createMailboxApplication } from "../application/mailboxes";
 import { createMailboxRepository } from "../db/mailbox-repository";
 import { createMailboxHttp } from "../http/mailboxes";
-import { unavailableMailboxProvider } from "../mailboxes/provider";
+import { createGmailConnection } from "../gmail/connection";
+import { createGmailProvider } from "../gmail/provider";
+import { createGmailApplication } from "../application/gmail";
+import { configuredGmail } from "../gmail/configuration";
+import { createGmailHttpHandlers } from "../http/gmail";
 import { createMicrosoftCalendarApplication } from "../application/microsoft-calendar";
 import { createMicrosoftCalendarRepository } from "../db/microsoft-calendar-repository";
 import { createMicrosoftCalendarProvider } from "../microsoft-calendar/provider";
@@ -123,7 +127,14 @@ async function composeServices() {
     repository: createMailboxRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
-    provider: unavailableMailboxProvider,
+    provider: createGmailProvider(
+      createGmailConnection(runtimeDatabase(pool), {
+        clock: { now: () => new Date() },
+        configuration: configuredGmail(process.env),
+        fetch,
+      }),
+      { now: () => new Date() },
+    ),
     clock: { now: () => new Date() },
     enqueue: configuredMailboxQueue(process.env),
   });
@@ -134,6 +145,18 @@ async function composeServices() {
     }),
     adapter: unavailableSenderAdapter,
     clock: { now: () => new Date() },
+  });
+  const gmail = createGmailApplication({
+    access,
+    connection: createGmailConnection(runtimeDatabase(pool), {
+      clock: { now: () => new Date() },
+      configuration: configuredGmail(process.env),
+      fetch,
+    }),
+    queueInitialSync: (credentials, businessId, mailboxId) =>
+      mailboxes.queue(credentials, businessId, mailboxId, {
+        mode: "incremental",
+      }),
   });
   const application = createBusinessApplication({
     authenticate,
@@ -309,6 +332,12 @@ async function composeServices() {
       reportFailure,
     }),
     senders,
+    gmail,
+    gmailHttp: createGmailHttpHandlers({
+      application: gmail,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     sendersHttp: createSenderHttp({
       application: senders,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

@@ -4,6 +4,11 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  gmailGrant,
+  gmailOauth,
+  gmailScopeForeignKeys,
+  gmailManualMessage,
+  gmailMessageScopeForeignKeys,
   mailboxPolicy,
   mailboxJob,
   mailboxScopeForeignKeys,
@@ -310,6 +315,9 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.inbox_connection, public.inbox_buyer, public.inbox_conversation, public.inbox_opportunity, public.inbox_message, public.inbox_event FROM app_runtime;
         REVOKE ALL PRIVILEGES (active) ON public.inbox_connection FROM app_runtime;
         REVOKE ALL PRIVILEGES (last_received_at) ON public.inbox_conversation FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='inbox_message' AND column_name='mailbox_current_metadata') THEN
+          REVOKE UPDATE (mailbox_current_metadata) ON public.inbox_message FROM app_runtime;
+        END IF;
       END IF;
       IF to_regclass('public.inbox_association') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.inbox_association, public.inbox_message_link, public.inbox_association_history, public.inbox_opportunity_history FROM app_runtime;
@@ -350,6 +358,15 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON public.google_calendar_grant FROM app_runtime;
         REVOKE UPDATE (consumed) ON public.google_calendar_oauth FROM app_runtime;
       END IF;
+      IF to_regclass('public.gmail_grant') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.gmail_grant, public.gmail_oauth FROM app_runtime;
+        REVOKE UPDATE (generation, status, reason, account_subject, credentials, rejected_credentials, scopes, authorized_at) ON public.gmail_grant FROM app_runtime;
+        REVOKE UPDATE (consumed) ON public.gmail_oauth FROM app_runtime;
+      END IF;
+      IF to_regclass('public.gmail_manual_message') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.gmail_manual_message FROM app_runtime;
+        REVOKE UPDATE (conversation_id, opportunity_id, state) ON public.gmail_manual_message FROM app_runtime;
+      END IF;
       IF to_regclass('public.microsoft_calendar_grant') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.microsoft_calendar_grant, public.microsoft_calendar_oauth FROM app_runtime;
         REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, account_kind, tenant_id, scopes, authorized_at, actor_id, at) ON public.microsoft_calendar_grant FROM app_runtime;
@@ -359,6 +376,12 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.mailbox_policy, public.mailbox_job FROM app_runtime;
         REVOKE UPDATE (version, connection_version, configuration, incremental_since, cursor, permission_observation, updated_at) ON public.mailbox_policy FROM app_runtime;
         REVOKE UPDATE (state, cursor, seen, identity) ON public.mailbox_job FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mailbox_policy' AND column_name='visibility') THEN
+          REVOKE UPDATE (visibility, last_synced_at) ON public.mailbox_policy FROM app_runtime;
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mailbox_policy' AND column_name='complete_reply_capture') THEN
+          REVOKE UPDATE (complete_reply_capture) ON public.mailbox_policy FROM app_runtime;
+        END IF;
       END IF;
       IF to_regclass('public.sender_identity') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.sender_connection, public.sender_reply_route, public.sender_identity, public.sender_observation FROM app_runtime;
@@ -385,6 +408,8 @@ export async function prepareDatabaseRole(pool: Pool) {
   const database = drizzle(pool);
   for (const key of [
     ...mailboxScopeForeignKeys,
+    ...gmailScopeForeignKeys,
+    ...gmailMessageScopeForeignKeys,
     ...senderScopeForeignKeys,
     ...inboxScopeForeignKeys,
     ...opportunityScopeForeignKeys,
@@ -435,6 +460,8 @@ export async function secureDatabase(pool: Pool) {
     );
     for (const key of [
       ...mailboxScopeForeignKeys,
+      ...gmailScopeForeignKeys,
+      ...gmailMessageScopeForeignKeys,
       ...senderScopeForeignKeys,
       ...aiExecutionScopeForeignKeys,
       ...inboxScopeForeignKeys,
@@ -475,6 +502,9 @@ export async function secureDatabase(pool: Pool) {
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
       mailboxPolicy,
+      gmailGrant,
+      gmailOauth,
+      gmailManualMessage,
       mailboxJob,
       senderConnection,
       senderReplyRoute,
@@ -544,9 +574,19 @@ export async function secureDatabase(pool: Pool) {
       }
     }
     await client.query(`
+      REVOKE ALL PRIVILEGES ON gmail_grant, gmail_oauth FROM app_runtime;
+      GRANT SELECT, INSERT ON gmail_grant, gmail_oauth TO app_runtime;
+      GRANT UPDATE (generation, status, reason, account_subject, credentials, rejected_credentials, scopes, authorized_at) ON gmail_grant TO app_runtime;
+      GRANT UPDATE (consumed) ON gmail_oauth TO app_runtime;
+      ALTER TABLE gmail_grant FORCE ROW LEVEL SECURITY;
+      ALTER TABLE gmail_oauth FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON gmail_manual_message FROM app_runtime;
+      GRANT SELECT, INSERT ON gmail_manual_message TO app_runtime;
+      GRANT UPDATE (conversation_id, opportunity_id, state) ON gmail_manual_message TO app_runtime;
+      ALTER TABLE gmail_manual_message FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON mailbox_policy, mailbox_job FROM app_runtime;
       GRANT SELECT, INSERT ON mailbox_policy, mailbox_job TO app_runtime;
-      GRANT UPDATE (version, connection_version, configuration, incremental_since, cursor, permission_observation, updated_at) ON mailbox_policy TO app_runtime;
+      GRANT UPDATE (version, connection_version, configuration, incremental_since, cursor, permission_observation, updated_at, visibility, last_synced_at, complete_reply_capture) ON mailbox_policy TO app_runtime;
       GRANT UPDATE (state, cursor, seen, identity) ON mailbox_job TO app_runtime;
       ALTER TABLE mailbox_policy FORCE ROW LEVEL SECURITY;
       ALTER TABLE mailbox_job FORCE ROW LEVEL SECURITY;
@@ -597,6 +637,7 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON inbox_connection, inbox_buyer, inbox_conversation, inbox_opportunity, inbox_message, inbox_event TO app_runtime;
       GRANT UPDATE (active) ON inbox_connection TO app_runtime;
       GRANT UPDATE (last_received_at) ON inbox_conversation TO app_runtime;
+      GRANT UPDATE (mailbox_current_metadata) ON inbox_message TO app_runtime;
       GRANT UPDATE (owner_id, handoff_reason, next_action, control_state, control_version, policy_version) ON inbox_opportunity TO app_runtime;
       REVOKE ALL PRIVILEGES ON opportunity_control_history, opportunity_manual_event, opportunity_due_action FROM app_runtime;
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
