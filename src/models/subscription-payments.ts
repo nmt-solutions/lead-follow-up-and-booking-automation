@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { Temporal } from "@js-temporal/polyfill";
-import { subscriptionQuoteSchema } from "./subscription-quotes";
+import {
+  subscriptionQuoteSchema,
+  allowanceSchema,
+} from "./subscription-quotes";
 import { taxCalculationSchema } from "./tax";
+import {
+  razorpayAccountReviewSchema,
+  type RazorpayAccountReview,
+} from "./razorpay-account";
 
 const ref = z.string().min(1).max(200);
 export const preparePaymentSchema = z.strictObject({
@@ -21,6 +28,17 @@ export const paymentTermSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type PaymentTerm = z.infer<typeof paymentTermSchema>;
+export const chargeTaxSchema = taxCalculationSchema
+  .omit({
+    version: true,
+    requestKey: true,
+    resolvesId: true,
+    purpose: true,
+    actorId: true,
+    actorName: true,
+    note: true,
+  })
+  .extend({ purpose: z.literal("subscription_charge"), actionId: z.uuid() });
 export function periodEnd(start: string, term: PaymentTerm) {
   return Temporal.Instant.from(start)
     .toZonedDateTimeISO(term.timeZone)
@@ -28,19 +46,55 @@ export function periodEnd(start: string, term: PaymentTerm) {
     .toInstant()
     .toString({ smallestUnit: "millisecond" });
 }
+/** Clamp each boundary from the original monthly anchor, retaining January 31 after February. */
+export function monthlyPeriodBoundary(anchor: string, months: number) {
+  return Temporal.Instant.from(anchor)
+    .toZonedDateTimeISO("UTC")
+    .add({ months })
+    .toInstant()
+    .toString({ smallestUnit: "millisecond" });
+}
+export function monthlyPeriodMatches(
+  anchor: string,
+  start: string,
+  end: string,
+  maximumCycles?: number,
+) {
+  const a = new Date(anchor),
+    s = new Date(start);
+  const cycle =
+    (s.getUTCFullYear() - a.getUTCFullYear()) * 12 +
+    s.getUTCMonth() -
+    a.getUTCMonth();
+  return (
+    cycle >= 0 &&
+    (maximumCycles === undefined || cycle < maximumCycles) &&
+    monthlyPeriodBoundary(anchor, cycle) === start &&
+    monthlyPeriodBoundary(anchor, cycle + 1) === end
+  );
+}
 export const paymentSnapshotSchema = z.object({
   quote: subscriptionQuoteSchema,
-  tax: taxCalculationSchema,
+  tax: z.union([taxCalculationSchema, chargeTaxSchema]),
+  basis: z
+    .object({
+      kind: z.enum(["initial", "renewal"]),
+      discovery: allowanceSchema,
+      automation: allowanceSchema,
+    })
+    .optional(),
   term: paymentTermSchema,
   provider: z.object({
     key: ref,
     account: ref,
-    mode: z.enum(["fixture", "live"]),
+    mode: z.enum(["fixture", "test", "live"]),
+    review: razorpayAccountReviewSchema.optional(),
   }),
 });
 export type PaymentSnapshot = z.infer<typeof paymentSnapshotSchema>;
 export const checkoutReferenceSchema = z.strictObject({
-  customerId: ref,
+  customerId: ref.nullable(),
+  planId: ref.optional(),
   checkoutId: ref,
   subscriptionId: ref.nullable(),
   url: z
@@ -55,7 +109,7 @@ export type CheckoutReference = z.infer<typeof checkoutReferenceSchema>;
 export const paymentObservationSchema = z.strictObject({
   provider: ref,
   account: ref,
-  operationKey: z.uuid(),
+  operationKey: z.uuid().nullable(),
   status: z.enum(["pending", "failed", "confirmed", "unknown"]),
   customerId: ref.nullable(),
   checkoutId: ref.nullable(),
@@ -70,6 +124,21 @@ export const paymentObservationSchema = z.strictObject({
   periodStart: z.iso.datetime().nullable(),
   periodEnd: z.iso.datetime().nullable(),
   checkout: checkoutReferenceSchema.nullable().default(null),
+  charge: z
+    .strictObject({
+      kind: z.enum(["initial", "renewal"]).optional(),
+      invoiceId: ref,
+      orderId: ref,
+      planId: ref,
+      method: z.literal("card"),
+      international: z.boolean(),
+      subscriptionStart: z.iso.datetime(),
+      feeMinor: z.string().regex(/^\d+$/).nullable(),
+      feeTaxMinor: z.string().regex(/^\d+$/).nullable(),
+      baseAmountMinor: z.string().regex(/^\d+$/).nullable(),
+      baseCurrency: z.literal("INR").nullable(),
+    })
+    .optional(),
 });
 export type PaymentObservation = z.infer<typeof paymentObservationSchema>;
 export const authenticatedPaymentEventSchema = z.strictObject({
@@ -99,6 +168,16 @@ export const paymentActionSchema = z.object({
   started: z.boolean(),
   reconciliationPending: z.boolean(),
   observation: paymentObservationSchema.nullable(),
+  recovery: z
+    .object({
+      subscriptionSkip: z.number().int().nonnegative(),
+      creationAt: z.iso.datetime().optional(),
+      candidateId: ref.nullable(),
+      ambiguous: z.boolean(),
+      invoiceSkip: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
   actorId: z.string(),
   at: z.iso.datetime(),
   history: z
@@ -137,6 +216,7 @@ export const paidPeriodSchema = z.object({
   start: z.iso.datetime(),
   end: z.iso.datetime(),
   snapshot: paymentSnapshotSchema,
+  charge: paymentObservationSchema.nullable().optional(),
 });
 export type PaidPeriod = z.infer<typeof paidPeriodSchema>;
 export const paidAccessSchema = z.object({
@@ -167,10 +247,18 @@ export const paymentWorkspaceSchema = z.object({
   gateway: z.object({
     ready: z.boolean(),
     key: ref,
-    mode: z.enum(["fixture", "live", "unconfigured"]),
+    mode: z.enum(["fixture", "test", "live", "unconfigured"]),
+    reasons: z.array(z.string()).optional(),
+    review: razorpayAccountReviewSchema.optional(),
   }),
 });
 export type PaymentWorkspace = z.infer<typeof paymentWorkspaceSchema>;
+/** An adapter may use this only before any resource-creation request has been sent. */
+export class PaymentCreationNotAttempted extends Error {
+  constructor() {
+    super("Payment creation was not attempted");
+  }
+}
 
 /** Only the external adapter authenticates raw events and retrieves authoritative payment state.
  * Creation must use this exact persisted operation key. A timeout must NEVER be retried as a new charge.
@@ -178,7 +266,16 @@ export type PaymentWorkspace = z.infer<typeof paymentWorkspaceSchema>;
 export type PaymentGateway = {
   key: string;
   account: string;
-  mode: "fixture" | "live" | "unconfigured";
+  mode: "fixture" | "test" | "live" | "unconfigured";
+  review?: RazorpayAccountReview;
+  readiness?(): string[];
+  reviewSnapshot?(snapshot: PaymentSnapshot): string[];
+  deferEvents?: boolean;
+  poll?(input: { action: PaymentAction }): Promise<{
+    checkout: CheckoutReference | null;
+    observations: PaymentObservation[];
+    recovery: PaymentAction["recovery"];
+  }>;
   supports(currency: "INR" | "USD"): boolean;
   create(input: {
     operationKey: string;

@@ -725,6 +725,7 @@ export const subscriptionPayment = pgTable(
     reason: text("reason"),
     checkout: jsonb("checkout").$type<CheckoutReference>(),
     observation: jsonb("observation").$type<PaymentObservation>(),
+    recovery: jsonb("recovery").$type<PaymentAction["recovery"]>(),
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
     reconciliationPending: boolean("reconciliation_pending")
       .notNull()
@@ -824,9 +825,14 @@ export const subscriptionPeriod = pgTable(
     start: timestamp("start", { withTimezone: true }).notNull(),
     end: timestamp("end", { withTimezone: true }).notNull(),
     snapshot: jsonb("snapshot").$type<PaymentSnapshot>().notNull(),
+    charge: jsonb("charge").$type<PaymentObservation>(),
   },
   (t) => [
-    uniqueIndex("subscription_period_action_once").on(t.actionId),
+    uniqueIndex("subscription_period_window_once").on(
+      t.actionId,
+      t.start,
+      t.end,
+    ),
     uniqueIndex("subscription_period_payment_once").on(
       t.provider,
       t.account,
