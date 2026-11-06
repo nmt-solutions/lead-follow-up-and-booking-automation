@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { reservePaidUsage, paidReservationCurrent } from "./paid-access";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { hasMfa, operatorMfaLifetime } from "../auth/access";
@@ -226,7 +227,7 @@ export function createEmailSequenceRepository(
   ): Promise<SequenceWorkspace> {
     const policy = await sequencePolicyAt(tx, businessId);
     const usage = policy
-      ? await sequenceUsage(tx, businessId, policy.configuration)
+      ? await sequenceUsage(tx, businessId, policy.configuration, clock.now())
       : { reserved: 0, remaining: 0 };
     const setupIssues: string[] = [];
     if (provider.mode === "unconfigured")
@@ -644,7 +645,12 @@ export function createEmailSequenceRepository(
               provider: provider,
             });
             if (gate.reason !== null) continue;
-            const usage = await sequenceUsage(tx, businessId, gate.policy);
+            const usage = await sequenceUsage(
+              tx,
+              businessId,
+              gate.policy,
+              clock.now(),
+            );
             const reservations = recipientReservedAttempts(
               usage.events,
               run.id,
@@ -1086,7 +1092,12 @@ export function createEmailSequenceRepository(
             );
             return null;
           }
-          const usage = await sequenceUsage(tx, input.businessId, gate.policy);
+          const usage = await sequenceUsage(
+            tx,
+            input.businessId,
+            gate.policy,
+            clock.now(),
+          );
           const attempts = recipientReservedAttempts(
             usage.events,
             run.id,
@@ -1129,6 +1140,31 @@ export function createEmailSequenceRepository(
             return null;
           }
           const attemptId = randomUUID();
+          try {
+            await reservePaidUsage(
+              tx,
+              input.businessId,
+              "automation",
+              attemptId,
+              1,
+              "provider calls",
+              clock.now(),
+            );
+          } catch (error: unknown) {
+            if (
+              !(error instanceof ApplicationError) ||
+              error.code !== "PAID_ACCESS_REQUIRED"
+            )
+              throw error;
+            await stopBeforeProvider(
+              tx,
+              input.identity,
+              run,
+              action,
+              "paid_automation_exhausted",
+            );
+            return null;
+          }
           const committed = await actionUpdate(tx, action, {
             state: "committed",
             attemptId,
@@ -1213,7 +1249,12 @@ export function createEmailSequenceRepository(
           );
           return;
         }
-        const usage = await sequenceUsage(tx, input.businessId, gate.policy);
+        const usage = await sequenceUsage(
+          tx,
+          input.businessId,
+          gate.policy,
+          clock.now(),
+        );
         const reserved = usage.events.find(
           (e) =>
             e.kind === "attempt_reserved" && e.attemptId === action.attemptId,
@@ -1224,10 +1265,17 @@ export function createEmailSequenceRepository(
           .sort((a, b) => a.getTime() - b.getTime())
           .at(-1);
         const boundary = clock.now();
-        const reason =
-          !reserved ||
-          reserved.at < new Date(gate.policy.periodStart) ||
-          usage.reserved > gate.policy.maxProviderCalls
+        const reason = !(await paidReservationCurrent(
+          tx,
+          input.businessId,
+          "automation",
+          action.attemptId!,
+          boundary,
+        ))
+          ? "paid_automation_changed"
+          : !reserved ||
+              reserved.at < new Date(gate.policy.periodStart) ||
+              usage.reserved > gate.policy.maxProviderCalls
             ? "allowance_changed"
             : lastOther &&
                 lastOther.getTime() + gate.policy.minIntervalSeconds * 1000 >
@@ -1392,7 +1440,12 @@ export function createEmailSequenceRepository(
       const retryAt = result.retryAt ? new Date(result.retryAt) : null;
       const policy = await sequencePolicyAt(tx, run.businessId);
       const usage = policy
-        ? await sequenceUsage(tx, run.businessId, policy.configuration)
+        ? await sequenceUsage(
+            tx,
+            run.businessId,
+            policy.configuration,
+            clock.now(),
+          )
         : null;
       const actions = await tx
         .select()

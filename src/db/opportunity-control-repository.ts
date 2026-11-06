@@ -27,6 +27,7 @@ import type {
 } from "../models/opportunity-control";
 import type { OpportunityMailEnvelope } from "../models/opportunity-mail";
 import { mailResultSchema } from "../models/mail-dispatch";
+import { reservePaidUsage, paidReservationCurrent } from "./paid-access";
 import { gmailSequenceKey } from "../gmail/sequence-mail";
 import { gmailDispatchAccess } from "./gmail-dispatch";
 import { reconciledOpportunityMail } from "./opportunity-mail";
@@ -626,6 +627,20 @@ export function createOpportunityRepository(
         intentOnly = false,
       ) {
         const failure = await sessionFailure(tx, action, role);
+        if (
+          !intentOnly &&
+          !(await paidReservationCurrent(
+            tx,
+            businessId,
+            "automation",
+            action.id,
+            now(),
+          ))
+        )
+          return {
+            action: await cancel(tx, "paid_automation_unavailable"),
+            failure: null,
+          };
         if (failure)
           return { action: await cancel(tx, "authorization_revoked"), failure };
         const stopped = committedFollowupStopReason(action.reason);
@@ -877,6 +892,28 @@ export function createOpportunityRepository(
             const ctx = await messageContext(tx, businessId, row.messageId);
             if (!provider.channels.includes(ctx.connection.channel))
               throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+          }
+          try {
+            await reservePaidUsage(
+              tx,
+              businessId,
+              "automation",
+              actionId,
+              1,
+              "provider calls",
+              now(),
+            );
+          } catch (error: unknown) {
+            if (
+              !(error instanceof ApplicationError) ||
+              error.code !== "PAID_ACCESS_REQUIRED"
+            )
+              throw error;
+            return {
+              action: await cancel(tx, "paid_automation_unavailable"),
+              acquired: false,
+              failure: null,
+            };
           }
           // Commit the exact intent BEFORE transport. A crash or result-write failure cannot erase correlation.
           const [committed] = await tx

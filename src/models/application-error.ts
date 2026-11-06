@@ -1,4 +1,5 @@
 export type ApplicationErrorCode =
+  | "PAID_ACCESS_REQUIRED"
   | "CALENDAR_SETUP_REQUIRED"
   | "INVALID_INPUT"
   | "UNAUTHENTICATED"

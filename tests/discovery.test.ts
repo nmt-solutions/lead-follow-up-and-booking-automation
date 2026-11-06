@@ -1,3 +1,4 @@
+import { persistPaidSubscription } from "./support/paid-subscription";
 import type { ScheduleWork } from "../src/models/discovery-schedules";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
@@ -2097,6 +2098,11 @@ describe("Bounded discovery at the primary application seam", () => {
         discoveryPolicySchema.parse({ ...policy, ...policyOverrides }),
       ],
     );
+    await persistPaidSubscription(harness, owner, business.id, {
+      markets: [...(policyOverrides.activeMarkets ?? policy.activeMarkets)],
+      discovery: { quantity: 100000, unit: policy.allowanceUnit },
+      automation: { quantity: 10000, unit: "provider calls" },
+    });
     return { owner, business };
   }
 

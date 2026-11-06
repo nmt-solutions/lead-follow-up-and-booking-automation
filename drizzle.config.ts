@@ -7,6 +7,11 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "subscription_payment",
+    "subscription_payment_event",
+    "subscription_payment_history",
+    "subscription_period",
+    "subscription_usage",
     "whatsapp_evidence",
     "tax_rule_revision",
     "tax_rule_decision",
