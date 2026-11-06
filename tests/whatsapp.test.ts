@@ -425,6 +425,9 @@ describe("Customer-owned WhatsApp onboarding at the application seam", () => {
       "GRANT UPDATE (review) ON whatsapp_evidence TO app_runtime",
     );
     await h.admin.query(
+      "GRANT UPDATE (whatsapp_review) ON platform_operator TO app_runtime",
+    );
+    await h.admin.query(
       "ALTER POLICY whatsapp_evidence_read ON whatsapp_evidence USING (true)",
     );
     await h.reapplySchema();
