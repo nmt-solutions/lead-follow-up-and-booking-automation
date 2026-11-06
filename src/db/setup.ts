@@ -47,6 +47,8 @@ import {
   knowledgeRevision,
   billingProfileRevision,
   billingProfileReview,
+  subscriptionPricingRevision,
+  subscriptionQuote,
   commercialAuthorityRevision,
   discoveryConfiguration,
   discoveryRun,
@@ -333,6 +335,12 @@ export async function prepareDatabaseRole(pool: Pool) {
       END IF;
       IF to_regclass('public.billing_profile_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.billing_profile_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.subscription_pricing_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.subscription_pricing_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.subscription_quote') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.subscription_quote FROM app_runtime;
       END IF;
       IF to_regclass('public.billing_profile_review') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.billing_profile_review FROM app_runtime;
@@ -658,6 +666,8 @@ export async function secureDatabase(pool: Pool) {
       knowledgeRevision,
       billingProfileRevision,
       billingProfileReview,
+      subscriptionPricingRevision,
+      subscriptionQuote,
       commercialAuthorityRevision,
       discoveryConfiguration,
       discoveryRun,
@@ -868,6 +878,12 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON knowledge_revision TO app_runtime;
       ALTER TABLE knowledge_revision FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON billing_profile_revision FROM app_runtime;
+      REVOKE ALL PRIVILEGES ON subscription_pricing_revision FROM app_runtime;
+      GRANT SELECT, INSERT ON subscription_pricing_revision TO app_runtime;
+      ALTER TABLE subscription_pricing_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON subscription_quote FROM app_runtime;
+      GRANT SELECT, INSERT ON subscription_quote TO app_runtime;
+      ALTER TABLE subscription_quote FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON billing_profile_revision TO app_runtime;
       ALTER TABLE billing_profile_revision FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON billing_profile_review FROM app_runtime;

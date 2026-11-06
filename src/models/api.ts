@@ -4,6 +4,11 @@ import {
 } from "./application-error";
 
 const failures = {
+  PRICING_SETUP_REQUIRED: {
+    status: 409,
+    message:
+      "Review billing evidence and configure explicit currency prices and allowances before creating this quote. Refresh the subscription quote to see the missing setup.",
+  },
   INVALID_PROVIDER_RESPONSE: {
     status: 502,
     message:

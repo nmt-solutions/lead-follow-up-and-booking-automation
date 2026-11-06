@@ -37,10 +37,29 @@ export default async function BusinessesPage() {
       Review billing evidence
     </Link>
   ) : null;
+  const canConfigurePricing = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "pricing.manage");
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const pricingLink = canConfigurePricing ? (
+    <Link
+      href="/platform/pricing"
+      className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+    >
+      Configure subscription pricing
+    </Link>
+  ) : null;
   if (!businesses.length)
     return (
       <div className="mx-auto max-w-2xl space-y-8">
         {billingReviewLink}
+        {pricingLink}
         <div>
           <p className="mb-3 text-sm font-medium text-primary">
             Getting started
@@ -59,6 +78,7 @@ export default async function BusinessesPage() {
   return (
     <div className="space-y-8">
       {billingReviewLink}
+      {pricingLink}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">
