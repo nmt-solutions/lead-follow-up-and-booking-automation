@@ -134,7 +134,7 @@ export function createMetaTransport(d: {
             messaging_product: "whatsapp",
             recipient_type: "individual",
             to: intent.peer,
-            biz_opaque_callback_data: intent.actionId,
+            biz_opaque_callback_data: intent.callbackToken,
             ...(intent.parent
               ? { context: { message_id: intent.parent } }
               : {}),
@@ -167,7 +167,11 @@ export function createMetaTransport(d: {
           const error = z
             .object({ error: z.object({ code: z.number().int() }) })
             .safeParse(value);
-          if (!error.success || response.status >= 500)
+          if (
+            !error.success ||
+            response.status >= 500 ||
+            response.status === 408
+          )
             return { status: "unknown", reason: "transport_ambiguous" };
           return {
             status: "not_accepted",

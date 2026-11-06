@@ -2762,6 +2762,7 @@ export const opportunityDueAction = pgTable(
     whatsappPlanId: uuid("whatsapp_plan_id"),
     whatsappStep: integer("whatsapp_step"),
     whatsappPeer: text("whatsapp_peer"),
+    metaRecoveryAt: timestamp("meta_recovery_at", { withTimezone: true }),
     actorId: text("actor_id")
       .notNull()
       .references(() => user.id),

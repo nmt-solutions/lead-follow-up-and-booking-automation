@@ -33,8 +33,9 @@ export async function metaSendingFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
   name: string,
   paidUnits = 100,
+  at = "2026-11-05T09:00:00Z",
 ) {
-  h.clock.set("2026-11-05T09:00:00Z");
+  h.clock.set(at);
   const credentials = await h.signIn(`meta-send-${name}@example.com`);
   const business = await h.application.createBusiness(credentials, {
     name: "Supplier",
@@ -111,6 +112,7 @@ export async function metaSendingFixture(
   const sent: Record<string, unknown>[] = [];
   const httpState = {
     ambiguous: false,
+    responseStatus: 200,
     templateStatus: "APPROVED",
     templateBody: "Hello {{1}}, would you like our steel catalogue?",
     beforeSend: null as null | (() => Promise<void>),
@@ -140,6 +142,11 @@ export async function metaSendingFixture(
         throw new Error("Invalid fixture send");
       sent.push(Object.fromEntries(Object.entries(body)));
       if (httpState.ambiguous) throw new Error("Accepted then disconnected");
+      if (httpState.responseStatus !== 200)
+        return Response.json(
+          { error: { code: 1 } },
+          { status: httpState.responseStatus },
+        );
       const peer = sent.at(-1)?.to;
       return Response.json({
         messaging_product: "whatsapp",

@@ -29,10 +29,19 @@ export function createWhatsAppSendingApplication<Credentials>(d: {
     };
   }
   return {
-    async recoverDue() {
+    async recoverDue(input: unknown = { maxActions: 100 }) {
+      const { maxActions } = parse(
+        z.strictObject({ maxActions: z.number().int().min(1).max(100) }),
+        input,
+      );
       let processed = 0;
-      for (const work of await d.repository.recoveryWork()) {
+      for (const work of await d.repository.recoveryWork(maxActions)) {
         try {
+          await d.repository.recoveryVisited(
+            work.actor,
+            work.businessId,
+            work.actionId,
+          );
           await d.opportunities.reconcile(
             work.actor,
             work.businessId,

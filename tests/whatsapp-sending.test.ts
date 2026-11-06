@@ -39,11 +39,15 @@ describe("WhatsApp sends through current public application commands", () => {
       to: "919876543210",
       type: "text",
       context: { message_id: "wamid.inquiry" },
-      biz_opaque_callback_data: action.id,
+      biz_opaque_callback_data: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(f.sent[0].text).toMatchObject({
       body: expect.stringContaining("quotation-request review"),
     });
+    expect(f.sent[0].biz_opaque_callback_data).not.toBe(action.id);
+    expect(
+      JSON.stringify(await f.app.workspace(f.credentials, f.businessId)),
+    ).not.toContain(String(f.sent[0].biz_opaque_callback_data));
     await f.control.dispatch(f.credentials, f.businessId, action.id);
     expect(f.sent).toHaveLength(1);
     const restarted = f.restart();
@@ -76,7 +80,7 @@ describe("WhatsApp sends through current public application commands", () => {
           status: "delivered",
           timestamp: String(Math.floor(h.clock.now().getTime() / 1000)),
           recipient_id: "919876543211",
-          biz_opaque_callback_data: action.id,
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
         },
       ],
     });
@@ -92,7 +96,7 @@ describe("WhatsApp sends through current public application commands", () => {
           status: "delivered",
           timestamp: String(Math.floor(h.clock.now().getTime() / 1000)),
           recipient_id: "919876543210",
-          biz_opaque_callback_data: action.id,
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
           pricing: {
             billable: true,
             pricing_model: "PMP",
@@ -161,7 +165,7 @@ describe("WhatsApp sends through current public application commands", () => {
           status: "sent",
           timestamp: "1793869260",
           recipient_id: "919876543211",
-          biz_opaque_callback_data: actions[0].id,
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
         },
       ],
     });
@@ -293,7 +297,7 @@ describe("WhatsApp sends through current public application commands", () => {
           status: "sent",
           timestamp: String(Math.floor(h.clock.now().getTime() / 1000)),
           recipient_id: "919876543210",
-          biz_opaque_callback_data: a.id,
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
         },
       ],
     });
@@ -482,7 +486,7 @@ describe("WhatsApp sends through current public application commands", () => {
           status: "delivered",
           timestamp: "1793869200",
           recipient_id: "919876543210",
-          biz_opaque_callback_data: a.id,
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
           origin: "unrecognized-device",
         },
       ],
@@ -606,7 +610,7 @@ describe("WhatsApp sends through current public application commands", () => {
           status: "delivered",
           timestamp: "1793869200",
           recipient_id: "919876543210",
-          biz_opaque_callback_data: a.id,
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
           pricing: {
             category: "service",
             pricing_model: "PMP",
@@ -670,5 +674,130 @@ describe("WhatsApp sends through current public application commands", () => {
       await h.admin.query("GRANT SELECT ON whatsapp_outbound TO app_runtime");
     }
     await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
+  });
+  it("does not turn Meta template and Owner outreach approval into authority for a financial promise", async () => {
+    const f = await metaSendingFixture(h, "financial-template");
+    f.httpState.templateBody = "Hello {{1}}, our steel has no cost.";
+    const o = await f.outreach();
+    const saved = await f.app.savePlan(f.credentials, f.businessId, {
+        ...o.plan,
+        recipients: o.plan.recipients.map((r) => ({
+          ...r,
+          steps: r.steps.map((s) => ({ ...s, evaluation: null })),
+        })),
+      }),
+      r = saved.plans[0],
+      ref = { planId: r.id, hash: r.hash };
+    await f.app.decide(f.credentials, f.businessId, { ...ref, approved: true });
+    const started = await f.app.start(f.credentials, f.businessId, ref),
+      first = [...started.actions].sort((a, b) =>
+        a.dueAt.localeCompare(b.dueAt),
+      )[0];
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, first.id),
+    ).toMatchObject({
+      state: "cancelled",
+      reason: "whatsapp_commercial_template_requires_authorized_action",
+    });
+    expect(f.sent).toHaveLength(0);
+  });
+  it("retains an HTTP request timeout as unknown acceptance rather than authoritative rejection", async () => {
+    const f = await metaSendingFixture(h, "http-timeout");
+    await f.permission();
+    const action = await f.groundedReply();
+    f.httpState.responseStatus = 408;
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, action.id),
+    ).toMatchObject({
+      state: "committed",
+      reason: "whatsapp_acceptance_unknown",
+    });
+    await f.control.dispatch(f.credentials, f.businessId, action.id);
+    expect(f.sent).toHaveLength(1);
+  });
+  it("requires newer distinct recipient evidence after withdrawal instead of restoring a revoked consent artifact", async () => {
+    const f = await metaSendingFixture(h, "reconsent");
+    const recorded = await f.permission();
+    const action = await f.groundedReply();
+    await f.app.revokePermission(f.credentials, f.businessId, {
+      permissionId: recorded.permissions[0].id,
+      reason: "Recipient withdrew permission",
+    });
+    h.clock.set("2026-11-05T09:00:01Z");
+    await expect(f.permission()).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(f.sent).toHaveLength(0);
+    await f.app.permission(f.credentials, f.businessId, {
+      peer: "919876543210",
+      purpose: "conversation",
+      opportunityId: f.opportunityId,
+      numberProvided: true,
+      optedIn: true,
+      noticesReviewed: true,
+      reference: "CONSENT-RENEWED-2026",
+      sha256: "ef".repeat(32),
+      observedAt: h.clock.now().toISOString(),
+      validUntil: "2026-12-05T09:00:00Z",
+    });
+    expect(
+      await f.control.dispatch(f.credentials, f.businessId, action.id),
+    ).toMatchObject({ state: "dispatched" });
+    expect(f.sent).toHaveLength(1);
+  });
+  it("does not attribute acceptance from a copyable action marker without the private committed provider correlation reference", async () => {
+    const f = await metaSendingFixture(h, "marker-only");
+    await f.permission();
+    const a = await f.groundedReply();
+    f.httpState.ambiguous = true;
+    await f.control.dispatch(f.credentials, f.businessId, a.id);
+    await f.deliver("messages", {
+      statuses: [
+        {
+          id: "wamid.marker-only",
+          status: "sent",
+          timestamp: "1793869200",
+          recipient_id: "919876543210",
+          biz_opaque_callback_data: a.id,
+        },
+      ],
+    });
+    await f.intake.drain();
+    expect(
+      (await f.app.reconcile(f.credentials, f.businessId, { actionId: a.id }))
+        .actions[0],
+    ).toMatchObject({
+      state: "committed",
+      evidence: "unresolved",
+      providerMessageRef: null,
+    });
+    expect(f.sent).toHaveLength(1);
+  });
+  it("recovers unrelated due work after an older unresolved intent without repeating its transport", async () => {
+    const recovery = await createHarness();
+    try {
+      const old = await metaSendingFixture(recovery, "recovery-old");
+      await old.permission();
+      const a = await old.groundedReply();
+      old.httpState.ambiguous = true;
+      await old.control.dispatch(old.credentials, old.businessId, a.id);
+      const fresh = await metaSendingFixture(
+        recovery,
+        "recovery-fresh",
+        100,
+        "2026-11-05T09:01:00Z",
+      );
+      await fresh.permission();
+      await fresh.groundedReply();
+      recovery.clock.set("2026-11-05T09:02:00Z");
+      await fresh.restart().recoverDue({ maxActions: 1 });
+      expect(fresh.sent).toHaveLength(0);
+      await fresh.restart().recoverDue({ maxActions: 1 });
+      expect(fresh.sent).toHaveLength(1);
+      expect(old.sent).toHaveLength(1);
+      await fresh.restart().recoverDue({ maxActions: 1 });
+      expect(fresh.sent).toHaveLength(1);
+      expect(old.sent).toHaveLength(1);
+    } finally {
+      await recovery.close();
+    }
   });
 });

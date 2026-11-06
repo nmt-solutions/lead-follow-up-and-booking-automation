@@ -962,6 +962,8 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
       GRANT UPDATE (state, reason, email) ON opportunity_due_action TO app_runtime;
       REVOKE UPDATE (whatsapp_plan_id,whatsapp_step,whatsapp_peer) ON opportunity_due_action FROM app_runtime;
+      REVOKE UPDATE (meta_recovery_at) ON opportunity_due_action FROM app_runtime;
+      GRANT UPDATE (meta_recovery_at) ON opportunity_due_action TO app_runtime;
       CREATE OR REPLACE FUNCTION public.protect_opportunity_mail() RETURNS trigger
       LANGUAGE plpgsql SET search_path = pg_catalog, public AS $protect$
       BEGIN
@@ -1169,7 +1171,7 @@ export async function secureDatabase(pool: Pool) {
         JOIN public.inbox_connection i ON i.id=a.connection_id AND i.business_id=a.business_id AND i.mode='meta'
         JOIN public.membership m ON m.business_id=a.business_id AND m.user_id=a.actor_id AND m.role IN ('owner','admin')
         WHERE (a.state='pending' AND a.due_at<=statement_timestamp() OR a.state='committed')
-        ORDER BY a.due_at,a.id LIMIT 100
+        ORDER BY coalesce(a.meta_recovery_at,a.created_at),a.due_at,a.id LIMIT 100
       $$;
       REVOKE ALL ON FUNCTION public.pending_meta_outbound() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;

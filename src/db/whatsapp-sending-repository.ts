@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Clock } from "../models/business";
@@ -32,6 +32,11 @@ import { evaluateCommercialAuthority } from "../models/commercial-authority";
 import { sequenceDue } from "../email-sequences/timing";
 import { paidAllowance } from "./paid-access";
 import { inquiryDispatchContext } from "./inquiry-context";
+import { requiresCommercialReview } from "../models/inquiries";
+import {
+  metaIntentSchema,
+  metaPublicIntentSchema,
+} from "../models/whatsapp-sending";
 import {
   whatsAppOutbound,
   whatsAppConnection,
@@ -301,7 +306,7 @@ export function createWhatsAppSendingRepository(
             proof?.supported &&
             r.messageRef &&
             r.peer === intent.peer &&
-            (proof.callbackData === intent.actionId ||
+            (proof.callbackData === intent.callbackToken ||
               (!!accepted &&
                 r.messageRef === accepted.messageRef &&
                 !proof.callbackData)) &&
@@ -569,11 +574,7 @@ export function createWhatsAppSendingRepository(
     if (commercial && commercial.status !== "permitted")
       return { reason: commercial.reason, intent: null };
     // Template approval cannot authorize a financial promise. This subset supports informational outreach only.
-    if (
-      /(?:\b(price|pricing|quote|quotation|discount|accept(?:ed)? order|payment|charge|guarantee|refund|deposit|fee|usd|inr|eur|gbp)\b|[$€£₹]|\d\s*%)/i.test(
-        step.template.rendered,
-      )
-    )
+    if (requiresCommercialReview(step.template.rendered))
       return {
         reason: "whatsapp_commercial_template_requires_authorized_action",
         intent: null,
@@ -666,9 +667,12 @@ export function createWhatsAppSendingRepository(
       planId: row.id,
       stepIndex: action.whatsappStep,
       reservedAt: existing?.reservedAt ?? clock.now().toISOString(),
+      callbackToken: existing?.callbackToken ?? randomBytes(32).toString("hex"),
     };
     if (existing && !isDeepStrictEqual(existing, intent))
       return { reason: "whatsapp_intent_changed", intent: null };
+    if (!metaIntentSchema.safeParse(intent).success)
+      return { reason: "whatsapp_message_shape_unsupported", intent: null };
     return { reason: null, intent };
   }
   async function prepareAt(
@@ -768,9 +772,12 @@ export function createWhatsAppSendingRepository(
       planId: null,
       stepIndex: null,
       reservedAt: existing?.reservedAt ?? clock.now().toISOString(),
+      callbackToken: existing?.callbackToken ?? randomBytes(32).toString("hex"),
     };
     if (existing && !isDeepStrictEqual(existing, intent))
       return { reason: "whatsapp_intent_changed", intent: null };
+    if (!metaIntentSchema.safeParse(intent).success)
+      return { reason: "whatsapp_message_shape_unsupported", intent: null };
     return { reason: null, intent };
   }
   async function workspace(
@@ -888,7 +895,7 @@ export function createWhatsAppSendingRepository(
             state: r.state,
             reason: r.reason,
             dueAt: r.dueAt.toISOString(),
-            intent,
+            intent: intent ? metaPublicIntentSchema.parse(intent) : null,
             providerMessageRef: proof.messageRef,
             evidence: proof.evidence,
             reconciliationReason: proof.reason,
@@ -1492,6 +1499,27 @@ export function createWhatsAppSendingRepository(
               .then((r) => r.rows);
             if (!need) throw new ApplicationError("NOT_FOUND");
           }
+          const prior = await records(tx, businessId);
+          for (const revocation of prior) {
+            if (revocation.data.kind !== "revoke_permission") continue;
+            const permissionId = revocation.data.permissionId;
+            const source = prior.find((r) => r.id === permissionId)?.data;
+            if (source?.kind !== "permission") continue;
+            const old = source.permission;
+            if (
+              old.peer !== permission.peer ||
+              old.purpose !== permission.purpose ||
+              (old.opportunityId &&
+                permission.opportunityId &&
+                old.opportunityId !== permission.opportunityId)
+            )
+              continue;
+            if (
+              new Date(permission.observedAt) <= revocation.at ||
+              permission.sha256 === old.sha256
+            )
+              throw new ApplicationError("CONFLICT");
+          }
           await append(
             tx,
             actor,
@@ -1662,13 +1690,34 @@ export function createWhatsAppSendingRepository(
         true,
       );
     },
-    async recoveryWork() {
+    recoveryVisited(actor: WorkIdentity, businessId: string, actionId: string) {
+      // Worker bookkeeping grants no transport authority. Session/MFA and every effect guard repeat in the guarded dispatch.
+      return scoped(
+        database,
+        actor,
+        businessId,
+        async (tx) => {
+          await requireCapability(tx, actor, businessId, "integrations.manage");
+          await tx
+            .update(opportunityDueAction)
+            .set({ metaRecoveryAt: clock.now() })
+            .where(
+              and(
+                eq(opportunityDueAction.businessId, businessId),
+                eq(opportunityDueAction.id, actionId),
+              ),
+            );
+        },
+        { lock: true },
+      );
+    },
+    async recoveryWork(maxActions = 100) {
       const result = await database.execute<{
         business_id: string;
         action_id: string;
         actor_id: string;
         session_id: string;
-      }>(sql`select * from public.pending_meta_outbound()`);
+      }>(sql`select * from public.pending_meta_outbound() limit ${maxActions}`);
       return result.rows.map((r) => ({
         businessId: r.business_id,
         actionId: r.action_id,

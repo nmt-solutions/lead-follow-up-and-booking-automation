@@ -108,8 +108,13 @@ export const metaIntentSchema = z.strictObject({
   planId: z.uuid().nullable(),
   stepIndex: z.number().int().nonnegative().nullable(),
   reservedAt: z.iso.datetime(),
+  callbackToken: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type MetaIntent = z.infer<typeof metaIntentSchema>;
+// The provider correlation capability stays in restricted persistence and transport, never client responses.
+export const metaPublicIntentSchema = metaIntentSchema
+  .omit({ callbackToken: true })
+  .strip();
 export const metaSendResultSchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("accepted"),
@@ -203,7 +208,7 @@ export type MetaSendingWorkspace = {
     state: string;
     reason: string | null;
     dueAt: string;
-    intent: MetaIntent | null;
+    intent: z.infer<typeof metaPublicIntentSchema> | null;
     providerMessageRef: string | null;
     evidence:
       "unresolved" | "accepted" | "sent" | "delivered" | "read" | "failed";
@@ -296,7 +301,7 @@ export const metaSendingWorkspaceSchema: z.ZodType<MetaSendingWorkspace> =
         state: z.string(),
         reason: z.string().nullable(),
         dueAt: z.iso.datetime(),
-        intent: metaIntentSchema.nullable(),
+        intent: metaPublicIntentSchema.nullable(),
         providerMessageRef: z.string().nullable(),
         evidence: z.enum([
           "unresolved",

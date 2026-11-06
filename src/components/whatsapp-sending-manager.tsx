@@ -97,7 +97,9 @@ export function WhatsAppSendingManager({
         );
         setError(
           code === "CONFLICT"
-            ? "Saved context changed or this action needs review. Refresh status and save a new version when recipients or messages change."
+            ? action === "permission"
+              ? "Withdrawn permission needs newer recipient evidence and a distinct evidence record. Review the saved history; your entries are preserved."
+              : "Saved context changed or this action needs review. Refresh status and save a new version when recipients or messages change."
             : code === "CHANNEL_SETUP_REQUIRED"
               ? "Review the selected Meta account, approved template, capture and worker setup. Sending remains blocked."
               : "The action could not be completed. Check the fields, current Business access and session; your entries are preserved.",
