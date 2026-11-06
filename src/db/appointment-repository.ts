@@ -29,7 +29,11 @@ import {
   type AppointmentWorkspace,
   type CalendarScope,
 } from "../models/appointments";
-import { calendarCall, calendarCatalog } from "../appointments/provider";
+import {
+  calendarCall,
+  calendarCatalog,
+  calendarFailureReason,
+} from "../appointments/provider";
 import {
   buffered,
   candidateSlots,
@@ -40,7 +44,13 @@ import {
 
 type Appointment = typeof appointment.$inferSelect;
 type Policy = typeof bookingPolicy.$inferSelect;
-type Provider = { provider: CalendarProvider; timeoutMs: number };
+type Provider = {
+  provider: CalendarProvider;
+  timeoutMs: number;
+  providerForTransaction?(tx: Transaction): CalendarProvider;
+};
+const providerIn = (dep: Provider, tx: Transaction) =>
+  dep.providerForTransaction?.(tx) ?? dep.provider;
 const hash = (v: unknown) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
 const sameInstant = (a: string, b: string) =>
@@ -234,15 +244,16 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
       }
   }
   async function readyCalendar(
+    tx: Transaction,
     businessId: string,
     policy: Policy,
     dep: Provider,
   ) {
-    if (!policy.calendar || !dep.provider.available)
+    if (!policy.calendar || !providerIn(dep, tx).available)
       return "calendar_setup_required";
     try {
       const all = await calendarCatalog(
-        dep.provider,
+        providerIn(dep, tx),
         businessId,
         dep.timeoutMs,
       );
@@ -265,8 +276,8 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
       )
         return "calendar_capability_changed";
       return null;
-    } catch {
-      return "provider_unavailable";
+    } catch (error) {
+      return calendarFailureReason(error, "provider_unavailable");
     }
   }
   function calendarScope(
@@ -287,6 +298,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
     };
   }
   async function availability(
+    tx: Transaction,
     scope: CalendarScope,
     start: Date,
     end: Date,
@@ -299,7 +311,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
       endsAt: end.toISOString(),
     };
     const raw = await calendarCall(
-      (s) => dep.provider.availability(query, s),
+      (s) => providerIn(dep, tx).availability(query, s),
       dep.timeoutMs,
     );
     const parsed = availabilityReceiptSchema.safeParse(raw);
@@ -489,7 +501,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
     try {
       raw = await calendarCall(
         (s) =>
-          dep.provider.lookup(
+          providerIn(dep, tx).lookup(
             {
               ...p.intent,
               eventId: p.event?.eventId ?? null,
@@ -500,13 +512,13 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           ),
         dep.timeoutMs,
       );
-    } catch {
+    } catch (error) {
       await finish(
         tx,
         actor,
         p,
         p.event ? "conflict" : "ambiguous",
-        "reconciliation_unavailable",
+        calendarFailureReason(error, "reconciliation_unavailable"),
         p.event ? "requested" : p.status,
       );
       return;
@@ -596,7 +608,11 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           throw new ApplicationError("CONFLICT");
         const selected = input.configuration.calendar;
         const catalog = selected
-          ? await calendarCatalog(dep.provider, businessId, dep.timeoutMs)
+          ? await calendarCatalog(
+              providerIn(dep, tx),
+              businessId,
+              dep.timeoutMs,
+            )
           : [];
         const calendar = selected
           ? catalog.find(
@@ -633,16 +649,16 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         let setupReason: string | null = "calendar_setup_required";
         try {
           calendars = await calendarCatalog(
-            dep.provider,
+            providerIn(dep, tx),
             businessId,
             dep.timeoutMs,
           );
           setupReason = allPolicies[0]
-            ? await readyCalendar(businessId, allPolicies[0], dep)
+            ? await readyCalendar(tx, businessId, allPolicies[0], dep)
             : "configure_booking_hours";
-        } catch {
-          setupReason = dep.provider.available
-            ? "provider_unavailable"
+        } catch (error) {
+          setupReason = providerIn(dep, tx).available
+            ? calendarFailureReason(error, "provider_unavailable")
             : "calendar_setup_required";
         }
         const appointments: AppointmentWorkspace["appointments"] = [];
@@ -683,7 +699,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           canAct: c.need.ownerId === actor.userId,
           ownerId: c.need.ownerId,
           controlState: c.need.controlState,
-          providerAvailable: dep.provider.available,
+          providerAvailable: providerIn(dep, tx).available,
           setupReason,
           appointments,
         };
@@ -701,13 +717,14 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         const policy = (await policies(tx, businessId))[0];
         if (!policy)
           return { version: 0, reason: "configure_booking_hours", slots: [] };
-        const reason = await readyCalendar(businessId, policy, dep);
+        const reason = await readyCalendar(tx, businessId, policy, dep);
         if (reason) return { version: policy.version, reason, slots: [] };
         const { start, end } = customerDay(input);
         const all = await rows(tx, businessId);
         await expire(tx, actor, all);
         try {
           const busy = await availability(
+            tx,
             calendarScope(businessId, opportunityId, policy),
             new Date(
               start.epochMilliseconds -
@@ -741,10 +758,10 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
             );
           });
           return { version: policy.version, reason: null, slots };
-        } catch {
+        } catch (error) {
           return {
             version: policy.version,
-            reason: "provider_unavailable",
+            reason: calendarFailureReason(error, "provider_unavailable"),
             slots: [],
           };
         }
@@ -802,7 +819,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           input.mode === "automation" &&
           !(await qualified(tx, businessId, opportunityId, c))
             ? "qualification_review_required"
-            : await readyCalendar(businessId, policy, dep);
+            : await readyCalendar(tx, businessId, policy, dep);
         if (
           !reason &&
           all.some(
@@ -904,7 +921,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           p.holdExpiresAt <= clock.now()
             ? "hold_expired"
             : await guard(tx, actor, p, policy);
-        reason ??= await readyCalendar(businessId, policy, dep);
+        reason ??= await readyCalendar(tx, businessId, policy, dep);
         if (reason) {
           await finish(tx, actor, p, "blocked", reason);
           return;
@@ -912,6 +929,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         // Fresh scoped availability is the last external operation before create.
         try {
           const busy = await availability(
+            tx,
             calendarScope(businessId, opportunityId, policy),
             p.blockedStart,
             p.blockedEnd,
@@ -925,8 +943,14 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
             await finish(tx, actor, p, "blocked", "slot_no_longer_available");
             return;
           }
-        } catch {
-          await finish(tx, actor, p, "blocked", "provider_unavailable");
+        } catch (error) {
+          await finish(
+            tx,
+            actor,
+            p,
+            "blocked",
+            calendarFailureReason(error, "provider_unavailable"),
+          );
           return;
         }
         const role = await requireCapability(
@@ -948,11 +972,17 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         let raw: unknown;
         try {
           raw = await calendarCall(
-            (s) => dep.provider.create(p.intent, s),
+            (s) => providerIn(dep, tx).create(p.intent, s),
             dep.timeoutMs,
           );
-        } catch {
-          await finish(tx, actor, p, "ambiguous", "creation_result_unknown");
+        } catch (error) {
+          await finish(
+            tx,
+            actor,
+            p,
+            "ambiguous",
+            calendarFailureReason(error, "creation_result_unknown"),
+          );
           return;
         }
         const result = calendarEventSchema.safeParse(raw);
@@ -1023,7 +1053,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           (v) => v.id === p.policyId,
         );
         if (!policy) throw new ApplicationError("CONFLICT");
-        const reason = await readyCalendar(businessId, policy, dep);
+        const reason = await readyCalendar(tx, businessId, policy, dep);
         if (reason) {
           await finish(
             tx,
@@ -1182,7 +1212,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           await finish(tx, actor, p, "booked", "cancellation_context_changed");
           return;
         }
-        const reason = await readyCalendar(businessId, policy, dep);
+        const reason = await readyCalendar(tx, businessId, policy, dep);
         if (reason) {
           await finish(tx, actor, p, "booked", reason);
           return;
@@ -1195,7 +1225,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           const lookupResult = calendarLookupSchema.safeParse(
             await calendarCall(
               (s) =>
-                dep.provider.lookup(
+                providerIn(dep, tx).lookup(
                   {
                     ...p.intent,
                     eventId: p.event!.eventId,
@@ -1259,7 +1289,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           }
           raw = await calendarCall(
             (s) =>
-              dep.provider.cancel(
+              providerIn(dep, tx).cancel(
                 {
                   ...p.intent,
                   eventId: current.eventId,
@@ -1269,13 +1299,13 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
               ),
             dep.timeoutMs,
           );
-        } catch {
+        } catch (error) {
           await finish(
             tx,
             actor,
             p,
             "cancel_ambiguous",
-            "cancellation_result_unknown",
+            calendarFailureReason(error, "cancellation_result_unknown"),
           );
           return;
         }

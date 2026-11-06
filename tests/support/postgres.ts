@@ -1,6 +1,6 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -61,6 +61,32 @@ export async function startPostgres() {
     database: "postgres",
     max: 2,
   });
+  async function stop() {
+    try {
+      await postgres.stop();
+    } catch (error) {
+      // embedded-postgres deletes immediately after Windows taskkill exits;
+      // remaining file handles can briefly outlive that process notification.
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        !["EBUSY", "ENOTEMPTY", "EPERM"].includes(String(error.code))
+      )
+        throw error;
+      const target = resolve(directory);
+      if (
+        dirname(target) !== resolve(tmpdir()) ||
+        !basename(target).startsWith("business-postgres-")
+      )
+        throw error;
+      await rm(target, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 100,
+      });
+    }
+  }
   async function reapplySchema() {
     await prepareDatabaseRole(admin);
     const pushed = await run(process.execPath, [drizzleCli, "push"], {
@@ -89,13 +115,13 @@ export async function startPostgres() {
       async close() {
         await runtime.end();
         await admin.end();
-        await postgres.stop();
+        await stop();
       },
     };
   } catch (error) {
     await runtime.end();
     await admin.end();
-    await postgres.stop();
+    await stop();
     throw error;
   }
 }

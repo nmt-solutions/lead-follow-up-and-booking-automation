@@ -17,6 +17,10 @@ import { createRfqRepository } from "../src/db/rfq-repository";
 import { createAppointmentHttp } from "../src/http/appointments";
 import type { KnowledgeConfiguration } from "../src/models/knowledge";
 import { bookingInquiry } from "./support/booking-inquiry";
+import { googleFixture } from "./support/google-calendar";
+import { createGoogleCalendarApplication } from "../src/application/google-calendar";
+import { createGoogleCalendarRepository } from "../src/db/google-calendar-repository";
+import { createGoogleCalendarProvider } from "../src/google-calendar/provider";
 
 describe("Appointments through the application seam and real PostgreSQL", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -34,6 +38,7 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
       timing?: Record<string, unknown>;
       goal?: "booking" | "rfq";
       qualification?: KnowledgeConfiguration["qualification"];
+      nativeGoogle?: boolean;
     } = {},
   ) {
     h.clock.set(options.now ?? "2026-11-05T09:00:00Z");
@@ -119,10 +124,51 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
           ? "calendar_view"
           : "free_busy";
     }
+    const google = options.nativeGoogle ? googleFixture() : null;
+    const googleOptions = google
+      ? {
+          configuration: google.configuration,
+          clock: h.clock,
+          fetch: google.fetch,
+        }
+      : null;
+    const googleApplication = googleOptions
+      ? createGoogleCalendarApplication({
+          database: db,
+          access: h.access,
+          ...googleOptions,
+        })
+      : null;
+    let googleConnectionId: string | null = null;
+    if (googleApplication) {
+      const start = await googleApplication.start(credentials, business.id, {
+        returnPath: `/businesses/${business.id}/calendar`,
+      });
+      await googleApplication.callback(credentials, business.id, {
+        state: new URL(start.authorizationUrl).searchParams.get("state"),
+        code: "fixture-code",
+      });
+      const selected = await googleApplication.select(
+        credentials,
+        business.id,
+        { calendarId: "dedicated@example.com" },
+      );
+      googleConnectionId = selected.connectionId;
+    }
+    const googleRepository = googleOptions
+      ? createGoogleCalendarRepository(db, googleOptions)
+      : null;
     const application = createAppointmentApplication({
       authenticateForWork: h.access.authenticateForWork,
       repository: createAppointmentRepository(db, h.clock),
       provider: calendar.provider,
+      ...(googleRepository
+        ? {
+            providerForTransaction: (
+              tx: Parameters<typeof createGoogleCalendarProvider>[1],
+            ) => createGoogleCalendarProvider(googleRepository, tx, h.clock),
+          }
+        : {}),
       clock: h.clock,
       timeoutMs: 1000,
     });
@@ -135,7 +181,10 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
       slotStepMinutes: 15,
       holdSeconds: 120,
       automationEnabled: false,
-      calendar: { connectionId: calendar.connectionId, calendarId: "primary" },
+      calendar: {
+        connectionId: googleConnectionId ?? calendar.connectionId,
+        calendarId: googleConnectionId ? "dedicated@example.com" : "primary",
+      },
       ...options.timing,
     };
     await application.configure(credentials, business.id, {
@@ -164,9 +213,306 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
       slots,
       opportunities,
       connection,
+      google,
+      googleApplication,
     };
   }
+
+  it("cancels an unchanged native Google event expressed in the calendar offset", async () => {
+    const f = await fixture({ nativeGoogle: true });
+    f.google!.control.nativeOffset = true;
+    const held = await request(f);
+    const booked = await f.application.book(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(booked.appointments[0].status).toBe("confirmed");
+    const result = await f.application.cancel(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(result.appointments[0].status).toBe("cancelled");
+    expect(f.google!.calls.filter((c) => c.method === "DELETE")).toHaveLength(
+      1,
+    );
+  });
+  it("uses the selected Google calendar timezone for all-day conflicts when Business time differs", async () => {
+    const f = await fixture({ nativeGoogle: true });
+    f.google!.control.timeZone = "Pacific/Kiritimati";
+    const held = await request(f);
+    f.google!.events.set("all-day", {
+      id: "all-day",
+      status: "confirmed",
+      start: { date: "2026-11-06" },
+      end: { date: "2026-11-07" },
+    });
+    const result = await f.application.book(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(result.appointments[0]).toMatchObject({
+      status: "requested",
+      phase: "conflict",
+      reason: "external_calendar_conflict",
+    });
+  });
   type Fixture = Awaited<ReturnType<typeof fixture>>;
+  it("books through native Google APIs with scoped authoritative metadata, no invites and read-only recovery after an accepted timeout", async () => {
+    const f = await fixture({ nativeGoogle: true });
+    const slots = await f.slots();
+    expect(slots.slots).not.toHaveLength(0);
+    f.google!.control.timeoutAfterCreate = true;
+    const held = await request(f);
+    const unknown = await f.application.book(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(unknown.appointments[0]).toMatchObject({
+      status: "requested",
+      phase: "ambiguous",
+      event: null,
+    });
+    const recovered = await f.application.reconcile(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(recovered.appointments[0]).toMatchObject({
+      status: "confirmed",
+      phase: "booked",
+      customerNotified: false,
+      event: { eventId: `a${held.intent.intentKey}` },
+    });
+    await f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+      appointmentId: held.id,
+    });
+    const creates = f.google!.calls.filter(
+      (c) => c.method === "POST" && c.url.includes("/events?"),
+    );
+    expect(creates).toHaveLength(1);
+    expect(creates[0].url).toContain("sendUpdates=none");
+    expect(creates[0].body).toMatchObject({
+      attendees: [],
+      reminders: { useDefault: false, overrides: [] },
+      guestsCanInviteOthers: false,
+      extendedProperties: {
+        private: {
+          businessId: f.business.id,
+          connectionId: held.intent.connectionId,
+          opportunityId: f.opportunity.id,
+          appointmentId: held.id,
+          intentKey: held.intent.intentKey,
+        },
+      },
+    });
+    const cancelled = await f.application.cancel(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(cancelled.appointments[0]).toMatchObject({
+      status: "cancelled",
+      phase: "finished",
+    });
+    const deleted = f.google!.calls.find((c) => c.method === "DELETE")!;
+    expect(deleted.url).toContain("sendUpdates=none");
+    expect(deleted.headers.get("If-Match")).toBe('"revision-1"');
+  });
+  it.each([401, 403, 429])(
+    "blocks native Google booking on HTTP %i before creation and exposes current grant/recovery state",
+    async (status) => {
+      const f = await fixture({ nativeGoogle: true });
+      const held = await request(f);
+      f.google!.control.apiError = status;
+      const result = await f.application.book(
+        f.credentials,
+        f.business.id,
+        f.opportunity.id,
+        { appointmentId: held.id },
+      );
+      expect(result.appointments[0]).toMatchObject({
+        status: "requested",
+        phase: "blocked",
+        event: null,
+        reason:
+          status === 401
+            ? "calendar_revoked"
+            : status === 403
+              ? "calendar_insufficient"
+              : "calendar_rate_limited",
+      });
+      expect(f.google!.events.size).toBe(0);
+      const connection = await f.googleApplication!.read(
+        f.credentials,
+        f.business.id,
+      );
+      expect(connection.status).toBe(
+        status === 401
+          ? "reconnect_required"
+          : status === 403
+            ? "insufficient"
+            : "ready",
+      );
+    },
+  );
+  it.each(["freeBusyErrors", "malformedBusy"] as const)(
+    "refuses native Google availability %s instead of inferring an empty calendar",
+    async (kind) => {
+      const f = await fixture({ nativeGoogle: true });
+      f.google!.control[kind] = true;
+      expect((await f.slots()).slots).toHaveLength(0);
+      const held = await request(f);
+      await f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+        appointmentId: held.id,
+      });
+      expect(f.google!.events.size).toBe(0);
+    },
+  );
+  it("maps native Google 409 to read-only reconciliation without retrying insert or declaring absence definitive", async () => {
+    const f = await fixture({ nativeGoogle: true });
+    const held = await request(f);
+    f.google!.control.createError = 409;
+    const result = await f.application.book(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(result.appointments[0]).toMatchObject({
+      status: "requested",
+      phase: "ambiguous",
+      reason: "calendar_conflict",
+    });
+    const absent = await f.application.reconcile(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(absent.appointments[0]).toMatchObject({
+      phase: "ambiguous",
+      status: "requested",
+      reason: "creation_result_unknown",
+    });
+    await f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+      appointmentId: held.id,
+    });
+    expect(
+      f.google!.calls.filter(
+        (c) => c.method === "POST" && c.url.includes("/events?"),
+      ),
+    ).toHaveLength(1);
+  });
+  it("recovers native Google acceptance after a failed persistence commit without a duplicate event", async () => {
+    const f = await fixture({ nativeGoogle: true });
+    const held = await request(f);
+    await h.admin.query(
+      `CREATE FUNCTION fail_google_retention() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event IS NOT NULL THEN RAISE EXCEPTION 'fixture storage unavailable'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_google_retention BEFORE UPDATE ON appointment FOR EACH ROW EXECUTE FUNCTION fail_google_retention()`,
+    );
+    try {
+      await expect(
+        f.application.book(f.credentials, f.business.id, f.opportunity.id, {
+          appointmentId: held.id,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await h.admin.query(
+        "DROP TRIGGER fail_google_retention ON appointment; DROP FUNCTION fail_google_retention()",
+      );
+    }
+    expect((await f.read()).appointments[0]).toMatchObject({
+      phase: "committed",
+      status: "requested",
+      event: null,
+    });
+    const result = await f.application.reconcile(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(result.appointments[0]).toMatchObject({
+      phase: "booked",
+      status: "confirmed",
+    });
+    expect(f.google!.events.size).toBe(1);
+    expect(
+      f.google!.calls.filter(
+        (c) => c.method === "POST" && c.url.includes("/events?"),
+      ),
+    ).toHaveLength(1);
+  });
+  it("validates native Google intent provenance, external conflicts and immutable history across disconnect", async () => {
+    const f = await fixture({ nativeGoogle: true });
+    const held = await request(f);
+    f.google!.control.malformedCreate = true;
+    const uncertain = await f.application.book(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(uncertain.appointments[0]).toMatchObject({
+      status: "requested",
+      phase: "ambiguous",
+      event: null,
+    });
+    const id = `a${held.intent.intentKey}`;
+    const native = f.google!.events.get(id)!;
+    f.google!.events.set(id, {
+      ...native,
+      extendedProperties: { private: { businessId: randomUUID() } },
+    });
+    const wrong = await f.application.reconcile(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(wrong.appointments[0].status).toBe("requested");
+    expect(wrong.appointments[0].event).toBeNull();
+    f.google!.events.set(id, native);
+    f.google!.control.conflict = true;
+    const conflict = await f.application.reconcile(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(conflict.appointments[0]).toMatchObject({
+      status: "requested",
+      phase: "conflict",
+      reason: "external_calendar_conflict",
+    });
+    f.google!.control.conflict = false;
+    const confirmed = await f.application.reconcile(
+      f.credentials,
+      f.business.id,
+      f.opportunity.id,
+      { appointmentId: held.id },
+    );
+    expect(confirmed.appointments[0].status).toBe("confirmed");
+    await f.googleApplication!.disconnect(f.credentials, f.business.id);
+    const history = await f.read();
+    expect(history.appointments[0].event).toEqual(
+      confirmed.appointments[0].event,
+    );
+    expect(history.appointments[0].history).toEqual(
+      confirmed.appointments[0].history,
+    );
+    expect(history.calendars).toEqual([]);
+    expect(f.google!.events.size).toBe(1);
+  });
   async function request(f: Fixture, patch: Record<string, unknown> = {}) {
     const ids = new Set((await f.read()).appointments.map((p) => p.id));
     const state = await f.application.request(

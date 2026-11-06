@@ -3,6 +3,11 @@ import { createAppointmentApplication } from "../application/appointments";
 import { createAppointmentRepository } from "../db/appointment-repository";
 import { createAppointmentHttp } from "../http/appointments";
 import { unavailableCalendarProvider } from "../appointments/provider";
+import { createGoogleCalendarApplication } from "../application/google-calendar";
+import { createGoogleCalendarRepository } from "../db/google-calendar-repository";
+import { createGoogleCalendarProvider } from "../google-calendar/provider";
+import { configuredGoogleCalendar } from "../google-calendar/configuration";
+import { createGoogleCalendarHttp } from "../http/google-calendar";
 import { createCommercialApplication } from "../application/commercial-actions";
 import { createCommercialRepository } from "../db/commercial-actions-repository";
 import { createCommercialHttp } from "../http/commercial-actions";
@@ -208,18 +213,39 @@ async function composeServices() {
       },
     },
   });
+  const googleConfiguration = configuredGoogleCalendar(process.env);
+  const googleOptions = {
+    configuration: googleConfiguration,
+    clock: { now: () => new Date() },
+    fetch,
+  };
+  const googleCalendar = createGoogleCalendarApplication({
+    database: runtimeDatabase(pool),
+    access,
+    ...googleOptions,
+  });
+  const googleRepository = createGoogleCalendarRepository(
+    runtimeDatabase(pool),
+    googleOptions,
+  );
   const appointments = createAppointmentApplication({
     authenticateForWork: access.authenticateForWork,
     repository: createAppointmentRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
     clock: { now: () => new Date() },
-    // Separate native grants and live transports are implemented in #24/#25.
-    // No fixture adapter, mailbox grant or hidden scheduling service is activated.
     provider: unavailableCalendarProvider,
+    providerForTransaction: (tx) =>
+      createGoogleCalendarProvider(googleRepository, tx, googleOptions.clock),
     timeoutMs: 5000,
   });
   return {
+    googleCalendar,
+    googleCalendarHttp: createGoogleCalendarHttp({
+      application: googleCalendar,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     appointments,
     appointmentsHttp: createAppointmentHttp({
       application: appointments,

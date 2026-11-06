@@ -5,6 +5,26 @@ import {
   type CalendarProvider,
 } from "../models/appointments";
 
+export class CalendarProviderFailure extends Error {
+  constructor(
+    readonly reason:
+      | "rate_limited"
+      | "revoked"
+      | "insufficient"
+      | "conflict"
+      | "not_found"
+      | "unavailable"
+      | "invalid_response",
+  ) {
+    super(reason);
+  }
+}
+export function calendarFailureReason(error: unknown, fallback: string) {
+  return error instanceof CalendarProviderFailure
+    ? `calendar_${error.reason}`
+    : fallback;
+}
+
 export async function calendarCall(
   operation: (signal: AbortSignal) => Promise<unknown>,
   timeoutMs: number,

@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { GoogleCalendarStatus } from "../models/google-calendar";
 import {
   bigint,
   boolean,
@@ -2121,6 +2122,92 @@ export const commercialScopeForeignKeys = [
           ],
         }),
       ),
+  ),
+];
+
+function googlePolicies(name: string, privileged: boolean) {
+  const access = privileged ? inboxWrite : inboxScope;
+  return [
+    pgPolicy(`${name}_read`, { for: "select", to: appRuntime, using: access }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxWrite}) and actor_id = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy(`${name}_update`, {
+      for: "update",
+      to: appRuntime,
+      using: access,
+      withCheck: access,
+    }),
+  ];
+}
+export const googleCalendarGrant = pgTable(
+  "google_calendar_grant",
+  {
+    ...inboxColumns(),
+    generation: integer("generation").notNull(),
+    status: text("status").$type<GoogleCalendarStatus>().notNull(),
+    reason: text("reason"),
+    accountSubject: text("account_subject"),
+    accountEmail: text("account_email"),
+    selectedCalendarId: text("selected_calendar_id"),
+    credentials: text("credentials"),
+    rejectedCredentials: text("rejected_credentials"),
+    scopes: jsonb("scopes").$type<string[]>().notNull(),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("google_calendar_active_business")
+      .on(t.businessId)
+      .where(sql`${t.status} <> 'disconnected'`),
+    uniqueIndex("google_calendar_grant_scope").on(t.id, t.businessId),
+    check("google_calendar_generation", sql`${t.generation} > 0`),
+    check(
+      "google_calendar_status",
+      sql`${t.status} in ('connecting','selection_required','ready','reconnect_required','insufficient','revocation_pending','disconnected')`,
+    ),
+    ...googlePolicies("google_calendar_grant", false),
+  ],
+).enableRLS();
+export const googleCalendarOauth = pgTable(
+  "google_calendar_oauth",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    generation: integer("generation").notNull(),
+    stateHash: text("state_hash").notNull(),
+    verifier: text("verifier").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id, { onDelete: "cascade" }),
+    returnPath: text("return_path").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumed: boolean("consumed").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("google_calendar_oauth_state").on(t.stateHash),
+    ...googlePolicies("google_calendar_oauth", true),
+  ],
+).enableRLS();
+export const googleCalendarScopeForeignKeys = [
+  new ForeignKey(
+    googleCalendarOauth,
+    foreignKey({
+      name: "google_calendar_oauth_grant_scope",
+      columns: [
+        googleCalendarOauth.connectionId,
+        googleCalendarOauth.businessId,
+      ],
+      foreignColumns: [googleCalendarGrant.id, googleCalendarGrant.businessId],
+    }),
   ),
 ];
 

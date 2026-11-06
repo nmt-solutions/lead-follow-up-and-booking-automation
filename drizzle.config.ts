@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "google_calendar_grant",
+    "google_calendar_oauth",
     "booking_policy",
     "appointment",
     "appointment_history",

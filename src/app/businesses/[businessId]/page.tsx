@@ -73,6 +73,14 @@ export default async function BusinessPage({
       </Link>
       {access.role !== "salesperson" && (
         <Link
+          href={`/businesses/${businessId}/calendar`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Booking calendar connection
+        </Link>
+      )}
+      {access.role !== "salesperson" && (
+        <Link
           href={`/businesses/${businessId}/team`}
           className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
         >

@@ -14,6 +14,18 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('google_calendar_grant','google_calendar_oauth'))
+      AND (SELECT count(*) = 6 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
+        WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('google_calendar_grant','google_calendar_oauth'))
+      AND NOT has_table_privilege(current_user, 'public.google_calendar_grant', 'DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.google_calendar_grant', 'business_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.google_calendar_oauth', 'verifier', 'UPDATE')
       AND current_setting('row_security') = 'on'
       AND (SELECT count(*) = 6 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))

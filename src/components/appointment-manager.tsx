@@ -36,7 +36,19 @@ const reasons: Record<string, string> = {
   event_identity_already_used:
     "This calendar identity is already retained by another appointment. The assigned owner must investigate the provider records before proceeding.",
   calendar_setup_required:
-    "An Admin must connect a supported Google or Microsoft calendar with separate calendar permissions. Native live adapters are pending; booking is unavailable in this runtime. RFQs remain available.",
+    "An Admin must connect a supported calendar with separate calendar permissions and configure booking hours. Google Calendar setup is available from the Business profile. RFQs remain available.",
+  calendar_rate_limited:
+    "Google is limiting calendar requests. Wait before checking or reconciling again; do not repeat event creation.",
+  calendar_revoked:
+    "Google authorization was revoked or expired. Ask an Admin to reconnect, then reconcile any unresolved event.",
+  calendar_insufficient:
+    "Calendar permission is insufficient. Ask an Admin to restore the selected calendar grant, then reconcile unresolved bookings.",
+  calendar_conflict:
+    "Google reported an event identity or revision conflict. Reconcile the original request before any further action.",
+  calendar_invalid_response:
+    "Google returned an unverified result. Review the connection and reconcile; do not repeat creation.",
+  calendar_unavailable:
+    "Google is unavailable. Restore access and reconcile any uncertain result before booking again.",
   configure_booking_hours:
     "Ask an Admin to configure working hours, duration, buffers and hold expiry.",
   calendar_permission_required:

@@ -55,6 +55,9 @@ import {
   commercialOutcome,
   commercialScopeForeignKeys,
   bookingPolicy,
+  googleCalendarGrant,
+  googleCalendarOauth,
+  googleCalendarScopeForeignKeys,
   appointment,
   appointmentHistory,
   appointmentScopeForeignKeys,
@@ -311,6 +314,11 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.booking_policy, public.appointment, public.appointment_history FROM app_runtime;
         REVOKE ALL PRIVILEGES (status, phase, event, reason, cancellation) ON public.appointment FROM app_runtime;
       END IF;
+      IF to_regclass('public.google_calendar_grant') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.google_calendar_grant, public.google_calendar_oauth FROM app_runtime;
+        REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON public.google_calendar_grant FROM app_runtime;
+        REVOKE UPDATE (consumed) ON public.google_calendar_oauth FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -333,6 +341,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     ...opportunityScopeForeignKeys,
     ...commercialScopeForeignKeys,
     ...appointmentScopeForeignKeys,
+    ...googleCalendarScopeForeignKeys,
   ]) {
     const { name } = getTableConfig(key.table);
     const exists = await pool.query<{ present: boolean }>(
@@ -380,6 +389,7 @@ export async function secureDatabase(pool: Pool) {
       ...opportunityScopeForeignKeys,
       ...commercialScopeForeignKeys,
       ...appointmentScopeForeignKeys,
+      ...googleCalendarScopeForeignKeys,
     ]) {
       const table = key.table;
       const reference = key.reference();
@@ -411,6 +421,8 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      googleCalendarGrant,
+      googleCalendarOauth,
       bookingPolicy,
       appointment,
       appointmentHistory,
@@ -470,6 +482,12 @@ export async function secureDatabase(pool: Pool) {
     }
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON google_calendar_grant, google_calendar_oauth FROM app_runtime;
+      GRANT SELECT, INSERT ON google_calendar_grant, google_calendar_oauth TO app_runtime;
+      GRANT UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON google_calendar_grant TO app_runtime;
+      GRANT UPDATE (consumed) ON google_calendar_oauth TO app_runtime;
+      ALTER TABLE google_calendar_grant FORCE ROW LEVEL SECURITY;
+      ALTER TABLE google_calendar_oauth FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON booking_policy, appointment, appointment_history FROM app_runtime;
       GRANT SELECT, INSERT ON booking_policy, appointment, appointment_history TO app_runtime;
       GRANT UPDATE (status, phase, event, reason, cancellation) ON appointment TO app_runtime;

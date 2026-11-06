@@ -11,6 +11,7 @@ import {
   type CalendarProvider,
 } from "../models/appointments";
 import type { createAppointmentRepository } from "../db/appointment-repository";
+import type { Transaction } from "../db/scope";
 
 function validate<T>(schema: z.ZodType<T>, input: unknown): T {
   const p = schema.safeParse(input);
@@ -21,6 +22,7 @@ export function createAppointmentApplication<Credentials>(dependencies: {
   authenticateForWork(credentials: Credentials): Promise<WorkIdentity>;
   repository: ReturnType<typeof createAppointmentRepository>;
   provider: CalendarProvider;
+  providerForTransaction?(tx: Transaction): CalendarProvider;
   clock: Clock;
   timeoutMs: number;
 }) {
@@ -32,6 +34,7 @@ export function createAppointmentApplication<Credentials>(dependencies: {
     throw new Error("Invalid calendar request deadline");
   const dep = {
     provider: dependencies.provider,
+    providerForTransaction: dependencies.providerForTransaction,
     timeoutMs: dependencies.timeoutMs,
   };
   async function context(
