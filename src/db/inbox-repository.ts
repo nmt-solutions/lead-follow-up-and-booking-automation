@@ -6,6 +6,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { stopOpportunityFollowups } from "./opportunity-followups";
 import { observeSequenceReply } from "./email-sequence-observations";
+import { resolveMetaOutgoing } from "./whatsapp-references";
 import type { InboxRepository } from "../application/inbox";
 import { ApplicationError } from "../models/application-error";
 import type { Actor } from "../models/business";
@@ -197,7 +198,9 @@ export async function captureInboxInquiry(
     return result;
   }
   if (event.kind === "opt_out") throw new ApplicationError("INVALID_INPUT");
-  const sequenceOpportunityId = await observeSequenceReply(
+  const metaReference = connection.mode === "meta" && metaAuthorization && event.replyToMessageRef
+    ? await resolveMetaOutgoing(tx,businessId,connectionId,event.senderRef,event.replyToMessageRef) : null;
+  const sequenceOpportunityId = metaReference?.opportunityId ?? await observeSequenceReply(
     tx,
     businessId,
     connectionId,

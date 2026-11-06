@@ -7,6 +7,7 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "whatsapp_outbound",
     "whatsapp_intake",
     "whatsapp_receipt",
     "whatsapp_evidence",

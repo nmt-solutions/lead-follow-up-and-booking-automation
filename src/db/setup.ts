@@ -5,6 +5,7 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
   whatsAppIntake,
+  whatsAppOutbound,
   whatsAppReceipt,
   whatsAppIntakeScopeForeignKeys,
   whatsAppConnection,
@@ -447,6 +448,7 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.whatsapp_intake,public.whatsapp_receipt FROM app_runtime;
         REVOKE ALL PRIVILEGES (connection_version,account_key,inbox_connection_id,actor_id,enabled_at,receipt_retention_seconds,inbound_at,echo_at,gap) ON public.whatsapp_intake FROM app_runtime;
         REVOKE ALL PRIVILEGES (activity,state,conversation_id,opportunity_id) ON public.whatsapp_receipt FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_receipt' AND column_name='status_evidence') THEN REVOKE UPDATE(status_evidence) ON public.whatsapp_receipt FROM app_runtime; END IF;
       END IF;
       IF to_regclass('public.whatsapp_connection') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.whatsapp_connection, public.whatsapp_oauth, public.whatsapp_event FROM app_runtime;
@@ -641,6 +643,7 @@ export async function secureDatabase(pool: Pool) {
     // Upgrade the original owner-only role check from the schema's definition.
     for (const table of [
       membership,
+      opportunityDueAction,
       inboxOpportunity,
       senderHealthRecord,
       whatsAppIntake,
@@ -658,6 +661,7 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      whatsAppOutbound,
       whatsAppIntake,
       whatsAppReceipt,
       whatsAppEvidence,
@@ -829,6 +833,11 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON whatsapp_evidence FROM app_runtime;
       GRANT SELECT, INSERT ON whatsapp_evidence TO app_runtime;
       ALTER TABLE whatsapp_evidence FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON whatsapp_outbound FROM app_runtime;
+      REVOKE ALL PRIVILEGES (id,business_id,connection_id,key,actor_id,at,data,position) ON whatsapp_outbound FROM app_runtime;
+      GRANT SELECT, INSERT ON whatsapp_outbound TO app_runtime;
+      GRANT USAGE ON SEQUENCE whatsapp_outbound_position_seq TO app_runtime;
+      ALTER TABLE whatsapp_outbound FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON whatsapp_connection, whatsapp_oauth, whatsapp_event TO app_runtime;
       GRANT UPDATE (version, configuration, status, reason, terms_actor_id, terms_accepted_at, credentials, provider_key, observation, operation_id, assets, coexistence_finished, phone_number_id) ON whatsapp_connection TO app_runtime;
       GRANT UPDATE (consumed) ON whatsapp_oauth TO app_runtime;

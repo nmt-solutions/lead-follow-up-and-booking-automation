@@ -9,6 +9,7 @@ import type { MetaActivity, MetaIntakeView } from "../models/whatsapp-intake";
 import { ApplicationError } from "../models/application-error";
 import { captureInboxInquiry } from "./inbox-repository";
 import { writeControl } from "./opportunity-control-repository";
+import { resolveMetaOutgoing } from "./whatsapp-references";
 import {
   metaInboundAllowed,
   metaConnectionAuthorized,
@@ -504,6 +505,7 @@ export function createWhatsAppIntakeRepository(
             peer: activity.peer,
             replyTo: activity.replyTo,
             status: activity.status,
+            statusEvidence: activity.statusEvidence ?? null,
             state: "pending",
             at: clock.now(),
             expiresAt: new Date(
@@ -571,7 +573,8 @@ export function createWhatsAppIntakeRepository(
                     eq(inboxMessage.messageRef, activity.replyTo),
                   ),
                 );
-              if (!parent) {
+              const outgoing = !parent ? await resolveMetaOutgoing(tx,scope.businessId,intake.inboxConnectionId,activity.peer,activity.replyTo) : null;
+              if (!parent && !outgoing) {
                 await tx
                   .update(whatsAppReceipt)
                   .set({ state: "review" })

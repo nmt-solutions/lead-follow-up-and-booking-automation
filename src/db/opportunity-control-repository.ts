@@ -31,6 +31,8 @@ import { gmailSequenceKey } from "../gmail/sequence-mail";
 import { gmailDispatchAccess } from "./gmail-dispatch";
 import { reconciledOpportunityMail } from "./opportunity-mail";
 import type { Database } from "./runtime";
+import type { WhatsAppSendingRepository } from "./whatsapp-sending-repository";
+import type { MetaIntent } from "../models/whatsapp-sending";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { readCommercialPolicy } from "./commercial-authority-repository";
 import { inquiryDispatchContext, lockInquiryProfile } from "./inquiry-context";
@@ -262,6 +264,7 @@ function sameMailIntent(
 export function createOpportunityRepository(
   database: Database,
   clock: Clock,
+  whatsapp?: WhatsAppSendingRepository,
 ): OpportunityRepository {
   return {
     reconcile(actor, businessId, actionId) {
@@ -291,6 +294,11 @@ export function createOpportunityRepository(
             throw new ApplicationError("FORBIDDEN");
           if (!["committed", "dispatched"].includes(row.state))
             return actionView(row);
+          if (whatsapp && await whatsapp.intentAt(tx,businessId,actionId)) {
+            await whatsapp.reconcileAt(tx,actor,businessId,actionId);
+            const [updated] = await tx.select().from(opportunityDueAction).where(eq(opportunityDueAction.id,actionId));
+            return actionView(updated);
+          }
           const email = await reconciledOpportunityMail(tx, row, clock.now());
           if (!email) return actionView(row);
           const [updated] = await tx
@@ -632,7 +640,25 @@ export function createOpportunityRepository(
         if (stopped)
           return { action: await cancel(tx, stopped), failure: null };
         const need = await needAt(tx, businessId, action.opportunityId);
-        const ctx = await messageContext(tx, businessId, action.messageId);
+        if (action.whatsappPlanId && whatsapp) {
+          const policy = await readCommercialPolicy(tx,businessId,false);
+          const decision = action.evaluation ? evaluateCommercialAuthority(policy,action.evaluation,now()) : null;
+          const connection = await whatsapp.planConnectionAt(tx,businessId,action);
+          const reason = need.controlState!=="automation" || need.controlVersion!==action.controlVersion || need.ownerId!==action.actorId ? "control_changed" : !connection?.active ? "connection_revoked" : !(await opportunityRepliesVisible(tx,businessId,need.id,now())) ? "reply_visibility_unavailable" : policy.version!==action.policyVersion ? "policy_changed" : !decision || decision.status!=="permitted" ? decision?.reason ?? "missing_authority" : null;
+          if (reason) return {action:await cancel(tx,reason),failure:null};
+          const meta = await whatsapp.prepareAt(tx,actor,action);
+          if (meta.reason || !meta.intent) {
+            if (action.state==="pending" && ["whatsapp_previous_attempt_unresolved","whatsapp_followup_not_due","whatsapp_outside_approved_timing"].includes(meta.reason ?? "")) {
+              const [waiting]=await tx.update(opportunityDueAction).set({reason:meta.reason}).where(eq(opportunityDueAction.id,actionId)).returning();
+              return {action:waiting,failure:null};
+            }
+            return {action:await cancel(tx,meta.reason ?? "whatsapp_intent_required"),failure:null};
+          }
+          if (!provider.channels.includes("whatsapp")) throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+          const dispatch: OpportunityDispatch = {actionId:action.id,businessId,opportunityId:need.id,connectionId:action.connectionId,channel:"whatsapp",evaluation:action.evaluation};
+          return {action,failure:null,dispatch,metaIntent:meta.intent};
+        }
+        const ctx = await messageContext(tx, businessId, action.messageId ?? "");
         if (action.inquiryRunId && !intentOnly) await lockInquiryProfile(tx);
         const inquiry = action.inquiryRunId
           ? await inquiryDispatchContext(
@@ -740,6 +766,11 @@ export function createOpportunityRepository(
         };
         if (!provider.channels.includes(ctx.connection.channel))
           throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+        if (ctx.connection.channel === "whatsapp" && whatsapp) {
+          const meta = await whatsapp.prepareAt(tx, actor, action, inquiry?.reply);
+          if (meta.reason || !meta.intent) return { action: await cancel(tx, meta.reason ?? "whatsapp_intent_required"), failure: null };
+          return { action, failure: null, dispatch, metaIntent: meta.intent };
+        }
         let email: OpportunityMailEnvelope | undefined;
         if (
           provider.emailIdentity?.adapterKey === gmailSequenceKey &&
@@ -857,15 +888,17 @@ export function createOpportunityRepository(
           if (row.state !== "pending" || row.dueAt > now())
             return { action: row, acquired: false, failure: null };
           let email: OpportunityMailEnvelope | undefined;
+          let metaIntent: MetaIntent | undefined;
           if (
-            provider.emailIdentity?.adapterKey === gmailSequenceKey &&
-            row.inquiryRunId
+            (provider.emailIdentity?.adapterKey === gmailSequenceKey && row.inquiryRunId) ||
+            (whatsapp && (row.whatsappPlanId || (await messageContext(tx, businessId, row.messageId ?? "")).connection.channel === "whatsapp"))
           ) {
             // Prepare the immutable reply intent without holding global policy/profile locks across commitment.
             // Full authorization belongs to the locked provider boundary below, and repeats after refresh.
             const allowed = await authorize(tx, row, role, true);
             if (!allowed.dispatch) return { ...allowed, acquired: false };
             email = allowed.email;
+            metaIntent = allowed.metaIntent;
           } else {
             const failure = await sessionFailure(tx, row, role);
             if (failure)
@@ -874,11 +907,12 @@ export function createOpportunityRepository(
                 acquired: false,
                 failure,
               };
-            const ctx = await messageContext(tx, businessId, row.messageId);
+            const ctx = await messageContext(tx, businessId, row.messageId ?? "");
             if (!provider.channels.includes(ctx.connection.channel))
               throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
           }
           // Commit the exact intent BEFORE transport. A crash or result-write failure cannot erase correlation.
+          if (metaIntent) await whatsapp!.reserveAt(tx, actor, metaIntent);
           const [committed] = await tx
             .update(opportunityDueAction)
             .set({
@@ -933,6 +967,20 @@ export function createOpportunityRepository(
             return { action: current, failure: null };
           const allowed = await authorize(tx, current, role);
           if (!allowed.dispatch) return allowed;
+          if (allowed.metaIntent && whatsapp) {
+            const intent = allowed.metaIntent;
+            const native = await boundedDispatch((signal) => whatsapp.dispatchAt(tx, actor, intent, async () => {
+              const refreshed = await authorize(tx, current, role);
+              return !!refreshed.dispatch;
+            }, signal));
+            if (native.reason || !native.result) return { action: await cancel(tx, native.reason ?? "whatsapp_send_blocked"), failure: null };
+            await whatsapp.settleAt(tx, actor, intent, native.result);
+            const [settled] = await tx.update(opportunityDueAction).set({
+              state: native.result.status === "accepted" ? "dispatched" : native.result.status === "not_accepted" ? "cancelled" : "committed",
+              reason: native.result.status === "accepted" ? "whatsapp_accepted_delivery_unconfirmed" : native.result.status === "not_accepted" ? `whatsapp_${native.result.reason}` : "whatsapp_acceptance_unknown",
+            }).where(and(eq(opportunityDueAction.id, actionId), eq(opportunityDueAction.businessId, businessId))).returning();
+            return { action: settled, failure: null };
+          }
           let finalFailure: Awaited<ReturnType<typeof authorize>> | undefined;
           const access = current.email
             ? await gmailDispatchAccess(

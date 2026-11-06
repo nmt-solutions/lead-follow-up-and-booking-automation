@@ -303,6 +303,7 @@ export function createWhatsAppRepository(database: Database, clock: Clock) {
     };
   }
   return {
+    workspaceAt: (tx: Transaction, businessId: string, provider: MetaProvider) => workspace(tx, businessId, provider, false),
     ensureAccess: (actor: WorkIdentity, businessId: string) =>
       authorized(actor, businessId, async () => {}),
     workspace(actor: WorkIdentity, businessId: string, provider: MetaProvider) {

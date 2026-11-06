@@ -1,5 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Transaction } from "./scope";
+import { resolveMetaOutgoing } from "./whatsapp-references";
 import {
   whatsAppIntake,
   whatsAppConnection,
@@ -131,9 +132,26 @@ export async function metaOpportunityVisible(
           ),
         );
       // A known exact reference fences its need. Unresolved references still fence the peer.
-      if (!anchor?.opportunityId || anchor.opportunityId === opportunityId)
+      const outgoing = !anchor?.opportunityId ? await resolveMetaOutgoing(tx,businessId,source.connectionId,source.content.senderRef,receipt.replyTo) : null;
+      const referencedNeed = anchor?.opportunityId ?? outgoing?.opportunityId;
+      if (!referencedNeed || referencedNeed === opportunityId)
         return false;
     }
+  }
+  return true;
+}
+/** Same need/peer fencing for an approved prospect that has no incoming-message row yet. */
+export async function metaPeerVisible(tx: Transaction, businessId: string, connectionId: string, peer: string, opportunityId: string) {
+  if (!(await metaInboundAllowed(tx,businessId,connectionId))) return false;
+  const [intake] = await tx.select().from(whatsAppIntake).where(and(eq(whatsAppIntake.businessId,businessId),eq(whatsAppIntake.inboxConnectionId,connectionId)));
+  if (!intake?.inboundAt || !intake.echoAt || (intake.gap && !["manual_activity_needs_association","unsupported_event_coverage","unprocessed_event_expired"].includes(intake.gap))) return false;
+  const pending = await tx.select().from(whatsAppReceipt).where(and(eq(whatsAppReceipt.connectionId,intake.id),eq(whatsAppReceipt.connectionVersion,intake.connectionVersion),sql`(${whatsAppReceipt.state} IN ('pending','review','expired') OR (${whatsAppReceipt.kind}='gap' AND ${whatsAppReceipt.state}<>'historical')) AND ${whatsAppReceipt.kind}<>'status' AND (${whatsAppReceipt.peer} IS NULL OR ${whatsAppReceipt.peer}=${peer})`));
+  for (const r of pending) {
+    if (!r.replyTo) return false;
+    const [parent] = await tx.select({opportunityId:inboxMessageLink.opportunityId}).from(inboxMessage).innerJoin(inboxMessageLink,eq(inboxMessage.id,inboxMessageLink.id)).where(and(eq(inboxMessage.businessId,businessId),eq(inboxMessage.connectionId,connectionId),eq(inboxMessage.messageRef,r.replyTo),sql`${inboxMessage.content}->>'senderRef'=${peer}`));
+    const outgoing = !parent?.opportunityId ? await resolveMetaOutgoing(tx,businessId,connectionId,peer,r.replyTo) : null;
+    const need = parent?.opportunityId ?? outgoing?.opportunityId;
+    if (!need || need === opportunityId) return false;
   }
   return true;
 }
