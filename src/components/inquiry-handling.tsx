@@ -319,7 +319,9 @@ export function InquiryHandling({
                         : "Confirmed by Gmail response"
                       : run.action.email.result?.status === "not_accepted"
                         ? `Not accepted (${run.action.email.result.reason.replaceAll("_", " ")})`
-                        : "Unknown"}
+                        : run.action.state === "cancelled"
+                          ? "Not attempted; current checks blocked transport"
+                          : "Unknown"}
                     .
                   </p>
                   <p>
