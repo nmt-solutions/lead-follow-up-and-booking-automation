@@ -18,6 +18,9 @@ import { configuredMicrosoftCalendar } from "../microsoft-calendar/configuration
 import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
 import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
+import { createCampaignApplication } from "../application/campaigns";
+import { createCampaignRepository } from "../db/campaign-repository";
+import { createCampaignHttp } from "../http/campaigns";
 import { createEmailEligibilityApplication } from "../application/email-eligibility";
 import { createEmailEligibilityRepository } from "../db/email-eligibility-repository";
 import { createEmailEligibilityHttp } from "../http/email-eligibility";
@@ -129,6 +132,12 @@ async function composeServices() {
     clock: { now: () => new Date() },
   });
   const { authenticate, authenticatePrivileged, authenticatePlatform } = access;
+  const campaigns = createCampaignApplication({
+    authenticate: access.authenticateForWork,
+    repository: createCampaignRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+  });
   const emailEligibility = createEmailEligibilityApplication({
     authenticate: access.authenticateForWork,
     repository: createEmailEligibilityRepository(runtimeDatabase(pool), {
@@ -348,6 +357,12 @@ async function composeServices() {
     timeoutMs: 5000,
   });
   return {
+    campaigns,
+    campaignsHttp: createCampaignHttp({
+      application: campaigns,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     emailEligibility,
     emailEligibilityHttp: createEmailEligibilityHttp({
       application: emailEligibility,

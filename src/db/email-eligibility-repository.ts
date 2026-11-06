@@ -26,6 +26,8 @@ import {
 } from "./email-eligibility-context";
 import {
   commercialProposal,
+  campaignRevision,
+  discoveryProspect,
   emailActionReview,
   emailEligibilityEvaluation,
   emailMarketPolicy,
@@ -189,6 +191,20 @@ export function createEmailEligibilityRepository(
             .filter((r) => r.payload.channel === "email")
             .map((r) => ({ kind: "commercial" as const, id: r.id })),
         ];
+        const campaigns = await tx
+          .select()
+          .from(campaignRevision)
+          .where(eq(campaignRevision.businessId, businessId))
+          .orderBy(desc(campaignRevision.at));
+        for (const r of campaigns)
+          for (const recipient of r.snapshot.recipients)
+            for (let i = 0; i < r.snapshot.steps.length; i++)
+              refs.push({
+                kind: "campaign",
+                id: r.id,
+                recipientKey: recipient.contactId,
+                stepIndex: i,
+              });
         const actions = [];
         for (const ref of refs) {
           const c = await emailActionContext(tx, businessId, ref);
@@ -228,7 +244,20 @@ export function createEmailEligibilityRepository(
         if (!canManage) throw new ApplicationError("FORBIDDEN");
         await lockEmailPolicies(tx);
         for (const e of input.facts.permissions) {
-          await opportunity(tx, businessId, e.opportunityId);
+          if (e.opportunityId)
+            await opportunity(tx, businessId, e.opportunityId);
+          else {
+            const [prospect] = await tx
+              .select()
+              .from(discoveryProspect)
+              .where(
+                and(
+                  eq(discoveryProspect.businessId, businessId),
+                  eq(discoveryProspect.id, e.prospectId!),
+                ),
+              );
+            if (!prospect) throw new ApplicationError("NOT_FOUND");
+          }
           const [policy] = await tx
             .select()
             .from(emailMarketPolicy)

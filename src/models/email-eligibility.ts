@@ -88,11 +88,22 @@ export const recipientPermissionSchema = z
     kind: z.enum(["consent", "documented_relationship"]),
     purpose: emailPurposeSchema,
     policyId: z.uuid(),
-    opportunityId: z.uuid(),
+    opportunityId: z.uuid().nullable(),
+    prospectId: z.uuid().optional(),
     reference: note,
     observedAt: instant,
     validUntil: instant,
   })
+  .refine(
+    (v) =>
+      v.opportunityId !== null
+        ? !v.prospectId
+        : Boolean(v.prospectId) && v.purpose !== "inquiry_response",
+    {
+      message:
+        "Bind permission to one Opportunity or to a discovered prospect for outreach.",
+    },
+  )
   .refine((v) => new Date(v.validUntil) > new Date(v.observedAt), {
     path: ["validUntil"],
     message: "Permission expiry must follow its observed time",
@@ -146,11 +157,26 @@ export type IncomingOptOutEvidence = {
   sourceMessageId: string;
   policyId: string | null;
 };
-export const emailActionRefSchema = z.strictObject({
-  kind: z.enum(["opportunity", "commercial"]),
-  id: z.uuid(),
-});
+export const emailActionRefSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.enum(["opportunity", "commercial"]), id: z.uuid() }),
+  z.strictObject({
+    kind: z.literal("campaign"),
+    id: z.uuid(),
+    recipientKey: z.string().min(1).max(256),
+    stepIndex: z.number().int().nonnegative(),
+  }),
+]);
 export type EmailActionRef = z.infer<typeof emailActionRefSchema>;
+export function sameEmailAction(a: EmailActionRef, b: EmailActionRef) {
+  return (
+    a.kind === b.kind &&
+    a.id === b.id &&
+    (a.kind !== "campaign" ||
+      (b.kind === "campaign" &&
+        a.recipientKey === b.recipientKey &&
+        a.stepIndex === b.stepIndex))
+  );
+}
 export const emailContentReviewSchema = z.strictObject({
   action: emailActionRefSchema,
   requirements: z.array(z.enum(contentRequirements)).min(1).max(5),
@@ -187,7 +213,7 @@ export type EligibilityCheck = {
 export type EmailEligibility = {
   id: string;
   action: EmailActionRef;
-  opportunityId: string;
+  opportunityId: string | null;
   recipient: string;
   purpose: EmailPurpose;
   fingerprint: string;
@@ -215,7 +241,7 @@ export type EmailEligibilityWorkspace = {
   evaluations: EmailEligibility[];
   actions: {
     action: EmailActionRef;
-    opportunityId: string;
+    opportunityId: string | null;
     recipient: string;
     purpose: EmailPurpose;
     description: string;
@@ -243,6 +269,38 @@ export function emailDispatchAuthorization(
   };
 }
 const actionRef = emailActionRefSchema;
+export const emailEligibilitySchema = z.object({
+  id: z.uuid(),
+  action: actionRef,
+  opportunityId: z.uuid().nullable(),
+  recipient: z.string(),
+  purpose: emailPurposeSchema,
+  fingerprint: z.string(),
+  policyId: z.uuid().nullable(),
+  recipientRevisionId: z.uuid().nullable(),
+  evidence: z.array(
+    z.object({
+      kind: z.string(),
+      reference: z.string(),
+      actorId: z.string().nullable(),
+      observedAt: instant,
+    }),
+  ),
+  suppressionIds: z.array(z.uuid()),
+  senderIdentityId: z.uuid().nullable(),
+  checks: z.array(
+    z.object({
+      code: z.string(),
+      status: z.enum(["allowed", "blocked", "unknown"]),
+      detail: z.string(),
+      nextAction: z.string(),
+    }),
+  ),
+  status: z.enum(["allowed", "blocked", "unknown"]),
+  at: instant,
+  recheckAt: instant.nullable(),
+});
+
 export const emailEligibilityWorkspaceSchema: z.ZodType<EmailEligibilityWorkspace> =
   z.object({
     canManage: z.boolean(),
@@ -280,43 +338,11 @@ export const emailEligibilityWorkspaceSchema: z.ZodType<EmailEligibilityWorkspac
         source: z.enum(["business", "incoming_opt_out"]),
       }),
     ),
-    evaluations: z.array(
-      z.object({
-        id: z.uuid(),
-        action: actionRef,
-        opportunityId: z.uuid(),
-        recipient: z.string(),
-        purpose: emailPurposeSchema,
-        fingerprint: z.string(),
-        policyId: z.uuid().nullable(),
-        recipientRevisionId: z.uuid().nullable(),
-        evidence: z.array(
-          z.object({
-            kind: z.string(),
-            reference: z.string(),
-            actorId: z.string().nullable(),
-            observedAt: instant,
-          }),
-        ),
-        suppressionIds: z.array(z.uuid()),
-        senderIdentityId: z.uuid().nullable(),
-        checks: z.array(
-          z.object({
-            code: z.string(),
-            status: z.enum(["allowed", "blocked", "unknown"]),
-            detail: z.string(),
-            nextAction: z.string(),
-          }),
-        ),
-        status: z.enum(["allowed", "blocked", "unknown"]),
-        at: instant,
-        recheckAt: instant.nullable(),
-      }),
-    ),
+    evaluations: z.array(emailEligibilitySchema),
     actions: z.array(
       z.object({
         action: actionRef,
-        opportunityId: z.uuid(),
+        opportunityId: z.uuid().nullable(),
         recipient: z.string(),
         purpose: emailPurposeSchema,
         description: z.string(),

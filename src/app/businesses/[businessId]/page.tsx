@@ -106,6 +106,12 @@ export default async function BusinessPage({
         Shared sales inbox
       </Link>
       <Link
+        href={`/businesses/${businessId}/campaigns`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        First-outreach campaigns and Owner approvals
+      </Link>
+      <Link
         href={`/businesses/${businessId}/senders`}
         className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
       >

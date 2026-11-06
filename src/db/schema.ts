@@ -12,6 +12,7 @@ import type {
   MicrosoftIdentity,
 } from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
+import type { CampaignSnapshot } from "../models/campaigns";
 import type {
   EmailMarketPolicy,
   RecipientFacts,
@@ -3295,3 +3296,62 @@ export const opportunityScopeForeignKeys = [
     }),
   ),
 ];
+
+// Campaign versions and Owner decisions are append-only. Approval creates no due action or outbox entry.
+export const campaignRevision = pgTable(
+  "campaign_revision",
+  {
+    ...emailRecordColumns(),
+    campaignId: uuid("campaign_id").notNull(),
+    version: integer("version").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    snapshot: jsonb("snapshot").$type<CampaignSnapshot>().notNull(),
+    sessionId: text("session_id").notNull(),
+    actorName: text("actor_name").notNull(),
+    note: text("note").notNull(),
+  },
+  (t) => [
+    uniqueIndex("campaign_revision_version").on(
+      t.businessId,
+      t.campaignId,
+      t.version,
+    ),
+    uniqueIndex("campaign_revision_request").on(t.businessId, t.requestKey),
+    check("campaign_revision_positive", sql`${t.version} > 0`),
+    ...emailRecordPolicies("campaign_revision"),
+  ],
+).enableRLS();
+export const campaignDecision = pgTable(
+  "campaign_decision",
+  {
+    ...emailRecordColumns(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => campaignRevision.id),
+    payloadHash: text("payload_hash").notNull(),
+    decision: text("decision").$type<"approved" | "rejected">().notNull(),
+    sessionId: text("session_id").notNull(),
+    actorName: text("actor_name").notNull(),
+    role: text("role").$type<"owner">().notNull(),
+    note: text("note").notNull(),
+  },
+  (t) => [
+    uniqueIndex("campaign_decision_revision").on(t.revisionId),
+    check(
+      "campaign_decision_value",
+      sql`${t.decision} in ('approved','rejected') and ${t.role} = 'owner'`,
+    ),
+    pgPolicy("campaign_decision_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("campaign_decision_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and public.current_business_role() = 'owner' and actor_id = current_setting('app.actor_id',true) and exists (select 1 from public.campaign_revision r where r.id = revision_id and r.business_id = ${t.businessId} and r.payload_hash = ${t.payloadHash})`,
+    }),
+  ],
+).enableRLS();

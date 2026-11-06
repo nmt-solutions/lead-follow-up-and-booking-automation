@@ -49,7 +49,7 @@ import {
   type RetainedObservation,
 } from "../discovery/consolidation";
 
-async function observationsFor(
+export async function observationsFor(
   tx: Transaction,
   businessId: string,
 ): Promise<RetainedObservation[]> {
@@ -107,6 +107,40 @@ async function observationsFor(
         };
       }),
   ];
+}
+
+export async function discoveryEvidenceAt(
+  tx: Transaction,
+  businessId: string,
+  at: Date,
+) {
+  const observations = await observationsFor(tx, businessId);
+  const checked = await tx
+    .select()
+    .from(discoveryUsage)
+    .where(
+      and(
+        eq(discoveryUsage.businessId, businessId),
+        eq(discoveryUsage.kind, "review"),
+        eq(discoveryUsage.outcome, "succeeded"),
+      ),
+    );
+  const checks = checked.flatMap((u) =>
+    u.sourceUrl && u.checkedAt
+      ? [
+          {
+            ...sourceCheckSchema.parse({
+              runId: u.runId,
+              url: u.sourceUrl,
+              checkedAt: u.checkedAt.toISOString(),
+            }),
+            order: u.checkOrder ?? 0,
+          },
+        ]
+      : [],
+  );
+  const prospects = consolidateViews(observations, businessId, at, checks);
+  return { observations, checks, prospects };
 }
 
 async function ownedRun(tx: Transaction, work: DiscoveryWork) {
@@ -169,37 +203,11 @@ export function createDiscoveryRepository(
           .from(discoveryDispatch)
           .where(eq(discoveryDispatch.businessId, businessId));
         const runs: RunView[] = [];
-        const observations = await observationsFor(tx, businessId);
-        const checked = await tx
-          .select()
-          .from(discoveryUsage)
-          .where(
-            and(
-              eq(discoveryUsage.businessId, businessId),
-              eq(discoveryUsage.kind, "review"),
-              eq(discoveryUsage.outcome, "succeeded"),
-            ),
-          );
-        const checks = checked.flatMap((u) =>
-          u.sourceUrl && u.checkedAt
-            ? [
-                {
-                  ...sourceCheckSchema.parse({
-                    runId: u.runId,
-                    url: u.sourceUrl,
-                    checkedAt: u.checkedAt.toISOString(),
-                  }),
-                  order: u.checkOrder ?? 0,
-                },
-              ]
-            : [],
-        );
-        const retained = consolidateViews(
+        const {
           observations,
-          businessId,
-          clock.now(),
           checks,
-        );
+          prospects: retained,
+        } = await discoveryEvidenceAt(tx, businessId, clock.now());
         for (const row of rows) {
           const usage = await tx
             .select()

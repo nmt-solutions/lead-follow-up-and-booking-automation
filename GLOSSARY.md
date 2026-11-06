@@ -140,7 +140,10 @@ The permissions a business grants the service to communicate prices, issue quota
 The sales outcome a business wants an engaged lead to reach, such as a confirmed appointment or a qualified quotation request.
 
 **First-outreach approval**:
-The business's approval of the recipients, initial message, and bounded follow-up sequence before contacting newly discovered prospects.
+The Business Owner's approval of a fixed recipient set, its source/contact evidence, sending identity, exact messages, timing, attempt cap and stop conditions before first contact. Approval applies to that campaign version; it is separate from current permission, readiness, Commercial authority and execution.
+
+**Outreach campaign version**:
+One complete, immutable first-contact plan for explicitly selected prospects and contacts. A changed plan or recipient selection has its own version and requires its own First-outreach approval.
 
 **Follow-up sequence**:
 An approved series of messages with defined timing, maximum attempts, and stop conditions for an unanswered outreach attempt.

@@ -14,6 +14,7 @@ import {
   recipientClasses,
   saveRecipientFactsSchema,
   suppressionScopes,
+  sameEmailAction,
   type EmailEligibilityWorkspace,
 } from "@/models/email-eligibility";
 import { Button } from "./ui/button";
@@ -125,7 +126,13 @@ export function EmailEligibilityManager({
       ...state.recipients.map((r) => r.facts.recipient),
     ]),
   ];
-  const opportunities = [...new Set(state.actions.map((a) => a.opportunityId))];
+  const opportunities = [
+    ...new Set(
+      state.actions
+        .map((a) => a.opportunityId)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
   const base = `/api/businesses/${businessId}/email-eligibility`;
   async function command(scope: string, commandName?: string, input?: unknown) {
     if (pending) return;
@@ -291,13 +298,16 @@ export function EmailEligibilityManager({
             </p>
           )}
           {state.actions.map((a) => {
-            const result = state.evaluations.find(
-              (r) =>
-                r.action.id === a.action.id && r.action.kind === a.action.kind,
+            const actionKey =
+              a.action.kind === "campaign"
+                ? `${a.action.id}-${a.action.recipientKey}-${a.action.stepIndex}`
+                : a.action.id;
+            const result = state.evaluations.find((r) =>
+              sameEmailAction(r.action, a.action),
             );
             return (
               <section
-                key={`${a.action.kind}-${a.action.id}`}
+                key={actionKey}
                 className="space-y-3 rounded-xl border p-4"
               >
                 <div className="flex flex-wrap items-center gap-3">
@@ -307,7 +317,10 @@ export function EmailEligibilityManager({
                   </Badge>
                 </div>
                 <p>
-                  Purpose: {label(a.purpose)} · Opportunity {a.opportunityId}
+                  Purpose: {label(a.purpose)} ·{" "}
+                  {a.opportunityId
+                    ? `Opportunity ${a.opportunityId}`
+                    : "Discovered prospect campaign"}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Action {a.action.id}
@@ -323,7 +336,7 @@ export function EmailEligibilityManager({
                       onSubmit={(e) =>
                         submit(
                           e,
-                          a.action.id,
+                          actionKey,
                           "review",
                           emailContentReviewSchema,
                           (f) => ({
@@ -344,11 +357,11 @@ export function EmailEligibilityManager({
                           values={contentRequirements}
                         />
                         <Field
-                          name={`review-${a.action.id}`}
+                          name={`review-${actionKey}`}
                           title="Review evidence or reference"
                         >
                           <Textarea
-                            id={`review-${a.action.id}`}
+                            id={`review-${actionKey}`}
                             name="reference"
                             required
                             maxLength={2000}
@@ -361,13 +374,11 @@ export function EmailEligibilityManager({
                 </details>
                 <Button
                   disabled={pending}
-                  onClick={() =>
-                    void command(a.action.id, "evaluate", a.action)
-                  }
+                  onClick={() => void command(actionKey, "evaluate", a.action)}
                 >
                   Evaluate eligibility
                 </Button>
-                {feedbackFor(a.action.id)}
+                {feedbackFor(actionKey)}
                 {result && (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
@@ -475,7 +486,11 @@ export function EmailEligibilityManager({
                                   kind: text(f, "kind"),
                                   purpose: text(f, "purpose"),
                                   policyId: text(f, "policyId"),
-                                  opportunityId: text(f, "opportunityId"),
+                                  opportunityId:
+                                    text(f, "opportunityId") || null,
+                                  ...(text(f, "prospectId")
+                                    ? { prospectId: text(f, "prospectId") }
+                                    : {}),
                                   reference: text(f, "permissionReference"),
                                   observedAt: date(f, "observedAt"),
                                   validUntil: date(f, "permissionUntil"),
@@ -633,6 +648,16 @@ export function EmailEligibilityManager({
                         />
                       </Field>
                       <Field
+                        name="permission-prospect"
+                        title="Covered prospect (for first outreach without an Opportunity)"
+                      >
+                        <Input id="permission-prospect" name="prospectId" />
+                        <p className="text-sm text-muted-foreground">
+                          Use the prospect ID shown in campaign review. Leave
+                          Opportunity blank when recording prospect permission.
+                        </p>
+                      </Field>
+                      <Field
                         name="permission-reference"
                         title="Permission provenance and covered use"
                       >
@@ -691,9 +716,10 @@ export function EmailEligibilityManager({
                   </p>
                   {r.facts.permissions.map((p, i) => (
                     <p key={i}>
-                      {label(p.kind)}: {label(p.purpose)} · Opportunity{" "}
-                      {p.opportunityId} · {p.reference} · {p.observedAt} to{" "}
-                      {p.validUntil}
+                      {label(p.kind)}: {label(p.purpose)} ·{" "}
+                      {p.opportunityId ? "Opportunity" : "Prospect"}{" "}
+                      {p.opportunityId ?? p.prospectId} · {p.reference} ·{" "}
+                      {p.observedAt} to {p.validUntil}
                     </p>
                   ))}
                 </div>

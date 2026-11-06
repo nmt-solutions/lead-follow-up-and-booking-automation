@@ -4,6 +4,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  campaignRevision,
+  campaignDecision,
   emailMarketPolicy,
   emailRecipientRevision,
   emailSuppression,
@@ -414,6 +416,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.email_market_policy') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.email_market_policy, public.email_recipient_revision, public.email_suppression, public.email_eligibility_evaluation, public.email_action_review FROM app_runtime;
       END IF;
+      IF to_regclass('public.campaign_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.campaign_revision, public.campaign_decision FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -530,6 +535,8 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      campaignRevision,
+      campaignDecision,
       emailMarketPolicy,
       emailRecipientRevision,
       emailSuppression,
@@ -611,6 +618,10 @@ export async function secureDatabase(pool: Pool) {
       }
     }
     await client.query(`
+      REVOKE ALL PRIVILEGES ON campaign_revision, campaign_decision FROM app_runtime;
+      GRANT SELECT, INSERT ON campaign_revision, campaign_decision TO app_runtime;
+      ALTER TABLE campaign_revision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE campaign_decision FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON gmail_grant, gmail_oauth FROM app_runtime;
       REVOKE ALL PRIVILEGES ON microsoft_mail_grant, microsoft_mail_oauth FROM app_runtime;
       REVOKE ALL PRIVILEGES ON mailbox_app_message FROM app_runtime;

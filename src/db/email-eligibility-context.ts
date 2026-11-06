@@ -11,6 +11,7 @@ import {
 import type { Transaction } from "./scope";
 import {
   commercialProposal,
+  campaignRevision,
   emailActionReview,
   emailEligibilityEvaluation,
   emailMarketPolicy,
@@ -22,8 +23,9 @@ import {
   inquiryRun,
   opportunityDueAction,
   senderObservation,
+  senderIdentity,
 } from "./schema";
-import { responseSender } from "./sender-repository";
+import { responseSender, identityView } from "./sender-repository";
 
 export const emailPolicyLock = "email-market-policies";
 export async function lockEmailPolicies(tx: Transaction, write = false) {
@@ -50,6 +52,51 @@ export async function emailActionContext(
   businessId: string,
   ref: EmailActionRef,
 ) {
+  if (ref.kind === "campaign") {
+    const [revision] = await tx
+      .select()
+      .from(campaignRevision)
+      .where(
+        and(
+          eq(campaignRevision.businessId, businessId),
+          eq(campaignRevision.id, ref.id),
+        ),
+      );
+    if (!revision) throw new ApplicationError("NOT_FOUND");
+    const selected = revision.snapshot.recipients.find(
+      (r) => r.contactId === ref.recipientKey,
+    );
+    const step = revision.snapshot.steps[ref.stepIndex];
+    if (!selected || !step) throw new ApplicationError("NOT_FOUND");
+    const purpose: EmailPurpose =
+      ref.stepIndex === 0 ? "sales_outreach" : "sales_follow_up";
+    const content = `${step.subject}\n${step.body}`;
+    return {
+      ref,
+      opportunityId: null,
+      prospectId: selected.prospectId,
+      recipient: selected.address,
+      purpose,
+      content,
+      fingerprint: createHash("sha256")
+        .update(
+          JSON.stringify({
+            businessId,
+            ref,
+            payloadHash: revision.payloadHash,
+            selected,
+            step,
+          }),
+        )
+        .digest("hex"),
+      source: null,
+      identityId: revision.snapshot.senderIdentityId,
+      identityVersion: revision.snapshot.senderVersion,
+      bindingValid:
+        selected.contact.route?.kind === "email" &&
+        selected.contact.route.value.toLowerCase() === selected.address,
+    };
+  }
   const [due] =
     ref.kind === "opportunity"
       ? await tx
@@ -142,6 +189,9 @@ export async function emailActionContext(
     content,
     fingerprint,
     source,
+    prospectId: null,
+    identityId: null,
+    identityVersion: null,
     bindingValid:
       source.link.opportunityId === action.opportunityId &&
       (!proposal ||
@@ -233,13 +283,49 @@ export async function evaluateEmailAction(
           (s.scope === "recipient_outreach" ||
             s.opportunityId === c.opportunityId))),
   );
-  const sender = await responseSender(
-    tx,
-    businessId,
-    c.source.connection.id,
-    at,
-    c.purpose === "inquiry_response" ? "inbound" : "existing_conversation",
-  );
+  const campaignIdentity = c.identityId
+    ? (
+        await tx
+          .select()
+          .from(senderIdentity)
+          .where(
+            and(
+              eq(senderIdentity.businessId, businessId),
+              eq(senderIdentity.id, c.identityId),
+            ),
+          )
+      )[0]
+    : null;
+  const campaignSender = campaignIdentity
+    ? await identityView(tx, businessId, campaignIdentity, at)
+    : null;
+  const sender =
+    c.ref.kind === "campaign"
+      ? {
+          sender:
+            campaignSender &&
+            campaignSender.version === c.identityVersion &&
+            campaignSender.readiness.uses.first_contact.ready
+              ? {
+                  identityId: campaignSender.id,
+                  evidenceId: campaignSender.evidence!.id,
+                }
+              : null,
+          reason:
+            campaignSender?.readiness.uses.first_contact.ready &&
+            campaignSender.version === c.identityVersion
+              ? null
+              : "sender_not_ready",
+        }
+      : await responseSender(
+          tx,
+          businessId,
+          c.source!.connection.id,
+          at,
+          c.purpose === "inquiry_response"
+            ? "inbound"
+            : "existing_conversation",
+        );
   const checks: EligibilityCheck[] = [];
   const check = (
     code: string,
@@ -252,7 +338,7 @@ export async function evaluateEmailAction(
     c.bindingValid && emailRecipientSchema.safeParse(c.recipient).success
       ? "allowed"
       : "blocked",
-    "The recipient and purpose are bound to the persisted action and Opportunity.",
+    "The recipient and purpose are bound to the persisted action and its recipient context.",
     "Review the action's exact email recipient and current message association.",
   );
   check(
@@ -290,6 +376,7 @@ export async function evaluateEmailAction(
         e.policyId === policy?.id &&
         e.purpose === c.purpose &&
         e.opportunityId === c.opportunityId &&
+        (c.prospectId ? e.prospectId === c.prospectId : !e.prospectId) &&
         new Date(e.observedAt) <= at &&
         new Date(e.validUntil) > at &&
         policy?.policy.acceptedEvidence.includes(e.kind)
@@ -303,7 +390,7 @@ export async function evaluateEmailAction(
     }
   if (
     c.purpose === "inquiry_response" &&
-    c.source.message.content.kind === "direct_inquiry" &&
+    c.source?.message.content.kind === "direct_inquiry" &&
     policy?.policy.acceptedEvidence.includes("direct_inquiry")
   )
     evidence.push({
@@ -315,8 +402,8 @@ export async function evaluateEmailAction(
   check(
     "permission",
     evidence.length ? "allowed" : "unknown",
-    "Only purpose- and Opportunity-specific evidence accepted by the selected policy can qualify. Public details, DNS/MX, paid reach and AI text confer no permission.",
-    "Record current consent or the policy's documented relationship evidence for this purpose and Opportunity.",
+    "Only purpose- and recipient-context-specific evidence accepted by the selected policy can qualify. Public details, paid reach and approval confer no permission.",
+    "Record current consent or documented relationship evidence for this purpose and the exact Opportunity or discovered prospect.",
   );
   check(
     "sender",
@@ -398,6 +485,7 @@ export async function evaluateEmailAction(
       .filter(
         (e) =>
           e.opportunityId === c.opportunityId &&
+          (c.prospectId ? e.prospectId === c.prospectId : !e.prospectId) &&
           e.purpose === c.purpose &&
           e.policyId === policy?.id,
       )

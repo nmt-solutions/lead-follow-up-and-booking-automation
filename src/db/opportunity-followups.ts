@@ -1,6 +1,60 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Transaction } from "./scope";
-import { inboxMessage, opportunityDueAction } from "./schema";
+import {
+  inboxBuyer,
+  inboxConnection,
+  inboxOpportunity,
+  inboxMessage,
+  opportunityDueAction,
+} from "./schema";
+
+/** First outreach must give way to already engaged recipients and existing human control.
+ * An exact address is only a stop key here; it never merges buyer identities or Opportunities. */
+export async function firstOutreachConversationState(
+  tx: Transaction,
+  businessId: string,
+  addresses: string[],
+) {
+  if (!addresses.length)
+    return {
+      status: "allowed" as const,
+      reason:
+        "No direct engagement is recorded for the selected addresses. Approval creates none.",
+    };
+  const rows = await tx
+    .select({ state: inboxOpportunity.controlState })
+    .from(inboxBuyer)
+    .innerJoin(inboxConnection, eq(inboxConnection.id, inboxBuyer.connectionId))
+    .leftJoin(
+      inboxOpportunity,
+      and(
+        eq(inboxOpportunity.buyerId, inboxBuyer.id),
+        eq(inboxOpportunity.businessId, businessId),
+      ),
+    )
+    .where(
+      and(
+        eq(inboxBuyer.businessId, businessId),
+        eq(inboxConnection.channel, "email"),
+        sql`lower(${inboxBuyer.senderRef}) in (${sql.join(
+          addresses.map((a) => sql`${a}`),
+          sql`,`,
+        )})`,
+      ),
+    );
+  return rows.length
+    ? {
+        status: "blocked" as const,
+        reason: rows.some((r) => r.state === "human")
+          ? "A selected recipient has direct engagement under human control. Review the inbox; campaign approval cannot hand it back."
+          : "A selected recipient already has direct engagement. Review the current conversation and stop first-outreach reminders.",
+      }
+    : {
+        status: "allowed" as const,
+        reason:
+          "No direct engagement is recorded for the selected addresses. Approval creates none.",
+      };
+}
 
 type StopReason = "buyer_replied" | "reply_visibility_unavailable";
 /** Preserve an ambiguous prior dispatch while fencing an acquired invocation that has not called its provider. */

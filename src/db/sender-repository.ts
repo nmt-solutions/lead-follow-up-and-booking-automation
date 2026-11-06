@@ -71,7 +71,7 @@ async function identityAt(tx: Transaction, businessId: string, id: string) {
   if (!row) throw new ApplicationError("NOT_FOUND");
   return row;
 }
-async function inspectionAt(
+export async function inspectionAt(
   tx: Transaction,
   businessId: string,
   row: IdentityRow,
@@ -118,7 +118,7 @@ async function inspectionAt(
     replyConnection,
   };
 }
-async function identityView(
+export async function identityView(
   tx: Transaction,
   businessId: string,
   row: IdentityRow,
