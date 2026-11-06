@@ -14,6 +14,11 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*) = 3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT,INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('whatsapp_connection','whatsapp_oauth','whatsapp_event'))
+      AND (SELECT count(*) = 8 AND bool_and('app_runtime'=ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL ELSE false END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('whatsapp_connection','whatsapp_oauth','whatsapp_event'))
+      AND (SELECT count(*) = 2 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conname IN ('whatsapp_oauth_connection_scope','whatsapp_event_connection_scope'))
+      AND NOT has_column_privilege(current_user,'public.whatsapp_connection','business_id','UPDATE')
+      AND NOT has_column_privilege(current_user,'public.whatsapp_oauth','state_hash','UPDATE')
       AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER')
         AND has_table_privilege(current_user, c.oid, 'SELECT')

@@ -37,6 +37,13 @@ import type {
   SenderInspection,
 } from "../models/senders";
 import type { GoogleCalendarStatus } from "../models/google-calendar";
+import type {
+  WhatsAppConfiguration,
+  WhatsAppStatus,
+  WhatsAppReason,
+  MetaObservation,
+  MetaAssets,
+} from "../models/whatsapp";
 import {
   bigint,
   boolean,
@@ -2786,6 +2793,112 @@ function integrationPolicies(name: string, privileged: boolean) {
     }),
   ];
 }
+export const whatsAppConnection = pgTable(
+  "whatsapp_connection",
+  {
+    ...inboxColumns(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration")
+      .$type<WhatsAppConfiguration>()
+      .notNull(),
+    status: text("status").$type<WhatsAppStatus>().notNull(),
+    reason: text("reason").$type<WhatsAppReason>(),
+    termsActorId: text("terms_actor_id")
+      .notNull()
+      .references(() => user.id),
+    termsAcceptedAt: timestamp("terms_accepted_at", {
+      withTimezone: true,
+    }).notNull(),
+    credentials: text("credentials"),
+    providerKey: text("provider_key"),
+    observation: jsonb("observation").$type<MetaObservation>(),
+    operationId: uuid("operation_id"),
+    assets: jsonb("assets").$type<MetaAssets>(),
+    coexistenceFinished: boolean("coexistence_finished")
+      .notNull()
+      .default(false),
+    phoneNumberId: text("phone_number_id"),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_business").on(t.businessId),
+    uniqueIndex("whatsapp_connection_scope").on(t.id, t.businessId),
+    uniqueIndex("whatsapp_number_exclusive").on(t.phoneNumberId),
+    check("whatsapp_version", sql`${t.version} > 0`),
+    pgPolicy("whatsapp_connection_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxWrite,
+    }),
+    pgPolicy("whatsapp_connection_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxWrite}) and terms_actor_id = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("whatsapp_connection_update", {
+      for: "update",
+      to: appRuntime,
+      using: inboxWrite,
+      withCheck: inboxWrite,
+    }),
+  ],
+).enableRLS();
+export const whatsAppOauth = pgTable(
+  "whatsapp_oauth",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    version: integer("version").notNull(),
+    stateHash: text("state_hash").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumed: boolean("consumed").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_oauth_state").on(t.stateHash),
+    ...integrationPolicies("whatsapp_oauth", true),
+  ],
+).enableRLS();
+export const whatsAppEvent = pgTable(
+  "whatsapp_event",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    kind: text("kind").notNull(),
+    version: integer("version").notNull(),
+    terms: jsonb("terms").$type<WhatsAppConfiguration>(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () =>
+    integrationPolicies("whatsapp_event", true).filter(
+      (p) => p.for !== "update",
+    ),
+).enableRLS();
+export const whatsAppScopeForeignKeys = [
+  new ForeignKey(
+    whatsAppOauth,
+    foreignKey({
+      name: "whatsapp_oauth_connection_scope",
+      columns: [whatsAppOauth.connectionId, whatsAppOauth.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppEvent,
+    foreignKey({
+      name: "whatsapp_event_connection_scope",
+      columns: [whatsAppEvent.connectionId, whatsAppEvent.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+];
 export const mailboxAppMessage = pgTable(
   "mailbox_app_message",
   {

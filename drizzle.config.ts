@@ -9,6 +9,9 @@ export default defineConfig({
   tablesFilter: [
     "subscription_pricing_revision",
     "subscription_quote",
+    "whatsapp_connection",
+    "whatsapp_oauth",
+    "whatsapp_event",
     "billing_profile_revision",
     "billing_profile_review",
     "email_sequence_policy",
