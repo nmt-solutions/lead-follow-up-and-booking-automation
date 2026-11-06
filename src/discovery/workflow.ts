@@ -232,6 +232,8 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
                       policy: run.policy,
                       runId: work.runId,
                       operationId: search.id,
+                      recordCost: (value) =>
+                        repository.recordProviderCost(work, search.id, value),
                       offering: run.brief.publicOffering,
                       buyer,
                       market,
@@ -297,6 +299,12 @@ export function discover(work: DiscoveryWork, run: DiscoveryRun) {
                         retrieve({
                           policy: run.policy,
                           source: candidate,
+                          recordCost: (value) =>
+                            repository.recordProviderCost(
+                              work,
+                              contents.id,
+                              value,
+                            ),
                           signal,
                         }),
                       ).pipe(

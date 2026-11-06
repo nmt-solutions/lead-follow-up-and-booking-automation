@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createOperationsApplication } from "../src/application/operations";
 import { createOperationsRepository } from "../src/db/operations-repository";
 import { createHmac, randomUUID } from "node:crypto";
+import { readOperatorCosts } from "./support/costs";
 import { createHarness } from "./support/harness";
 import { subscriptionFixture } from "./support/subscription";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";
@@ -357,6 +358,29 @@ describe("Native recurring cards at the public application seam", () => {
       taxMinor: "250",
       totalMinor: "2750",
     });
+    const costs = await readOperatorCosts(h, f.owner);
+    expect(
+      costs.sources.filter(
+        (r) =>
+          r.source.businessId === f.business.id &&
+          r.source.category === "payment",
+      ),
+    ).toMatchObject([
+      {
+        included: false,
+        source: {
+          status: "observed_not_settled",
+          amount: { currency: "INR", micros: "250000" },
+          details: {
+            feeMinor: "25",
+            feeTaxMinor: "3",
+            baseAmountMinor: "240000",
+            baseCurrency: "INR",
+            mode: "test",
+          },
+        },
+      },
+    ]);
   });
   it("keeps missing and ambiguous creations durable even after exhaustive lookup", async () => {
     const f = await subscriptionFixture(h),

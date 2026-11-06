@@ -9,7 +9,8 @@ import type {
   MailboxJobState,
   MailboxMetadata,
 } from "../models/mailboxes";
-import type { WorkIdentity } from "../models/discovery";
+import type { WorkIdentity, DiscoveryProviderCost } from "../models/discovery";
+import type { CostSource, CostPlanning, CostBudget } from "../models/costs";
 import type { HealthPayload } from "../models/sender-health";
 import type { MetaActivity } from "../models/whatsapp-intake";
 import type { MetaOutboundData } from "../models/whatsapp-sending";
@@ -1093,6 +1094,7 @@ export const platformOperator = pgTable(
     senderHealth: boolean("sender_health").notNull().default(false),
     documents: boolean("documents").notNull().default(false),
     operations: boolean("operations").notNull().default(false),
+    costs: boolean("costs").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {
@@ -1227,6 +1229,214 @@ export const operationDetail = pgTable(
 ).enableRLS();
 
 const documentOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.documents)`;
+const costOperator = sql`nullif(current_setting('app.business_id',true),'') is null and nullif(current_setting('app.cost_budget',true),'') is null and exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.costs)`;
+const costRead = sql`(${costOperator}) or public.cost_worker_authorized(month)`;
+export const costRecord = pgTable(
+  "operator_cost_record",
+  {
+    id: uuid("id").primaryKey(),
+    sourceId: text("source_id").notNull(),
+    version: integer("version").notNull(),
+    month: text("month").notNull(),
+    origin: text("origin").$type<"native" | "operator">().notNull(),
+    source: jsonb("source").$type<CostSource>().notNull(),
+    reason: text("reason").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operator_cost_source_version").on(t.sourceId, t.version),
+    check(
+      "operator_cost_bounds",
+      sql`${t.version}>0 and ${t.source}->>'month'=${t.month} and ${t.origin} in ('native','operator') and ${t.retainUntil}>${t.at}`,
+    ),
+    pgPolicy("operator_cost_record_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_record_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`((${costOperator}) or (origin='native' and public.cost_worker_authorized(month))) and actor_id=current_setting('app.actor_id',true) and public.cost_attribution_valid(source->>'businessId',source->>'runId')`,
+    }),
+  ],
+).enableRLS();
+export const costPlanningRevision = pgTable(
+  "operator_cost_planning",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration").$type<CostPlanning>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operator_cost_planning_version").on(t.month, t.version),
+    check(
+      "operator_cost_planning_bounds",
+      sql`${t.version}>0 and ${t.configuration}->>'month'=${t.month} and ${t.retainUntil}>${t.at}`,
+    ),
+    pgPolicy("operator_cost_planning_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_planning_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const costScan = pgTable(
+  "operator_cost_scan",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    sourceCount: integer("source_count").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [
+    pgPolicy("operator_cost_scan_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_scan_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costRead}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const costBudgetRevision = pgTable(
+  "operator_cost_budget",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    category: text("category").notNull(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration").$type<CostBudget>().notNull(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id),
+    workerKey: uuid("worker_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operator_cost_budget_version").on(
+      t.month,
+      t.category,
+      t.version,
+    ),
+    check(
+      "operator_cost_budget_bounds",
+      sql`${t.version}>0 and ${t.configuration}->>'month'=${t.month} and ${t.configuration}->>'category'=${t.category} and ${t.configuration}->>'ownerId'=${t.ownerId} and ${t.retainUntil}>${t.at}`,
+    ),
+    pgPolicy("operator_cost_budget_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_budget_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const costAlert = pgTable(
+  "operator_cost_alert",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    category: text("category").notNull(),
+    threshold: integer("threshold").notNull(),
+    measure: text("measure").$type<"actual" | "forecast">().notNull(),
+    budgetId: uuid("budget_id")
+      .notNull()
+      .references(() => costBudgetRevision.id),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id),
+    valueMicros: text("value_micros").notNull(),
+    limitMicros: text("limit_micros").notNull(),
+    summary: text("summary").notNull(),
+    email: text("email"),
+    emailState: text("email_state")
+      .$type<
+        "in_app" | "pending" | "sending" | "accepted" | "uncertain" | "held"
+      >()
+      .notNull(),
+    firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
+    leaseUntil: timestamp("lease_until", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    leaseKey: uuid("lease_key"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operator_cost_threshold_once").on(
+      t.month,
+      t.category,
+      t.threshold,
+      t.measure,
+    ),
+    pgPolicy("operator_cost_alert_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_alert_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costRead}) and exists(select 1 from public.operator_cost_budget b where b.id=${t.budgetId} and b.month=${t.month} and b.category=${t.category} and b.owner_id=${t.ownerId})`,
+    }),
+  ],
+).enableRLS();
+export const costNotificationEvent = pgTable(
+  "operator_cost_notification_event",
+  {
+    id: uuid("id").primaryKey(),
+    alertId: uuid("alert_id")
+      .notNull()
+      .references(() => costAlert.id),
+    kind: text("kind")
+      .$type<"sending" | "accepted" | "uncertain" | "held" | "acknowledged">()
+      .notNull(),
+    detail: text("detail").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy("operator_cost_notification_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`exists(select 1 from public.operator_cost_alert a where a.id=${t.alertId})`,
+    }),
+    pgPolicy("operator_cost_notification_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costOperator}) and actor_id=current_setting('app.actor_id',true) and kind='acknowledged' and exists(select 1 from public.operator_cost_alert a where a.id=${t.alertId})`,
+    }),
+  ],
+).enableRLS();
 const documentScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and (public.current_business_role() in ('owner','admin') or (${documentOperator}))`;
 const documentWorker = sql`public.seller_artifact_worker_authorized(id,business_id)`;
 export const issuerRevision = pgTable(
@@ -2133,6 +2343,7 @@ export const discoveryUsage = pgTable(
     sources: jsonb("sources").$type<SearchResult[]>(),
     sourceUrl: text("source_url"),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
+    providerCost: jsonb("provider_cost").$type<DiscoveryProviderCost>(),
     checkOrder: bigint("check_order", { mode: "number" }),
     at: timestamp("at", { withTimezone: true }).notNull(),
   },

@@ -3,6 +3,10 @@ import { createOperationsApplication } from "../application/operations";
 import { createOperationsRepository } from "../db/operations-repository";
 import { createOperationsHttp } from "../http/operations";
 import { configuredOperationLogs } from "../operations/configuration";
+import { createCostApplication } from "../application/costs";
+import { createCostRepository } from "../db/cost-repository";
+import { createCostHttp } from "../http/costs";
+import { configuredCostMailer } from "../costs/mailer";
 import { routeSenderAdapters } from "../senders/adapter";
 import { createMicrosoftOpportunityMail } from "../microsoft-mail/opportunity-mail";
 import { createMicrosoftSenderAdapter } from "../microsoft-mail/sender";
@@ -185,6 +189,13 @@ async function composeServices() {
     clock: { now: () => new Date() },
   });
   const { authenticate, authenticatePrivileged, authenticatePlatform } = access;
+  const costs = createCostApplication({
+    authenticatePlatform,
+    repository: createCostRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    mailer: configuredCostMailer(process.env),
+    scheduleConfigured: Boolean(process.env.TRIGGER_COST_BUDGET_CRON?.trim()),
+  });
   const campaigns = createCampaignApplication({
     authenticate: access.authenticateForWork,
     repository: createCampaignRepository(runtimeDatabase(pool), {
@@ -723,6 +734,12 @@ async function composeServices() {
       reportFailure,
     }),
     subscriptionQuotes,
+    costs,
+    costsHttp: createCostHttp({
+      application: costs,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     subscriptionPayments,
     sellerDocuments,
     sellerDocumentsHttp: createSellerDocumentHttp({

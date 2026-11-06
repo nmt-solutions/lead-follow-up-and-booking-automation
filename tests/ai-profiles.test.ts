@@ -24,6 +24,9 @@ import { scoped } from "../src/db/scope";
 import { aiActivationAudit } from "../src/db/schema";
 import { createExaRetrieval } from "../src/discovery/exa";
 import { exaActivation, exaPolicy, exaScope } from "./support/exa";
+import { createCostApplication } from "../src/application/costs";
+import { createCostRepository } from "../src/db/cost-repository";
+import { readOperatorCosts } from "./support/costs";
 
 describe("AI profiles at the authorized application seam", () => {
   let harness: Awaited<ReturnType<typeof createHarness>>;
@@ -381,6 +384,96 @@ describe("AI profiles at the authorized application seam", () => {
       (await f.ai.workspace(f.headers, f.business.id)).executions,
     ).toHaveLength(2);
     expect(harness.invitations.sent).toEqual([]);
+  });
+
+  it("projects actual AI attempts into operator costs without replaying inference or counting fallback provider cost twice", async () => {
+    const f = await fixture("ai-cost-source@example.com", {
+      readiness: () => ({ primary: true, fallback: true }),
+      async generate(input) {
+        if (input.route === "operator_byok")
+          throw new AiProviderFailure("funding", {
+            ...unknownAiMetrics,
+            inputTokens: 12,
+          });
+        return {
+          output: {
+            draft: "Collection only.",
+            answerIndexes: [0],
+            needsHumanReview: true,
+          },
+          metrics: {
+            ...unknownAiMetrics,
+            inputTokens: 14,
+            outputTokens: 8,
+            gatewayCostUsd: 0.015,
+            providerCostUsd: 0.012,
+            credentialSource: "gateway_system",
+            provider: "openai",
+            model: "openai/fixture-model",
+          },
+        };
+      },
+    });
+    await harness.admin.query(
+      "update platform_operator set costs=true where user_id=$1",
+      [f.actor.userId],
+    );
+    const initial = await f.ai.workspace(f.headers, f.business.id);
+    const state = await f.ai.saveDraft(f.headers, f.business.id, {
+      expectedVersion: initial.profiles.length,
+      profile,
+      note: "Cost source fixture",
+    });
+    const result = await f.ai.preview(f.headers, f.business.id, {
+      profileId: state.profiles.at(-1)!.id,
+      requestKey: randomUUID(),
+      expectedKnowledgeVersion: 2,
+      confirmReviewedInput: true,
+      confirmBusinessContext: true,
+      sample: { task: "drafting", label: "Cost sample", text: "Delivery?" },
+    });
+    const costs = createCostApplication({
+      authenticatePlatform: harness.access.authenticatePlatform,
+      repository: createCostRepository(runtimeDatabase(harness.runtime)),
+      clock: harness.clock,
+    });
+    await costs.refresh(f.headers, {
+      month: "2026-11",
+      retentionSeconds: 3600,
+    });
+    const rows = (await costs.workspace(f.headers, "2026-11")).sources.filter(
+      (r) => r.source.businessId === f.business.id,
+    );
+    expect(rows).toHaveLength(2);
+    expect(
+      rows.find((r) => r.sourceId === `native:ai:${result.attempts[1].id}`)
+        ?.source,
+    ).toMatchObject({
+      amount: { currency: "USD", micros: "15000" },
+      funding: "gateway_prepaid",
+      details: {
+        route: "gateway_system",
+        providerCostUsd: 0.012,
+        gatewayCostUsd: 0.015,
+      },
+    });
+    expect(
+      rows.find((r) => r.sourceId === `native:ai:${result.attempts[0].id}`)
+        ?.source,
+    ).toMatchObject({
+      amount: null,
+      status: "unpriced",
+      funding: "openai_linked_credits",
+    });
+    await costs.refresh(f.headers, {
+      month: "2026-11",
+      retentionSeconds: 3600,
+    });
+    expect(
+      (await costs.workspace(f.headers, "2026-11")).history.filter(
+        (r) => r.source.businessId === f.business.id,
+      ),
+    ).toHaveLength(2);
   });
 
   it("bounds primary and explicit system fallback under one persistent allowance, including concurrent previews and failed usage", async () => {
@@ -891,6 +984,7 @@ describe("AI profiles at the authorized application seam", () => {
       automation: { quantity: 10000, unit: "provider calls" },
     });
     const requests: { endpoint: string; body: unknown }[] = [];
+    let emptyCostedSearch = false;
     const queued: DiscoveryWork[] = [];
     const discovery = createDiscoveryApplication({
       authenticate: harness.authenticate,
@@ -919,8 +1013,16 @@ describe("AI profiles at the authorized application seam", () => {
             const url = "https://fabricator.example/needs";
             return Response.json(
               String(endpoint).endsWith("/search")
-                ? { results: [{ title: "Fabricator", url }] }
+                ? {
+                    requestId: "fixture-search-cost",
+                    costDollars: { total: 0.004 },
+                    results: emptyCostedSearch
+                      ? []
+                      : [{ title: "Fabricator", url }],
+                  }
                 : {
+                    requestId: "fixture-contents-cost",
+                    costDollars: { total: 0.002 },
                     results: [{ url, text: "Need 500 kg steel" }],
                     statuses: [
                       { id: url, status: "success", source: "crawled" },
@@ -952,6 +1054,30 @@ describe("AI profiles at the authorized application seam", () => {
       });
       const work = queued.at(-1)!;
       expect(await discovery.execute(work)).toEqual({ outcome: "completed" });
+      const costs = await readOperatorCosts(harness, f.headers);
+      const usage = costs.sources.filter(
+        (r) =>
+          r.source.businessId === f.business.id &&
+          r.source.runId === started.id,
+      );
+      expect(
+        usage
+          .filter((r) => r.source.provider === "exa")
+          .map((r) => r.source.unit)
+          .sort(),
+      ).toEqual(["contents_request", "search_request"]);
+      expect(usage.some((r) => r.sourceId.startsWith("native:ai:"))).toBe(true);
+      expect(
+        usage
+          .filter((r) => r.source.provider === "exa")
+          .map((r) => r.source.amount?.micros)
+          .sort(),
+      ).toEqual(["2000", "4000"]);
+      expect(
+        usage
+          .filter((r) => r.source.provider === "exa")
+          .every((r) => r.source.status === "estimated"),
+      ).toBe(true);
       const beforeReplay = models.length;
       await discovery.execute(work);
       expect(models).toHaveLength(beforeReplay);
@@ -1018,6 +1144,33 @@ describe("AI profiles at the authorized application seam", () => {
     ]);
     expect(harness.invitations.sent).toEqual([]);
     const backup = await harness.signIn("ai-backup-owner@example.com");
+    emptyCostedSearch = true;
+    const emptyRun = await discovery.start(f.headers, f.business.id, {
+      markets: ["US"],
+      publicOffering: "Steel",
+      confirmPublicQuery: true,
+      budget: 3,
+      requestKey: randomUUID(),
+    });
+    expect(await discovery.execute(queued.at(-1)!)).toEqual({
+      outcome: "completed",
+    });
+    const emptyUsage = (
+      await readOperatorCosts(harness, f.headers)
+    ).sources.filter((r) => r.source.runId === emptyRun.id);
+    expect(emptyUsage).toMatchObject([
+      {
+        source: {
+          provider: "exa",
+          quantity: 1,
+          unit: "search_request",
+          status: "estimated",
+          amount: { currency: "USD", micros: "4000" },
+          details: { returnedResults: 0 },
+        },
+      },
+    ]);
+    emptyCostedSearch = false;
     const backupActor = await harness.authenticate(backup);
     await harness.admin.query(
       "INSERT INTO membership (business_id, user_id, role) VALUES ($1, $2, 'admin')",
