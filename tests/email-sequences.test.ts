@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { sequenceWorkspaceSchema } from "../src/models/email-sequences";
 import { createHarness } from "./support/harness";
 import { campaignFixture } from "./support/campaigns";
@@ -1705,7 +1707,31 @@ describe("Approved email sequences at the persisted application seam", () => {
       });
       f.queue.fail = false;
       f.queue.failAfterAccept = false;
-      await f.newApp().recoverDue();
+      const operations = createOperationsApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createOperationsRepository(
+          runtimeDatabase(h.runtime),
+          h.clock,
+        ),
+        commands: { sequences: f.newApp() },
+      });
+      expect(
+        (await operations.workspace(f.owner, f.business.id)).resources.find(
+          (r) => r.id === started.runs[0].id,
+        ),
+      ).toMatchObject({
+        source: "sequence",
+        context: {
+          approvalHash: started.runs[0].payloadHash,
+          revisionId: started.runs[0].revisionId,
+        },
+      });
+      await operations.recover(f.owner, f.business.id, {
+        source: "sequence",
+        targetId: started.runs[0].id,
+        action: "reconcile",
+        requestKey: crypto.randomUUID(),
+      });
       expect(f.queued).toHaveLength(1);
       h.clock.set("2026-11-05T14:00:00Z");
       await h.reverifyAuthenticator(f.owner);

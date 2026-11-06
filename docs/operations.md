@@ -1,0 +1,48 @@
+# Action history and safe recovery
+
+`/businesses/:id/operations` provides Business action/history and accountable next actions. `/platform/operations` is a separate view for a provisioned `operations.manage` operator with current platform MFA. It separates actions, runs, queues, channels, sender health and history. An operations-only grant participates in central authentication/MFA classification; it does not confer Business membership, financial reconciliation, document management or sender-health repair authority.
+
+The application composes existing commands, rather than resetting domain state:
+
+| Source                    | Business command                                                                                 | Operator maintenance                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| Discovery                 | Explicit resume of unfinished work under the existing attempt/budget/configuration gates         | Inspect/escalate; the Business manager authorizes a new attempt                                             |
+| Discovery outbox          | Recover the existing dispatch; current manager capability required                               | Recover only the selected existing dispatch with its original queued actor                                  |
+| Mailbox                   | Queue the saved selected scope, message bounds and checkpoint as the current integration manager | Requeue only the existing job with its original actor/session; it cannot transfer authority or expand scope |
+| Email sequence            | Existing `recover` command, exact evidence reconciliation and durable queue publication          | Scoped existing recovery work; original identity and all dispatch gates remain                              |
+| Inquiry email or WhatsApp | Existing exact native reconciliation                                                             | Escalate to the responsible Business actor                                                                  |
+| Calendar booking          | Reconcile the exact saved booking intent                                                         | Escalate; never create a replacement booking                                                                |
+| Subscription payment      | Existing authoritative payment refresh                                                           | Existing operator refresh, additionally requiring reconciliation authority/MFA                              |
+| Seller document           | Existing protected artifact recovery                                                             | Existing document recovery, additionally requiring document authority/MFA                                   |
+| Sender health             | Review selected incident and evidence through the health flow                                    | Requires its separate health capability; acknowledgement is not repair                                      |
+
+Every recovery request has an actor-bound stable request key and an immutable requested/outcome record. A lost command result stays `reconciliation_required`; replay does not rerun it. Native sends/bookings are never routed through a generic retry transport. Unknown native acceptance remains reserved; payment creation is never repeated by this view. Current domain commands remain authoritative even if the recorded monitoring snapshot is old.
+
+## Persistence and privacy
+
+`operation_event` is an append-only, forced-RLS projection and recovery ledger. Transactional source triggers copy explicitly selected identifiers, versions, hashes, counters and status codes. They omit credentials, session IDs, mailbox cursors, message bodies/recipients, native callback capabilities, private provider payloads, payment amounts and document/storage keys. Business-only handoff text is read under the existing Business scope; the operator projection receives no such text. Native WhatsApp evidence is selected from the real authorized sending query; an unassociated channel status does not establish an application delivery. Email provider acceptance and Sent-folder observation remain separate from delivery.
+
+Managed security setup backfills existing source records as **observations at installation time**, without inventing historical execution timestamps. A temporary owner-only read policy is removed within the same security transaction. Subsequent source changes append observations atomically. Runtime startup independently verifies read and append grants, forced RLS, helper restrictions, policies and every capture trigger. Prepare/secure restores grants and observers after schema reconciliation. New detail foreign keys reference stable primary identities; they do not add dependencies on replaceable composite unique constraints. Existing financial, Meta and document scope preparation remains intact.
+
+`OperationSnapshot`, `OperationEvent`, `OperationNotification`, `RecoveryCommand`, `OperationQuery` and `DiagnosticRetention` in `src/models/operations.ts` are the integration contracts for #56/#58/#60. Context has explicitly named typed fields; it is not arbitrary diagnostic JSON. History uses an immutable increasing `position`; `workspace(credentials, businessId, operator, { before, limit })` pages backwards and returns `nextHistoryBefore`. Current resources are selected independently of the history page. Source references and recorded policy/approval versions remain available without exposing provider capabilities. Later consumers should preserve these source/evidence distinctions instead of inferring commercial outcomes or spending from an accepted action.
+
+For #59, the same query returns stable notification IDs, source/target, responsible user, audience, resolution and actual in-app delivery stage. Acknowledgement is a separate attributed command, independently recorded for Business and operator audiences. Escalation makes a durable item available to both queues. These records establish `available_in_app` or `acknowledged_in_app`; they do not claim an email was queued, accepted or delivered. The recent alert projection is bounded to 200 observations; full immutable history is paged separately. A notification worker can compose these records under its own approved audience/delivery policy without reexecuting the underlying action.
+
+## Explicit retention and maintenance
+
+An operations operator records the authorized diagnostic/audit-detail periods and policy evidence reference with fresh MFA. There are no default retention durations. `operation_retention` retains the attributed version/approval; new optional `operation_detail` records freeze that policy and a database-computed expiry. Their contents are allowlisted recovery codes and generated request IDs only. Without an approved policy, optional details are not created; essential action/replay/ownership/financial/document identity is not discarded.
+
+Manual pruning requires current operator authority/MFA. The optional `maintain-operation-diagnostics` Trigger schedule uses `TRIGGER_OPERATIONS_RETENTION_CRON` and a restricted database connection. Its only capability deletes already-expired optional details under policies whose approving operator still has operations authority. Both paths enforce `statement_timestamp()` inside the database; future application clocks cannot authorize early deletion. Neither can delete or rewrite action, financial, document, takeover or native replay scope. Existing details keep their saved expiry when a later policy changes. Domain retention/export/deletion/offboarding decisions remain separate explicit inputs.
+
+## Provider-native resources and live gates
+
+Optional deployment-owned `OPERATIONS_TRIGGER_LOG_URL`, `OPERATIONS_VERCEL_LOG_URL` and `OPERATIONS_NEON_LOG_URL` point to actual authorized resources. Links require HTTPS, exact allowlisted hosts and narrow resource paths; credentials, query strings, fragments, ports and arbitrary redirects/hosts are excluded. Missing or rejected resources receive an unavailable reason. No telemetry API, unlimited provider allowance or new observability subscription is introduced. Provider access remains independently authorized in the provider console.
+
+Primary sources checked 2026-11-07:
+
+- [Trigger logging](https://trigger.dev/docs/logging), [idempotency](https://trigger.dev/docs/idempotency) and [scheduled tasks](https://trigger.dev/docs/tasks/scheduled).
+- [Vercel runtime logs](https://vercel.com/docs/logs/runtime) and [Neon monitoring](https://neon.com/docs/introduction/monitoring).
+- [Gmail message send](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send) and [Microsoft sendMail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0): native acceptance is not delivery proof.
+- [Google calendar event creation](https://developers.google.com/workspace/calendar/api/guides/create-events) and [Razorpay subscription invoice lookup](https://razorpay.com/docs/api/payments/subscriptions/fetch-invoices).
+
+Real operator provisioning, approved retention evidence, actual provider resources/grants, domain policy/budget inputs, deployed Trigger jobs and a chosen maintenance cron remain launch inputs. No live provider, financial, customer-send, deployment or browser validation is established by deterministic application tests. UI validation and user acceptance remain pending.

@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
 import { metaSendingFixture } from "./support/meta-sending";
-import { verifyRuntimeRole } from "../src/db/runtime";
+import { verifyRuntimeRole, runtimeDatabase } from "../src/db/runtime";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 import { createWhatsAppSendingHttp } from "../src/http/whatsapp-sending";
 
@@ -89,6 +91,30 @@ describe("WhatsApp sends through current public application commands", () => {
     });
     await f.control.dispatch(f.credentials, f.businessId, action.id);
     expect(f.sent).toHaveLength(1);
+    const operations = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { whatsapp: f.restart() },
+    });
+    await expect(
+      operations.recover(f.credentials, f.businessId, {
+        source: "action",
+        targetId: action.id,
+        action: "retry",
+        requestKey: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(
+      await operations.recover(f.credentials, f.businessId, {
+        source: "action",
+        targetId: action.id,
+        action: "reconcile",
+        requestKey: crypto.randomUUID(),
+      }),
+    ).toEqual({ outcome: "checked" });
     await f.deliver("messages", {
       statuses: [
         {
@@ -131,6 +157,11 @@ describe("WhatsApp sends through current public application commands", () => {
       evidence: "delivered",
       providerMessageRef: "wamid.out-1",
     });
+    expect(
+      (await operations.workspace(f.credentials, f.businessId)).resources.find(
+        (r) => r.id === action.id,
+      ),
+    ).toMatchObject({ context: { nativeEvidence: "delivered" } });
     expect(workspace.usage[0]).toMatchObject({
       state: "observed_unpriced",
       currency: null,

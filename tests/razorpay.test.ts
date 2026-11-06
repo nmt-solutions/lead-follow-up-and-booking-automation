@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { createHmac, randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
 import { subscriptionFixture } from "./support/subscription";
@@ -274,7 +276,32 @@ describe("Native recurring cards at the public application seam", () => {
     expect(
       (await app.workspace(f.owner, f.business.id)).actions[0].checkout,
     ).toBeNull();
-    await compose(native).recover();
+    const operations = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { payments: compose(native) },
+    });
+    const projection = (
+      await operations.workspace(f.owner, f.business.id)
+    ).resources.find((r) => r.id === a.id);
+    expect(projection).toMatchObject({
+      source: "payment",
+      context: { quoteId: f.quote.id },
+    });
+    expect(JSON.stringify(projection)).not.toMatch(
+      /recoveryKey|operationKey|amountMinor|account|checkout/,
+    );
+    const recovery = {
+      source: "payment",
+      targetId: a.id,
+      action: "reconcile",
+      requestKey: randomUUID(),
+    };
+    await operations.recover(f.owner, f.business.id, recovery);
+    await operations.recover(f.owner, f.business.id, recovery);
     const saved = (await app.workspace(f.owner, f.business.id)).actions[0];
     expect(saved.checkout?.subscriptionId).toBe("sub_fixture1");
     expect(native.requests.some((r) => r.path.includes("skip=100"))).toBe(true);

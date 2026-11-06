@@ -1,4 +1,6 @@
 import { persistPaidSubscription } from "./support/paid-subscription";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
@@ -2045,6 +2047,46 @@ describe("Inquiry handling at the persisted application seam", () => {
         state: "committed",
         email: { result: { status: "unknown" }, sent: null },
       });
+      const operations = createOperationsApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createOperationsRepository(
+          runtimeDatabase(h.runtime),
+          h.clock,
+        ),
+        commands: { inquiries: f.restart() },
+      });
+      const actionId = result.action!.id;
+      const projection = (
+        await operations.workspace(f.credentials, f.business.id)
+      ).resources.find((r) => r.id === actionId);
+      expect(projection).toMatchObject({
+        source: "action",
+        status: "committed",
+        context: {
+          inquiryRunId: ready.id,
+          acceptance: "unknown",
+          sentObserved: false,
+        },
+      });
+      expect(JSON.stringify(projection)).not.toMatch(
+        /recipient|parent|body|internetMessageId/,
+      );
+      await expect(
+        operations.recover(f.credentials, f.business.id, {
+          source: "action",
+          targetId: actionId,
+          action: "retry",
+          requestKey: crypto.randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(
+        await operations.recover(f.credentials, f.business.id, {
+          source: "action",
+          targetId: actionId,
+          action: "reconcile",
+          requestKey: crypto.randomUUID(),
+        }),
+      ).toEqual({ outcome: "checked" });
       await f
         .restart()
         .dispatch(f.credentials, f.business.id, f.need.id, ready.id);

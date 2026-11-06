@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
@@ -417,9 +419,32 @@ describe("Seller documents at the public application seam", () => {
     });
     storage.failPut = false;
     storage.failAfterPut = true;
-    const recovered = await app.recover(f.owner, f.business.id, {
-      documentId: failed.id,
+    const operations = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { documents: app },
     });
+    expect(
+      (await operations.workspace(f.owner, f.business.id)).resources.find(
+        (r) => r.id === failed.id,
+      ),
+    ).toMatchObject({
+      source: "document",
+      status: "failed",
+      context: { periodId: f.period.id },
+    });
+    await operations.recover(f.owner, f.business.id, {
+      source: "document",
+      targetId: failed.id,
+      action: "reconcile",
+      requestKey: randomUUID(),
+    });
+    const recovered = (
+      await app.workspace(f.owner, f.business.id)
+    ).documents.find((d) => d.id === failed.id)!;
     expect(recovered).toMatchObject({
       id: failed.id,
       number: failed.number,

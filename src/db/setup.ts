@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { secureOperations, prepareOperations } from "./operations-security";
 import { preparePaymentSecurity } from "./payment-security";
 import { prepareSellerDocumentSecurity } from "./seller-document-security";
 import { sql } from "drizzle-orm";
@@ -53,6 +54,9 @@ import {
   invitation,
   teamAudit,
   platformOperator,
+  operationEvent,
+  operationRetention,
+  operationDetail,
   businessFile,
   fileAccess,
   fileUsage,
@@ -202,6 +206,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
+  await prepareOperations(pool);
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
     RETURNS TABLE(payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -778,6 +783,9 @@ export async function secureDatabase(pool: Pool) {
       invitation,
       teamAudit,
       platformOperator,
+      operationEvent,
+      operationRetention,
+      operationDetail,
       businessFile,
       fileAccess,
       fileUsage,
@@ -1241,6 +1249,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL ON FUNCTION public.pending_meta_outbound() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
     `);
+    await secureOperations(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");
