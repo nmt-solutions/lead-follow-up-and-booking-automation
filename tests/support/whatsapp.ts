@@ -33,6 +33,7 @@ export function metaFixture(clock: Clock) {
       coexistence: true,
     },
     login: { appId: "900001", configId: "900002", graphVersion: "v25.0" },
+    async subscribe() {},
     async exchange(code) {
       exchanges.push(code);
       return { accessToken: "secret-customer-token", expiresAt: null };

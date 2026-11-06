@@ -4,6 +4,9 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  whatsAppIntake,
+  whatsAppReceipt,
+  whatsAppIntakeScopeForeignKeys,
   whatsAppConnection,
   whatsAppOauth,
   whatsAppEvent,
@@ -440,6 +443,11 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON public.google_calendar_grant FROM app_runtime;
         REVOKE UPDATE (consumed) ON public.google_calendar_oauth FROM app_runtime;
       END IF;
+      IF to_regclass('public.whatsapp_intake') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_intake,public.whatsapp_receipt FROM app_runtime;
+        REVOKE ALL PRIVILEGES (connection_version,account_key,inbox_connection_id,actor_id,enabled_at,receipt_retention_seconds,inbound_at,echo_at,gap) ON public.whatsapp_intake FROM app_runtime;
+        REVOKE ALL PRIVILEGES (activity,state,conversation_id,opportunity_id) ON public.whatsapp_receipt FROM app_runtime;
+      END IF;
       IF to_regclass('public.whatsapp_connection') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.whatsapp_connection, public.whatsapp_oauth, public.whatsapp_event FROM app_runtime;
         REVOKE UPDATE (version, configuration, status, reason, terms_actor_id, terms_accepted_at, credentials, provider_key, observation, operation_id, assets, coexistence_finished, phone_number_id) ON public.whatsapp_connection FROM app_runtime;
@@ -551,6 +559,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     ...microsoftCalendarScopeForeignKeys,
     ...googleCalendarScopeForeignKeys,
     ...whatsAppScopeForeignKeys,
+    ...whatsAppIntakeScopeForeignKeys,
   ]) {
     const { name } = getTableConfig(key.table);
     const exists = await pool.query<{ present: boolean }>(
@@ -609,6 +618,7 @@ export async function secureDatabase(pool: Pool) {
       ...microsoftCalendarScopeForeignKeys,
       ...googleCalendarScopeForeignKeys,
       ...whatsAppScopeForeignKeys,
+      ...whatsAppIntakeScopeForeignKeys,
     ]) {
       const table = key.table;
       const reference = key.reference();
@@ -629,7 +639,13 @@ export async function secureDatabase(pool: Pool) {
     }
     // The pinned push also misses changes to an existing CHECK expression.
     // Upgrade the original owner-only role check from the schema's definition.
-    for (const table of [membership, inboxOpportunity, senderHealthRecord]) {
+    for (const table of [
+      membership,
+      inboxOpportunity,
+      senderHealthRecord,
+      whatsAppIntake,
+      whatsAppReceipt,
+    ]) {
       for (const constraint of getTableConfig(table).checks) {
         await database.execute(
           sql`alter table ${table} drop constraint if exists ${sql.identifier(constraint.name)}`,
@@ -642,6 +658,8 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      whatsAppIntake,
+      whatsAppReceipt,
       whatsAppEvidence,
       whatsAppConnection,
       whatsAppOauth,
@@ -1041,8 +1059,50 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE discovery_schedule FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_dispatch FORCE ROW LEVEL SECURITY;
       GRANT UPDATE (durable_run_id, durable_attempt, attempt_started_at, schedule_revision) ON discovery_run TO app_runtime;
-      SET LOCAL ROLE app_runtime;
     `);
+    await client.query(`
+      REVOKE ALL ON whatsapp_intake, whatsapp_receipt FROM app_runtime;
+      GRANT SELECT, INSERT ON whatsapp_intake, whatsapp_receipt TO app_runtime;
+      GRANT UPDATE (connection_version,account_key,inbox_connection_id,actor_id,enabled_at,receipt_retention_seconds,inbound_at,echo_at,gap) ON whatsapp_intake TO app_runtime;
+      GRANT UPDATE (activity,state,conversation_id,opportunity_id) ON whatsapp_receipt TO app_runtime;
+      ALTER TABLE whatsapp_intake FORCE ROW LEVEL SECURITY;
+      ALTER TABLE whatsapp_receipt FORCE ROW LEVEL SECURITY;
+      CREATE OR REPLACE FUNCTION public.resolve_meta_intake(provider text, waba text, phone text)
+      RETURNS TABLE(id uuid,business_id uuid,actor_id text)
+      LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        SELECT i.id,i.business_id,i.actor_id FROM public.whatsapp_intake i
+        JOIN public.whatsapp_connection c ON c.id=i.id AND c.business_id=i.business_id
+        JOIN public.membership m ON m.business_id=i.business_id AND m.user_id=i.actor_id
+        WHERE c.provider_key=provider AND c.assets->>'wabaId'=waba AND c.phone_number_id=phone
+          AND c.version=i.connection_version AND c.status='connected' AND c.credentials IS NOT NULL
+          AND m.role IN ('owner','admin')
+      $$;
+      CREATE OR REPLACE FUNCTION public.pending_meta_intakes(provider text)
+      RETURNS TABLE(id uuid,business_id uuid,actor_id text)
+      LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        SELECT i.id,i.business_id,i.actor_id FROM public.whatsapp_intake i
+        JOIN public.whatsapp_connection c ON c.id=i.id AND c.business_id=i.business_id
+        JOIN public.membership m ON m.business_id=i.business_id AND m.user_id=i.actor_id
+        WHERE c.provider_key=provider AND c.version=i.connection_version AND c.status='connected'
+          AND c.credentials IS NOT NULL AND m.role IN ('owner','admin')
+          AND EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id AND r.state IN ('pending','review') AND r.connection_version=i.connection_version)
+        ORDER BY EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id AND r.connection_version=i.connection_version AND r.state='pending') DESC,i.id LIMIT 100
+      $$;
+      CREATE OR REPLACE FUNCTION public.purge_meta_receipts(at_time timestamptz)
+      RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        UPDATE public.whatsapp_intake i SET gap='unprocessed_event_expired'
+          WHERE EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id
+            AND r.connection_version=i.connection_version AND r.state IN ('pending','review') AND r.expires_at<=at_time);
+        UPDATE public.whatsapp_receipt SET activity=NULL,
+          state=CASE WHEN state IN ('pending','review') THEN 'expired' ELSE state END
+        WHERE expires_at<=at_time AND activity IS NOT NULL
+      $$;
+      REVOKE ALL ON FUNCTION public.purge_meta_receipts(timestamptz) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.purge_meta_receipts(timestamptz) TO app_runtime;
+      REVOKE ALL ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) TO app_runtime;
+    `);
+    await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");
   } catch (error: unknown) {

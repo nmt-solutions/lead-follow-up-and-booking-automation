@@ -22,6 +22,11 @@ export type MetaProvider = {
   key: string;
   setup: WhatsAppSetup;
   login?: { appId: string; configId: string; graphVersion: string };
+  subscribe?(
+    token: MetaToken,
+    assets: MetaAssets,
+    signal: AbortSignal,
+  ): Promise<void>;
   exchange(code: string, signal: AbortSignal): Promise<unknown>;
   inspect(
     token: MetaToken,

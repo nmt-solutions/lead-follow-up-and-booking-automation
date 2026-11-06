@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { metaIntakeViewSchema } from "./whatsapp-intake";
 
 export const metaIdSchema = z.string().regex(/^[0-9]{1,40}$/);
 export const whatsAppConfigurationSchema = z.strictObject({
@@ -183,9 +184,13 @@ export const whatsAppViewSchema = z.object({
     .nullable(),
   readiness: z.object({
     onboardingReady: z.boolean(),
-    automationReady: z.literal(false),
+    automationReady: z.boolean(),
+    inboundReady: z.boolean(),
+    manualVisibilityReady: z.boolean(),
+    sendingReady: z.literal(false),
     issues: z.array(z.string()),
   }),
+  intake: metaIntakeViewSchema,
   billing: z.object({
     payer: z.literal("customer"),
     provider: z.literal("meta"),

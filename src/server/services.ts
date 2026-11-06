@@ -20,6 +20,10 @@ import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
 import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
 import { createWhatsAppApplication } from "../application/whatsapp";
+import { createWhatsAppIntakeApplication } from "../application/whatsapp-intake";
+import { createWhatsAppIntakeRepository } from "../db/whatsapp-intake-repository";
+import { createWhatsAppIntakeHttp } from "../http/whatsapp-intake";
+import { configuredMetaWebhook } from "../whatsapp/intake-configuration";
 import { createWhatsAppRepository } from "../db/whatsapp-repository";
 import { configuredMetaCloud } from "../whatsapp/configuration";
 import { createWhatsAppHttp } from "../http/whatsapp";
@@ -465,7 +469,23 @@ async function composeServices() {
     clock: googleOptions.clock,
     ...whatsappComposition,
   });
+  const whatsappIntake = createWhatsAppIntakeApplication({
+    authenticate: access.authenticateForWork,
+    repository: createWhatsAppIntakeRepository(
+      runtimeDatabase(pool),
+      googleOptions.clock,
+    ),
+    clock: googleOptions.clock,
+    ...whatsappComposition,
+    configuration: configuredMetaWebhook(process.env),
+  });
   return {
+    whatsappIntake,
+    whatsappIntakeHttp: createWhatsAppIntakeHttp({
+      application: whatsappIntake,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     whatsapp,
     whatsappHttp: createWhatsAppHttp({
       application: whatsapp,

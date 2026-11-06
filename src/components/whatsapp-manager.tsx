@@ -30,6 +30,7 @@ import {
 } from "./ui/alert-dialog";
 import { MetaSignup, metaSignupSchema } from "./meta-signup";
 import { WhatsAppEvidenceStatus } from "./whatsapp-evidence-status";
+import { WhatsAppIntakeManager } from "./whatsapp-intake-manager";
 
 const issueLabels: Record<string, string> = {
   configured:
@@ -304,6 +305,13 @@ export function WhatsAppManager({
   const lastObservation = c?.observation;
   return (
     <div className="space-y-8">
+      <WhatsAppIntakeManager
+        key={`${c?.version}-${state.intake.inboxConnectionId}`}
+        businessId={businessId}
+        version={c?.version ?? null}
+        initialState={state.intake}
+        canManage={state.canManage}
+      />
       <Card>
         <CardHeader>
           <CardTitle>Customer-owned channel, separate Meta bill</CardTitle>
@@ -339,12 +347,12 @@ export function WhatsAppManager({
                 ? "Onboarding checks confirmed"
                 : "Onboarding not ready"}
             </Badge>
-            <Badge>Automation unavailable</Badge>
+            <Badge>Sending requires separate setup</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
             Onboarding does not enable sending, recipient permission, approved
-            templates, conversation windows or manual-app activity capture.
-            These require separately configured channel handling.
+            templates or conversation windows. Incoming capture and supported
+            manual activity have their own evidence above.
           </p>
           {c?.reason && (
             <p className="rounded-lg bg-muted p-4 text-sm">

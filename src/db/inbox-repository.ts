@@ -134,6 +134,7 @@ export async function captureInboxInquiry(
   event: IncomingInquiry,
   at: Date,
   authorization?: { since: Date; metadata: MailboxMetadata },
+  metaAuthorization?: { connectionId: string },
 ): Promise<CaptureResult> {
   // Recheck after normalization; role/connection revocation can race adapter I/O.
   await requireCapability(tx, actor, businessId, "integrations.manage");
@@ -146,6 +147,11 @@ export async function captureInboxInquiry(
   )
     throw new ApplicationError("FORBIDDEN");
   if (connection.mode === "mailbox" && !authorization)
+    throw new ApplicationError("FORBIDDEN");
+  if (
+    connection.mode === "meta" &&
+    metaAuthorization?.connectionId !== connection.id
+  )
     throw new ApplicationError("FORBIDDEN");
   const eventFingerprint = fingerprint(event, true);
   const [seen] = await tx

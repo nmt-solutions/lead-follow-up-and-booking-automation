@@ -146,6 +146,18 @@ export function createMetaCloudProvider(
       configId: config.configId,
       graphVersion: config.graphVersion,
     },
+    async subscribe(token, assets, signal) {
+      validate(
+        z.object({ success: z.literal(true) }),
+        await request(
+          `${assets.wabaId}/subscribed_apps`,
+          token.accessToken,
+          signal,
+          {},
+          {},
+        ),
+      );
+    },
     async exchange(code, signal) {
       const value = validate(
         z.object({

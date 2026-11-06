@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { mailManualHistory } from "./mailbox-intake";
+import { metaManualHistory } from "./whatsapp-visibility";
 import {
   planInquiryAssociation,
   purchasingNeedDefaults,
@@ -338,7 +339,10 @@ export function createAssociationRepository(
             receivedAt: message.receivedAt.toISOString(),
             opportunityId,
           })),
-          manualReplies: await mailManualHistory(tx, businessId, id),
+          manualReplies: [
+            ...(await mailManualHistory(tx, businessId, id)),
+            ...(await metaManualHistory(tx, businessId, id)),
+          ],
           history: history.map((entry) => ({
             ...entry,
             at: entry.at.toISOString(),
