@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "billing_profile_revision",
+    "billing_profile_review",
     "email_sequence_policy",
     "email_sequence_run",
     "email_sequence_action",
