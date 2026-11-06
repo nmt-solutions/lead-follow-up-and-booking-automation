@@ -21,7 +21,7 @@ Opaque fallback is automatic without backdrop-filter support, with reduced trans
 
 ## Components and flows
 
-Reuse `src/components/ui`: shadcn-style Button, Input, Textarea, Label, NativeSelect, Card, Alert and Badge; Radix-backed Tabs and AlertDialog preserve their keyboard and focus behavior. Use semantic links for navigation and buttons for commands. Native selects remain appropriate for short role lists.
+Reuse `src/components/ui`: shadcn-style Button, Input, Textarea, Label, NativeSelect, Card, Alert and Badge; Radix-backed Checkbox, Tabs and AlertDialog preserve their keyboard and focus behavior. Use semantic links for navigation and buttons for commands. Native selects remain appropriate for short role lists.
 
 Controls have 44px minimum height, visible focus, persistent labels and appropriate autocomplete/input mode. Validate external responses before using them. Keep one prominent task per section. Destructive security changes use AlertDialog with a named consequence and cancel action.
 

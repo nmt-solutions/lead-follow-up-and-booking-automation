@@ -27,6 +27,7 @@ import {
   handoffObservations,
   appendHandoffObservation,
   reconcileHandoffReplies,
+  type HandoffObservationCache,
 } from "./email-handoff-observations";
 
 type Handoff = typeof emailHandoff.$inferSelect;
@@ -49,7 +50,9 @@ export function createEmailHandoffRepository(database: Database, clock: Clock) {
           "sales.work",
         );
         await requireSalesSession(tx, actor, clock.now(), role);
-        return run(tx, role);
+        const result = await run(tx, role);
+        await requireSalesSession(tx, actor, clock.now(), role);
+        return result;
       },
       { lock: true },
     );
@@ -114,7 +117,11 @@ export function createEmailHandoffRepository(database: Database, clock: Clock) {
         source: e.source,
       }));
   }
-  async function view(tx: Transaction, row: Handoff): Promise<EmailHandoff> {
+  async function view(
+    tx: Transaction,
+    row: Handoff,
+    cache?: HandoffObservationCache,
+  ): Promise<EmailHandoff> {
     const c = await content(tx, row);
     return {
       id: row.id,
@@ -128,7 +135,7 @@ export function createEmailHandoffRepository(database: Database, clock: Clock) {
       at: row.at.toISOString(),
       mailto: c.mailto,
       evidence: await evidence(tx, row),
-      ...(await handoffObservations(tx, row, clock.now())),
+      ...(await handoffObservations(tx, row, clock.now(), cache)),
     };
   }
   return {
@@ -139,9 +146,10 @@ export function createEmailHandoffRepository(database: Database, clock: Clock) {
           .from(emailHandoff)
           .where(eq(emailHandoff.businessId, businessId))
           .orderBy(asc(emailHandoff.at), asc(emailHandoff.id));
+        const cache: HandoffObservationCache = new Map();
         return {
           canBind: role === "owner" || role === "admin",
-          handoffs: await Promise.all(rows.map((row) => view(tx, row))),
+          handoffs: await Promise.all(rows.map((row) => view(tx, row, cache))),
         };
       });
     },
@@ -184,17 +192,15 @@ export function createEmailHandoffRepository(database: Database, clock: Clock) {
             at: clock.now(),
           };
           await tx.insert(emailHandoff).values(row);
-          await tx
-            .insert(emailHandoffEvidence)
-            .values({
-              id: randomUUID(),
-              businessId,
-              handoffId: row.id,
-              kind: "prepared",
-              sourceKey: "prepared",
-              actorId: actor.userId,
-              at: row.at,
-            });
+          await tx.insert(emailHandoffEvidence).values({
+            id: randomUUID(),
+            businessId,
+            handoffId: row.id,
+            kind: "prepared",
+            sourceKey: "prepared",
+            actorId: actor.userId,
+            at: row.at,
+          });
           return view(tx, row);
         },
       );
@@ -287,8 +293,14 @@ export function createEmailHandoffRepository(database: Database, clock: Clock) {
               eq(gmailManualMessage.id, candidate.id),
             ),
           );
-        await reconcileHandoffReplies(tx, actor, businessId, clock.now());
-        return view(tx, row);
+        await reconcileHandoffReplies(tx, actor, businessId, clock);
+        const final = await view(tx, row);
+        if (
+          final.visibility === "unavailable" ||
+          !final.candidates.some((c) => c.id === candidate.id)
+        )
+          throw new ApplicationError("CONFLICT");
+        return final;
       });
     },
   };

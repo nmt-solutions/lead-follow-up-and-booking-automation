@@ -40,7 +40,7 @@ const reasons = {
   worker_required:
     "Mailbox authorization is separate from durable synchronization. Ask the operator to configure or restore the deployed mailbox worker, then resume this saved job.",
   manual_reply_review:
-    "A selected manual reply cannot yet be matched to an exact received message and Opportunity. Review the retained reply and chosen history bounds; affected follow-ups remain paused.",
+    "A selected outgoing message needs review. For an initial email, review its evidence in First-outreach campaigns; replies need an exact received-message and Opportunity association. Affected follow-ups remain paused.",
   rate_limited:
     "The mail provider limited this request. Follow-ups are paused; retry later from the saved checkpoint.",
   cursor_recovery:
@@ -251,10 +251,10 @@ export function MailboxManager({
             </p>
             {mailbox.pendingManualReplies > 0 && (
               <Alert>
-                {mailbox.pendingManualReplies} selected manual replies are
-                retained for review because their exact received-message
-                references are not yet associated. They have not been assigned
-                to a buyer or Opportunity by guesswork.
+                {mailbox.pendingManualReplies} selected outgoing messages are
+                retained for review. Initial emails can be reviewed in
+                First-outreach campaigns; replies need an exact received-message
+                association. No buyer or Opportunity has been inferred.
               </Alert>
             )}
             {mailbox.manualReplyReview.map((reply) => (
@@ -263,12 +263,12 @@ export function MailboxManager({
                 className="rounded-xl border border-border p-4"
               >
                 <summary className="min-h-11 cursor-pointer font-medium">
-                  Review manual reply: {reply.subject}
+                  Review outgoing message: {reply.subject}
                 </summary>
                 <p className="mt-3 text-sm text-muted-foreground">
                   Occurred {new Date(reply.occurredAt).toLocaleString()}. Exact
-                  received-message header: {reply.inReplyTo ?? "unavailable"}.
-                  Locate this message in{" "}
+                  reply reference: {reply.inReplyTo ?? "none"}. Locate this
+                  message in{" "}
                   {mailbox.provider === "microsoft" ? "Outlook" : "Gmail"} and
                   explicitly approve the corresponding thread and history bounds
                   if needed; no buyer association is inferred.

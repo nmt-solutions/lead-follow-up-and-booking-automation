@@ -50,11 +50,12 @@ function headers(message: Message) {
   }
   return result;
 }
-function addresses(value: string): string[] {
-  if (!value || value.length > 8192) return [];
+function addresses(value: string): string[] | null {
+  if (!value) return [];
+  if (value.length > 8192) return null;
   // Deliberately support simple addr-spec/name-addr lists only. Ambiguous/group syntax is never a buyer identity.
   const entries = value.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
-  if (entries.length > 50) return [];
+  if (entries.length > 50) return null;
   const emails = entries.map((v) => {
     const nameAddr = /^(?:"[^"<>]*"|[^"<>]*)<([^<>]+)>$/.exec(v.trim());
     const parsed = z
@@ -63,7 +64,7 @@ function addresses(value: string): string[] {
       .safeParse(nameAddr?.[1]?.trim() ?? v.trim());
     return parsed.success ? parsed.data.toLowerCase() : "";
   });
-  return emails.every(Boolean) ? emails : [];
+  return emails.every(Boolean) ? emails : null;
 }
 export function gmailMetadata(
   message: Message,
@@ -71,20 +72,22 @@ export function gmailMetadata(
 ): MailboxMetadata {
   const h = headers(message);
   const from = addresses(h.get("from") ?? "");
-  const to = [
-    ...new Set([
-      ...addresses(h.get("to") ?? ""),
-      ...addresses(h.get("cc") ?? ""),
-      ...addresses(h.get("bcc") ?? ""),
-    ]),
+  const recipientLists = [
+    addresses(h.get("to") ?? ""),
+    addresses(h.get("cc") ?? ""),
+    addresses(h.get("bcc") ?? ""),
   ];
+  // Unsupported nonempty headers cannot be silently interpreted as an empty recipient list.
+  const to = recipientLists.some((list) => list === null)
+    ? []
+    : [...new Set(recipientLists.flatMap((list) => list ?? []))];
   const account = context.account.toLowerCase();
   const sent = message.labelIds.includes("SENT");
   const native = gmailNativeSchema.safeParse({
     direction: sent ? "manual_reply" : "incoming",
     internetMessageId: h.get("message-id"),
     inReplyTo: h.get("in-reply-to") ?? null,
-    from: from[0],
+    from: from?.[0],
     to,
   });
   const occurred = Number(message.internalDate);
@@ -98,8 +101,8 @@ export function gmailMetadata(
     h.has("list-id") ||
     (h.has("auto-submitted") && h.get("auto-submitted") !== "no");
   const directionValid = sent
-    ? from[0] === account && !to.includes(account)
-    : from[0] !== account && to.includes(account);
+    ? from?.[0] === account && !to.includes(account)
+    : from?.[0] !== account && to.includes(account);
   const subject = decodedHeader(h.get("subject") ?? "").toLocaleLowerCase();
   const known = context.knownThreads?.includes(message.threadId);
   const selectedSales =
@@ -116,7 +119,7 @@ export function gmailMetadata(
     occurredAt: new Date(occurred).toISOString(),
     relevance: excluded
       ? "unrelated"
-      : native.success && from.length === 1 && directionValid && selectedSales
+      : native.success && from?.length === 1 && directionValid && selectedSales
         ? "sales"
         : "unknown",
     ...(native.success ? { native: native.data } : {}),

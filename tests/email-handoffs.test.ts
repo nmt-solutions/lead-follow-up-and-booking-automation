@@ -742,6 +742,139 @@ describe("Own-client email handoff at the persisted application seam", () => {
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
+  it("rejects an unsupported nonempty Gmail Bcc list before it can hide extra recipients in a Sent candidate", async () => {
+    const f = await setup();
+    await f.handoffs.prepare(f.owner, f.business.id, f.input);
+    const n = await native(f);
+    n.addSent("sent1").payload.headers.push({
+      name: "Bcc",
+      value: "Others: other@example.com;",
+    });
+    n.google.pages.set("Label_sales", {
+      messages: [{ id: "sent1", threadId: "abc123" }],
+    });
+    h.clock.set("2026-11-05T09:03:00Z");
+    await n.synchronize();
+    expect(
+      (await f.handoffs.workspace(f.owner, f.business.id)).handoffs[0]
+        .candidates,
+    ).toEqual([]);
+    expect(n.google.bodyReads).not.toContain("sent1");
+  });
+  it("records a later exact reply through native synchronization without another handoff click or user assertion", async () => {
+    const f = await setup(),
+      prepared = await f.handoffs.prepare(f.owner, f.business.id, f.input),
+      n = await native(f);
+    n.addSent("sent1");
+    n.google.pages.set("Label_sales", {
+      messages: [{ id: "sent1", threadId: "abc123" }],
+    });
+    h.clock.set("2026-11-05T09:03:00Z");
+    await n.synchronize();
+    const candidate = (await f.handoffs.workspace(f.owner, f.business.id))
+      .handoffs[0].candidates[0];
+    await f.handoffs.bindSent(f.owner, f.business.id, {
+      handoffId: prepared.id,
+      observationId: candidate.id,
+      confirmExactMessage: true,
+    });
+    n.google.add("reply1", {
+      at: "2026-11-05T09:04:00Z",
+      from: f.recipient.address,
+      reply: "<sent1@example.com>",
+      text: "Acknowledged",
+    });
+    n.google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [{ message: { id: "reply1" } }],
+        },
+      ],
+    });
+    h.clock.set("2026-11-05T09:04:30Z");
+    expect((await n.synchronize())?.status).toBe("completed");
+    const row = (await f.newApp().workspace(f.owner, f.business.id))
+      .handoffs[0];
+    expect(row.evidence.map((e) => e.kind)).toEqual([
+      "prepared",
+      "sent_folder_observed",
+      "reply_observed",
+    ]);
+    expect(row.evidence[2].source).toMatchObject({
+      messageRef: "reply1",
+      inReplyTo: "<sent1@example.com>",
+      occurredAt: "2026-11-05T09:04:00.000Z",
+    });
+    await n.synchronize();
+    expect(
+      (await f.newApp().workspace(f.owner, f.business.id)).handoffs[0].evidence,
+    ).toHaveLength(3);
+    expect(n.google.calls.some((c) => /send|drafts/.test(c.url.pathname))).toBe(
+      false,
+    );
+  });
+  it("rolls back native evidence when synchronization freshness or the manager session is lost while binding persists", async () => {
+    for (const boundary of ["freshness", "session"] as const) {
+      const f = await setup(),
+        prepared = await f.handoffs.prepare(f.owner, f.business.id, f.input),
+        n = await native(f);
+      n.addSent("sent1");
+      n.google.pages.set("Label_sales", {
+        messages: [{ id: "sent1", threadId: "abc123" }],
+      });
+      h.clock.set("2026-11-05T09:03:00Z");
+      await n.synchronize();
+      const candidate = (await f.handoffs.workspace(f.owner, f.business.id))
+        .handoffs[0].candidates[0];
+      const email = (await h.auth.api.getSession({ headers: f.owner }))!.user
+        .email;
+      const gate = await h.admin.connect();
+      await gate.query("select pg_advisory_lock(330034)");
+      await h.admin.query(
+        "CREATE FUNCTION test_handoff_native_barrier() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(330034); RETURN NEW; END $$; CREATE TRIGGER test_handoff_native_barrier BEFORE INSERT ON email_handoff_evidence FOR EACH ROW WHEN (NEW.kind='sent_folder_observed') EXECUTE FUNCTION test_handoff_native_barrier()",
+      );
+      const binding = Promise.allSettled([
+        f.handoffs.bindSent(f.owner, f.business.id, {
+          handoffId: prepared.id,
+          observationId: candidate.id,
+          confirmExactMessage: true,
+        }),
+      ]);
+      try {
+        const deadline = performance.now() + 5000;
+        let reached = false;
+        while (performance.now() < deadline) {
+          const r = await h.admin.query<{ count: string }>(
+            "select count(*) from pg_locks where locktype='advisory' and not granted",
+          );
+          if (Number(r.rows[0].count) > 0) {
+            reached = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        expect(reached).toBe(true);
+        if (boundary === "freshness") h.clock.set("2026-11-05T09:08:00Z");
+        else await h.signOut(f.owner);
+        await gate.query("select pg_advisory_unlock_all()");
+        expect(await binding).toMatchObject([{ status: "rejected" }]);
+        const reader = boundary === "session" ? await h.signIn(email) : f.owner;
+        expect(
+          (
+            await f.newApp().workspace(reader, f.business.id)
+          ).handoffs[0].evidence.map((e) => e.kind),
+        ).toEqual(["prepared"]);
+      } finally {
+        await gate.query("select pg_advisory_unlock_all()");
+        gate.release();
+        await h.admin.query(
+          "DROP TRIGGER IF EXISTS test_handoff_native_barrier ON email_handoff_evidence; DROP FUNCTION IF EXISTS test_handoff_native_barrier()",
+        );
+      }
+    }
+  });
   it("allows current sales staff to prepare and assert, requires a manager for native binding and rejects revoked actors without losing history", async () => {
     const f = await setup();
     const email = `handoff-sales-${crypto.randomUUID()}@example.com`;

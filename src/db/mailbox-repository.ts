@@ -903,7 +903,7 @@ export function createMailboxRepository(
             tx,
             work.identity,
             work.businessId,
-            clock.now(),
+            clock,
           );
         return state;
       });

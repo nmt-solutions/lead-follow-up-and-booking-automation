@@ -16,6 +16,7 @@ import { Label } from "./ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
+import { Checkbox } from "./ui/checkbox";
 
 const evidenceLabels = {
   prepared: "Prepared",
@@ -452,14 +453,13 @@ export function EmailHandoffManager({
                         {c.body}
                       </p>
                       <label className="flex min-h-11 items-start gap-3">
-                        <input
-                          type="checkbox"
-                          className="mt-1 size-5 shrink-0 accent-primary"
+                        <Checkbox
+                          className="mt-1"
                           checked={confirmed[c.id] ?? false}
-                          onChange={(e) =>
+                          onCheckedChange={(checked) =>
                             setConfirmed((current) => ({
                               ...current,
-                              [c.id]: e.target.checked,
+                              [c.id]: checked === true,
                             }))
                           }
                         />
