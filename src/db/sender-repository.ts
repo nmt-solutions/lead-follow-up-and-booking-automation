@@ -1,4 +1,5 @@
 import { mailboxReplyReady } from "./mailbox-processing";
+import { senderHealthAt } from "./sender-health-repository";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { sameSenderBinding } from "../models/senders";
@@ -106,6 +107,9 @@ export async function inspectionAt(
     : null;
   return {
     requestedAt: requestedAt.toISOString(),
+    healthProof: row.connectionId
+      ? (await senderHealthAt(tx, businessId, row.id, requestedAt)).proof
+      : null,
     previousEvidenceId: latest?.id ?? null,
     binding: {
       businessId,
@@ -218,6 +222,15 @@ export async function identityView(
           },
         ]
       : [];
+  const health = row.connectionId
+    ? await senderHealthAt(
+        tx,
+        businessId,
+        row.id,
+        at,
+        (adapter?.mode ?? latest?.evidence.mode) === "live",
+      )
+    : { issues: [] };
   return {
     ...view(row),
     identification: {
@@ -251,7 +264,7 @@ export async function identityView(
             ))),
       ),
       adapter,
-      mailboxIssues,
+      [...mailboxIssues, ...health.issues],
     ),
   };
 }

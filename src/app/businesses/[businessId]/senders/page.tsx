@@ -43,6 +43,12 @@ export default async function SendersPage({
       </Link>
       <SenderManager businessId={businessId} initialState={state} />
       <Link
+        href={`/businesses/${businessId}/sender-health`}
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+      >
+        Review sender health, incident alerts and repair evidence
+      </Link>
+      <Link
         href={`/businesses/${businessId}/email-eligibility`}
         className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
       >

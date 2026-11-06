@@ -385,13 +385,15 @@ export function createTeamRepository(database: Database): TeamRepository {
           .where(eq(platformOperator.userId, actor.userId));
         if (
           !operator ||
-          !(capability === "whatsapp.review"
-            ? operator.whatsAppReview
-            : capability === "pricing.manage"
-              ? operator.pricing
-              : capability === "tax.manage"
-                ? operator.tax
-                : operator.reconciliation)
+          !(capability === "sender-health.manage"
+            ? operator.senderHealth
+            : capability === "whatsapp.review"
+              ? operator.whatsAppReview
+              : capability === "pricing.manage"
+                ? operator.pricing
+                : capability === "tax.manage"
+                  ? operator.tax
+                  : operator.reconciliation)
         )
           throw new ApplicationError("FORBIDDEN");
       });

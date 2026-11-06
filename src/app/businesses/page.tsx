@@ -73,12 +73,30 @@ export default async function BusinessesPage() {
       Review WhatsApp evidence
     </Link>
   ) : null;
+  const senderHealthLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "sender-health.manage");
+      return (
+        <Link
+          href="/platform/sender-health"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Review sender health alerts
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   if (!businesses.length)
     return (
       <div className="mx-auto max-w-2xl space-y-8">
         {billingReviewLink}
         {pricingLink}
         {whatsAppReviewLink}
+        {senderHealthLink}
         <div>
           <p className="mb-3 text-sm font-medium text-primary">
             Getting started
@@ -98,6 +116,7 @@ export default async function BusinessesPage() {
     <div className="space-y-8">
       {billingReviewLink}
       {pricingLink}
+      {senderHealthLink}
       {whatsAppReviewLink}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>

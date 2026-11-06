@@ -42,6 +42,7 @@ import { createGmailConnection } from "../src/gmail/connection";
 import { createGmailProvider } from "../src/gmail/provider";
 import { createGmailOpportunityMail } from "../src/gmail/opportunity-mail";
 import { createGmailSenderAdapter } from "../src/gmail/sender";
+import { reviewedSenderHealth } from "./support/sender-health";
 
 describe("Inquiry handling at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -98,6 +99,7 @@ describe("Inquiry handling at the persisted application seam", () => {
     evidenceUntil = "2028-01-01T00:00:00Z",
   ) {
     h.clock.set("2026-11-05T09:00:00Z");
+    let health: Awaited<ReturnType<typeof reviewedSenderHealth>> | undefined;
     const credentials = await h.signIn(`inquiry-${suffix}@example.com`);
     const actor = await h.authenticate(credentials);
     const business = await h.application.createBusiness(credentials, {
@@ -294,22 +296,14 @@ describe("Inquiry handling at the persisted application seam", () => {
       sender.adapter.mode = "live";
       sender.adapter.inspect = createGmailSenderAdapter({
         clock: h.clock,
-        evidence: [
-          {
-            businessId: business.id,
-            account: google.control.email,
-            observedAt: "2026-11-01T00:00:00Z",
-            validUntil: evidenceUntil,
-            reference: "https://operator.example/synthetic-inquiry-proof",
-            checks: {
-              spf: "pass",
-              dkim: "pass",
-              dmarc_alignment: "pass",
-              health: "pass",
-            },
-          },
-        ],
+        evidence: [],
       }).inspect;
+      health = await reviewedSenderHealth(
+        h,
+        business.id,
+        sender.identity.id,
+        evidenceUntil,
+      );
       await sender.app.check(credentials, business.id, sender.identity.id, {
         expectedVersion: sender.identity.version,
       });
@@ -470,6 +464,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       profileId,
       config: localConfig,
       sender,
+      health,
       synchronize,
       reauthorize,
       readAuthorization,
@@ -2437,6 +2432,30 @@ describe("Inquiry handling at the persisted application seam", () => {
         read: status !== 401,
         send: status === 429,
       });
+      const health = await f.health!.app.workspace(
+        f.credentials,
+        f.business.id,
+      );
+      const incidents = health.identities[0].incidents;
+      if (status === 429) expect(incidents).toHaveLength(0);
+      else
+        expect(incidents).toMatchObject([
+          {
+            failures: ["sending_authorization"],
+            reason: status === 401 ? "revoked" : "insufficient",
+            binding: {
+              account: google.control.email,
+              generation: f.health!.evidence.binding.generation,
+            },
+            resolved: false,
+          },
+        ]);
+      expect(health.alerts).toHaveLength(status === 429 ? 0 : 1);
+      expect(
+        (await f.health!.app.alerts(f.health!.operator)).alerts.filter(
+          (a) => a.businessId === f.business.id,
+        ),
+      ).toHaveLength(status === 429 ? 0 : 1);
       const workspace = await f.inbox.workspace(f.credentials, f.business.id);
       expect(workspace.opportunities).toHaveLength(1);
     },
@@ -2581,6 +2600,19 @@ describe("Inquiry handling at the persisted application seam", () => {
         },
       },
     );
+    const currentBinding = (
+      await f.health!.app.workspace(f.health!.operator, f.business.id, true)
+    ).identities.find((i) => i.id === permitted.id)!.binding;
+    await f.health!.app.ingest(
+      f.health!.operator,
+      f.business.id,
+      permitted.id,
+      {
+        ...f.health!.evidence,
+        eventKey: "review-existing-use",
+        binding: currentBinding,
+      },
+    );
     await f.sender.app.check(f.credentials, f.business.id, permitted.id, {
       expectedVersion: permitted.version,
     });
@@ -2613,5 +2645,156 @@ describe("Inquiry handling at the persisted application seam", () => {
       ).action?.state,
     ).toBe("dispatched");
     expect(google.sends).toHaveLength(2);
+  });
+  it("preserves unknown native inquiry acceptance across a health pause and repair without another send", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    google.control.sendLost = true;
+    const f = await fixture("health-unknown", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    const health = f.health!;
+    await health.app.ingest(
+      health.operator,
+      f.business.id,
+      f.sender.identity.id,
+      {
+        ...health.evidence,
+        eventKey: "bad",
+        metrics: {
+          ...health.evidence.metrics,
+          bounces: { failed: 5, total: 100 },
+        },
+      },
+    );
+    const incident = (await health.app.workspace(f.credentials, f.business.id))
+      .identities[0].incidents[0];
+    h.clock.set("2026-11-05T10:00:00Z");
+    await h.reverifyAuthenticator(health.operator);
+    await health.app.ingest(
+      health.operator,
+      f.business.id,
+      f.sender.identity.id,
+      {
+        ...health.evidence,
+        eventKey: "repaired",
+        observedAt: h.clock.now().toISOString(),
+        windowStart: "2026-11-05T09:00:00Z",
+        windowEnd: h.clock.now().toISOString(),
+        repairs: [incident.id],
+      },
+    );
+    await f.sender.app.check(
+      f.credentials,
+      f.business.id,
+      f.sender.identity.id,
+      { expectedVersion: f.sender.identity.version },
+    );
+    const replay = await f
+      .restart()
+      .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    expect(replay.action).toMatchObject({
+      state: "committed",
+      email: { result: { status: "unknown" } },
+    });
+    expect(google.sends).toHaveLength(1);
+  });
+  it("blocks concurrent ordinary inquiry sends after a committed health incident while retaining new incoming mail and never reviving the cancelled intent on repair", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const f = await fixture("health-incident", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    const health = f.health!,
+      bad = {
+        ...health.evidence,
+        eventKey: "complaint-report",
+        metrics: {
+          ...health.evidence.metrics,
+          complaints: { failed: 5, total: 100 },
+        },
+      };
+    await health.app.ingest(
+      health.operator,
+      f.business.id,
+      f.sender.identity.id,
+      bad,
+    );
+    await Promise.all([
+      f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+      f.restart().dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+      health.app.ingest(
+        health.operator,
+        f.business.id,
+        f.sender.identity.id,
+        bad,
+      ),
+    ]);
+    expect(google.sends).toHaveLength(0);
+    expect(
+      (await f.app.read(f.credentials, f.business.id, f.need.id)).runs.find(
+        (r) => r.id === ready.id,
+      )?.action?.state,
+    ).toBe("cancelled");
+    google.add("health-incoming", {
+      at: h.clock.now().toISOString(),
+      text: "Email: buyer@example.com",
+    });
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "health-incoming", threadId: "abc123" } },
+          ],
+        },
+      ],
+    });
+    await f.synchronize!();
+    expect(
+      (await f.inbox.workspace(f.credentials, f.business.id)).conversations
+        .length,
+    ).toBeGreaterThan(0);
+    const incident = (await health.app.workspace(f.credentials, f.business.id))
+      .identities[0].incidents[0];
+    h.clock.set("2026-11-05T10:00:00Z");
+    await h.reverifyAuthenticator(health.operator);
+    await health.app.ingest(
+      health.operator,
+      f.business.id,
+      f.sender.identity.id,
+      {
+        ...health.evidence,
+        eventKey: "repair",
+        observedAt: h.clock.now().toISOString(),
+        windowStart: "2026-11-05T09:00:00Z",
+        windowEnd: h.clock.now().toISOString(),
+        repairs: [incident.id],
+      },
+    );
+    await f.sender.app.check(
+      f.credentials,
+      f.business.id,
+      f.sender.identity.id,
+      { expectedVersion: f.sender.identity.version },
+    );
+    await f
+      .restart()
+      .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    expect(google.sends).toHaveLength(0);
+    expect(
+      (await health.app.workspace(f.credentials, f.business.id)).alerts,
+    ).toHaveLength(1);
+    expect(
+      (await health.app.alerts(health.operator)).alerts.filter(
+        (a) => a.businessId === f.business.id,
+      ),
+    ).toHaveLength(1);
   });
 });
