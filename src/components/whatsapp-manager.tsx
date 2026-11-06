@@ -347,7 +347,11 @@ export function WhatsAppManager({
                 ? "Onboarding checks confirmed"
                 : "Onboarding not ready"}
             </Badge>
-            <Badge>Sending requires separate setup</Badge>
+            <Badge>
+              {state.readiness.sendingReady
+                ? "Sending account checks ready"
+                : "Sending requires separate setup"}
+            </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
             Onboarding does not enable sending, recipient permission, approved

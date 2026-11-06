@@ -3,6 +3,11 @@ import { routeSenderAdapters } from "../senders/adapter";
 import { createMicrosoftOpportunityMail } from "../microsoft-mail/opportunity-mail";
 import { createMicrosoftSenderAdapter } from "../microsoft-mail/sender";
 import { createGmailOpportunityMail } from "../gmail/opportunity-mail";
+import { createWhatsAppSendingRepository } from "../db/whatsapp-sending-repository";
+import { createWhatsAppSendingApplication } from "../application/whatsapp-sending";
+import { createWhatsAppSendingHttp } from "../http/whatsapp-sending";
+import { createMetaTransport } from "../whatsapp/transport";
+import type { OpportunityActionProvider } from "../models/opportunity-control";
 import { configuredMailboxQueue } from "../mailboxes/queue";
 import { createMailboxApplication } from "../application/mailboxes";
 import { createMailboxRepository } from "../db/mailbox-repository";
@@ -372,13 +377,33 @@ async function composeServices() {
     clock: { now: () => new Date() },
     adapter: normalizedInquiryAdapter,
   });
+  const whatsappComposition = configuredMetaCloud(process.env, fetch, {
+    now: () => new Date(),
+  });
+  const whatsappSendingRepository = createWhatsAppSendingRepository(
+    runtimeDatabase(pool),
+    { now: () => new Date() },
+    {
+      ...whatsappComposition,
+      transport:
+        whatsappComposition.vault && process.env.META_GRAPH_VERSION
+          ? createMetaTransport({
+              graphVersion: process.env.META_GRAPH_VERSION,
+              fetch,
+            })
+          : null,
+      workerReady:
+        process.env.META_OUTBOUND_WORKER_DEPLOYMENT_CONFIRMED === "true",
+    },
+  );
   const opportunityRepository = createOpportunityRepository(
     runtimeDatabase(pool),
     { now: () => new Date() },
+    whatsappSendingRepository,
   );
   const gmailConfiguration = configuredGmail(process.env),
     microsoftConfiguration = configuredMicrosoftMail(process.env);
-  const inquiryProvider = routeOpportunityMail([
+  const emailInquiryProvider = routeOpportunityMail([
     ...(gmailConfiguration
       ? [
           createGmailOpportunityMail({
@@ -398,6 +423,16 @@ async function composeServices() {
         ]
       : []),
   ]);
+  const inquiryProvider: OpportunityActionProvider = {
+    ...emailInquiryProvider,
+    channels: [...emailInquiryProvider.channels, "whatsapp"],
+  };
+  const whatsappSending = createWhatsAppSendingApplication({
+    authenticate: access.authenticateForWork,
+    repository: whatsappSendingRepository,
+    opportunities: opportunityRepository,
+    clock: { now: () => new Date() },
+  });
   const opportunities = createOpportunityApplication({
     authenticate,
     authenticateForWork: access.authenticateForWork,
@@ -489,11 +524,6 @@ async function composeServices() {
       ),
     timeoutMs: 5000,
   });
-  const whatsappComposition = configuredMetaCloud(
-    process.env,
-    fetch,
-    googleOptions.clock,
-  );
   const whatsapp = createWhatsAppApplication({
     authenticate: access.authenticateForWork,
     repository: createWhatsAppRepository(
@@ -514,6 +544,12 @@ async function composeServices() {
     configuration: configuredMetaWebhook(process.env),
   });
   return {
+    whatsappSending,
+    whatsappSendingHttp: createWhatsAppSendingHttp({
+      application: whatsappSending,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     whatsappIntake,
     whatsappIntakeHttp: createWhatsAppIntakeHttp({
       application: whatsappIntake,

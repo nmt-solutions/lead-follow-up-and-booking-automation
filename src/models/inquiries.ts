@@ -126,6 +126,10 @@ export const initialInquiryResult: InquiryResult = {
 // #22 owns structured amounts/limits. Neither a model classification nor an answer citation grants that authority.
 const commercial =
   /(?:\b(?:price|pricing|cost|quote|quotation|discount|order|payment|pay|charge|free|complimentary|guarantee|confirm(?:ed)?|booked|reserved|refund|deposit|rate|fee|rupees?|dollars?|usd|inr|eur|gbp)\b|[$€£₹]|\d\s*%)/i;
+/** Shared conservative review gate; a channel/template approval never grants financial authority. */
+export function requiresCommercialReview(content: string) {
+  return commercial.test(content);
+}
 export function inquiryDecision(input: {
   configuration: KnowledgeConfiguration;
   messages: { id: string; text: string }[];

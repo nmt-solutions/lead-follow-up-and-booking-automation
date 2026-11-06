@@ -35,6 +35,12 @@ export default async function WhatsAppPage({
         </p>
       </header>
       <WhatsAppManager businessId={businessId} initialState={state} />
+      <Link
+        href={`/businesses/${businessId}/whatsapp/sending`}
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+      >
+        Review WhatsApp permissions and messages
+      </Link>
     </div>
   );
 }

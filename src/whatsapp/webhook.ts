@@ -148,6 +148,38 @@ export function metaActivities(raw: Uint8Array, at: Date) {
           peer: s.recipient_id,
           occurredAt: occurred.toISOString(),
           status: s.status,
+          statusEvidence: {
+            callbackData: s.biz_opaque_callback_data ?? null,
+            occurredAt: occurred.toISOString(),
+            supported:
+              knownKeys(s, [
+                "id",
+                "status",
+                "timestamp",
+                "recipient_id",
+                "biz_opaque_callback_data",
+                "pricing",
+                "conversation",
+                "errors",
+              ]) && ["sent", "delivered", "read", "failed"].includes(s.status),
+            pricing: s.pricing
+              ? {
+                  ...(s.pricing.billable !== undefined
+                    ? { billable: s.pricing.billable }
+                    : {}),
+                  ...(s.pricing.pricing_model
+                    ? { pricing_model: s.pricing.pricing_model }
+                    : {}),
+                  ...(s.pricing.category
+                    ? { category: s.pricing.category }
+                    : {}),
+                  ...(s.pricing.type ? { type: s.pricing.type } : {}),
+                }
+              : null,
+          },
+          providerFingerprint: createHash("sha256")
+            .update(JSON.stringify(canonical(s)))
+            .digest("hex"),
         });
       }
       if (!supported)
