@@ -27,6 +27,7 @@ import {
 import {
   paymentActionSchema,
   periodEnd,
+  monthlyPeriodMatches,
   type PaymentGateway,
   type PaymentSnapshot,
   type PaymentWorkspace,
@@ -37,6 +38,14 @@ import {
 import { ApplicationError } from "../models/application-error";
 import type { Actor } from "../models/business";
 import { paidAllowance } from "./paid-access";
+import { z } from "zod";
+import {
+  billingState,
+  billingRevisionSchema,
+  billingReviewSchema,
+} from "../models/billing";
+import { taxCatalogSchema } from "../models/tax";
+import { chargeTaxSchema } from "../models/subscription-payments";
 
 type Row = typeof subscriptionPayment.$inferSelect;
 type Work = { id: string; business_id: string; recovery_key: string };
@@ -124,6 +133,103 @@ async function trustedQuote(
   return quote;
 }
 export function createSubscriptionPaymentRepository(database: Database) {
+  async function renewalSnapshot(
+    tx: Transaction,
+    row: Row,
+    o: PaymentObservation,
+    at: Date,
+  ): Promise<PaymentSnapshot> {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended('subscription-tax-rules',0))`,
+    );
+    const context = await tx.execute<{ context: unknown }>(
+      sql`select public.payment_renewal_context(${row.id}::uuid,${row.businessId}::uuid) as context`,
+    );
+    const raw = z
+      .object({
+        history: z.array(z.record(z.string(), z.unknown())),
+        reviews: z.array(z.record(z.string(), z.unknown())),
+        files: z.array(
+          z.object({
+            id: z.string(),
+            state: z.string(),
+            sha256: z.string().nullable(),
+            retentionUntil: z.string(),
+          }),
+        ),
+        revisions: z.array(z.record(z.string(), z.unknown())),
+        decisions: z.array(z.record(z.string(), z.unknown())),
+      })
+      .parse(context.rows[0]?.context);
+    const camel = (r: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(r).map(([k, v]) => [
+          k.replace(/_([a-z])/g, (_s, l: string) => l.toUpperCase()),
+          k === "at" && typeof v === "string" ? new Date(v).toISOString() : v,
+        ]),
+      );
+    const billing = billingState(
+      raw.history.map((r) => billingRevisionSchema.parse(camel(r))),
+      raw.reviews.map((r) => billingReviewSchema.parse(camel(r))),
+    );
+    for (const evidence of billing.current?.evidence ?? []) {
+      const file = raw.files.find((f) => f.id === evidence.fileId);
+      if (
+        !file ||
+        file.state !== "ready" ||
+        file.sha256 !== evidence.sha256 ||
+        new Date(file.retentionUntil) <= at
+      ) {
+        billing.status = "missing";
+        billing.issues.push("evidence_unavailable");
+      }
+    }
+    const configuration = taxCatalogSchema.parse({
+      revisions: raw.revisions.map(camel),
+      decisions: raw.decisions.map(camel),
+    });
+    const s = row.snapshot,
+      q = s.quote;
+    const input = {
+      requestKey: randomUUID(),
+      expectedProfileVersion: billing.version,
+      expectedReviewVersion: billing.reviewVersion,
+      currency: q.currency,
+      lines: q.renewal.lines.map((l) => ({
+        id: l.kind,
+        productCode: l.kind,
+        description: l.label,
+        quantity: 1,
+        unitAmountMinor: String(l.amountMinor),
+      })),
+      note: `Subscription charge ${o.paymentId}`,
+    };
+    const mode = s.provider.mode === "live" ? "live" : "fixture";
+    const tax = chargeTaxSchema.parse({
+      id: randomUUID(),
+      businessId: row.businessId,
+      actionId: row.id,
+      purpose: "subscription_charge",
+      mode,
+      currency: q.currency,
+      minorUnit: 2,
+      input,
+      billing,
+      configuration,
+      ...evaluateTax(input, billing, configuration, new Date(o.paidAt!), mode),
+      at: at.toISOString(),
+    });
+    return {
+      ...s,
+      tax,
+      term: { kind: "calendar_month", timeZone: "UTC" },
+      basis: {
+        kind: "renewal",
+        discovery: q.renewal.discovery,
+        automation: q.renewal.automation,
+      },
+    };
+  }
   async function worker<T>(
     work: Work,
     operation: (tx: Transaction, row: Row) => Promise<T>,
@@ -252,7 +358,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
               note: `Checkout quote ${quote.id}`,
             },
             at,
-            gateway.mode,
+            gateway.mode === "test" ? "fixture" : gateway.mode,
           );
           const snapshot: PaymentSnapshot = {
             quote,
@@ -261,6 +367,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
               key: gateway.key,
               account: gateway.account,
               mode: gateway.mode,
+              ...(gateway.review ? { review: gateway.review } : {}),
             },
             term:
               quote.initial.kind === "paid_pilot"
@@ -273,7 +380,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
               : quote.initial.automation.quantity > 0 &&
                   quote.initial.automation.unit !== "provider calls"
                 ? "allowance_units_unavailable"
-                : null;
+                : (gateway.reviewSnapshot?.(snapshot)[0] ?? null);
           const [row] = await tx
             .insert(subscriptionPayment)
             .values({
@@ -329,7 +436,10 @@ export function createSubscriptionPaymentRepository(database: Database) {
           gateway: {
             key: gateway.key,
             mode: gateway.mode,
-            ready: gateway.mode !== "unconfigured",
+            ready:
+              gateway.mode !== "unconfigured" && !gateway.readiness?.().length,
+            reasons: gateway.readiness?.(),
+            review: gateway.review,
           },
         };
       });
@@ -367,6 +477,8 @@ export function createSubscriptionPaymentRepository(database: Database) {
             !gateway.supports(row.snapshot.quote.currency)
           )
             throw new ApplicationError("SETUP_REQUIRED");
+          if (gateway.reviewSnapshot?.(row.snapshot).length)
+            throw new ApplicationError("SETUP_REQUIRED");
           let current = true;
           try {
             await trustedQuote(tx, businessId, row.quoteId, at);
@@ -386,7 +498,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
             await readBillingWorkspace(tx, businessId, at),
             await readTaxCatalog(tx),
             at,
-            binding.mode,
+            binding.mode === "test" ? "fixture" : binding.mode,
           );
           if (
             !current ||
@@ -429,6 +541,13 @@ export function createSubscriptionPaymentRepository(database: Database) {
               started: true,
               state: "pending",
               reason: "creation_pending",
+              recovery: {
+                creationAt: at.toISOString(),
+                subscriptionSkip: 0,
+                candidateId: null,
+                ambiguous: false,
+                invoiceSkip: 0,
+              },
             })
             .where(eq(subscriptionPayment.id, row.id))
             .returning();
@@ -440,12 +559,13 @@ export function createSubscriptionPaymentRepository(database: Database) {
     },
     async creation(work: Work, checkout: Row["checkout"], at: Date) {
       return worker(work, async (tx, row) => {
-        if (row.state === "confirmed") return paymentView(row);
+        if (row.state === "confirmed" && !checkout) return paymentView(row);
         if (
           row.checkout &&
           checkout &&
           (row.checkout.checkoutId !== checkout.checkoutId ||
-            row.checkout.customerId !== checkout.customerId ||
+            (row.checkout.customerId !== null &&
+              row.checkout.customerId !== checkout.customerId) ||
             row.checkout.subscriptionId !== checkout.subscriptionId)
         )
           return record(
@@ -475,11 +595,55 @@ export function createSubscriptionPaymentRepository(database: Database) {
         );
       });
     },
+    creationRejected(work: Work, at: Date) {
+      return worker(work, async (tx, row) =>
+        row.state === "confirmed"
+          ? paymentView(row)
+          : record(
+              tx,
+              row,
+              "creation_not_attempted",
+              "failed",
+              "native_preflight_rejected",
+              at,
+            ),
+      );
+    },
     async pending(gateway: PaymentGateway) {
       const result = await database.execute<Work>(
         sql`select * from public.pending_subscription_payments(${gateway.key},${gateway.account})`,
       );
       return result.rows;
+    },
+    saveRecovery(work: Work, recovery: PaymentAction["recovery"], at: Date) {
+      return worker(work, async (tx, row) => {
+        await tx
+          .update(subscriptionPayment)
+          .set({
+            recovery,
+            reconciledAt: at,
+            reconciliationPending: false,
+            ...(recovery?.ambiguous
+              ? {
+                  state: "review_required" as const,
+                  reason: "creation_lookup_ambiguous",
+                }
+              : {}),
+          })
+          .where(eq(subscriptionPayment.id, row.id));
+      });
+    },
+    pollUnavailable(work: Work, at: Date) {
+      return worker(work, async (tx, row) =>
+        record(
+          tx,
+          row,
+          "reconciliation_unavailable",
+          row.state,
+          "reconciliation_unavailable",
+          at,
+        ),
+      );
     },
     readWork(work: Work) {
       return worker(work, async (_tx, row) => paymentView(row));
@@ -487,8 +651,11 @@ export function createSubscriptionPaymentRepository(database: Database) {
     async receive(event: AuthenticatedPaymentEvent, at: Date) {
       const o = event.observation;
       const target = await database.execute<Work>(
-        sql`select * from public.subscription_payment_target(${o.provider},${o.account},${o.operationKey}::uuid)`,
+        o.operationKey
+          ? sql`select * from public.subscription_payment_target(${o.provider},${o.account},${o.operationKey}::uuid)`
+          : sql`select * from public.subscription_payment_reference_target(${o.provider},${o.account},${o.subscriptionId})`,
       );
+      if (target.rows.length > 1) throw new ApplicationError("CONFLICT");
       const work = target.rows[0];
       if (!work) {
         await database.transaction(async (tx) => {
@@ -533,7 +700,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
             !isDeepStrictEqual(previous.observation, o)
           )
             throw new ApplicationError("CONFLICT");
-          if (row.state !== "confirmed")
+          if (row.started)
             await tx
               .update(subscriptionPayment)
               .set({ reconciliationPending: true })
@@ -551,7 +718,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           observation: o,
           at,
         });
-        if (row.state !== "confirmed")
+        if (row.started)
           await tx
             .update(subscriptionPayment)
             .set({ reconciliationPending: true })
@@ -565,7 +732,18 @@ export function createSubscriptionPaymentRepository(database: Database) {
       at: Date,
     ) {
       return worker(work, async (tx, row) => {
-        if (row.state === "confirmed") return paymentView(row);
+        if (observation?.review)
+          return record(
+            tx,
+            row,
+            "charge_evidence_conflict",
+            "review_required",
+            "provider_binding_mismatch",
+            at,
+            observation,
+          );
+        if (row.state === "confirmed" && !observation?.charge)
+          return paymentView(row);
         if (!observation)
           return record(
             tx,
@@ -579,8 +757,32 @@ export function createSubscriptionPaymentRepository(database: Database) {
           .update(subscriptionPayment)
           .set({ reconciliationPending: false })
           .where(eq(subscriptionPayment.id, row.id));
-        const o = observation,
-          s = row.snapshot;
+        const o = observation;
+        const periods = await tx
+          .select()
+          .from(subscriptionPeriod)
+          .where(eq(subscriptionPeriod.actionId, row.id));
+        const previous = periods.find((p) => p.paymentId === o.paymentId);
+        if (previous) {
+          if (previous.charge && !isDeepStrictEqual(previous.charge, o))
+            return record(
+              tx,
+              row,
+              "charge_evidence_conflict",
+              "review_required",
+              "provider_binding_mismatch",
+              at,
+              o,
+            );
+          return paymentView(row);
+        }
+        const renewal =
+          !!o.charge &&
+          (o.charge.kind === "renewal" ||
+            o.periodStart !== o.charge.subscriptionStart);
+        const s = renewal
+          ? await renewalSnapshot(tx, row, o, at)
+          : row.snapshot;
         if (
           o.provider !== s.provider.key ||
           o.account !== s.provider.account ||
@@ -591,10 +793,17 @@ export function createSubscriptionPaymentRepository(database: Database) {
               o.checkout.subscriptionId !== o.subscriptionId)) ||
           (row.checkout &&
             (o.checkoutId !== row.checkout.checkoutId ||
-              o.customerId !== row.checkout.customerId ||
+              (row.checkout.customerId !== null &&
+                o.customerId !== row.checkout.customerId) ||
               o.subscriptionId !== row.checkout.subscriptionId)) ||
           (o.currency !== null && o.currency !== s.quote.currency) ||
-          (o.amountMinor !== null && o.amountMinor !== s.tax.totals?.totalMinor)
+          (o.amountMinor !== null &&
+            o.amountMinor !== s.tax.totals?.totalMinor) ||
+          s.tax.status !== "calculated" ||
+          (o.charge &&
+            (!o.subscriptionId ||
+              !row.checkout?.planId ||
+              o.charge.planId !== row.checkout.planId))
         )
           return record(
             tx,
@@ -665,11 +874,25 @@ export function createSubscriptionPaymentRepository(database: Database) {
           !o.periodStart ||
           !o.periodEnd ||
           new Date(o.periodStart) < row.at ||
+          (!renewal && periods.length > 0) ||
+          (renewal &&
+            !periods.some(
+              (p) => p.end.getTime() === new Date(o.periodStart!).getTime(),
+            )) ||
           new Date(o.periodStart) > new Date(o.paidAt) ||
           new Date(o.periodEnd) <= new Date(o.paidAt) ||
           new Date(o.paidAt) > at ||
-          new Date(periodEnd(o.periodStart, s.term)).getTime() !==
-            new Date(o.periodEnd).getTime()
+          (o.charge
+            ? !monthlyPeriodMatches(
+                o.charge.subscriptionStart,
+                o.periodStart,
+                o.periodEnd,
+                s.provider.review?.plans.find(
+                  (p) => p.planId === o.charge?.planId,
+                )?.totalCount,
+              )
+            : new Date(periodEnd(o.periodStart, s.term)).getTime() !==
+              new Date(o.periodEnd).getTime())
         )
           return record(
             tx,
@@ -717,6 +940,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           start: new Date(o.periodStart),
           end: new Date(o.periodEnd),
           snapshot: s,
+          charge: o,
         });
         return record(tx, row, "payment_confirmed", "confirmed", null, at, o);
       });

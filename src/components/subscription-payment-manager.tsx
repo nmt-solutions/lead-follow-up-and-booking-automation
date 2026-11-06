@@ -27,6 +27,14 @@ const states: Record<PaymentAction["state"], string> = {
   failed: "Payment failed",
 };
 const reasons: Record<string, string> = {
+  native_preflight_rejected:
+    "The native plan or card availability could not be verified before creation. No subscription creation was attempted. Ask the operator to review account and plan setup, then prepare a new checkout review.",
+  native_paid_pilot_mapping_unverified:
+    "Paid pilot checkout is unavailable for this card configuration. Choose a supported monthly quote or ask the operator about paid-pilot payment options.",
+  native_plan_or_capability_review_required:
+    "The native plan, amount limit or approved card capability does not match this quote. Ask the operator to review the account and plan mapping.",
+  creation_lookup_ambiguous:
+    "More than one native resource matches this saved operation. The operator must reconcile the provider references. Another subscription will not be created automatically.",
   allowance_units_unavailable:
     "The included automation unit has no approved consumer. Ask the pricing operator to configure provider calls or an explicitly supported unit, then create a new quote.",
   tax_review_required:
@@ -59,6 +67,12 @@ function paymentTime(value: string | null | undefined) {
 function PaymentDetail({ action: a }: { action: PaymentAction }) {
   const q = a.snapshot.quote,
     t = a.snapshot.tax;
+  const nativePlan = a.snapshot.provider.review?.plans.find(
+    (p) =>
+      p.offerId === q.selection.offerId &&
+      p.reservedCapacityId === q.selection.reservedCapacityId &&
+      p.currency === q.currency,
+  );
   return (
     <div className="space-y-4 wrap-anywhere">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -104,10 +118,19 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
       </p>
       <p className="text-sm text-muted-foreground">
         Renewal terms: {q.renewal.terms} Monthly renewal before tax:{" "}
-        {formatTaxMoney(String(q.renewal.subtotalMinor), q.currency)}. This
-        purchase authorizes the initial period; automatic renewal is a separate
-        workflow.
+        {formatTaxMoney(String(q.renewal.subtotalMinor), q.currency)}.{" "}
+        {a.snapshot.provider.review
+          ? "Hosted checkout authorizes recurring card collection for the reviewed native plan. Each captured cycle requires independent payment and invoice reconciliation before access is extended."
+          : "This purchase authorizes the initial period."}
       </p>
+      {nativePlan && (
+        <p className="text-sm">
+          Hosted mandate: up to {nativePlan.totalCount} monthly collections on
+          the reviewed plan. Account terms version{" "}
+          {a.snapshot.provider.review?.version}. Review the hosted mandate
+          before authorizing.
+        </p>
+      )}
       {a.reason && (
         <p className="rounded-xl bg-muted p-4">
           {reasons[a.reason] ??
@@ -149,6 +172,7 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
                   }
                 : null,
               observation: a.observation,
+              recovery: a.recovery,
               history: a.history,
               events: a.events,
             },
@@ -275,6 +299,96 @@ export function SubscriptionPaymentManager({
           currencies and merchant activation. Saved records remain available.
         </p>
       )}
+      {state.gateway.key === "razorpay" && (
+        <section
+          className="space-y-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+          aria-label="Recurring card readiness"
+        >
+          <h2 className="text-xl font-semibold">Recurring card readiness</h2>
+          <p>
+            Provider mode: {state.gateway.mode}. Card details and mandate
+            authorization stay on Razorpay. UPI AutoPay and eMandate are
+            unavailable.
+          </p>
+          {state.gateway.reasons?.length ? (
+            <ul className="list-disc pl-5">
+              {state.gateway.reasons.map((r) => (
+                <li key={r}>
+                  {r.replaceAll("_", " ")}. Ask the platform operator to review
+                  account setup.
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {state.gateway.review && (
+            <>
+              <p>
+                India: INR domestic cards{" "}
+                {state.gateway.review.domestic.enabled
+                  ? "configured"
+                  : "unavailable"}
+                . International: USD international cards{" "}
+                {state.gateway.review.international.enabled
+                  ? "configured"
+                  : "unavailable"}
+                . Settlement path: {state.gateway.review.settlement}.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Monthly UTC terms require reviewed account evidence and matching
+                native invoice dates. Paid-pilot native collection is awaiting a
+                validated provider flow. Domestic plan changes require a new
+                approved payment or mandate; international changes remain
+                blocked until their account capability is reviewed.
+              </p>
+              <details>
+                <summary className="min-h-11 cursor-pointer py-3 text-primary">
+                  Reviewed account terms and limits
+                </summary>
+                <dl className="space-y-2 text-sm">
+                  <div>
+                    <dt className="font-medium">Account review</dt>
+                    <dd>
+                      {state.gateway.review.id}, version{" "}
+                      {state.gateway.review.version}; effective until{" "}
+                      {paymentTime(state.gateway.review.effectiveUntil)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium">Per-charge limits</dt>
+                    <dd>
+                      Domestic{" "}
+                      {formatTaxMoney(
+                        state.gateway.review.domestic.maxChargeMinor,
+                        "INR",
+                      )}
+                      ; international{" "}
+                      {formatTaxMoney(
+                        state.gateway.review.international.maxChargeMinor,
+                        "USD",
+                      )}
+                      . The provider&apos;s supported limits also apply.
+                    </dd>
+                  </div>
+                  {Object.entries(state.gateway.review.terms).map(
+                    ([key, value]) => (
+                      <div key={key}>
+                        <dt className="font-medium capitalize">
+                          {key.replace(/([A-Z])/g, " $1")}
+                        </dt>
+                        <dd>{value}</dd>
+                      </div>
+                    ),
+                  )}
+                  <div>
+                    <dt className="font-medium">Review evidence references</dt>
+                    <dd>{state.gateway.review.evidence.join(", ")}</dd>
+                  </div>
+                </dl>
+              </details>
+            </>
+          )}
+        </section>
+      )}
       <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
         <h2 className="text-xl font-semibold">Review tax and checkout</h2>
         <p>
@@ -334,6 +448,61 @@ export function SubscriptionPaymentManager({
         </p>
       )}
       <SubscriptionDisclosures />
+      {state.periods.length > 0 && (
+        <section className="space-y-4" aria-label="Confirmed charge periods">
+          <h2 className="text-xl font-semibold">Confirmed charge periods</h2>
+          {state.periods.toReversed().map((p) => (
+            <article
+              key={p.id}
+              className="space-y-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+            >
+              <h3 className="font-semibold">
+                {paymentTime(p.start)} through {paymentTime(p.end)}
+              </h3>
+              <p>
+                {p.snapshot.basis?.kind === "renewal"
+                  ? "Monthly renewal"
+                  : "Initial payment"}{" "}
+                ·{" "}
+                {p.snapshot.tax.totals
+                  ? formatTaxMoney(
+                      p.snapshot.tax.totals.totalMinor,
+                      p.snapshot.quote.currency,
+                    )
+                  : "Amount under review"}
+                ; tax{" "}
+                {p.snapshot.tax.totals
+                  ? formatTaxMoney(
+                      p.snapshot.tax.totals.taxMinor,
+                      p.snapshot.quote.currency,
+                    )
+                  : "under review"}
+                .
+              </p>
+              {p.charge?.charge && (
+                <p className="text-sm text-muted-foreground">
+                  {p.charge.charge.international ? "International" : "Domestic"}{" "}
+                  captured card payment {p.paymentId}. Provider invoice
+                  reference: {p.charge.charge.invoiceId}. This reference is
+                  collection evidence; seller invoices are issued separately.
+                </p>
+              )}
+              <details>
+                <summary className="min-h-11 cursor-pointer py-3 text-primary">
+                  Frozen charge, tax and allowance evidence
+                </summary>
+                <pre className="max-h-96 overflow-auto rounded-xl bg-muted p-4 text-xs whitespace-pre-wrap">
+                  {JSON.stringify(
+                    { periodId: p.id, snapshot: p.snapshot, charge: p.charge },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </details>
+            </article>
+          ))}
+        </section>
+      )}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">Payment history</h2>
         {!state.actions.length && (
@@ -362,9 +531,13 @@ export function SubscriptionPaymentManager({
                 </Button>
               )}
               {a.started &&
-                ["pending", "checkout", "failed", "review_required"].includes(
-                  a.state,
-                ) && (
+                [
+                  "pending",
+                  "checkout",
+                  "failed",
+                  "review_required",
+                  "confirmed",
+                ].includes(a.state) && (
                   <Button
                     variant="outline"
                     disabled={busy}
