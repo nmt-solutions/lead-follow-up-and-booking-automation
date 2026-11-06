@@ -42,6 +42,9 @@ import { createEmailEligibilityApplication } from "../application/email-eligibil
 import { createEmailEligibilityRepository } from "../db/email-eligibility-repository";
 import { createEmailEligibilityHttp } from "../http/email-eligibility";
 import { createSenderApplication } from "../application/senders";
+import { createSenderHealthApplication } from "../application/sender-health";
+import { createSenderHealthRepository } from "../db/sender-health-repository";
+import { createSenderHealthHttp } from "../http/sender-health";
 import { createSenderRepository } from "../db/sender-repository";
 import { createSenderHttp } from "../http/senders";
 import { unavailableSenderAdapter } from "../senders/adapter";
@@ -215,6 +218,12 @@ async function composeServices() {
         })
       : unavailableSenderAdapter,
     clock: { now: () => new Date() },
+  });
+  const senderHealth = createSenderHealthApplication({
+    authenticate: access.authenticateForWork,
+    repository: createSenderHealthRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
   });
   const gmail = createGmailApplication({
     access,
@@ -494,6 +503,12 @@ async function composeServices() {
       reportFailure,
     }),
     senders,
+    senderHealth,
+    senderHealthHttp: createSenderHealthHttp({
+      application: senderHealth,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     gmail,
     microsoftMail,
     gmailHttp: createGmailHttpHandlers({

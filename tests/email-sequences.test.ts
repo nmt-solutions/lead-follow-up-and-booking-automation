@@ -29,6 +29,7 @@ import { createOpportunityApplication } from "../src/application/opportunity-con
 import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
 import { createGmailSequenceMail } from "../src/gmail/sequence-mail";
 import { createGmailSenderAdapter } from "../src/gmail/sender";
+import { reviewedSenderHealth } from "./support/sender-health";
 
 describe("Approved email sequences at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -46,6 +47,7 @@ describe("Approved email sequences at the persisted application seam", () => {
     message?: { subject: string; body: string },
   ) {
     const f = await campaignFixture(h, { multipleSources: multiple, at });
+    let health: Awaited<ReturnType<typeof reviewedSenderHealth>> | undefined;
     let native:
       { mailboxId: string; synchronize(): Promise<unknown> } | undefined;
     if (google) {
@@ -116,22 +118,13 @@ describe("Approved email sequences at the persisted application seam", () => {
       f.sender.adapter.mode = "live";
       f.sender.adapter.inspect = createGmailSenderAdapter({
         clock: h.clock,
-        evidence: [
-          {
-            businessId: f.business.id,
-            account: google.control.email,
-            observedAt: "2026-11-01T00:00:00Z",
-            validUntil: "2028-01-01T00:00:00Z",
-            reference: "https://operator.example/synthetic-proof",
-            checks: {
-              spf: "pass",
-              dkim: "pass",
-              dmarc_alignment: "pass",
-              health: "pass",
-            },
-          },
-        ],
+        evidence: [],
       }).inspect;
+      health = await reviewedSenderHealth(
+        h,
+        f.business.id,
+        f.sender.identity.id,
+      );
       await f.sender.app.check(f.owner, f.business.id, f.sender.identity.id, {
         expectedVersion: f.sender.identity.version,
       });
@@ -277,6 +270,7 @@ describe("Approved email sequences at the persisted application seam", () => {
       eligibility,
       queue,
       native,
+      health,
     };
   }
   it("sends an approved Gmail action exactly once with native identity and separate acceptance evidence", async () => {
@@ -1090,6 +1084,55 @@ describe("Approved email sequences at the persisted application seam", () => {
       );
     }
   }
+  it("serializes authenticated health ingestion ahead of the final due boundary and keeps alerts duplicate-safe across workers and restart", async () => {
+    const f = await setup(false, "2026-11-05T14:00:00Z");
+    const health = await reviewedSenderHealth(
+      h,
+      f.business.id,
+      f.sender.identity.id,
+    );
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    const work = f.queued.shift()!.work;
+    const bad = {
+      ...health.evidence,
+      eventKey: "bounce-report",
+      metrics: {
+        ...health.evidence.metrics,
+        bounces: { failed: 5, total: 100 },
+      },
+    };
+    await restrictionWins(f, work, () =>
+      health.app.ingest(
+        health.operator,
+        f.business.id,
+        f.sender.identity.id,
+        bad,
+      ),
+    );
+    await Promise.all([
+      health.app.ingest(
+        health.operator,
+        f.business.id,
+        f.sender.identity.id,
+        bad,
+      ),
+      f.newApp().execute(work),
+      f.newApp().execute(work),
+    ]);
+    expect(f.mail.effects).toHaveLength(0);
+    expect(
+      (await health.app.workspace(f.owner, f.business.id)).alerts,
+    ).toHaveLength(1);
+    expect(
+      (await health.app.alerts(health.operator)).alerts.filter(
+        (a) => a.businessId === f.business.id,
+      ),
+    ).toHaveLength(1);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[0].state,
+    ).toBe("paused");
+  });
   it.each([
     "new suppression",
     "takeover",

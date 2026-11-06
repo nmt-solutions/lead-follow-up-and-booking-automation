@@ -52,7 +52,19 @@ export function createGmailSenderAdapter(d: {
           new Date(p.observedAt) <= at &&
           new Date(p.validUntil) > at,
       );
-      const proof = proofs.length === 1 ? proofs[0] : null;
+      const proof = context.healthProof
+        ? {
+            ...context.healthProof,
+            checks: {
+              spf: "pass",
+              dkim: "pass",
+              dmarc_alignment: "pass",
+              health: "pass",
+            },
+          }
+        : proofs.length === 1
+          ? proofs[0]
+          : null;
       const native =
         context.identity.origin === "customer_mailbox" &&
         context.connection?.configuration.provider === "gmail" &&
@@ -73,7 +85,9 @@ export function createGmailSenderAdapter(d: {
                     context.identity.purpose === "dedicated_outreach"),
               )
             : [],
-        ...(proof ? { verificationReference: proof.reference } : {}),
+        ...(proof && "reference" in proof
+          ? { verificationReference: proof.reference }
+          : {}),
         checks: {
           // Current native account/grant and selected reply visibility are additionally checked in identityView and at dispatch.
           identity_control:

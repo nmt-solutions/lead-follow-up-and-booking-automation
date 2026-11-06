@@ -43,6 +43,7 @@ export default defineConfig({
     "sender_reply_route",
     "sender_identity",
     "sender_observation",
+    "sender_health_record",
     "call_activity",
     "call_revision",
     "microsoft_calendar_grant",

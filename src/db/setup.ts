@@ -40,6 +40,7 @@ import {
   senderReplyRoute,
   senderIdentity,
   senderObservation,
+  senderHealthRecord,
   senderScopeForeignKeys,
   business,
   membership,
@@ -491,6 +492,12 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (version, configuration, updated_at, connection_id, inbox_connection_id) ON public.sender_reply_route FROM app_runtime;
         REVOKE UPDATE (version, configuration, updated_at, connection_id, reply_route_id) ON public.sender_identity FROM app_runtime;
       END IF;
+      IF to_regclass('public.sender_health_record') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.sender_health_record FROM app_runtime;
+        REVOKE ALL ON SEQUENCE public.sender_health_record_position_seq FROM app_runtime;
+      END IF;
+      IF to_regprocedure('public.sender_health_native(uuid)') IS NOT NULL THEN REVOKE ALL ON FUNCTION public.sender_health_native(uuid) FROM app_runtime; END IF;
+      IF to_regprocedure('public.purge_sender_health_artifacts(uuid,timestamptz)') IS NOT NULL THEN REVOKE ALL ON FUNCTION public.purge_sender_health_artifacts(uuid,timestamptz) FROM app_runtime; END IF;
       IF to_regclass('public.email_market_policy') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.email_market_policy, public.email_recipient_revision, public.email_suppression, public.email_eligibility_evaluation, public.email_action_review FROM app_runtime;
       END IF;
@@ -622,7 +629,7 @@ export async function secureDatabase(pool: Pool) {
     }
     // The pinned push also misses changes to an existing CHECK expression.
     // Upgrade the original owner-only role check from the schema's definition.
-    for (const table of [membership, inboxOpportunity]) {
+    for (const table of [membership, inboxOpportunity, senderHealthRecord]) {
       for (const constraint of getTableConfig(table).checks) {
         await database.execute(
           sql`alter table ${table} drop constraint if exists ${sql.identifier(constraint.name)}`,
@@ -664,6 +671,7 @@ export async function secureDatabase(pool: Pool) {
       senderReplyRoute,
       senderIdentity,
       senderObservation,
+      senderHealthRecord,
       microsoftCalendarGrant,
       microsoftCalendarOauth,
       googleCalendarGrant,
@@ -818,6 +826,38 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE sender_reply_route FORCE ROW LEVEL SECURITY;
       ALTER TABLE sender_identity FORCE ROW LEVEL SECURITY;
       ALTER TABLE sender_observation FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON sender_health_record FROM app_runtime;
+      GRANT SELECT, INSERT ON sender_health_record TO app_runtime;
+      GRANT USAGE ON SEQUENCE sender_health_record_position_seq TO app_runtime;
+      ALTER TABLE sender_health_record FORCE ROW LEVEL SECURITY;
+      CREATE OR REPLACE FUNCTION public.sender_health_native(connection uuid) RETURNS jsonb
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+        SELECT jsonb_build_object('mailboxId',p.id,'generation',g.generation,'accountSubject',g.account_subject,
+          'status',g.status,'send',g.scopes ? CASE WHEN p.provider='gmail' THEN 'https://www.googleapis.com/auth/gmail.send' ELSE 'Mail.Send' END)
+        FROM public.mailbox_policy p JOIN LATERAL (
+          SELECT generation,account_subject,status,scopes FROM public.gmail_grant WHERE id=p.id AND business_id=p.business_id AND p.provider='gmail'
+          UNION ALL SELECT generation,account_subject,status,scopes FROM public.microsoft_mail_grant WHERE id=p.id AND business_id=p.business_id AND p.provider='microsoft'
+        ) g ON true WHERE p.connection_id=connection AND p.business_id=nullif(current_setting('app.business_id',true),'')::uuid
+          AND (public.current_business_role() IS NOT NULL OR EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.sender_health))
+      $$;
+      REVOKE ALL ON FUNCTION public.sender_health_native(uuid) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.sender_health_native(uuid) TO app_runtime;
+      CREATE OR REPLACE FUNCTION public.purge_sender_health_artifacts(identity uuid, at_time timestamptz) RETURNS integer
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+      DECLARE retention integer; affected integer;
+      BEGIN
+        IF NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.sender_health) THEN RAISE EXCEPTION 'forbidden'; END IF;
+        SELECT (payload->'configuration'->>'retentionDays')::integer INTO retention FROM public.sender_health_record
+          WHERE business_id=nullif(current_setting('app.business_id',true),'')::uuid AND identity_id=identity AND kind='policy'
+          ORDER BY (payload->>'version')::integer DESC LIMIT 1;
+        IF retention IS NULL THEN RETURN 0; END IF;
+        UPDATE public.sender_health_record SET payload=jsonb_build_object('kind','evidence','evidence',null)
+          WHERE business_id=nullif(current_setting('app.business_id',true),'')::uuid AND identity_id=identity AND kind='evidence'
+          AND payload->'evidence'<>'null'::jsonb AND at<at_time-make_interval(days=>retention);
+        GET DIAGNOSTICS affected=ROW_COUNT; RETURN affected;
+      END $$;
+      REVOKE ALL ON FUNCTION public.purge_sender_health_artifacts(uuid,timestamptz) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.purge_sender_health_artifacts(uuid,timestamptz) TO app_runtime;
       REVOKE ALL PRIVILEGES ON google_calendar_grant, google_calendar_oauth FROM app_runtime;
       GRANT SELECT, INSERT ON google_calendar_grant, google_calendar_oauth TO app_runtime;
       GRANT UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON google_calendar_grant TO app_runtime;
