@@ -382,6 +382,12 @@ export function SellerDocumentManager({
                 d.snapshot.currency,
               )}
             </p>
+            {d.snapshot.issuer.revision.configuration.mode === "fixture" && (
+              <p className="mt-2 text-sm">
+                Fixture document · payment mode{" "}
+                {d.snapshot.financial.provider.mode}
+              </p>
+            )}
             <p>
               Before tax{" "}
               {formatTaxMoney(d.snapshot.totals.netMinor, d.snapshot.currency)}{" "}

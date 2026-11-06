@@ -29,6 +29,17 @@ import { renderSellerDocument } from "../application/seller-document-artifact";
 import { createHash } from "node:crypto";
 
 type Row = typeof sellerDocument.$inferSelect;
+function requireDocumentMode(row: Row, mode: "fixture" | "live") {
+  const financial = row.snapshot.financial;
+  if (
+    (financial.provider.mode === "test"
+      ? "fixture"
+      : financial.provider.mode) !== mode ||
+    financial.tax.mode !== mode ||
+    row.snapshot.issuer.revision.configuration.mode !== mode
+  )
+    throw new ApplicationError("CONFLICT");
+}
 export type DocumentWork = {
   id: string;
   business_id: string;
@@ -230,12 +241,15 @@ export function createSellerDocumentRepository(database: Database) {
           if (previous) {
             if (!isDeepStrictEqual(previous.payload, payload))
               throw new ApplicationError("CONFLICT");
-            return view(await read(tx, businessId, previous.documentId));
+            const row = await read(tx, businessId, previous.documentId);
+            requireDocumentMode(row, mode);
+            return view(row);
           }
           const existing = (await documents(tx, businessId)).find(
             (d) => d.kind === "invoice" && d.periodId === input.periodId,
           );
           let row = existing;
+          if (row) requireDocumentMode(row, mode);
           if (!row) {
             const [period] = await tx
               .select()
@@ -259,7 +273,9 @@ export function createSellerDocumentRepository(database: Database) {
               financial.quote.businessId !== businessId ||
               tax.billing.status !== "reviewed" ||
               !tax.billing.current ||
-              financial.provider.mode !== mode ||
+              (financial.provider.mode === "test"
+                ? "fixture"
+                : financial.provider.mode) !== mode ||
               period.provider !== financial.provider.key ||
               period.account !== financial.provider.account ||
               tax.mode !== mode
@@ -316,6 +332,7 @@ export function createSellerDocumentRepository(database: Database) {
                 account: period.account,
                 start: period.start.toISOString(),
                 end: period.end.toISOString(),
+                charge: period.charge ?? null,
               },
               financial,
               issuer,
@@ -402,13 +419,16 @@ export function createSellerDocumentRepository(database: Database) {
           if (request) {
             if (!isDeepStrictEqual(request.payload, payload))
               throw new ApplicationError("CONFLICT");
-            return view(await read(tx, businessId, request.documentId));
+            const row = await read(tx, businessId, request.documentId);
+            requireDocumentMode(row, mode);
+            return view(row);
           }
           const rows = await documents(tx, businessId),
             original = rows.find(
               (r) => r.id === input.invoiceId && r.kind === "invoice",
             );
           if (!original) throw new ApplicationError("NOT_FOUND");
+          requireDocumentMode(original, mode);
           if (
             original.periodId !== input.periodId ||
             original.snapshot.source.paymentId !== input.paymentId

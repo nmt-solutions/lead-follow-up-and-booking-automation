@@ -37,7 +37,19 @@ export function renderSellerDocument(document: {
     ),
     "",
     "TRANSACTION",
+    `Document mode: ${c.mode}; Payment mode: ${s.financial.provider.mode}`,
     `Payment: ${s.source.paymentId}`,
+    ...(s.source.charge
+      ? [
+          `Provider: ${s.source.charge.provider}; account: ${s.source.charge.account}`,
+          `Subscription: ${s.source.charge.subscriptionId ?? "unavailable"}; paid at: ${s.source.charge.paidAt ?? "unavailable"}`,
+          ...(s.source.charge.charge
+            ? [
+                `Provider invoice: ${s.source.charge.charge.invoiceId}; order: ${s.source.charge.charge.orderId}; plan: ${s.source.charge.charge.planId}`,
+              ]
+            : []),
+        ]
+      : []),
     `Period: ${s.source.start} to ${s.source.end}`,
     `Billing currency: ${s.currency}; precision: ${s.precision}`,
     ...(s.original

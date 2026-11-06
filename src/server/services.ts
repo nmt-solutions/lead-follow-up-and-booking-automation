@@ -317,19 +317,20 @@ async function composeServices() {
     repository: createSubscriptionQuoteRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
   });
+  const paymentGateway = configuredPayments();
   const subscriptionPayments = createSubscriptionPaymentApplication({
     authenticate,
     authenticatePlatform,
     repository: createSubscriptionPaymentRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
-    gateway: configuredPayments(),
+    gateway: paymentGateway,
   });
   const sellerDocuments = createSellerDocumentApplication({
     authenticate,
     authenticatePlatform,
     repository: createSellerDocumentRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
-    mode: "live",
+    mode: paymentGateway.mode === "test" ? "fixture" : "live",
     ...configuredSellerDocumentStorage(process.env),
   });
   const billingReviewFiles = createFileApplication({

@@ -15,6 +15,8 @@ import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 import { persistPaidSubscription } from "./support/paid-subscription";
 import { createFileApplication } from "../src/application/files";
 import { createFileRepository } from "../src/db/file-repository";
+import { configuredPayments } from "../src/subscription-payments/configuration";
+import { razorpayFixture } from "./support/razorpay";
 
 // Synthetic inputs only. No production legal identity, policy or series is seeded.
 const issuer = {
@@ -197,6 +199,171 @@ describe("Seller documents at the public application seam", () => {
     await expect(app.catalog(op)).rejects.toMatchObject({
       code: "MFA_REQUIRED",
     });
+  });
+  it("issues native test-charge invoices and renewal credits with immutable exact charge evidence while live issuance stays isolated", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      payments = createSubscriptionPaymentApplication({
+        authenticate: h.authenticate,
+        authenticatePlatform: h.access.authenticatePlatform,
+        repository: createSubscriptionPaymentRepository(
+          runtimeDatabase(h.runtime),
+        ),
+        clock: h.clock,
+        gateway: configuredPayments(native.configuration),
+      }),
+      { app, storage } = compose(),
+      op = await operator();
+    await approve(app, op);
+    const action = await payments.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await payments.start(f.owner, f.business.id, { actionId: action.id });
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    await payments.recover();
+    const initialPeriod = (await payments.workspace(f.owner, f.business.id))
+      .periods[0];
+    const original = await app.issue(f.owner, f.business.id, {
+      periodId: initialPeriod.id,
+      requestKey: randomUUID(),
+    });
+    expect(original.snapshot).toMatchObject({
+      source: { charge: initialPeriod.charge },
+      financial: { provider: { mode: "test" }, tax: { mode: "fixture" } },
+    });
+    const rules = await f.tax.saveRule(f.operator, {
+      key: f.rules.revisions[0].key,
+      expectedVersion: 1,
+      note: "Synthetic later registration evidence",
+      rule: {
+        ...f.rules.revisions[0].rule,
+        effectiveFrom: "2026-12-01T00:00:00.000Z",
+        registration: {
+          ...f.rules.revisions[0].rule.registration,
+          identifier: "RENEWAL-REGISTRATION",
+        },
+      },
+    });
+    await f.tax.decideRule(f.operator, {
+      revisionId: rules.revisions.at(-1)!.id,
+      expectedDecisionVersion: 0,
+      outcome: "approved",
+      note: "Synthetic renewal approval",
+    });
+    await h.admin.query(
+      "UPDATE business_file SET retention_until='2028-01-01' WHERE business_id=$1",
+      [f.business.id],
+    );
+    h.clock.set("2026-12-05T09:00:00.000Z");
+    native.charge(
+      "pay_renewal",
+      "2026-12-05T09:00:00.000Z",
+      "2027-01-05T09:00:00.000Z",
+    );
+    await payments.recover();
+    const owner = await h.signIn("tax-owner@example.com"),
+      currentOp = await h.signIn("documents@example.com"),
+      periods = (await payments.workspace(owner, f.business.id)).periods;
+    expect(periods).toHaveLength(2);
+    const renewal = periods[1],
+      invoice = await app.issue(owner, f.business.id, {
+        periodId: renewal.id,
+        requestKey: randomUUID(),
+      });
+    expect(invoice.number).toBe("TEST-I-0002");
+    expect(invoice.snapshot).toMatchObject({
+      source: { paymentId: "pay_renewal", charge: renewal.charge },
+      financial: {
+        basis: { kind: "renewal" },
+        tax: { purpose: "subscription_charge" },
+      },
+      lines: [
+        {
+          rule: {
+            revision: {
+              version: 2,
+              rule: { registration: { identifier: "RENEWAL-REGISTRATION" } },
+            },
+          },
+        },
+      ],
+      totals: { netMinor: "10005", taxMinor: "1001", totalMinor: "11006" },
+    });
+    expect(invoice.snapshot.financial).toEqual(renewal.snapshot);
+    const input = {
+      invoiceId: invoice.id,
+      periodId: renewal.id,
+      paymentId: renewal.paymentId,
+      requestKey: randomUUID(),
+      adjustmentId: randomUUID(),
+      source: {
+        kind: "refund",
+        reference: "fixture-native-renewal-correction",
+      },
+      reason: "Synthetic reviewed native renewal correction",
+      evidence: ["fixture:approved-correction"],
+      lines: [{ lineId: "subscription", netMinor: "3335" }],
+    };
+    const credit = await app.adjust(currentOp, f.business.id, input);
+    expect(credit.snapshot).toMatchObject({
+      source: { paymentId: "pay_renewal", charge: renewal.charge },
+      original: { id: invoice.id },
+      totals: { netMinor: "3335", taxMinor: "334", totalMinor: "3669" },
+    });
+    expect(
+      (
+        await app.adjust(currentOp, f.business.id, {
+          ...input,
+          requestKey: randomUUID(),
+        })
+      ).id,
+    ).toBe(credit.id);
+    await payments.recover();
+    expect(
+      (await app.workspace(owner, f.business.id)).documents.find(
+        (d) => d.id === original.id,
+      ),
+    ).toEqual(original);
+    expect(native.creations).toHaveLength(1);
+    const grant = await app.createAccess(owner, f.business.id, invoice.id),
+      downloaded = await app.download(
+        owner,
+        f.business.id,
+        invoice.id,
+        grant.token,
+      ),
+      text = new TextDecoder().decode(downloaded.bytes);
+    expect(text).toContain("inv_renewal");
+    expect(text).toContain("order_renewal");
+    expect(text).toContain("Payment mode: test");
+    const live = createSellerDocumentApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createSellerDocumentRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      mode: "live",
+      storage,
+      policy: {
+        accountScope: "tax-fixture",
+        maxBytes: 1000000,
+        accessTtlSeconds: 30,
+        recoveryLeaseSeconds: 60,
+      },
+    });
+    await expect(
+      live.issue(owner, f.business.id, {
+        periodId: renewal.id,
+        requestKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      live.adjust(currentOp, f.business.id, input),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
   it("issues one numbered invoice from real reviewed payment evidence under concurrent requests and rejects changed-key payloads", async () => {
     const f = await reviewedPurchase(),

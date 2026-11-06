@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { taxRuleSchema } from "./tax";
-import { paymentSnapshotSchema } from "./subscription-payments";
+import {
+  paymentSnapshotSchema,
+  paymentObservationSchema,
+} from "./subscription-payments";
 import { taxCalculationSchema } from "./tax";
 
 const text = z
@@ -177,6 +180,7 @@ export const documentSnapshotSchema = z.object({
     account: z.string(),
     start: z.iso.datetime(),
     end: z.iso.datetime(),
+    charge: paymentObservationSchema.nullable().optional(),
   }),
   financial: paymentSnapshotSchema,
   issuer: issuerSnapshotSchema,
