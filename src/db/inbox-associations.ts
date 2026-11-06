@@ -60,7 +60,6 @@ function opportunityView(
   history: OpportunityHistoryEntry[],
   sources: InboxDiscoverySource[],
 ): InboxOpportunity {
-  if (!row.buyerId) throw new ApplicationError("CONFLICT");
   return {
     id: row.id,
     buyerId: row.buyerId,

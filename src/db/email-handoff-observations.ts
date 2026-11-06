@@ -33,7 +33,7 @@ import {
 type Handoff = typeof emailHandoff.$inferSelect;
 
 /** Functioning scoped observations can coexist with an explicit association review. They never establish complete reply capture. */
-async function currentMailbox(
+export async function currentMailbox(
   tx: Transaction,
   businessId: string,
   p: typeof mailboxPolicy.$inferSelect,

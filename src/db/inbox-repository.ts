@@ -5,6 +5,7 @@ import { resolveMailReference } from "./mailbox-reference";
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { stopOpportunityFollowups } from "./opportunity-followups";
+import { observeSequenceReply } from "./email-sequence-observations";
 import type { InboxRepository } from "../application/inbox";
 import { ApplicationError } from "../models/application-error";
 import type { Actor } from "../models/business";
@@ -190,6 +191,15 @@ export async function captureInboxInquiry(
     return result;
   }
   if (event.kind === "opt_out") throw new ApplicationError("INVALID_INPUT");
+  const sequenceOpportunityId = await observeSequenceReply(
+    tx,
+    businessId,
+    connectionId,
+    actor.userId,
+    event,
+    at,
+    authorization?.metadata,
+  );
   if (event.kind === "public_signal" || event.kind === "other_reply") {
     await recordEvent(null);
     return { status: "ignored", conversationId: null };
@@ -282,7 +292,27 @@ export async function captureInboxInquiry(
       : [];
   const reply = replies.length === 1 ? replies[0] : undefined;
   // An exact channel identity and received reply reference establish continuity; names/domains never do.
-  const verifiedReply = reply?.originalBuyerId === buyerId ? reply : undefined;
+  const verifiedReply =
+    reply?.originalBuyerId === buyerId
+      ? reply
+      : sequenceOpportunityId
+        ? {
+            opportunityId: sequenceOpportunityId,
+            buyerId,
+            originalBuyerId: buyerId,
+          }
+        : undefined;
+  if (sequenceOpportunityId)
+    await tx
+      .update(inboxOpportunity)
+      .set({ buyerId, stage: "inquiry" })
+      .where(
+        and(
+          eq(inboxOpportunity.businessId, businessId),
+          eq(inboxOpportunity.id, sequenceOpportunityId),
+          eq(inboxOpportunity.stage, "prospect"),
+        ),
+      );
   const effectiveBuyerId = verifiedReply?.buyerId ?? buyerId;
   const conversationId = conversation?.id ?? randomUUID();
   let [association] = await tx

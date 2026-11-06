@@ -18,6 +18,11 @@ import { configuredMicrosoftCalendar } from "../microsoft-calendar/configuration
 import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
 import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
+import { createEmailSequenceApplication } from "../application/email-sequences";
+import { createEmailSequenceRepository } from "../db/email-sequence-repository";
+import { createEmailSequenceHttp } from "../http/email-sequences";
+import { configuredSequenceQueue } from "../email-sequences/queue";
+import { unavailableSequenceMail } from "../email-sequences/provider";
 import { createCampaignApplication } from "../application/campaigns";
 import { createCampaignRepository } from "../db/campaign-repository";
 import { createCampaignHttp } from "../http/campaigns";
@@ -140,6 +145,15 @@ async function composeServices() {
     repository: createCampaignRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
+  });
+  const emailSequences = createEmailSequenceApplication({
+    authenticate: access.authenticateForWork,
+    repository: createEmailSequenceRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    clock: { now: () => new Date() },
+    provider: unavailableSequenceMail,
+    queue: configuredSequenceQueue(process.env),
   });
   const emailHandoffs = createEmailHandoffApplication({
     authenticate: access.authenticateForWork,
@@ -366,6 +380,12 @@ async function composeServices() {
     timeoutMs: 5000,
   });
   return {
+    emailSequences,
+    emailSequencesHttp: createEmailSequenceHttp({
+      application: emailSequences,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     campaigns,
     emailHandoffs,
     emailHandoffsHttp: createEmailHandoffHttp({

@@ -115,9 +115,9 @@ export type InboxConversation = {
 };
 export type InboxOpportunity = {
   id: string;
-  buyerId: string;
+  buyerId: string | null;
   title: string;
-  stage: "inquiry";
+  stage: "inquiry" | "prospect";
   ownerId: string | null;
   handoffReason: string;
   nextAction: string;

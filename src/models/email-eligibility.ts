@@ -153,8 +153,9 @@ export type IncomingOptOutEvidence = {
   messageRef: string;
   eventRef: string;
   fingerprint: string;
-  conversationId: string;
-  sourceMessageId: string;
+  conversationId: string | null;
+  sourceMessageId: string | null;
+  sequenceActionId?: string;
   policyId: string | null;
 };
 export const emailActionRefSchema = z.discriminatedUnion("kind", [
@@ -163,6 +164,7 @@ export const emailActionRefSchema = z.discriminatedUnion("kind", [
     kind: z.literal("campaign"),
     id: z.uuid(),
     recipientKey: z.string().min(1).max(256),
+    sequenceActionId: z.uuid().optional(),
     stepIndex: z.number().int().nonnegative(),
   }),
 ]);
@@ -174,6 +176,7 @@ export function sameEmailAction(a: EmailActionRef, b: EmailActionRef) {
     (a.kind !== "campaign" ||
       (b.kind === "campaign" &&
         a.recipientKey === b.recipientKey &&
+        a.sequenceActionId === b.sequenceActionId &&
         a.stepIndex === b.stepIndex))
   );
 }

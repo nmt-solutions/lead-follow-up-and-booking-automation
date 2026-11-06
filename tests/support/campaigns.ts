@@ -20,12 +20,13 @@ import { readySender } from "./senders";
 export async function campaignFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
   options: {
+    at?: string;
     multipleSources?: boolean;
     namedGeneral?: boolean;
     mailboxProvider?: "gmail" | "microsoft";
   } = {},
 ) {
-  h.clock.set("2026-11-05T09:00:00Z");
+  h.clock.set(options.at ?? "2026-11-05T09:00:00Z");
   const owner = await h.signIn(`campaign-${crypto.randomUUID()}@example.com`);
   const business = await h.application.createBusiness(owner, {
     name: "Steel supplier",

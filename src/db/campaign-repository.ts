@@ -42,6 +42,8 @@ import {
   campaignDecision,
   senderIdentity,
   user,
+  emailSequenceAction,
+  emailSequenceRun,
 } from "./schema";
 
 function canonical(value: unknown): string {
@@ -294,25 +296,53 @@ export function createCampaignRepository(database: Database, clock: Clock) {
         id: r.id,
         recipientKey: selected.contactId,
         stepIndex: input.stepIndex,
+        ...(input.sequenceActionId
+          ? { sequenceActionId: input.sequenceActionId }
+          : {}),
       },
       actor.userId,
       clock.now(),
     );
+    const [execution] = await tx
+      .select({ state: emailSequenceAction.state })
+      .from(emailSequenceAction)
+      .innerJoin(
+        emailSequenceRun,
+        and(
+          eq(emailSequenceRun.id, emailSequenceAction.runId),
+          eq(emailSequenceRun.businessId, businessId),
+        ),
+      )
+      .where(
+        and(
+          eq(emailSequenceAction.businessId, businessId),
+          eq(emailSequenceRun.revisionId, r.id),
+          eq(emailSequenceAction.contactId, selected.contactId),
+          eq(emailSequenceAction.stepIndex, input.stepIndex),
+        ),
+      );
     return {
       revision: r,
       approval: r.decision,
-      current: r.current,
+      current: {
+        ...r.current,
+        conversation: await firstOutreachConversationState(tx, businessId, [
+          selected.address,
+        ]),
+      },
       recipient: selected,
       step,
       stepIndex: input.stepIndex,
       eligibility,
       execution: {
-        configured: false as const,
-        state: "not_scheduled" as const,
+        configured: Boolean(execution),
+        state: execution?.state ?? ("not_scheduled" as const),
       },
     };
   }
   return {
+    /** Transaction-level exact-version inspection for durable dispatch; caller supplies the shared Business lock and current session. */
+    reviewAt: review,
     /** Keep approval and current safety checks under the shared Business/policy guard through local preparation. */
     withApprovedAction<T>(
       actor: WorkIdentity,
@@ -398,6 +428,7 @@ export function createCampaignRepository(database: Database, clock: Clock) {
           replyConnection: inspection.replyConnection,
         };
         const snapshot = campaignSnapshotSchema.parse({
+          timing: input.timing,
           name: input.name,
           channel: input.channel,
           senderIdentityId: sender.id,

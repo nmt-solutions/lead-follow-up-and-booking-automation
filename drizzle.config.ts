@@ -7,6 +7,10 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "email_sequence_policy",
+    "email_sequence_run",
+    "email_sequence_action",
+    "email_sequence_event",
     "email_handoff",
     "email_handoff_evidence",
     "campaign_revision",

@@ -4,6 +4,11 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  emailSequencePolicy,
+  emailSequenceScopeForeignKeys,
+  emailSequenceRun,
+  emailSequenceAction,
+  emailSequenceEvent,
   emailHandoff,
   emailHandoffEvidence,
   campaignRevision,
@@ -162,6 +167,31 @@ export async function prepareDatabaseRole(pool: Pool) {
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
   await prepareFileCleanup(pool);
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
+    RETURNS TABLE(payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+    BEGIN RETURN QUERY SELECT jsonb_build_object('businessId',a.business_id,'runId',a.run_id,'actionId',a.id,
+      'generation',a.generation,'key',a.execution_key,'identity',a.identity)
+      FROM public.email_sequence_action a JOIN public.email_sequence_run r ON r.id=a.run_id AND r.business_id=a.business_id
+      WHERE (r.state='active' AND a.state='pending' AND a.queue_state IN ('pending','failed'))
+        OR a.state IN ('committed','unknown')
+      ORDER BY coalesce(a.recovery_at,a.at),a.id LIMIT 50;
+    END $$;
+    CREATE OR REPLACE FUNCTION public.stop_email_sequence_work(work jsonb,reason text)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
+      IF reason NOT IN ('authorization_changed','worker_lost') THEN RAISE EXCEPTION 'Invalid sequence failure'; END IF;
+      UPDATE public.email_sequence_action a SET reason=stop_email_sequence_work.reason,
+        state=CASE WHEN stop_email_sequence_work.reason='authorization_changed' THEN 'paused' ELSE 'pending' END,
+        queue_state=CASE WHEN stop_email_sequence_work.reason='authorization_changed' THEN 'none' ELSE 'failed' END,
+        generation=a.generation+1,execution_key=gen_random_uuid(),queue_run_id=NULL
+      FROM public.email_sequence_run r
+      WHERE a.id=(work->>'actionId')::uuid AND a.business_id=(work->>'businessId')::uuid
+        AND a.run_id=(work->>'runId')::uuid AND a.generation=(work->>'generation')::integer AND a.execution_key=(work->>'key')::uuid
+        AND r.id=a.run_id AND r.business_id=a.business_id AND a.identity=work->'identity' AND a.state='pending';
+    END $$;
+    REVOKE ALL ON FUNCTION public.pending_email_sequence_work(),public.stop_email_sequence_work(jsonb,text) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.pending_email_sequence_work(),public.stop_email_sequence_work(jsonb,text) TO app_runtime;
+  `);
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_discovery_dispatches()
     RETURNS TABLE(id uuid, payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
@@ -424,6 +454,14 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.email_handoff') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.email_handoff, public.email_handoff_evidence FROM app_runtime;
       END IF;
+      IF to_regclass('public.email_sequence_run') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.email_sequence_policy, public.email_sequence_run, public.email_sequence_action, public.email_sequence_event FROM app_runtime;
+        REVOKE UPDATE (identity,state,version,reason) ON public.email_sequence_run FROM app_runtime;
+        REVOKE UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,queue_state,queue_run_id,recovery_at,identity,control_version) ON public.email_sequence_action FROM app_runtime;
+      END IF;
+      IF to_regclass('public.inbox_opportunity') IS NOT NULL THEN
+        REVOKE UPDATE (stage,buyer_id) ON public.inbox_opportunity FROM app_runtime;
+      END IF;
       IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='inbox_message' AND column_name='native_sync_generation') THEN
         REVOKE UPDATE (native_sync_generation) ON public.inbox_message, public.gmail_manual_message FROM app_runtime;
       END IF;
@@ -445,6 +483,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...emailSequenceScopeForeignKeys,
     ...mailboxScopeForeignKeys,
     ...gmailScopeForeignKeys,
     ...microsoftMailScopeForeignKeys,
@@ -499,6 +538,7 @@ export async function secureDatabase(pool: Pool) {
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...emailSequenceScopeForeignKeys,
       ...mailboxScopeForeignKeys,
       ...gmailScopeForeignKeys,
       ...microsoftMailScopeForeignKeys,
@@ -532,17 +572,23 @@ export async function secureDatabase(pool: Pool) {
     }
     // The pinned push also misses changes to an existing CHECK expression.
     // Upgrade the original owner-only role check from the schema's definition.
-    for (const constraint of getTableConfig(membership).checks) {
-      await database.execute(
-        sql`alter table ${membership} drop constraint if exists ${sql.identifier(constraint.name)}`,
-      );
-      await database.execute(
-        sql`alter table ${membership} add constraint ${sql.identifier(constraint.name)} check (${constraint.value})`,
-      );
+    for (const table of [membership, inboxOpportunity]) {
+      for (const constraint of getTableConfig(table).checks) {
+        await database.execute(
+          sql`alter table ${table} drop constraint if exists ${sql.identifier(constraint.name)}`,
+        );
+        await database.execute(
+          sql`alter table ${table} add constraint ${sql.identifier(constraint.name)} check (${constraint.value})`,
+        );
+      }
     }
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      emailSequencePolicy,
+      emailSequenceRun,
+      emailSequenceAction,
+      emailSequenceEvent,
       emailHandoff,
       emailHandoffEvidence,
       campaignRevision,
@@ -628,6 +674,34 @@ export async function secureDatabase(pool: Pool) {
       }
     }
     await client.query(`
+      CREATE OR REPLACE FUNCTION public.protect_opportunity_intake() RETURNS trigger
+      LANGUAGE plpgsql SET search_path='' AS $$ BEGIN
+        -- Schema-owner maintenance includes additive upgrades of populated legacy intake.
+        -- Runtime can never assume the schema-owner role (verified by verifyRuntimeRole).
+        IF current_user=(SELECT pg_get_userbyid(c.relowner) FROM pg_catalog.pg_class c WHERE c.oid='public.inbox_opportunity'::regclass) THEN RETURN NEW; END IF;
+        IF NEW.buyer_id IS DISTINCT FROM OLD.buyer_id OR NEW.stage IS DISTINCT FROM OLD.stage THEN
+          IF NOT (OLD.buyer_id IS NULL AND OLD.stage='prospect' AND NEW.stage='inquiry' AND NEW.buyer_id IS NOT NULL
+            AND EXISTS (SELECT 1 FROM public.email_sequence_action a
+              JOIN public.email_sequence_event r ON r.action_id=a.id AND r.business_id=a.business_id AND r.kind='reply_observed'
+              JOIN public.email_sequence_event p ON p.action_id=a.id AND p.business_id=a.business_id AND p.kind='attempt_reserved'
+              JOIN public.inbox_buyer b ON b.id=NEW.buyer_id AND b.business_id=a.business_id
+              WHERE a.opportunity_id=OLD.id AND a.business_id=OLD.business_id
+              AND p.envelope->>'recipient'=lower(b.sender_ref) AND ((p.envelope->>'replyInboxId')::uuid=b.connection_id OR ((r.source->>'mailboxId')::uuid=b.connection_id AND r.source->>'connectionId'=p.envelope->>'replyConnectionId'))))
+          THEN RAISE EXCEPTION 'Opportunity intake is immutable'; END IF;
+        END IF;
+        RETURN NEW;
+      END $$;
+      DROP TRIGGER IF EXISTS protect_opportunity_intake ON public.inbox_opportunity;
+      CREATE TRIGGER protect_opportunity_intake BEFORE UPDATE ON public.inbox_opportunity FOR EACH ROW EXECUTE FUNCTION public.protect_opportunity_intake();
+      REVOKE ALL ON FUNCTION public.protect_opportunity_intake() FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON email_sequence_policy, email_sequence_run, email_sequence_action, email_sequence_event FROM app_runtime;
+      GRANT SELECT, INSERT ON email_sequence_policy, email_sequence_run, email_sequence_action, email_sequence_event TO app_runtime;
+      GRANT UPDATE (identity,state,version,reason) ON email_sequence_run TO app_runtime;
+      GRANT UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,queue_state,queue_run_id,recovery_at,identity,control_version) ON email_sequence_action TO app_runtime;
+      ALTER TABLE email_sequence_policy FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_sequence_run FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_sequence_action FORCE ROW LEVEL SECURITY;
+      ALTER TABLE email_sequence_event FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON campaign_revision, campaign_decision FROM app_runtime;
       GRANT SELECT, INSERT ON campaign_revision, campaign_decision TO app_runtime;
       REVOKE ALL PRIVILEGES ON email_handoff, email_handoff_evidence FROM app_runtime;
@@ -711,6 +785,7 @@ export async function secureDatabase(pool: Pool) {
       GRANT UPDATE (last_received_at) ON inbox_conversation TO app_runtime;
       GRANT UPDATE (mailbox_current_metadata) ON inbox_message TO app_runtime;
       GRANT UPDATE (owner_id, handoff_reason, next_action, control_state, control_version, policy_version) ON inbox_opportunity TO app_runtime;
+      GRANT UPDATE (stage, buyer_id) ON inbox_opportunity TO app_runtime;
       REVOKE ALL PRIVILEGES ON opportunity_control_history, opportunity_manual_event, opportunity_due_action FROM app_runtime;
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
       GRANT UPDATE (state, reason) ON opportunity_due_action TO app_runtime;

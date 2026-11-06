@@ -56,6 +56,7 @@ export type ControlHistory = {
   policy: PolicyReview | null;
 };
 export type OpportunityControl = ControlSnapshot & {
+  title: string;
   id: string;
   ownerName: string | null;
   history: ControlHistory[];

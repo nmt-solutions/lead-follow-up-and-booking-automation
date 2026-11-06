@@ -24,6 +24,8 @@ import {
   opportunityDueAction,
   senderObservation,
   senderIdentity,
+  emailSequenceAction,
+  emailSequenceRun,
 } from "./schema";
 import { responseSender, identityView } from "./sender-repository";
 
@@ -68,12 +70,39 @@ export async function emailActionContext(
     );
     const step = revision.snapshot.steps[ref.stepIndex];
     if (!selected || !step) throw new ApplicationError("NOT_FOUND");
+    const [sequence] = ref.sequenceActionId
+      ? await tx
+          .select({ action: emailSequenceAction, run: emailSequenceRun })
+          .from(emailSequenceAction)
+          .innerJoin(
+            emailSequenceRun,
+            and(
+              eq(emailSequenceRun.id, emailSequenceAction.runId),
+              eq(emailSequenceRun.businessId, businessId),
+            ),
+          )
+          .where(
+            and(
+              eq(emailSequenceAction.businessId, businessId),
+              eq(emailSequenceAction.id, ref.sequenceActionId),
+            ),
+          )
+      : [];
+    if (
+      ref.sequenceActionId &&
+      (!sequence ||
+        sequence.run.revisionId !== revision.id ||
+        sequence.run.payloadHash !== revision.payloadHash ||
+        sequence.action.contactId !== selected.contactId ||
+        sequence.action.stepIndex !== ref.stepIndex)
+    )
+      throw new ApplicationError("CONFLICT");
     const purpose: EmailPurpose =
       ref.stepIndex === 0 ? "sales_outreach" : "sales_follow_up";
     const content = `${step.subject}\n${step.body}`;
     return {
       ref,
-      opportunityId: null,
+      opportunityId: sequence?.action.opportunityId ?? null,
       prospectId: selected.prospectId,
       recipient: selected.address,
       purpose,
@@ -82,7 +111,12 @@ export async function emailActionContext(
         .update(
           JSON.stringify({
             businessId,
-            ref,
+            ref: {
+              kind: ref.kind,
+              id: ref.id,
+              recipientKey: ref.recipientKey,
+              stepIndex: ref.stepIndex,
+            },
             payloadHash: revision.payloadHash,
             selected,
             step,
@@ -375,7 +409,7 @@ export async function evaluateEmailAction(
       if (
         e.policyId === policy?.id &&
         e.purpose === c.purpose &&
-        e.opportunityId === c.opportunityId &&
+        e.opportunityId === (c.prospectId ? null : c.opportunityId) &&
         (c.prospectId ? e.prospectId === c.prospectId : !e.prospectId) &&
         new Date(e.observedAt) <= at &&
         new Date(e.validUntil) > at &&
@@ -484,7 +518,7 @@ export async function evaluateEmailAction(
     ...(facts?.facts.permissions
       .filter(
         (e) =>
-          e.opportunityId === c.opportunityId &&
+          e.opportunityId === (c.prospectId ? null : c.opportunityId) &&
           (c.prospectId ? e.prospectId === c.prospectId : !e.prospectId) &&
           e.purpose === c.purpose &&
           e.policyId === policy?.id,

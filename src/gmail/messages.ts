@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { MailboxMetadata, MailboxSnapshot } from "../models/mailboxes";
 import { gmailNativeSchema } from "../models/gmail";
 import { GmailFailure, providerValue } from "./http";
+import { sequenceMailSelected } from "../mailboxes/sequence-references";
 
 export const gmailId = z
   .string()
@@ -106,6 +107,7 @@ export function gmailMetadata(
   const subject = decodedHeader(h.get("subject") ?? "").toLocaleLowerCase();
   const known = context.knownThreads?.includes(message.threadId);
   const selectedSales =
+    (native.success && sequenceMailSelected(context, native.data)) ||
     known ||
     context.configuration.scope.kind === "threads" ||
     (context.configuration.scope.kind === "folders" &&

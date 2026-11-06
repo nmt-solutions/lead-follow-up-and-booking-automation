@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { stopOpportunityFollowups } from "./opportunity-followups";
+import { pauseMailboxSequences } from "./email-sequence-observations";
 import type { Transaction } from "./scope";
 import { mailboxPolicy, inboxMessage, inboxMessageLink } from "./schema";
 
@@ -19,7 +20,12 @@ export async function pauseMailboxFollowups(
         eq(inboxMessage.connectionId, mailboxId),
       ),
     );
-  const ids = [...new Set(needs.flatMap((n) => (n.id ? [n.id] : [])))];
+  const ids = [
+    ...new Set([
+      ...needs.flatMap((n) => (n.id ? [n.id] : [])),
+      ...(await pauseMailboxSequences(tx, businessId, mailboxId)),
+    ]),
+  ];
   await stopOpportunityFollowups(
     tx,
     businessId,

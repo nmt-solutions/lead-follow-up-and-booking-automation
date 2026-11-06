@@ -22,6 +22,7 @@ import { requireSalesSession } from "./sales-session";
 import { retainMailManual, applyMailManual } from "./mailbox-intake";
 import { pauseMailboxFollowups } from "./mailbox-visibility";
 import { reconcileHandoffReplies } from "./email-handoff-observations";
+import { sequenceMailboxReferences } from "./email-sequence-observations";
 import {
   inboxConnection,
   mailboxPolicy,
@@ -681,6 +682,12 @@ export function createMailboxRepository(
           knownThreads: conversations.map((c) => c.ref),
           oauthGeneration: oauth?.generation ?? null,
           appMessages,
+          sequenceMessages: await sequenceMailboxReferences(
+            tx,
+            work.businessId,
+            policy.connectionId,
+            policy.account,
+          ),
           retryAt: job.state.retryAt,
           visibility:
             policy.lastSyncedAt &&

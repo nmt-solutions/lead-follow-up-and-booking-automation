@@ -12,9 +12,13 @@ export default async function CampaignsPage({
   const { businessId } = await params;
   const state = await (async () => {
     try {
-      return await (
-        await getServices()
-      ).campaigns.workspace(await headers(), businessId);
+      const services = await getServices(),
+        credentials = await headers();
+      const [campaigns, sequences] = await Promise.all([
+        services.campaigns.workspace(credentials, businessId),
+        services.emailSequences.workspace(credentials, businessId),
+      ]);
+      return { campaigns, sequences };
     } catch (error: unknown) {
       return pageFailure(error);
     }
@@ -34,7 +38,11 @@ export default async function CampaignsPage({
           contact. Approval, current permission and execution remain separate.
         </p>
       </header>
-      <CampaignManager businessId={businessId} initialState={state} />
+      <CampaignManager
+        businessId={businessId}
+        initialState={state.campaigns}
+        initialSequences={state.sequences}
+      />
     </div>
   );
 }

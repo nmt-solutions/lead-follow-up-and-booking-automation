@@ -6,6 +6,10 @@ import { ApplicationError } from "../models/application-error";
 import { captureInboxInquiry } from "./inbox-repository";
 import { retainMailObservation } from "./mailbox-intake";
 import { resolveMailReference } from "./mailbox-reference";
+import {
+  sequenceReference,
+  observeSequenceReply,
+} from "./email-sequence-observations";
 import { gmailManualMessage, inboxMessage, inboxMessageLink } from "./schema";
 
 export function selectedRetainedReply(
@@ -54,6 +58,59 @@ export async function captureMailInquiry(
       ),
     );
   if (!existing && metadata.native?.inReplyTo) {
+    const sequence = await sequenceReference(
+      tx,
+      work.businessId,
+      work.mailboxId,
+      metadata.native.inReplyTo,
+      [event.senderRef.toLowerCase()],
+    );
+    if (sequence) {
+      await observeSequenceReply(
+        tx,
+        work.businessId,
+        work.mailboxId,
+        work.identity.userId,
+        event,
+        at,
+        metadata,
+        snapshot.oauthGeneration
+          ? {
+              provider: snapshot.provider,
+              mailboxId: work.mailboxId,
+              connectionId: snapshot.configuration.connectionId,
+              policyVersion: work.policyVersion,
+              syncGeneration: snapshot.oauthGeneration,
+              messageRef: event.messageRef,
+              threadRef: event.conversationRef,
+              internetMessageId: metadata.native.internetMessageId,
+              inReplyTo: metadata.native.inReplyTo,
+              occurredAt: event.occurredAt,
+            }
+          : null,
+      );
+      // Native adapters classify ordinary incoming mail as direct_inquiry. A reply reference
+      // establishes continuity, not buying interest. Retain unclassified replies for review.
+      if (event.kind === "buying_interest_reply" || event.kind === "opt_out")
+        return captureInboxInquiry(
+          tx,
+          work.identity,
+          work.businessId,
+          snapshot.inboxConnectionId,
+          event,
+          at,
+          {
+            since: new Date(
+              snapshot.mode === "history"
+                ? snapshot.configuration.history!.from
+                : snapshot.incrementalSince,
+            ),
+            metadata,
+          },
+        );
+      const status = await retainMailObservation(tx, batch, selected, at);
+      return { status };
+    }
     const source = await resolveMailReference(
       tx,
       work.businessId,

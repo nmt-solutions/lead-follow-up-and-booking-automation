@@ -13,6 +13,10 @@ import {
 } from "./email-eligibility-context";
 import { persistEmailSuppression } from "./email-eligibility-repository";
 import { resolveMailReference } from "./mailbox-reference";
+import {
+  sequenceReference,
+  observeSequenceReply,
+} from "./email-sequence-observations";
 import { emailSuppression, inboxMessage, inboxMessageLink } from "./schema";
 
 /** Called only inside the authenticated, selected-connection intake transaction and Business lock. */
@@ -72,7 +76,29 @@ export async function captureEmailOptOut(
         [recipient],
       )
     : null;
-  if (native && native.status !== "resolved")
+  const reference = metadata?.native?.inReplyTo ?? event.replyToMessageRef;
+  const sequence = reference
+    ? await sequenceReference(tx, businessId, connectionId, reference, [
+        recipient,
+      ])
+    : null;
+  if (
+    sequence &&
+    metadata?.native &&
+    !metadata.native.to.includes(sequence.envelope.replyTo)
+  )
+    throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+  if (sequence)
+    await observeSequenceReply(
+      tx,
+      businessId,
+      connectionId,
+      actorId,
+      event,
+      at,
+      metadata,
+    );
+  if (native && native.status !== "resolved" && !sequence)
     throw new ApplicationError("CONFLICT");
   const sources = await tx
     .select({ message: inboxMessage, link: inboxMessageLink })
@@ -90,9 +116,15 @@ export async function captureEmailOptOut(
             : sql`${inboxMessage.content}->>'conversationRef' = ${event.conversationRef}`,
       ),
     );
-  if (!sources.length) throw new ApplicationError("NOT_FOUND");
-  const ids = new Set(sources.map((r) => r.link.opportunityId));
-  const opportunityId = sources[0].link.opportunityId;
+  if (!sources.length && !sequence) throw new ApplicationError("NOT_FOUND");
+  const ids = new Set([
+    ...sources.map((r) => r.link.opportunityId),
+    ...(sequence ? [sequence.action.opportunityId] : []),
+  ]);
+  const opportunityId =
+    sequence?.action.opportunityId ?? sources[0].link.opportunityId;
+  const conversationId = sources[0]?.message.conversationId ?? null,
+    sourceMessageId = sources[0]?.message.id ?? null;
   await lockEmailPolicies(tx);
   const facts = await currentRecipient(tx, businessId, recipient, at);
   const policy =
@@ -131,7 +163,7 @@ export async function captureEmailOptOut(
       scope,
       opportunityId: scope === "opportunity_outreach" ? opportunityId : null,
       effectiveAt: event.occurredAt,
-      reference: `Connection ${connectionId}; opt-out message ${event.messageRef}; original ${sources[0].message.id}; request: ${requestExcerpt}. Next: honor covered scope; current owner reviews the restriction. No notification sent.`,
+      reference: `Connection ${connectionId}; opt-out message ${event.messageRef}; original ${sourceMessageId ?? `sequence action ${sequence!.action.id}`}; request: ${requestExcerpt}. Next: honor covered scope; current owner reviews the restriction. No notification sent.`,
     },
     at,
     "incoming_opt_out",
@@ -140,13 +172,14 @@ export async function captureEmailOptOut(
       messageRef: event.messageRef,
       eventRef: eventId,
       fingerprint,
-      conversationId: sources[0].message.conversationId,
-      sourceMessageId: sources[0].message.id,
+      conversationId,
+      sourceMessageId,
+      ...(sequence ? { sequenceActionId: sequence.action.id } : {}),
       policyId: policy?.id ?? null,
     },
   );
   return {
     status: "captured" as const,
-    conversationId: sources[0].message.conversationId,
+    conversationId,
   };
 }

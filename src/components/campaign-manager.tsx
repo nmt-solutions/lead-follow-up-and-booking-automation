@@ -27,6 +27,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Alert } from "./ui/alert";
 import { EmailHandoffManager } from "./email-handoff-manager";
+import { EmailSequenceManager } from "./email-sequence-manager";
+import type { SequenceWorkspace } from "@/models/email-sequences";
+import { Checkbox } from "./ui/checkbox";
 
 type Recipient = CampaignSnapshot["recipients"][number];
 const selectionKey = (r: Recipient) =>
@@ -34,6 +37,15 @@ const selectionKey = (r: Recipient) =>
 const stopText =
   "Stop on any reply, applicable opt-out, human control, authority or eligibility change, sender failure or loss of Geographic reach. These safety stops are mandatory.";
 const localDraftSchema = z.object({
+  timing: z
+    .object({
+      enabled: z.boolean(),
+      timeZone: z.string(),
+      startTime: z.string(),
+      endTime: z.string(),
+      weekdays: z.array(z.number()),
+    })
+    .optional(),
   editing: z
     .object({
       campaignId: z.uuid(),
@@ -71,6 +83,7 @@ const subscribeHydration = () => () => {};
 export function CampaignManager(props: {
   businessId: string;
   initialState: CampaignWorkspace;
+  initialSequences: SequenceWorkspace;
 }) {
   const hydrated = useSyncExternalStore(
     subscribeHydration,
@@ -174,12 +187,22 @@ function RecipientEvidence({ recipient: r }: { recipient: Recipient }) {
 function CampaignEditor({
   businessId,
   initialState,
+  initialSequences,
 }: {
   businessId: string;
   initialState: CampaignWorkspace;
+  initialSequences: SequenceWorkspace;
 }) {
   const storageKey = `campaign-draft:${businessId}:${initialState.actorId}`;
   const [restored] = useState(() => readLocalDraft(storageKey));
+  const emptyTiming = {
+    enabled: false,
+    timeZone: "",
+    startTime: "",
+    endTime: "",
+    weekdays: [] as number[],
+  };
+  const [timing, setTiming] = useState(restored?.timing ?? emptyTiming);
   const [state, setState] = useState(initialState),
     [pending, setPending] = useState(false),
     [feedback, setFeedbackState] = useState({
@@ -218,6 +241,7 @@ function CampaignEditor({
       sessionStorage.setItem(
         storageKey,
         JSON.stringify({
+          timing,
           editing,
           requestKey,
           name,
@@ -235,6 +259,7 @@ function CampaignEditor({
     }
   }, [
     storageKey,
+    timing,
     editing,
     requestKey,
     name,
@@ -332,6 +357,7 @@ function CampaignEditor({
     }
   }
   function resetDraft() {
+    setTiming(emptyTiming);
     setEditing(null);
     setName("");
     setSenderId("");
@@ -343,6 +369,9 @@ function CampaignEditor({
     setRequestKey(crypto.randomUUID());
   }
   function revise(r: CampaignRevision) {
+    setTiming(
+      r.snapshot.timing ? { enabled: true, ...r.snapshot.timing } : emptyTiming,
+    );
     setEditing({ campaignId: r.campaignId, expectedVersion: r.version });
     setName(r.snapshot.name);
     setSenderId(r.snapshot.senderIdentityId);
@@ -378,6 +407,16 @@ function CampaignEditor({
       return;
     }
     const parsed = saveCampaignSchema.safeParse({
+      timing: timing.enabled
+        ? {
+            timeZone: timing.timeZone,
+            startTime: timing.startTime,
+            endTime: timing.endTime,
+            weekdays: timing.weekdays,
+            dst: "compatible",
+            missed: "next_window",
+          }
+        : null,
       requestKey,
       campaignId: editing?.campaignId ?? requestKey,
       expectedVersion: editing?.expectedVersion ?? 0,
@@ -793,7 +832,9 @@ function CampaignEditor({
                 />
                 <p className="text-sm text-muted-foreground">
                   Enter {steps.length} for this {steps.length}-message plan.
-                  Each message has one authorized attempt.
+                  Reservations include failed and uncertain transport calls. A
+                  retry consumes the same cap and may leave no attempt for a
+                  later reminder.
                 </p>
               </div>
               <div className="space-y-2">
@@ -808,6 +849,113 @@ function CampaignEditor({
                   onChange={(e) => setAdditional(e.target.value)}
                 />
               </div>
+              <fieldset className="space-y-4 rounded-xl border border-border p-4">
+                <legend className="px-2 font-semibold">
+                  Local timing for automated sequences
+                </legend>
+                <div className="flex min-h-11 items-center gap-3">
+                  <Checkbox
+                    id="campaign-timing-enabled"
+                    checked={timing.enabled}
+                    onCheckedChange={(v) =>
+                      setTiming({ ...timing, enabled: v === true })
+                    }
+                  />
+                  <Label htmlFor="campaign-timing-enabled">
+                    Include a local send window in this approval
+                  </Label>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Choose the intended time zone and send days for this campaign.
+                  Delays are minimum elapsed minutes after actual provider
+                  acceptance. Missed work moves to an allowed window; it does
+                  not send overdue reminders in a burst. Without a window, this
+                  version supports manual email handoff only.
+                </p>
+                {timing.enabled && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="campaign-timezone">IANA time zone</Label>
+                      <Input
+                        id="campaign-timezone"
+                        value={timing.timeZone}
+                        onChange={(e) =>
+                          setTiming({ ...timing, timeZone: e.target.value })
+                        }
+                        required
+                        placeholder="For example, America/New_York"
+                      />
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="campaign-window-start">
+                          Local window starts
+                        </Label>
+                        <Input
+                          id="campaign-window-start"
+                          type="time"
+                          value={timing.startTime}
+                          required
+                          onChange={(e) =>
+                            setTiming({ ...timing, startTime: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="campaign-window-end">
+                          Local window ends
+                        </Label>
+                        <Input
+                          id="campaign-window-end"
+                          type="time"
+                          value={timing.endTime}
+                          required
+                          onChange={(e) =>
+                            setTiming({ ...timing, endTime: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <fieldset>
+                      <legend className="mb-2 text-sm font-medium">
+                        Send days
+                      </legend>
+                      <div className="flex flex-wrap gap-4">
+                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
+                          (day, i) => (
+                            <div
+                              key={day}
+                              className="flex min-h-11 items-center gap-2"
+                            >
+                              <Checkbox
+                                id={`campaign-day-${i}`}
+                                checked={timing.weekdays.includes(i + 1)}
+                                onCheckedChange={(v) =>
+                                  setTiming({
+                                    ...timing,
+                                    weekdays:
+                                      v === true
+                                        ? [...timing.weekdays, i + 1]
+                                        : timing.weekdays.filter(
+                                            (d) => d !== i + 1,
+                                          ),
+                                  })
+                                }
+                              />
+                              <Label htmlFor={`campaign-day-${i}`}>{day}</Label>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </fieldset>
+                    <p className="text-sm text-muted-foreground">
+                      At daylight-saving changes, a repeated start uses its
+                      first occurrence; a missing local start moves forward by
+                      the gap.
+                    </p>
+                  </>
+                )}
+              </fieldset>
               <div className="space-y-2">
                 <Label htmlFor="campaign-note">Reason for this version</Label>
                 <Textarea
@@ -855,7 +1003,7 @@ function CampaignEditor({
                     <Badge>
                       {r.decision?.decision ?? "Awaiting Owner approval"}
                     </Badge>
-                    <Badge>Automation not scheduled</Badge>
+                    <Badge>Approval record · execution shown below</Badge>
                     {r.version !== c.revisions.at(-1)?.version && (
                       <Badge>Superseded</Badge>
                     )}
@@ -880,6 +1028,16 @@ function CampaignEditor({
                       .provider ?? "Not configured"}
                     <br />
                     Maximum {r.snapshot.maxAttempts} attempts per recipient.
+                    {r.snapshot.timing && (
+                      <>
+                        <br />
+                        Local window: {r.snapshot.timing.timeZone} ·{" "}
+                        {r.snapshot.timing.startTime}–
+                        {r.snapshot.timing.endTime} · days{" "}
+                        {r.snapshot.timing.weekdays.join(", ")}. Missed work
+                        uses the next allowed window.
+                      </>
+                    )}
                   </p>
                   <div className="space-y-3">
                     {r.snapshot.steps.map((s, i) => (
@@ -887,7 +1045,9 @@ function CampaignEditor({
                         <h3 className="font-semibold">
                           {i === 0 ? "Initial message" : `Follow-up ${i}`} ·{" "}
                           {s.delayMinutes} minutes{" "}
-                          {i ? "after previous success" : "initial delay"}
+                          {i
+                            ? "after previous provider acceptance"
+                            : "initial delay"}
                         </h3>
                         <p className="mt-2 font-medium wrap-anywhere">
                           {s.subject}
@@ -1071,6 +1231,11 @@ function CampaignEditor({
         ))}
       </section>
       <EmailHandoffManager businessId={businessId} campaigns={state} />
+      <EmailSequenceManager
+        businessId={businessId}
+        initialState={initialSequences}
+        campaigns={state}
+      />
     </div>
   );
 }

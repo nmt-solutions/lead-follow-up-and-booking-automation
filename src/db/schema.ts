@@ -13,6 +13,13 @@ import type {
 } from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
 import type { CampaignSnapshot } from "../models/campaigns";
+import type {
+  SequencePolicy,
+  SequenceActionState,
+  SequenceReceipt,
+  SequenceEventKind,
+  SequenceEnvelope,
+} from "../models/email-sequences";
 import type { HandoffSource } from "../models/email-handoffs";
 import type {
   EmailMarketPolicy,
@@ -1587,7 +1594,7 @@ export const inboxOpportunity = pgTable(
     conversationId: uuid("conversation_id"),
     buyerId: uuid("buyer_id"),
     title: text("title").notNull().default("Purchasing need"),
-    stage: text("stage").$type<"inquiry">().notNull(),
+    stage: text("stage").$type<"inquiry" | "prospect">().notNull(),
     ownerId: text("owner_id").references(() => user.id),
     handoffReason: text("handoff_reason").notNull(),
     nextAction: text("next_action").notNull(),
@@ -1610,7 +1617,7 @@ export const inboxOpportunity = pgTable(
       table.businessId,
       table.buyerId,
     ),
-    check("inbox_initial_stage", sql`${table.stage} = 'inquiry'`),
+    check("inbox_initial_stage", sql`${table.stage} in ('inquiry','prospect')`),
     check(
       "opportunity_control_state",
       sql`${table.controlState} in ('human','automation') and ${table.controlVersion} >= 0`,
@@ -3426,3 +3433,176 @@ export const emailHandoffEvidence = pgTable(
     }),
   ],
 ).enableRLS();
+
+export const emailSequencePolicy = pgTable(
+  "email_sequence_policy",
+  {
+    ...emailRecordColumns(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration").$type<SequencePolicy>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("email_sequence_policy_version").on(t.businessId, t.version),
+    pgPolicy("email_sequence_policy_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("email_sequence_policy_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and (${emailPolicyOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+
+export const emailSequenceRun = pgTable(
+  "email_sequence_run",
+  {
+    ...emailRecordColumns(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => campaignRevision.id),
+    payloadHash: text("payload_hash").notNull(),
+    identity: jsonb("identity").$type<WorkIdentity>().notNull(),
+    state: text("state")
+      .$type<"active" | "paused" | "cancelled" | "completed">()
+      .notNull(),
+    version: integer("version").notNull(),
+    reason: text("reason"),
+  },
+  (t) => [
+    uniqueIndex("email_sequence_run_revision").on(t.revisionId),
+    uniqueIndex("email_sequence_run_scope").on(t.id, t.businessId),
+    ...emailRecordPolicies("email_sequence_run"),
+    pgPolicy("email_sequence_run_update", {
+      for: "update",
+      to: appRuntime,
+      using: inboxScope,
+      withCheck: inboxScope,
+    }),
+    pgPolicy("email_sequence_run_system", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_class c where c.oid='public.email_sequence_run'::regclass)`,
+    }),
+  ],
+).enableRLS();
+
+export const emailSequenceAction = pgTable(
+  "email_sequence_action",
+  {
+    ...emailRecordColumns(),
+    runId: uuid("run_id").notNull(),
+    contactId: text("contact_id").notNull(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    stepIndex: integer("step_index").notNull(),
+    identity: jsonb("identity").$type<WorkIdentity>().notNull(),
+    controlVersion: integer("control_version").notNull(),
+    state: text("state").$type<SequenceActionState>().notNull(),
+    reason: text("reason"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    generation: integer("generation").notNull(),
+    key: uuid("execution_key").notNull(),
+    recoveryAt: timestamp("recovery_at", { withTimezone: true }),
+    attemptId: uuid("attempt_id"),
+    receipt: jsonb("receipt").$type<SequenceReceipt>(),
+    queueState: text("queue_state")
+      .$type<"none" | "pending" | "enqueued" | "failed">()
+      .notNull(),
+    queueRunId: text("queue_run_id"),
+  },
+  (t) => [
+    uniqueIndex("email_sequence_action_step").on(
+      t.runId,
+      t.contactId,
+      t.stepIndex,
+    ),
+    uniqueIndex("email_sequence_action_scope").on(t.id, t.businessId, t.runId),
+    check(
+      "email_sequence_action_bounds",
+      sql`${t.stepIndex}>=0 and ${t.generation}>0`,
+    ),
+    ...emailRecordPolicies("email_sequence_action"),
+    pgPolicy("email_sequence_action_update", {
+      for: "update",
+      to: appRuntime,
+      using: inboxScope,
+      withCheck: inboxScope,
+    }),
+    pgPolicy("email_sequence_action_system", {
+      for: "all",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_class c where c.oid='public.email_sequence_action'::regclass)`,
+      withCheck: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_class c where c.oid='public.email_sequence_action'::regclass)`,
+    }),
+  ],
+).enableRLS();
+
+export const emailSequenceEvent = pgTable(
+  "email_sequence_event",
+  {
+    ...emailRecordColumns(),
+    runId: uuid("run_id").notNull(),
+    actionId: uuid("action_id"),
+    kind: text("kind").$type<SequenceEventKind>().notNull(),
+    reason: text("reason"),
+    source: jsonb("source").$type<HandoffSource>(),
+    note: text("note"),
+    attemptId: uuid("attempt_id"),
+    envelope: jsonb("envelope").$type<SequenceEnvelope>(),
+    receipt: jsonb("receipt").$type<SequenceReceipt>(),
+  },
+  (t) => [
+    uniqueIndex("email_sequence_reservation_once")
+      .on(t.attemptId)
+      .where(sql`${t.kind}='attempt_reserved'`),
+    ...emailRecordPolicies("email_sequence_event"),
+  ],
+).enableRLS();
+
+export const emailSequenceScopeForeignKeys = [
+  new ForeignKey(
+    emailSequenceAction,
+    foreignKey({
+      name: "email_sequence_action_run",
+      columns: [emailSequenceAction.runId, emailSequenceAction.businessId],
+      foreignColumns: [emailSequenceRun.id, emailSequenceRun.businessId],
+    }),
+  ),
+  new ForeignKey(
+    emailSequenceAction,
+    foreignKey({
+      name: "email_sequence_action_opportunity",
+      columns: [
+        emailSequenceAction.opportunityId,
+        emailSequenceAction.businessId,
+      ],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+  new ForeignKey(
+    emailSequenceEvent,
+    foreignKey({
+      name: "email_sequence_event_run",
+      columns: [emailSequenceEvent.runId, emailSequenceEvent.businessId],
+      foreignColumns: [emailSequenceRun.id, emailSequenceRun.businessId],
+    }),
+  ),
+  new ForeignKey(
+    emailSequenceEvent,
+    foreignKey({
+      name: "email_sequence_event_action",
+      columns: [
+        emailSequenceEvent.actionId,
+        emailSequenceEvent.businessId,
+        emailSequenceEvent.runId,
+      ],
+      foreignColumns: [
+        emailSequenceAction.id,
+        emailSequenceAction.businessId,
+        emailSequenceAction.runId,
+      ],
+    }),
+  ),
+];

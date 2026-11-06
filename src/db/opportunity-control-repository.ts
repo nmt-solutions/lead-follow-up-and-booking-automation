@@ -44,6 +44,7 @@ import {
   opportunityControlHistory,
   opportunityManualEvent,
   opportunityDueAction,
+  emailSequenceAction,
 } from "./schema";
 
 type Need = typeof inboxOpportunity.$inferSelect;
@@ -212,6 +213,20 @@ export async function writeControl(
     policy,
     at,
   });
+  if (command !== "handback")
+    await tx
+      .update(emailSequenceAction)
+      .set({ state: "paused", reason: "human_control", queueState: "none" })
+      .where(
+        and(
+          eq(emailSequenceAction.businessId, businessId),
+          eq(emailSequenceAction.opportunityId, need.id),
+          or(
+            eq(emailSequenceAction.state, "pending"),
+            eq(emailSequenceAction.state, "waiting"),
+          ),
+        ),
+      );
   // A new control generation never revives any previously queued action.
   await tx
     .update(opportunityDueAction)
@@ -279,6 +294,7 @@ export function createOpportunityRepository(
             : [];
           return {
             id,
+            title: need.title,
             ownerName: owner?.name ?? need.ownerId,
             ...snapshot(need),
             history: history.map((row) => ({

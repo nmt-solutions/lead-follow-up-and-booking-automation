@@ -179,6 +179,12 @@ export type MailboxSnapshot = {
   knownThreads?: string[];
   oauthGeneration?: number | null;
   appMessages?: { messageRef: string; internetMessageId: string }[];
+  sequenceMessages?: {
+    internetMessageId: string;
+    recipient: string;
+    fromAddress: string;
+    replyTo: string;
+  }[];
   retryAt?: string | null;
   visibility?: MailboxView["visibility"];
 };

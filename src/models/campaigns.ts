@@ -7,6 +7,7 @@ import {
   replyRouteSchema,
 } from "./senders";
 import { emailEligibilitySchema } from "./email-eligibility";
+import { sequenceTimingSchema, sequenceActionStates } from "./email-sequences";
 
 const text = z
   .string()
@@ -47,6 +48,7 @@ export const mandatoryCampaignStops: z.infer<typeof campaignStopsSchema> = {
   additional: [],
 };
 const plan = {
+  timing: sequenceTimingSchema.nullable().default(null),
   name: text,
   channel: z.literal("email"),
   senderIdentityId: z.uuid(),
@@ -87,6 +89,7 @@ export const campaignRefSchema = z.strictObject({
   payloadHash: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export const inspectCampaignSchema = campaignRefSchema.extend({
+  sequenceActionId: z.uuid().optional(),
   recipient: z.strictObject({
     prospectId: z.uuid(),
     contactId: z.string().min(1).max(256),
@@ -197,8 +200,8 @@ export const campaignReviewSchema = z.object({
   stepIndex: z.number().int(),
   eligibility: emailEligibilitySchema,
   execution: z.object({
-    configured: z.literal(false),
-    state: z.literal("not_scheduled"),
+    configured: z.boolean(),
+    state: z.enum(["not_scheduled", ...sequenceActionStates]),
   }),
 });
 export const campaignInspectionSchema = campaignReviewSchema.extend({

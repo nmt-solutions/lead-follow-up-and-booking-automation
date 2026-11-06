@@ -23,7 +23,7 @@ A person or organization identified as a potential buyer of a business's product
 A prospect who has directly inquired with the business or replied to it with buying interest. A public buying signal alone does not establish this engagement.
 
 **Opportunity**:
-One distinct purchasing need being pursued with a buyer. A buyer may have multiple opportunities; repeated messages about the same need belong to the same opportunity.
+One distinct purchasing need being pursued with a buyer or Prospect. A buyer may have multiple opportunities; repeated messages about the same need belong to the same opportunity. An approved Prospect Opportunity does not establish an Incoming inquiry or direct engagement.
 
 ### Discovery and reach
 
@@ -159,6 +159,18 @@ One complete, immutable first-contact plan for explicitly selected prospects and
 
 **Follow-up sequence**:
 An approved series of messages with defined timing, maximum attempts, and stop conditions for an unanswered outreach attempt.
+
+**Sequence execution**:
+A Business's explicitly started use of an approved Follow-up sequence for its fixed recipients. Approval and execution are separate actions.
+
+**Reserved email attempt**:
+An email attempt assigned part of the approved attempt cap and messaging allowance before sending begins. An uncertain attempt remains reserved until its outcome can be accounted for.
+
+**Provider acceptance**:
+The mail provider's confirmation that it accepted an exact outgoing email. Acceptance alone establishes neither delivery nor engagement.
+
+**Unknown email acceptance**:
+An outgoing attempt for which acceptance or non-acceptance is unresolved. It requires reconciliation before another attempt of that message can be authorized.
 
 **Human takeover**:
 A person assuming control of an opportunity while its automated messages are paused across channels until control is explicitly returned.

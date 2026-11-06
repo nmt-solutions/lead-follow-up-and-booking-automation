@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { inspectCampaignSchema } from "./campaigns";
+import { mailObservationSourceSchema } from "./mail-evidence";
 
 // #34 owns bounded follow-up execution. Own-client handoff prepares the approved initial message only.
 export const prepareHandoffSchema = inspectCampaignSchema.extend({
@@ -19,18 +20,7 @@ export const handoffEvidenceKinds = [
   "sent_folder_observed",
   "reply_observed",
 ] as const;
-export const handoffSourceSchema = z.object({
-  provider: z.enum(["gmail", "microsoft"]),
-  mailboxId: z.uuid(),
-  connectionId: z.uuid(),
-  policyVersion: z.number().int().positive(),
-  syncGeneration: z.number().int().positive(),
-  messageRef: z.string(),
-  threadRef: z.string(),
-  internetMessageId: z.string(),
-  inReplyTo: z.string().nullable(),
-  occurredAt: z.iso.datetime({ offset: true }),
-});
+export const handoffSourceSchema = mailObservationSourceSchema;
 export type HandoffSource = z.infer<typeof handoffSourceSchema>;
 export const handoffEvidenceSchema = z.object({
   id: z.uuid(),

@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq } from "drizzle-orm";
 import type { z } from "zod";
 import { ApplicationError } from "../models/application-error";
+import { stopSuppressedSequences } from "./email-sequence-observations";
 import type { Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import type {
@@ -90,6 +91,15 @@ export async function persistEmailSuppression(
     actorId,
     at,
   });
+  if (new Date(input.effectiveAt) <= at)
+    await stopSuppressedSequences(
+      tx,
+      businessId,
+      input.recipient,
+      input.scope === "opportunity_outreach" ? input.opportunityId : null,
+      actorId,
+      at,
+    );
   // Ownership and control generations are deliberately untouched. The dispatch gate covers committed work too.
   return id;
 }

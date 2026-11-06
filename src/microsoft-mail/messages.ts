@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
+import { sequenceMailSelected } from "../mailboxes/sequence-references";
 import { mailNativeSchema } from "../models/mail-native";
 import { MicrosoftMailFailure } from "../models/microsoft-mail";
 import type {
@@ -119,6 +120,7 @@ export function graphMetadata(
       : from !== account && to.includes(account));
   const subject = message.subject.toLocaleLowerCase();
   const sales =
+    (native.success && sequenceMailSelected(context, native.data)) ||
     context.knownThreads?.includes(message.conversationId) ||
     (context.configuration.scope.kind === "threads" &&
       context.configuration.scope.refs.includes(message.conversationId)) ||

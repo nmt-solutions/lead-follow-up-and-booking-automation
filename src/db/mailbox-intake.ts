@@ -7,6 +7,10 @@ import { selectedMetadata } from "../models/mailboxes";
 import { writeControl } from "./opportunity-control-repository";
 import { resolveMailReference } from "./mailbox-reference";
 import {
+  sequenceReference,
+  observeSequenceSent,
+} from "./email-sequence-observations";
+import {
   gmailManualMessage,
   inboxOpportunity,
   opportunityControlHistory,
@@ -29,6 +33,7 @@ export async function retainMailManual(
   )
     throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
   const { work } = batch.snapshot;
+  if (await observeSequenceSent(tx, batch, selected, at)) return "duplicate";
   const [appSend] = await tx
     .select()
     .from(mailboxAppMessage)
@@ -126,14 +131,28 @@ export async function applyMailManual(
       event.native.to,
       event.conversationRef,
     );
-    if (original.status !== "resolved" || !original.opportunityId) continue;
+    const sequence =
+      original.status !== "resolved"
+        ? await sequenceReference(
+            tx,
+            work.businessId,
+            work.mailboxId,
+            event.native.inReplyTo,
+            event.native.to,
+          )
+        : null;
+    const opportunityId =
+      original.status === "resolved"
+        ? original.opportunityId
+        : sequence?.action.opportunityId;
+    if (!opportunityId) continue;
     const [need] = await tx
       .select()
       .from(inboxOpportunity)
       .where(
         and(
           eq(inboxOpportunity.businessId, work.businessId),
-          eq(inboxOpportunity.id, original.opportunityId),
+          eq(inboxOpportunity.id, opportunityId),
         ),
       );
     if (!need) continue;
@@ -184,7 +203,8 @@ export async function applyMailManual(
       .update(gmailManualMessage)
       .set({
         state: historical ? "historical" : "applied",
-        conversationId: original.conversationId,
+        conversationId:
+          original.status === "resolved" ? original.conversationId : null,
         opportunityId: need.id,
       })
       .where(eq(gmailManualMessage.id, manual.id));
