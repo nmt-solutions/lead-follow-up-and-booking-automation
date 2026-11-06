@@ -345,6 +345,19 @@ export function createOperationsRepository(database: Database, clock: Clock) {
           command.source === "queue"
         )
           await requireCapability(tx, identity, businessId, "profile.manage");
+        const [proof] = await tx
+          .select({ mfaAt: session.mfaVerifiedAt })
+          .from(session)
+          .where(
+            and(
+              eq(session.id, identity.sessionId),
+              eq(session.userId, identity.userId),
+            ),
+          );
+        if (!proof) throw new ApplicationError("UNAUTHENTICATED");
+        const recoveryRole = operator
+          ? "operations"
+          : await requireCapability(tx, identity, businessId, "sales.work");
         const [event] = await tx
           .insert(operationEvent)
           .values({
@@ -352,7 +365,17 @@ export function createOperationsRepository(database: Database, clock: Clock) {
             businessId,
             source: command.source,
             targetId: command.targetId,
-            snapshot: target.snapshot,
+            snapshot: {
+              ...target.snapshot,
+              context: {
+                ...target.snapshot.context,
+                recoveryAuthority: operator
+                  ? "operations.manage"
+                  : "sales.work",
+                recoveryRole,
+                recoveryMfaAt: proof.mfaAt?.toISOString() ?? null,
+              },
+            },
             actorId: identity.userId,
             action: command.action,
             outcome: "requested",

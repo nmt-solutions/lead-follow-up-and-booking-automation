@@ -111,6 +111,11 @@ export const operationContextSchema = z.strictObject({
   nativeEvidence: code,
   notificationId: id,
   notificationAudience: z.enum(["business", "operator"]).optional(),
+  recoveryAuthority: z.enum(["sales.work", "operations.manage"]).optional(),
+  recoveryRole: z
+    .enum(["owner", "admin", "salesperson", "operations"])
+    .optional(),
+  recoveryMfaAt: z.iso.datetime().nullable().optional(),
 });
 export const operationSnapshotSchema = z.object({
   source: operationSourceSchema,

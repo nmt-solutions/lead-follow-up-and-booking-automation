@@ -18,7 +18,7 @@ The application composes existing commands, rather than resetting domain state:
 | Seller document           | Existing protected artifact recovery                                                             | Existing document recovery, additionally requiring document authority/MFA                                   |
 | Sender health             | Review selected incident and evidence through the health flow                                    | Requires its separate health capability; acknowledgement is not repair                                      |
 
-Every recovery request has an actor-bound stable request key and an immutable requested/outcome record. A lost command result stays `reconciliation_required`; replay does not rerun it. Native sends/bookings are never routed through a generic retry transport. Unknown native acceptance remains reserved; payment creation is never repeated by this view. Current domain commands remain authoritative even if the recorded monitoring snapshot is old.
+Every recovery request has an actor-bound stable request key and an immutable requested/outcome record. Its safe context records the recovery actor's current Business role or operations authority and MFA verification time, independently of the original source approval. A lost command result stays `reconciliation_required`; replay does not rerun it. Native sends/bookings are never routed through a generic retry transport. Unknown native acceptance remains reserved; payment creation is never repeated by this view. Current domain commands remain authoritative even if the recorded monitoring snapshot is old.
 
 ## Persistence and privacy
 

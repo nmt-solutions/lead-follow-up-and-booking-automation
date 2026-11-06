@@ -399,6 +399,18 @@ describe("Operations at the public application seam", () => {
     });
     expect(queued.at(-1)).toEqual(work);
     expect(
+      (await operations.workspace(op, null, true)).history.find(
+        (e) => e.requestKey === cmd.requestKey && e.outcome === "queued",
+      ),
+    ).toMatchObject({
+      actorId: opActor.userId,
+      context: {
+        recoveryAuthority: "operations.manage",
+        recoveryRole: "operations",
+        recoveryMfaAt: "2026-11-05T09:00:00.000Z",
+      },
+    });
+    expect(
       JSON.stringify(await operations.workspace(op, null, true)),
     ).not.toContain(work.identity.sessionId);
     await h.signOut(owner);
