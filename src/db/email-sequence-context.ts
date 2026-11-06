@@ -9,6 +9,7 @@ import type { Clock } from "../models/business";
 import type { Transaction } from "./scope";
 import { requireCapability } from "./scope";
 import { requireSalesSession } from "./sales-session";
+import { paidAllowance } from "./paid-access";
 import { campaignHash, createCampaignRepository } from "./campaign-repository";
 import { identityView } from "./sender-repository";
 import { emailDecisionAtDispatch } from "./email-eligibility-context";
@@ -40,6 +41,7 @@ export async function sequenceUsage(
   tx: Transaction,
   businessId: string,
   policy: SequencePolicy,
+  at: Date,
 ) {
   const events = await tx
     .select()
@@ -62,7 +64,10 @@ export async function sequenceUsage(
   return {
     events,
     reserved: reservations.length,
-    remaining: Math.max(0, policy.maxProviderCalls - reservations.length),
+    remaining: Math.min(
+      Math.max(0, policy.maxProviderCalls - reservations.length),
+      (await paidAllowance(tx, businessId, "automation", at))?.remaining ?? 0,
+    ),
   };
 }
 export function recipientReservedAttempts(
@@ -264,6 +269,13 @@ export function createSequenceGate(d: {
       return { reason: "sender_transport_unavailable" } as const;
     const policy = await sequencePolicyAt(tx, businessId);
     const at = clock.now();
+    const paid = await paidAllowance(tx, businessId, "automation", at);
+    if (
+      !paid ||
+      paid.allowance.unit !== "provider calls" ||
+      paid.allowance.quantity === 0
+    )
+      return { reason: "paid_automation_unavailable" } as const;
     if (
       !policy?.configuration.enabled ||
       at < new Date(policy.configuration.periodStart) ||

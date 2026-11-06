@@ -4,6 +4,11 @@ import {
 } from "./application-error";
 
 const failures = {
+  PAID_ACCESS_REQUIRED: {
+    status: 409,
+    message:
+      "Paid access or matching included units are unavailable. Review Subscription payments and allowances; stored work remains available.",
+  },
   PRICING_SETUP_REQUIRED: {
     status: 409,
     message:

@@ -1,3 +1,4 @@
+import { persistPaidSubscription } from "./support/paid-subscription";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
@@ -884,6 +885,11 @@ describe("AI profiles at the authorized application seam", () => {
       "INSERT INTO discovery_configuration (business_id, policy) VALUES ($1, $2)",
       [f.business.id, policy],
     );
+    await persistPaidSubscription(harness, f.headers, f.business.id, {
+      markets: policy.activeMarkets,
+      discovery: { quantity: 100000, unit: policy.allowanceUnit },
+      automation: { quantity: 10000, unit: "provider calls" },
+    });
     const requests: { endpoint: string; body: unknown }[] = [];
     const queued: DiscoveryWork[] = [];
     const discovery = createDiscoveryApplication({

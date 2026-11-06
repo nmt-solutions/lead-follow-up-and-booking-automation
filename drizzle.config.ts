@@ -8,6 +8,11 @@ export default defineConfig({
   schemaFilter: ["public"],
   tablesFilter: [
     "whatsapp_outbound",
+    "subscription_payment",
+    "subscription_payment_event",
+    "subscription_payment_history",
+    "subscription_period",
+    "subscription_usage",
     "whatsapp_intake",
     "whatsapp_receipt",
     "whatsapp_evidence",

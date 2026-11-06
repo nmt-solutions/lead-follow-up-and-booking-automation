@@ -97,6 +97,14 @@ export default async function BusinessPage({
       )}
       {access.role !== "salesperson" && (
         <Link
+          href={`/businesses/${businessId}/subscription-payments`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Subscription payments and paid access
+        </Link>
+      )}
+      {access.role !== "salesperson" && (
+        <Link
           href={`/businesses/${businessId}/calendar`}
           className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
         >

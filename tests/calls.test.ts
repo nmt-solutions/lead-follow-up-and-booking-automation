@@ -1,3 +1,4 @@
+import { persistPaidSubscription } from "./support/paid-subscription";
 import { randomUUID } from "node:crypto";
 import { readySender, fixtureMailBinding } from "./support/senders";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -40,6 +41,11 @@ describe("Human calls through the persisted application seam", () => {
       offering: "Products and services",
       homeMarket: "US",
       website: "",
+    });
+    await persistPaidSubscription(h, credentials, business.id, {
+      markets: ["US"],
+      discovery: { quantity: 0, unit: "research units" },
+      automation: { quantity: 10000, unit: "provider calls" },
     });
     const database = runtimeDatabase(h.runtime);
     const inbox = createInboxApplication({

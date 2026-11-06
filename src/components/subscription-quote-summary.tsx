@@ -187,9 +187,9 @@ export function SubscriptionQuoteSummary({ review }: { review: QuoteReview }) {
         </div>
       </details>
       <p className="text-sm text-muted-foreground">
-        Checkout unavailable: tax calculation and gateway checkout are still
-        required. This record preserves the terms for review; it is not an
-        invoice, payment approval or an activated subscription.
+        Continue to Subscription payments to review tax and create hosted
+        checkout. This quote preserves commercial terms; payment confirmation is
+        required before paid access starts.
       </p>
       <p className="text-xs text-muted-foreground wrap-anywhere">
         Quote reference: {q.id}

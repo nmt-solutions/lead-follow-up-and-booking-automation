@@ -106,6 +106,10 @@ import { createTaxHttp } from "../http/tax";
 import { createSubscriptionQuoteApplication } from "../application/subscription-quotes";
 import { createSubscriptionQuoteRepository } from "../db/subscription-quote-repository";
 import { createSubscriptionQuoteHttp } from "../http/subscription-quotes";
+import { createSubscriptionPaymentApplication } from "../application/subscription-payments";
+import { createSubscriptionPaymentRepository } from "../db/subscription-payment-repository";
+import { createSubscriptionPaymentHttp } from "../http/subscription-payments";
+import { configuredPayments } from "../subscription-payments/configuration";
 import { createFileRepository } from "../db/file-repository";
 import { createFilesHttp } from "../http/files";
 import { filesConfiguration } from "./files-configuration";
@@ -289,6 +293,13 @@ async function composeServices() {
     authenticatePlatform,
     repository: createSubscriptionQuoteRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
+  });
+  const subscriptionPayments = createSubscriptionPaymentApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createSubscriptionPaymentRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    gateway: configuredPayments(),
   });
   const billingReviewFiles = createFileApplication({
     authenticate: authenticatePlatform,
@@ -613,6 +624,12 @@ async function composeServices() {
       reportFailure,
     }),
     subscriptionQuotes,
+    subscriptionPayments,
+    subscriptionPaymentsHttp: createSubscriptionPaymentHttp({
+      application: subscriptionPayments,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     subscriptionQuotesHttp: createSubscriptionQuoteHttp({
       application: subscriptionQuotes,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
