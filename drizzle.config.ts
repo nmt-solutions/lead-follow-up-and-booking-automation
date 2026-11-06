@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "call_activity",
+    "call_revision",
     "microsoft_calendar_grant",
     "microsoft_calendar_oauth",
     "google_calendar_grant",

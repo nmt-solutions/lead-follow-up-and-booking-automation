@@ -48,6 +48,8 @@ import {
   inquiryRun,
   rfqRequest,
   rfqRevision,
+  callActivity,
+  callRevision,
   opportunityScopeForeignKeys,
   commercialProposal,
   commercialDecision,
@@ -211,6 +213,18 @@ export async function prepareDatabaseRole(pool: Pool) {
     END $$;
     REVOKE ALL ON FUNCTION public.rfq_owner_is_current(text) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.rfq_owner_is_current(text) TO app_runtime;
+    CREATE OR REPLACE FUNCTION public.call_responsible_members()
+    RETURNS TABLE("userId" text, name text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+    BEGIN
+      IF public.current_business_role() IS NULL THEN RETURN; END IF;
+      RETURN QUERY SELECT m.user_id, coalesce(nullif(u.name, ''), u.email) FROM public.membership m
+        JOIN public."user" u ON u.id = m.user_id
+        WHERE m.business_id = nullif(current_setting('app.business_id', true), '')::uuid
+          AND m.role IN ('owner', 'admin', 'salesperson') ORDER BY u.name, m.user_id;
+    END $$;
+    REVOKE ALL ON FUNCTION public.call_responsible_members() FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.call_responsible_members() TO app_runtime;
   `);
   // Narrow definer helpers avoid recursive membership RLS. PL/pgSQL resolves
   // tables at execution, so they can be installed before the first schema push.
@@ -305,6 +319,12 @@ export async function prepareDatabaseRole(pool: Pool) {
       END IF;
       IF to_regclass('public.rfq_request') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.rfq_request FROM app_runtime;
+      END IF;
+      IF to_regclass('public.call_activity') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.call_activity FROM app_runtime;
+      END IF;
+      IF to_regclass('public.call_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.call_revision FROM app_runtime;
       END IF;
       IF to_regclass('public.rfq_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.rfq_revision FROM app_runtime;
@@ -444,6 +464,8 @@ export async function secureDatabase(pool: Pool) {
       commercialOutcome,
       rfqRequest,
       rfqRevision,
+      callActivity,
+      callRevision,
       inquiryRun,
       opportunityControlHistory,
       opportunityManualEvent,
@@ -523,6 +545,10 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON rfq_request, rfq_revision TO app_runtime;
       ALTER TABLE rfq_request FORCE ROW LEVEL SECURITY;
       ALTER TABLE rfq_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON call_activity, call_revision FROM app_runtime;
+      GRANT SELECT, INSERT ON call_activity, call_revision TO app_runtime;
+      ALTER TABLE call_activity FORCE ROW LEVEL SECURITY;
+      ALTER TABLE call_revision FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON inbox_connection, inbox_buyer, inbox_conversation, inbox_opportunity, inbox_message, inbox_event FROM app_runtime;
       GRANT SELECT, INSERT ON inbox_connection, inbox_buyer, inbox_conversation, inbox_opportunity, inbox_message, inbox_event TO app_runtime;
       GRANT UPDATE (active) ON inbox_connection TO app_runtime;

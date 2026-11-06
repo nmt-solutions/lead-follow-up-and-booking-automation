@@ -1424,6 +1424,11 @@ export const inboxOpportunity = pgTable(
       table.id,
       table.businessId,
     ),
+    uniqueIndex("inbox_opportunity_buyer_identity").on(
+      table.id,
+      table.businessId,
+      table.buyerId,
+    ),
     check("inbox_initial_stage", sql`${table.stage} = 'inquiry'`),
     check(
       "opportunity_control_state",
@@ -1906,6 +1911,62 @@ export const inquiryRun = pgTable(
     uniqueIndex("inquiry_run_scope").on(t.id, t.businessId),
     uniqueIndex("inquiry_run_request").on(t.businessId, t.requestKey),
     ...associationPolicies("inquiry_run", true),
+  ],
+).enableRLS();
+
+export const callActivity = pgTable(
+  "call_activity",
+  {
+    ...inboxColumns(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    buyerId: uuid("buyer_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("call_activity_scope").on(
+      t.id,
+      t.businessId,
+      t.opportunityId,
+      t.buyerId,
+    ),
+    ...commercialPolicies("call_activity"),
+  ],
+).enableRLS();
+
+export const callRevision = pgTable(
+  "call_revision",
+  {
+    ...inboxColumns(),
+    callId: uuid("call_id").notNull(),
+    opportunityId: uuid("opportunity_id").notNull(),
+    buyerId: uuid("buyer_id").notNull(),
+    version: integer("version").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    responsibleId: text("responsible_id")
+      .notNull()
+      .references(() => user.id),
+    responsibleName: text("responsible_name").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    notes: text("notes").notNull(),
+    outcome: text("outcome").notNull(),
+    nextAction: text("next_action").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("call_revision_version").on(t.callId, t.version),
+    uniqueIndex("call_revision_command").on(t.businessId, t.requestKey),
+    check("call_revision_positive", sql`${t.version} > 0`),
+    check("call_revision_occurred", sql`${t.occurredAt} <= ${t.at}`),
+    ...commercialPolicies("call_revision"),
   ],
 ).enableRLS();
 
@@ -2431,6 +2492,40 @@ export const appointmentScopeForeignKeys = [
 ];
 
 export const opportunityScopeForeignKeys = [
+  new ForeignKey(
+    callActivity,
+    foreignKey({
+      name: "call_activity_need_buyer_scope",
+      columns: [
+        callActivity.opportunityId,
+        callActivity.businessId,
+        callActivity.buyerId,
+      ],
+      foreignColumns: [
+        inboxOpportunity.id,
+        inboxOpportunity.businessId,
+        inboxOpportunity.buyerId,
+      ],
+    }),
+  ),
+  new ForeignKey(
+    callRevision,
+    foreignKey({
+      name: "call_revision_activity_scope",
+      columns: [
+        callRevision.callId,
+        callRevision.businessId,
+        callRevision.opportunityId,
+        callRevision.buyerId,
+      ],
+      foreignColumns: [
+        callActivity.id,
+        callActivity.businessId,
+        callActivity.opportunityId,
+        callActivity.buyerId,
+      ],
+    }),
+  ),
   new ForeignKey(
     rfqRequest,
     foreignKey({

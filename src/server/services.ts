@@ -5,6 +5,9 @@ import { configuredMicrosoftCalendar } from "../microsoft-calendar/configuration
 import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
 import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
+import { createCallApplication } from "../application/calls";
+import { createCallRepository } from "../db/call-repository";
+import { createCallHttp } from "../http/calls";
 import { createAppointmentApplication } from "../application/appointments";
 import { createAppointmentRepository } from "../db/appointment-repository";
 import { createAppointmentHttp } from "../http/appointments";
@@ -206,6 +209,12 @@ async function composeServices() {
       now: () => new Date(),
     }),
   });
+  const calls = createCallApplication({
+    authenticateForWork: access.authenticateForWork,
+    repository: createCallRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+  });
   const commercialActions = createCommercialApplication({
     authenticateForWork: access.authenticateForWork,
     repository: createCommercialRepository(runtimeDatabase(pool), {
@@ -292,6 +301,12 @@ async function composeServices() {
       reportFailure,
     }),
     inquiries,
+    calls,
+    callsHttp: createCallHttp({
+      application: calls,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     rfqs,
     rfqsHttp: createRfqHttp({
       application: rfqs,

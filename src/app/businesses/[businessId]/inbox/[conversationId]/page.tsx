@@ -15,6 +15,7 @@ import type {
 import { InboxAssociation } from "@/components/inbox-association";
 import { InquiryHandling } from "@/components/inquiry-handling";
 import { RfqManager } from "@/components/rfq-manager";
+import { CallTimeline } from "@/components/call-timeline";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Incoming conversation" };
@@ -22,7 +23,7 @@ export default async function ConversationPage({
   params,
 }: PageProps<"/businesses/[businessId]/inbox/[conversationId]">) {
   const { businessId, conversationId } = await params;
-  const { conversation, workspace, controls, inquiries, rfqs } =
+  const { conversation, workspace, controls, inquiries, rfqs, calls } =
     await (async () => {
       try {
         const services = await getServices();
@@ -40,6 +41,16 @@ export default async function ConversationPage({
         return {
           conversation,
           controls,
+          calls: await Promise.all(
+            conversation.opportunities.map(async (need) => ({
+              id: need.id,
+              state: await services.calls.read(
+                credentials,
+                businessId,
+                need.id,
+              ),
+            })),
+          ),
           rfqs: await Promise.all(
             conversation.opportunities.map(async (need) => ({
               id: need.id,
@@ -179,6 +190,23 @@ export default async function ConversationPage({
                 </p>
                 <OpportunityHistory entries={need.history} />
                 <DiscoverySources sources={need.sources} />
+                <section
+                  className="space-y-3 border-t pt-4"
+                  aria-label="Human calls"
+                >
+                  <h3 className="font-semibold">Human calls</h3>
+                  <Link
+                    href={`/businesses/${businessId}/opportunities/${need.id}/calls`}
+                    className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+                  >
+                    Log or update a human call
+                  </Link>
+                  {calls
+                    .filter((item) => item.id === need.id)
+                    .map((item) => (
+                      <CallTimeline key={item.id} state={item.state} />
+                    ))}
+                </section>
                 {controls
                   .filter((control) => control.id === need.id)
                   .map((control) => (
