@@ -1,3 +1,7 @@
+import { routeOpportunityMail } from "../email-sequences/opportunity-provider";
+import { routeSenderAdapters } from "../senders/adapter";
+import { createMicrosoftOpportunityMail } from "../microsoft-mail/opportunity-mail";
+import { createMicrosoftSenderAdapter } from "../microsoft-mail/sender";
 import { createGmailOpportunityMail } from "../gmail/opportunity-mail";
 import { configuredMailboxQueue } from "../mailboxes/queue";
 import { createMailboxApplication } from "../application/mailboxes";
@@ -51,7 +55,6 @@ import { createSenderHealthRepository } from "../db/sender-health-repository";
 import { createSenderHealthHttp } from "../http/sender-health";
 import { createSenderRepository } from "../db/sender-repository";
 import { createSenderHttp } from "../http/senders";
-import { unavailableSenderAdapter } from "../senders/adapter";
 import { createCallApplication } from "../application/calls";
 import { createCallRepository } from "../db/call-repository";
 import { createCallHttp } from "../http/calls";
@@ -219,12 +222,23 @@ async function composeServices() {
     repository: createSenderRepository(runtimeDatabase(pool), {
       now: () => new Date(),
     }),
-    adapter: configuredGmail(process.env)
-      ? createGmailSenderAdapter({
-          clock: { now: () => new Date() },
-          evidence: configuredGmailSenderEvidence(process.env),
-        })
-      : unavailableSenderAdapter,
+    adapter: routeSenderAdapters({
+      ...(configuredGmail(process.env)
+        ? {
+            gmail: createGmailSenderAdapter({
+              clock: { now: () => new Date() },
+              evidence: configuredGmailSenderEvidence(process.env),
+            }),
+          }
+        : {}),
+      ...(configuredMicrosoftMail(process.env)
+        ? {
+            microsoft: createMicrosoftSenderAdapter({
+              clock: { now: () => new Date() },
+            }),
+          }
+        : {}),
+    }),
     clock: { now: () => new Date() },
   });
   const senderHealth = createSenderHealthApplication({
@@ -362,19 +376,28 @@ async function composeServices() {
     runtimeDatabase(pool),
     { now: () => new Date() },
   );
-  const gmailConfiguration = configuredGmail(process.env);
-  const inquiryProvider = gmailConfiguration
-    ? createGmailOpportunityMail({
-        configuration: gmailConfiguration,
-        fetch,
-        clock: { now: () => new Date() },
-      })
-    : {
-        channels: [],
-        async dispatch() {
-          throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
-        },
-      };
+  const gmailConfiguration = configuredGmail(process.env),
+    microsoftConfiguration = configuredMicrosoftMail(process.env);
+  const inquiryProvider = routeOpportunityMail([
+    ...(gmailConfiguration
+      ? [
+          createGmailOpportunityMail({
+            configuration: gmailConfiguration,
+            fetch,
+            clock: { now: () => new Date() },
+          }),
+        ]
+      : []),
+    ...(microsoftConfiguration
+      ? [
+          createMicrosoftOpportunityMail({
+            configuration: microsoftConfiguration,
+            fetch,
+            clock: { now: () => new Date() },
+          }),
+        ]
+      : []),
+  ]);
   const opportunities = createOpportunityApplication({
     authenticate,
     authenticateForWork: access.authenticateForWork,

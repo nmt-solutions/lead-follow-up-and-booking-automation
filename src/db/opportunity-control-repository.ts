@@ -27,9 +27,10 @@ import type {
 } from "../models/opportunity-control";
 import type { OpportunityMailEnvelope } from "../models/opportunity-mail";
 import { mailResultSchema } from "../models/mail-dispatch";
+import { microsoftTransportKey } from "../microsoft-mail/transport";
 import { reservePaidUsage, paidReservationCurrent } from "./paid-access";
 import { gmailSequenceKey } from "../gmail/sequence-mail";
-import { gmailDispatchAccess } from "./gmail-dispatch";
+import { nativeDispatchAccess } from "./native-mail-dispatch";
 import { reconciledOpportunityMail } from "./opportunity-mail";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
@@ -720,8 +721,12 @@ export function createOpportunityRepository(
           return { action: await cancel(tx, sender.reason), failure: null };
         if (
           sender?.sender &&
-          (sender.sender.adapterKey !== provider.emailIdentity?.adapterKey ||
-            sender.sender.mode !== provider.emailIdentity.mode)
+          (sender.sender.adapterKey !==
+            (provider.selectEmail?.(sender.sender.adapterKey) ?? provider)
+              .emailIdentity?.adapterKey ||
+            sender.sender.mode !==
+              (provider.selectEmail?.(sender.sender.adapterKey) ?? provider)
+                .emailIdentity?.mode)
         )
           return {
             action: await cancel(tx, "sender_transport_unavailable"),
@@ -757,7 +762,9 @@ export function createOpportunityRepository(
           throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
         let email: OpportunityMailEnvelope | undefined;
         if (
-          provider.emailIdentity?.adapterKey === gmailSequenceKey &&
+          [gmailSequenceKey, microsoftTransportKey].includes(
+            sender?.sender?.adapterKey ?? "",
+          ) &&
           ctx.connection.channel === "email"
         ) {
           const native = ctx.message.mailboxMetadata?.native;
@@ -799,7 +806,10 @@ export function createOpportunityRepository(
               ),
             );
           if (
-            mailbox?.provider !== "gmail" ||
+            mailbox?.provider !==
+              (sender.sender.adapterKey === microsoftTransportKey
+                ? "microsoft"
+                : "gmail") ||
             mailbox.connectionId !== identity.configuration.connectionId ||
             mailbox.account !== sender.sender.fromAddress
           )
@@ -834,6 +844,9 @@ export function createOpportunityRepository(
               messageRef: ctx.message.messageRef,
               threadRef: ctx.message.content.conversationRef,
               internetMessageId: native.internetMessageId,
+              ...(sender.sender.adapterKey === microsoftTransportKey
+                ? { text: ctx.message.content.text }
+                : {}),
             },
           };
           if (action.email && !sameMailIntent(action.email.envelope, email))
@@ -873,7 +886,10 @@ export function createOpportunityRepository(
             return { action: row, acquired: false, failure: null };
           let email: OpportunityMailEnvelope | undefined;
           if (
-            provider.emailIdentity?.adapterKey === gmailSequenceKey &&
+            (provider.selectEmail ||
+              [gmailSequenceKey, microsoftTransportKey].includes(
+                provider.emailIdentity?.adapterKey ?? "",
+              )) &&
             row.inquiryRunId
           ) {
             // Prepare the immutable reply intent without holding global policy/profile locks across commitment.
@@ -972,7 +988,7 @@ export function createOpportunityRepository(
           if (!allowed.dispatch) return allowed;
           let finalFailure: Awaited<ReturnType<typeof authorize>> | undefined;
           const access = current.email
-            ? await gmailDispatchAccess(
+            ? await nativeDispatchAccess(
                 tx,
                 current.email.envelope,
                 null,
@@ -997,7 +1013,11 @@ export function createOpportunityRepository(
             void | import("../models/mail-dispatch").MailResult;
           try {
             providerResult = await boundedDispatch((signal) =>
-              provider.dispatch(allowed.dispatch, signal, access),
+              (current.email
+                ? (provider.selectEmail?.(current.email.envelope.adapterKey) ??
+                  provider)
+                : provider
+              ).dispatch(allowed.dispatch, signal, access),
             );
           } catch (error: unknown) {
             // Legacy providers retain their existing throw contract. Native mail failures remain visibly unknown.
@@ -1022,6 +1042,22 @@ export function createOpportunityRepository(
           let outcome = parsed.success
             ? parsed.data
             : { status: "unknown" as const };
+          if (outcome.status === "accepted_pending_identity") {
+            const e = current.email.envelope,
+              a = outcome.acceptance;
+            if (
+              e.adapterKey !== microsoftTransportKey ||
+              a.actionId !== actionId ||
+              a.attemptId !== actionId ||
+              a.businessId !== businessId ||
+              a.connectionId !== e.connectionId ||
+              a.recipient !== e.recipient ||
+              a.submittedInternetMessageId !== e.internetMessageId ||
+              new Date(a.acceptedAt) < new Date(e.reservedAt) ||
+              new Date(a.acceptedAt) > now()
+            )
+              outcome = { status: "unknown" };
+          }
           if (outcome.status === "accepted") {
             const e = current.email.envelope,
               r = outcome.receipt;
@@ -1043,18 +1079,26 @@ export function createOpportunityRepository(
             .update(opportunityDueAction)
             .set({
               state:
-                outcome.status === "accepted"
+                outcome.status === "accepted" ||
+                outcome.status === "accepted_pending_identity"
                   ? "dispatched"
                   : outcome.status === "not_accepted"
                     ? "cancelled"
                     : "committed",
               reason:
-                outcome.status === "accepted"
+                outcome.status === "accepted" ||
+                outcome.status === "accepted_pending_identity"
                   ? null
                   : outcome.status === "not_accepted"
                     ? `provider_${outcome.reason}`
                     : "dispatch_unconfirmed",
-              email: { ...current.email, result: outcome },
+              email: {
+                ...current.email,
+                result: outcome,
+                ...(outcome.status === "accepted_pending_identity"
+                  ? { processingAcceptance: outcome.acceptance }
+                  : {}),
+              },
             })
             .where(
               and(

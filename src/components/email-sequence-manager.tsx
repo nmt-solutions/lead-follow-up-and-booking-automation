@@ -9,6 +9,7 @@ import {
   type SequenceWorkspace,
 } from "@/models/email-sequences";
 import { Button } from "./ui/button";
+import { NativeSelect } from "./ui/native-select";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
@@ -42,6 +43,9 @@ export function EmailSequenceManager({
     [error, setError] = useState(false);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const ready = state.setupIssues.length === 0;
+  const mailConfigured =
+    state.adapters?.some((a) => a.mode !== "unconfigured") ??
+    state.provider.mode !== "unconfigured";
   async function request(command?: string, input?: unknown) {
     setPending(true);
     setError(false);
@@ -118,8 +122,15 @@ export function EmailSequenceManager({
       expectedVersion: state.policy?.version ?? 0,
       policy: {
         enabled: data.get("enabled") === "on",
-        adapterKey: state.provider.key,
-        mode: state.provider.mode,
+        adapterKey: data.get("adapterKey") ?? state.provider.key,
+        ...(data.get("adapterKey") === "native-mail-v1"
+          ? { adapterKeys: state.adapters?.map((a) => a.key) }
+          : {}),
+        mode:
+          data.get("adapterKey") === "native-mail-v1"
+            ? "live"
+            : (state.adapters?.find((a) => a.key === data.get("adapterKey"))
+                ?.mode ?? state.provider.mode),
         periodStart: data.get("periodStart"),
         periodEnd: data.get("periodEnd"),
         maxProviderCalls: Number(data.get("maxProviderCalls")),
@@ -155,7 +166,9 @@ export function EmailSequenceManager({
                   ? "Deterministic test adapter"
                   : state.provider.key === "gmail-sequence-v1"
                     ? "Gmail"
-                    : "Production adapter"}
+                    : state.provider.key === "microsoft-mail-send-v1"
+                      ? "Microsoft"
+                      : "Production adapters"}
             </strong>
             . Durable queue:{" "}
             <strong>
@@ -220,8 +233,48 @@ export function EmailSequenceManager({
                 Operator allowance and pacing
               </summary>
               <form onSubmit={configure} className="space-y-4">
+                {state.adapters && (
+                  <div className="space-y-2">
+                    <Label htmlFor="sequence-adapter">
+                      Authorized mail provider
+                    </Label>
+                    <NativeSelect
+                      id="sequence-adapter"
+                      name="adapterKey"
+                      defaultValue={
+                        state.policy?.configuration.adapterKeys
+                          ? "native-mail-v1"
+                          : state.provider.key
+                      }
+                      disabled={pending || !mailConfigured}
+                      required
+                    >
+                      {state.adapters.length > 1 && (
+                        <option value="native-mail-v1">
+                          Gmail and Microsoft (shared allowance)
+                        </option>
+                      )}
+                      {state.adapters.map((a) => (
+                        <option key={a.key} value={a.key}>
+                          {a.key === "microsoft-mail-send-v1"
+                            ? "Microsoft"
+                            : a.key === "gmail-sequence-v1"
+                              ? "Gmail"
+                              : a.key}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                    <p className="text-sm text-muted-foreground">
+                      Choose the reviewed providers of the approved sending
+                      identities. The reservation cap is shared across the
+                      selected providers. Changing this allowance never retries
+                      a committed attempt through another provider.
+                    </p>
+                  </div>
+                )}
+
                 <fieldset
-                  disabled={pending || state.provider.mode === "unconfigured"}
+                  disabled={pending || !mailConfigured}
                   className="space-y-4"
                 >
                   <p className="text-sm text-muted-foreground">
@@ -399,6 +452,16 @@ export function EmailSequenceManager({
                         {label(a.reason)}. Review current checks; use recovery
                         for uncertain acceptance. Hand back human control
                         explicitly before resuming.
+                      </p>
+                    )}
+                    {a.processingAcceptance && (
+                      <p className="text-sm wrap-anywhere">
+                        Microsoft accepted processing at{" "}
+                        {a.processingAcceptance.acceptedAt}.{" "}
+                        {a.receipt
+                          ? "Native identity reconciled below."
+                          : "Native message identity is pending. Synchronize the selected Sent folder, then reconcile. This attempt will not resend; its follow-up waits for identity."}{" "}
+                        Delivery is unconfirmed.
                       </p>
                     )}
                     {a.receipt && (

@@ -4,7 +4,7 @@ import { sequenceWorkspaceSchema } from "../src/models/email-sequences";
 import { createHarness } from "./support/harness";
 import { campaignFixture } from "./support/campaigns";
 import { eligibilityApplication } from "./support/email-eligibility";
-import { runtimeDatabase } from "../src/db/runtime";
+import { runtimeDatabase, verifyRuntimeRole } from "../src/db/runtime";
 import { createEmailSequenceRepository } from "../src/db/email-sequence-repository";
 import { createEmailSequenceApplication } from "../src/application/email-sequences";
 import { deterministicSequenceMail } from "./support/sequence-mail";
@@ -14,7 +14,10 @@ import type {
   SequenceMailProvider,
 } from "../src/models/email-sequences";
 import { createEmailSequenceHttp } from "../src/http/email-sequences";
-import { unavailableSequenceMail } from "../src/email-sequences/provider";
+import {
+  routeSequenceMail,
+  unavailableSequenceMail,
+} from "../src/email-sequences/provider";
 import { createMailboxApplication } from "../src/application/mailboxes";
 import { createMailboxRepository } from "../src/db/mailbox-repository";
 import { unavailableMailboxProvider } from "../src/mailboxes/provider";
@@ -28,7 +31,16 @@ import { createCommercialAuthorityRepository } from "../src/db/commercial-author
 import { createOpportunityApplication } from "../src/application/opportunity-control";
 import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
 import { createGmailSequenceMail } from "../src/gmail/sequence-mail";
+import { routeSenderAdapters } from "../src/senders/adapter";
+import { createSenderApplication } from "../src/application/senders";
+import { createSenderRepository } from "../src/db/sender-repository";
 import { createGmailSenderAdapter } from "../src/gmail/sender";
+import { microsoftMailFixture } from "./support/microsoft-mail";
+import { createMicrosoftMailApplication } from "../src/application/microsoft-mail";
+import { createMicrosoftMailConnection } from "../src/microsoft-mail/connection";
+import { createMicrosoftMailProvider } from "../src/microsoft-mail/provider";
+import { createMicrosoftSequenceMail } from "../src/microsoft-mail/sequence-mail";
+import { createMicrosoftSenderAdapter } from "../src/microsoft-mail/sender";
 import { reviewedSenderHealth } from "./support/sender-health";
 
 describe("Approved email sequences at the persisted application seam", () => {
@@ -45,17 +57,19 @@ describe("Approved email sequences at the persisted application seam", () => {
     timing?: SequenceTiming,
     google?: ReturnType<typeof gmailFixture>,
     message?: { subject: string; body: string },
+    microsoft?: ReturnType<typeof microsoftMailFixture>,
     paidAutomation = 10000,
   ) {
     const f = await campaignFixture(h, {
       multipleSources: multiple,
       at,
+      mailboxProvider: microsoft ? "microsoft" : "gmail",
       automationQuantity: paidAutomation,
     });
     let health: Awaited<ReturnType<typeof reviewedSenderHealth>> | undefined;
     let native:
       { mailboxId: string; synchronize(): Promise<unknown> } | undefined;
-    if (google) {
+    if (google || microsoft) {
       const database = runtimeDatabase(h.runtime);
       const settings = createMailboxApplication({
         authenticate: h.access.authenticateForWork,
@@ -76,13 +90,38 @@ describe("Approved email sequences at the persisted application seam", () => {
           salesSubjectTerms: ["steel"],
         },
       });
-      const connection = createGmailConnection(database, {
-        clock: h.clock,
-        configuration: google.configuration,
-        fetch: google.fetch,
-      });
-      const auth = createGmailApplication({ access: h.access, connection });
+      const nativeServices = microsoft
+        ? (() => {
+            const connection = createMicrosoftMailConnection(database, {
+              clock: h.clock,
+              configuration: microsoft.configuration,
+              fetch: microsoft.fetch,
+            });
+            return {
+              auth: createMicrosoftMailApplication({
+                access: h.access,
+                connection,
+              }),
+              provider: createMicrosoftMailProvider(connection, h.clock),
+            };
+          })()
+        : (() => {
+            const connection = createGmailConnection(database, {
+              clock: h.clock,
+              configuration: google!.configuration,
+              fetch: google!.fetch,
+            });
+            return {
+              auth: createGmailApplication({ access: h.access, connection }),
+              provider: createGmailProvider(connection, h.clock),
+            };
+          })();
+      const auth = nativeServices.auth;
       const oauth = await auth.start(f.owner, f.business.id, mailbox.id);
+      if (microsoft)
+        microsoft.identity.nonce = new URL(
+          oauth.authorizationUrl,
+        ).searchParams.get("nonce")!;
       await auth.callback(f.owner, f.business.id, mailbox.id, {
         state: new URL(oauth.authorizationUrl).searchParams.get("state"),
         code: "fixture-code",
@@ -91,7 +130,7 @@ describe("Approved email sequences at the persisted application seam", () => {
         authenticate: h.access.authenticateForWork,
         repository: createMailboxRepository(database, h.clock),
         clock: h.clock,
-        provider: createGmailProvider(connection, h.clock),
+        provider: nativeServices.provider,
         enqueue: async () => {},
       });
       native = {
@@ -119,12 +158,15 @@ describe("Approved email sequences at the persisted application seam", () => {
           },
         },
       );
-      f.sender.adapter.key = "gmail-sequence-v1";
+      f.sender.adapter.key = microsoft
+        ? "microsoft-mail-send-v1"
+        : "gmail-sequence-v1";
       f.sender.adapter.mode = "live";
-      f.sender.adapter.inspect = createGmailSenderAdapter({
-        clock: h.clock,
-        evidence: [],
-      }).inspect;
+      f.sender.adapter.inspect = (
+        microsoft
+          ? createMicrosoftSenderAdapter({ clock: h.clock })
+          : createGmailSenderAdapter({ clock: h.clock, evidence: [] })
+      ).inspect;
       health = await reviewedSenderHealth(
         h,
         f.business.id,
@@ -231,13 +273,19 @@ describe("Approved email sequences at the persisted application seam", () => {
         if (this.cancelFails) throw new Error("private-cancellation-error");
       },
     };
-    const gmailProvider = google
-      ? createGmailSequenceMail({
-          configuration: google.configuration,
-          fetch: google.fetch,
+    const gmailProvider = microsoft
+      ? createMicrosoftSequenceMail({
+          configuration: microsoft.configuration,
+          fetch: microsoft.fetch,
           clock: h.clock,
         })
-      : null;
+      : google
+        ? createGmailSequenceMail({
+            configuration: google.configuration,
+            fetch: google.fetch,
+            clock: h.clock,
+          })
+        : null;
     const newApp = (
       provider: SequenceMailProvider = gmailProvider ?? mail.provider,
     ) =>
@@ -285,6 +333,7 @@ describe("Approved email sequences at the persisted application seam", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       1,
     );
     await f.app.start(f.owner, f.business.id, f.ref(f.revision));
@@ -299,6 +348,291 @@ describe("Approved email sequences at the persisted application seam", () => {
     const state = await f.app.workspace(f.owner, f.business.id);
     expect(state.usage.remaining).toBe(0);
     expect(state.runs[0].recipients[0].actions[1].state).toBe("paused");
+  });
+  it("records Microsoft sequence processing acceptance and reserves follow-up until exact Sent identity is known", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const f = await setup(
+      false,
+      "2026-11-05T14:00:00Z",
+      undefined,
+      undefined,
+      undefined,
+      graph,
+    );
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    await f.app.execute(f.queued[0].work);
+    const state = await f.app.workspace(f.owner, f.business.id),
+      action = state.runs[0].recipients[0].actions[0];
+    expect(action).toMatchObject({
+      state: "committed",
+      reason: "provider_accepted_identity_pending",
+      receipt: null,
+      processingAcceptance: { provider: "microsoft" },
+    });
+    expect(state.runs[0].recipients[0].actions[1].state).toBe("waiting");
+    await f.newApp().execute(f.queued[0].work);
+    expect(graph.sends).toHaveLength(1);
+  });
+  it("routes concurrent Gmail and Microsoft Businesses by exact selected native connection and persisted adapter", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const m = await setup(
+      false,
+      "2026-11-05T14:00:00Z",
+      undefined,
+      undefined,
+      undefined,
+      graph,
+    );
+    const g = await setup(false, "2026-11-05T14:00:00Z", undefined, google);
+    const router = routeSequenceMail([
+      createMicrosoftSequenceMail({
+        configuration: graph.configuration,
+        fetch: graph.fetch,
+        clock: h.clock,
+      }),
+      createGmailSequenceMail({
+        configuration: google.configuration,
+        fetch: google.fetch,
+        clock: h.clock,
+      }),
+    ]);
+    const ma = m.newApp(router),
+      ga = g.newApp(router);
+    const senders = createSenderApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createSenderRepository(runtimeDatabase(h.runtime), h.clock),
+      clock: h.clock,
+      adapter: routeSenderAdapters({
+        gmail: createGmailSenderAdapter({ clock: h.clock, evidence: [] }),
+        microsoft: createMicrosoftSenderAdapter({ clock: h.clock }),
+      }),
+    });
+    expect(
+      (
+        await senders.check(m.owner, m.business.id, m.sender.identity.id, {
+          expectedVersion: m.sender.identity.version,
+        })
+      ).evidence?.adapterKey,
+    ).toBe("microsoft-mail-send-v1");
+    expect(
+      (
+        await senders.check(g.owner, g.business.id, g.sender.identity.id, {
+          expectedVersion: g.sender.identity.version,
+        })
+      ).evidence?.adapterKey,
+    ).toBe("gmail-sequence-v1");
+    await ma.configure(m.owner, m.business.id, {
+      expectedVersion: 1,
+      policy: {
+        ...(await ma.workspace(m.owner, m.business.id)).policy!.configuration,
+        adapterKey: "native-mail-v1",
+        adapterKeys: ["microsoft-mail-send-v1", "gmail-sequence-v1"],
+        note: "Explicit reviewed providers sharing the same Business cap",
+      },
+    });
+
+    await ma.start(m.owner, m.business.id, m.ref(m.revision));
+    await ga.start(g.owner, g.business.id, g.ref(g.revision));
+    await Promise.all([
+      ma.execute(m.queued[0].work),
+      ga.execute(g.queued[0].work),
+    ]);
+    expect(graph.sends).toHaveLength(1);
+    expect(google.sends).toHaveLength(1);
+    await ma.execute(m.queued[0].work);
+    await ga.execute(g.queued[0].work);
+    expect(graph.sends).toHaveLength(1);
+    expect(google.sends).toHaveLength(1);
+  });
+  it("resolves Microsoft sequence acceptance only from exact authorized Sent evidence and sends the next approved follow-up once", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const f = await setup(
+      false,
+      "2026-11-05T14:00:00Z",
+      undefined,
+      undefined,
+      undefined,
+      graph,
+    );
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    await f.app.execute(f.queued[0].work);
+    const approved = f.revision.snapshot.steps[0],
+      recipient = f.revision.snapshot.recipients[0].address;
+    const rfc = /^Message-ID: (.+)$/m.exec(graph.sends[0])![1].trim();
+    const sent = graph.add("sequence-sent", {
+      folder: "sent",
+      from: "sales@supplier.example",
+      to: recipient,
+      at: h.clock.now().toISOString(),
+      subject: approved.subject,
+      text: approved.body,
+    });
+    sent.internetMessageId = rfc;
+    Object.assign(sent, {
+      replyTo: [{ emailAddress: { address: "sales@supplier.example" } }],
+    });
+    graph.pages.set("sent-steady", {
+      value: [{ id: "sequence-sent" }],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sent/messages/delta?$deltatoken=sent-next",
+    });
+    await f.native!.synchronize();
+    const before = (await f.app.workspace(f.owner, f.business.id)).runs[0];
+    const recovered = await f.app.command(f.owner, f.business.id, {
+      runId: before.id,
+      expectedVersion: before.version,
+      command: "recover",
+      note: "Review exact current Sent evidence",
+    });
+    expect(recovered.runs[0].recipients[0].actions[0]).toMatchObject({
+      state: "accepted",
+      receipt: { messageRef: "sequence-sent", evidence: "sent_folder" },
+      processingAcceptance: { provider: "microsoft" },
+    });
+    const next = f.queued.find(
+      (q) => q.work.actionId === recovered.runs[0].recipients[0].actions[1].id,
+    )!;
+    h.clock.set(next.dueAt.toISOString());
+    await h.reverifyAuthenticator(f.owner);
+    // Current reply visibility must be refreshed after the controlled clock advances.
+    await f.native!.synchronize();
+    const refreshed = (await f.app.workspace(f.owner, f.business.id)).runs[0];
+    await f.app.command(f.owner, f.business.id, {
+      runId: refreshed.id,
+      expectedVersion: refreshed.version,
+      command: "resume",
+      note: "Review current visibility after credential refresh",
+    });
+    await f.app.execute(f.queued.at(-1)!.work);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[1],
+    ).toMatchObject({
+      state: "committed",
+      reason: "provider_accepted_identity_pending",
+    });
+    expect(graph.sends).toHaveLength(2);
+    expect(graph.sends[1]).toContain(`In-Reply-To: ${rfc}`);
+  });
+  it.each(["lost", "malformed", "server"] as const)(
+    "does not repeat a Microsoft sequence after %s acceptance",
+    async (mode) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await setup(
+        false,
+        "2026-11-05T14:00:00Z",
+        undefined,
+        undefined,
+        undefined,
+        graph,
+      );
+      await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+      graph.control.sendLost = mode === "lost";
+      graph.control.sendMalformed = mode === "malformed";
+      graph.control.sendError = mode === "server" ? 503 : 0;
+      await f.app.execute(f.queued[0].work);
+      await f.newApp().execute(f.queued[0].work);
+      const state = await f.app.workspace(f.owner, f.business.id);
+      expect(state.runs[0].recipients[0].actions[0]).toMatchObject({
+        state: "unknown",
+        receipt: null,
+      });
+      expect(state.runs[0].recipients[0].actions[1].state).toBe("waiting");
+      expect(graph.sends).toHaveLength(1);
+    },
+  );
+  it("honors Microsoft Retry-After with a fresh reserved attempt and no provider fallback", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const f = await setup(
+      false,
+      "2026-11-05T14:00:00Z",
+      undefined,
+      undefined,
+      undefined,
+      graph,
+    );
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    graph.control.sendError = 429;
+    graph.control.retryAfter = "120";
+    await f.app.execute(f.queued[0].work);
+    const state = await f.app.workspace(f.owner, f.business.id);
+    expect(state.runs[0].recipients[0].actions[0]).toMatchObject({
+      state: "pending",
+      dueAt: "2026-11-05T14:02:00.000Z",
+      attempts: 1,
+    });
+    expect(state.runs[0].history).toContainEqual(
+      expect.objectContaining({ kind: "not_accepted", reason: "rate_limited" }),
+    );
+    const retry = f.queued.at(-1)!;
+    await f.app.execute(retry.work);
+    expect(graph.sends).toHaveLength(1);
+    h.clock.set(retry.dueAt.toISOString());
+    graph.control.sendError = 0;
+    await f.app.execute(retry.work);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[0],
+    ).toMatchObject({
+      state: "committed",
+      processingAcceptance: { provider: "microsoft" },
+      attempts: 2,
+    });
+    expect(graph.sends).toHaveLength(2);
+  });
+  it("retains the Microsoft sequence reservation across a result write failure and validates the new restricted grant", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const f = await setup(
+      false,
+      "2026-11-05T14:00:00Z",
+      undefined,
+      undefined,
+      undefined,
+      graph,
+    );
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    await h.admin.query(
+      `CREATE FUNCTION fail_ms_sequence_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = '${f.queued[0].work.actionId}' AND NEW.processing_acceptance IS NOT NULL THEN RAISE EXCEPTION 'synthetic result persistence failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_ms_sequence_result BEFORE UPDATE ON email_sequence_action FOR EACH ROW EXECUTE FUNCTION fail_ms_sequence_result()`,
+    );
+    try {
+      await expect(f.app.execute(f.queued[0].work)).rejects.toBeDefined();
+    } finally {
+      await h.admin.query(
+        "DROP TRIGGER fail_ms_sequence_result ON email_sequence_action; DROP FUNCTION fail_ms_sequence_result()",
+      );
+    }
+    await f.newApp().execute(f.queued[0].work);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0].recipients[0]
+        .actions[0],
+    ).toMatchObject({
+      state: "committed",
+      receipt: null,
+      processingAcceptance: null,
+      attempts: 1,
+    });
+    expect(graph.sends).toHaveLength(1);
+    await h.admin.query(
+      "REVOKE UPDATE(processing_acceptance) ON email_sequence_action FROM app_runtime",
+    );
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
+      await h.admin.query(
+        "GRANT UPDATE(processing_acceptance) ON email_sequence_action TO app_runtime",
+      );
+    }
+    await verifyRuntimeRole(h.runtime);
   });
   it("sends an approved Gmail action exactly once with native identity and separate acceptance evidence", async () => {
     const google = gmailFixture();

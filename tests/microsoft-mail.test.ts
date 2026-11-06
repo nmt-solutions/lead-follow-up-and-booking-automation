@@ -211,6 +211,41 @@ describe("Selected MicrosoftMail at the persisted application seam", () => {
       },
     });
   }
+  it("continues legacy Microsoft delta selections while reading current message metadata without expanding processing scope", async () => {
+    const f = await setup();
+    await connect(f);
+    const fields =
+      "id,conversationId,parentFolderId,receivedDateTime,sentDateTime,isDraft,subject,internetMessageId,from,sender,toRecipients,ccRecipients,bccRecipients,internetMessageHeaders";
+    f.graph.add("legacy-source");
+    f.graph.pages.set("sales", {
+      value: [{ id: "legacy-source" }],
+      "@odata.deltaLink": `https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=legacy-base&$select=${fields}`,
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    expect((await synchronize(f))?.status).toBe("completed");
+    f.graph.add("legacy-follow", {
+      reply: "<legacy-source@example.com>",
+      at: "2026-11-05T09:03:00Z",
+    });
+    f.graph.pages.set("legacy-base", {
+      value: [{ id: "legacy-follow" }],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=legacy-next",
+    });
+    h.clock.set("2026-11-05T09:04:00Z");
+    expect((await synchronize(f))?.status).toBe("completed");
+    const state = await f.inbox.workspace(f.credentials, f.businessId);
+    expect(
+      (
+        await f.inbox.conversation(
+          f.credentials,
+          f.businessId,
+          state.conversations[0].id,
+        )
+      ).messages,
+    ).toHaveLength(2);
+    expect(f.graph.bodyReads).toEqual(["legacy-source", "legacy-follow"]);
+  });
   it("binds separate read consent to the current Business/mailbox/session, encrypts tokens and rejects replay", async () => {
     const f = await setup();
     const start = await f.app.start(f.credentials, f.businessId, f.mailbox.id);

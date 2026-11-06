@@ -1,3 +1,4 @@
+import { selectSequenceMail } from "../email-sequences/provider";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ApplicationError } from "../models/application-error";
 import type { WorkIdentity } from "../models/discovery";
@@ -135,9 +136,20 @@ export function createSequenceGate(d: {
       actor,
       businessId,
       revision: r,
-      provider,
       action: { contactId, stepIndex, opportunityId, id: sequenceActionId },
     } = context;
+    const nativeProvider =
+      context.revision.snapshot.senderContext.connection?.configuration
+        .provider;
+    const provider = selectSequenceMail(
+      context.provider,
+      nativeProvider === "microsoft"
+        ? "microsoft-mail-send-v1"
+        : nativeProvider === "gmail"
+          ? "gmail-sequence-v1"
+          : context.provider.key,
+    );
+
     const role = await requireCapability(tx, actor, businessId, "sales.work");
     await requireSalesSession(tx, actor, clock.now(), role);
     const recipient = r.snapshot.recipients.find(
@@ -280,7 +292,9 @@ export function createSequenceGate(d: {
       !policy?.configuration.enabled ||
       at < new Date(policy.configuration.periodStart) ||
       at >= new Date(policy.configuration.periodEnd) ||
-      policy.configuration.adapterKey !== provider.key ||
+      !(
+        policy.configuration.adapterKeys ?? [policy.configuration.adapterKey]
+      ).includes(provider.key) ||
       policy.configuration.mode !== provider.mode
     )
       return { reason: "sequence_allowance_unavailable" } as const;

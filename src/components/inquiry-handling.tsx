@@ -68,7 +68,7 @@ export function InquiryHandling({
             : code === "UNAUTHENTICATED"
               ? "Sign in again, then reload."
               : code === "CHANNEL_SETUP_REQUIRED"
-                ? "Gmail delivery requires a configured native connection. Review sender and mailbox setup."
+                ? "Native email delivery requires a configured native connection. Review sender and mailbox setup."
                 : "The action could not complete. Reload to review its saved state, ownership and setup.",
         );
         router.refresh();
@@ -80,12 +80,14 @@ export function InquiryHandling({
         action?.email?.sent
           ? "Exact Sent-folder evidence saved. Delivery remains unconfirmed."
           : action?.email?.result?.status === "accepted"
-            ? "Gmail accepted the prepared reply. Delivery remains unconfirmed."
-            : action?.state === "committed"
-              ? "Acceptance remains unknown. Synchronize the selected mailbox, then check Sent evidence. This action will not resend."
-              : action?.state === "cancelled"
-                ? `Sending stopped: ${action.reason?.replaceAll("_", " ") ?? "current authorization failed"}. Review setup and current inquiry context.`
-                : "No new Sent evidence was confirmed. Synchronize the selected mailbox and check again.",
+            ? "The provider accepted the prepared reply. Delivery remains unconfirmed."
+            : action?.email?.result?.status === "accepted_pending_identity"
+              ? "Microsoft accepted processing. Native message identity and delivery remain unconfirmed. Synchronize the selected mailbox and check Sent evidence; this action will not resend."
+              : action?.state === "committed"
+                ? "Acceptance remains unknown. Synchronize the selected mailbox, then check Sent evidence. This action will not resend."
+                : action?.state === "cancelled"
+                  ? `Sending stopped: ${action.reason?.replaceAll("_", " ") ?? "current authorization failed"}. Review setup and current inquiry context.`
+                  : "No new Sent evidence was confirmed. Synchronize the selected mailbox and check again.",
       );
       router.refresh();
     } catch {
@@ -205,9 +207,10 @@ export function InquiryHandling({
       )}
       <p className="text-sm text-muted-foreground">
         Review the exact response and recipient before sending through the
-        selected Gmail account. Sending requires separate authorization and
-        current sender, reply visibility and recipient checks. Other channel
-        responses require a manual reply recorded in this conversation.
+        selected Gmail or Microsoft account. Sending requires separate
+        authorization and current sender, reply visibility and recipient checks.
+        Other channel responses require a manual reply recorded in this
+        conversation.
       </p>
       <div className="flex flex-wrap gap-x-4 text-sm">
         <Link
@@ -310,18 +313,30 @@ export function InquiryHandling({
               </p>
               {run.action?.email && (
                 <div className="space-y-2 text-sm wrap-anywhere">
+                  {run.action.email.processingAcceptance && (
+                    <p>
+                      Microsoft accepted processing at{" "}
+                      {run.action.email.processingAcceptance.acceptedAt}.{" "}
+                      {run.action.email.sent
+                        ? "Native identity was later reconciled from Sent evidence."
+                        : "Native message identity is pending; this action will not resend."}
+                    </p>
+                  )}
                   <p>
                     Provider acceptance:{" "}
                     {run.action.email.result?.status === "accepted"
                       ? run.action.email.result.receipt.evidence ===
                         "sent_folder"
                         ? "Reconciled from exact Sent-folder evidence"
-                        : "Confirmed by Gmail response"
-                      : run.action.email.result?.status === "not_accepted"
-                        ? `Not accepted (${run.action.email.result.reason.replaceAll("_", " ")})`
-                        : run.action.state === "cancelled"
-                          ? "Not attempted; current checks blocked transport"
-                          : "Unknown"}
+                        : "Confirmed by provider response"
+                      : run.action.email.result?.status ===
+                          "accepted_pending_identity"
+                        ? "Microsoft accepted processing; native identity pending"
+                        : run.action.email.result?.status === "not_accepted"
+                          ? `Not accepted (${run.action.email.result.reason.replaceAll("_", " ")})`
+                          : run.action.state === "cancelled"
+                            ? "Not attempted; current checks blocked transport"
+                            : "Unknown"}
                     .
                   </p>
                   <p>
@@ -337,7 +352,7 @@ export function InquiryHandling({
                   </p>
                   {run.action.email.result?.status === "accepted" && (
                     <p>
-                      Gmail message:{" "}
+                      Native message:{" "}
                       {run.action.email.result.receipt.messageRef} · Thread:{" "}
                       {run.action.email.result.receipt.threadRef}
                     </p>
@@ -349,19 +364,22 @@ export function InquiryHandling({
                   <Button
                     type="button"
                     disabled={
-                      pending || !state.canProcess || !run.reply.nativeGmail
+                      pending ||
+                      !state.canProcess ||
+                      !(run.reply.nativeProvider || run.reply.nativeGmail)
                     }
                     aria-busy={working === `${run.id}:dispatch`}
                     onClick={() => delivery(run.id, "dispatch")}
                   >
                     {working === `${run.id}:dispatch`
                       ? "Sending prepared reply…"
-                      : "Send prepared Gmail reply"}
+                      : `Send prepared ${run.reply.nativeProvider === "microsoft" ? "Microsoft" : "Gmail"} reply`}
                   </Button>
-                  {!run.reply.nativeGmail && (
+                  {!(run.reply.nativeProvider || run.reply.nativeGmail) && (
                     <p className="text-sm text-muted-foreground">
-                      A current native Gmail sender and reply route are
-                      required. Review sender and mailbox setup, then reload.
+                      A current native Gmail or Microsoft sender and reply route
+                      are required. Review sender and mailbox setup, then
+                      reload.
                     </p>
                   )}
                 </div>

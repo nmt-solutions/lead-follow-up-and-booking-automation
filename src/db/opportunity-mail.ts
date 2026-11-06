@@ -1,3 +1,4 @@
+import { microsoftTransportKey } from "../microsoft-mail/transport";
 import { and, eq } from "drizzle-orm";
 import type { Transaction } from "./scope";
 import type { MailboxBatch } from "../models/mailboxes";
@@ -39,7 +40,6 @@ export async function isOpportunityMailObservation(
   const { snapshot } = batch,
     { event, metadata } = selected;
   if (
-    snapshot.provider !== "gmail" ||
     snapshot.mode !== "incremental" ||
     !snapshot.oauthGeneration ||
     event.kind !== "manual_reply" ||
@@ -54,9 +54,17 @@ export async function isOpportunityMailObservation(
   );
   return envelopes.some(
     (e) =>
+      e.adapterKey ===
+        (snapshot.provider === "microsoft"
+          ? microsoftTransportKey
+          : "gmail-sequence-v1") &&
       e.mailboxId === snapshot.work.mailboxId &&
       metadata.native?.internetMessageId === e.internetMessageId &&
-      metadata.folderRefs.includes("SENT") &&
+      metadata.folderRefs.includes(
+        snapshot.provider === "gmail"
+          ? "SENT"
+          : (snapshot.permissionObservation?.microsoft?.sentFolderRef ?? ""),
+      ) &&
       event.native.from === e.fromAddress &&
       event.native.to.length === 1 &&
       event.native.to[0] === e.recipient &&
@@ -93,7 +101,8 @@ export async function reconciledOpportunityMail(
     );
   if (
     !policy ||
-    policy.provider !== "gmail" ||
+    policy.provider !==
+      (e.adapterKey === microsoftTransportKey ? "microsoft" : "gmail") ||
     policy.connectionId !== e.connectionId ||
     policy.account !== e.fromAddress
   )
@@ -146,7 +155,11 @@ export async function reconciledOpportunityMail(
   const lines = (s: string) => s.replace(/\r\n|\r/g, "\n");
   if (
     !source ||
-    !m.folderRefs.includes("SENT") ||
+    !m.folderRefs.includes(
+      policy.provider === "gmail"
+        ? "SENT"
+        : (policy.grant?.microsoft?.sentFolderRef ?? ""),
+    ) ||
     event.kind !== "manual_reply" ||
     m.native?.direction !== "manual_reply" ||
     m.native.from !== e.fromAddress ||

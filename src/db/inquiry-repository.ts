@@ -69,6 +69,14 @@ async function view(tx: Transaction, row: Run, at: Date): Promise<InquiryRun> {
       : null;
   return {
     reply: {
+      nativeProvider:
+        source.connection.mode === "mailbox"
+          ? sender?.sender?.adapterKey === "microsoft-mail-send-v1"
+            ? "microsoft"
+            : sender?.sender?.adapterKey === gmailSequenceKey
+              ? "gmail"
+              : null
+          : null,
       nativeGmail:
         source.connection.mode === "mailbox" &&
         sender?.sender?.adapterKey === gmailSequenceKey,
@@ -96,7 +104,11 @@ async function view(tx: Transaction, row: Run, at: Date): Promise<InquiryRun> {
           reason: action.reason,
           dueAt: action.dueAt.toISOString(),
           email: action.email
-            ? { result: action.email.result, sent: action.email.sent }
+            ? {
+                result: action.email.result,
+                sent: action.email.sent,
+                processingAcceptance: action.email.processingAcceptance,
+              }
             : null,
         }
       : null,

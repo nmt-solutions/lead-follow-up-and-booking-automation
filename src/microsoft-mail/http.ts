@@ -80,6 +80,7 @@ export function createMicrosoftMailHttp(
     url: string,
     init: RequestInit,
     signal?: AbortSignal,
+    accepted = false,
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -88,6 +89,7 @@ export function createMicrosoftMailHttp(
       if (error instanceof MicrosoftMailFailure) throw error;
       throw new MicrosoftMailFailure("unavailable");
     }
+    if (accepted && response.status === 202) return;
     let raw: unknown;
     try {
       raw = JSON.parse(await response.text());
@@ -143,6 +145,7 @@ export function createMicrosoftMailHttp(
         Number.isInteger(retry) && retry > 0 ? Math.min(retry, 86400) : 60,
       );
     }
+    if (accepted) throw new MicrosoftMailFailure("invalid_response");
     return raw;
   }
   const identity = createMicrosoftHttp(configuration, boundedFetch);
@@ -163,6 +166,25 @@ export function createMicrosoftMailHttp(
   }
   return {
     profile,
+    send(raw: string, token: string, signal: AbortSignal, parent?: string) {
+      const path = parent
+        ? `me/messages/${encodeURIComponent(parent)}/reply`
+        : "me/sendMail";
+      return request(
+        graphMailUrl(path).toString(),
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "text/plain",
+            Prefer: 'IdType="ImmutableId"',
+          },
+          body: raw,
+        },
+        signal,
+        true,
+      );
+    },
     async token(
       parameters: Record<string, string>,
       signal?: AbortSignal,
