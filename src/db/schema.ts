@@ -5,6 +5,7 @@ import type {
   MailboxMetadata,
 } from "../models/mailboxes";
 import type { WorkIdentity } from "../models/discovery";
+import type { MetaActivity } from "../models/whatsapp-intake";
 import type { TaxRule, TaxCalculation } from "../models/tax";
 import type { MailboxAuthorizationStatus } from "../models/mailbox-authorization";
 import type { MailManual } from "../models/mail-native";
@@ -1779,7 +1780,7 @@ export const inboxConnection = pgTable(
     conversationRefs: jsonb("conversation_refs").$type<string[]>().notNull(),
     active: boolean("active").notNull(),
     mode: text("mode")
-      .$type<"normalized_import" | "mailbox">()
+      .$type<"normalized_import" | "mailbox" | "meta">()
       .notNull()
       .default("normalized_import"),
     manualRepliesObservable: boolean("manual_replies_observable")
@@ -2922,6 +2923,85 @@ function integrationPolicies(name: string, privileged: boolean) {
   ];
 }
 const whatsAppReviewer = sql`exists (select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id', true) and o.whatsapp_review)`;
+function metaIntakePolicies(name: string) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: inboxWrite,
+    }),
+    pgPolicy(`${name}_update`, {
+      for: "update",
+      to: appRuntime,
+      using: inboxWrite,
+      withCheck: inboxWrite,
+    }),
+  ];
+}
+export const whatsAppIntake = pgTable(
+  "whatsapp_intake",
+  {
+    ...inboxColumns(),
+    connectionVersion: integer("connection_version").notNull(),
+    accountKey: text("account_key").notNull(),
+    inboxConnectionId: uuid("inbox_connection_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    enabledAt: timestamp("enabled_at", { withTimezone: true }).notNull(),
+    receiptRetentionSeconds: integer("receipt_retention_seconds").notNull(),
+    inboundAt: timestamp("inbound_at", { withTimezone: true }),
+    echoAt: timestamp("echo_at", { withTimezone: true }),
+    gap: text("gap"),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_intake_scope").on(t.id, t.businessId),
+    check(
+      "whatsapp_intake_bounds",
+      sql`${t.connectionVersion}>0 and ${t.receiptRetentionSeconds}>=60`,
+    ),
+    ...metaIntakePolicies("whatsapp_intake"),
+  ],
+).enableRLS();
+export const whatsAppReceipt = pgTable(
+  "whatsapp_receipt",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    connectionVersion: integer("connection_version").notNull(),
+    accountKey: text("account_key").notNull(),
+    eventKey: text("event_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    activity: jsonb("activity").$type<MetaActivity>(),
+    kind: text("kind").notNull(),
+    messageRef: text("message_ref"),
+    status: text("provider_status"),
+    state: text("state")
+      .$type<"pending" | "processed" | "historical" | "review" | "expired">()
+      .notNull(),
+    conversationId: uuid("conversation_id"),
+    opportunityId: uuid("opportunity_id"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_receipt_identity").on(
+      t.connectionId,
+      t.accountKey,
+      t.eventKey,
+    ),
+    check(
+      "whatsapp_receipt_state",
+      sql`${t.state} in ('pending','processed','historical','review','expired') and ${t.kind} in ('incoming','app_echo','status','gap') and ${t.connectionVersion}>0`,
+    ),
+    ...metaIntakePolicies("whatsapp_receipt"),
+  ],
+).enableRLS();
 const whatsAppEvidenceScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and ((${inboxWrite}) or (${whatsAppReviewer}))`;
 export const whatsAppConnection = pgTable(
   "whatsapp_connection",
@@ -2972,6 +3052,49 @@ export const whatsAppConnection = pgTable(
     }),
   ],
 ).enableRLS();
+export const whatsAppIntakeScopeForeignKeys = [
+  new ForeignKey(
+    whatsAppReceipt,
+    foreignKey({
+      name: "whatsapp_receipt_conversation_scope",
+      columns: [whatsAppReceipt.conversationId, whatsAppReceipt.businessId],
+      foreignColumns: [inboxConversation.id, inboxConversation.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppReceipt,
+    foreignKey({
+      name: "whatsapp_receipt_opportunity_scope",
+      columns: [whatsAppReceipt.opportunityId, whatsAppReceipt.businessId],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+
+  new ForeignKey(
+    whatsAppIntake,
+    foreignKey({
+      name: "whatsapp_intake_connection_scope",
+      columns: [whatsAppIntake.id, whatsAppIntake.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppIntake,
+    foreignKey({
+      name: "whatsapp_intake_inbox_scope",
+      columns: [whatsAppIntake.inboxConnectionId, whatsAppIntake.businessId],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppReceipt,
+    foreignKey({
+      name: "whatsapp_receipt_connection_scope",
+      columns: [whatsAppReceipt.connectionId, whatsAppReceipt.businessId],
+      foreignColumns: [whatsAppIntake.id, whatsAppIntake.businessId],
+    }),
+  ),
+];
 export const whatsAppOauth = pgTable(
   "whatsapp_oauth",
   {

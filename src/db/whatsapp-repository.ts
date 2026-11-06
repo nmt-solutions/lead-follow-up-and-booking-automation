@@ -22,6 +22,7 @@ import type { MetaProvider } from "../whatsapp/provider";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { requireSalesSession } from "./sales-session";
+import { metaIntakeView } from "./whatsapp-intake-repository";
 import { hasMfa, operatorMfaLifetime } from "../auth/access";
 import {
   whatsAppConnection,
@@ -240,6 +241,7 @@ export function createWhatsAppRepository(database: Database, clock: Clock) {
   ): Promise<WhatsAppView> {
     const row = await current(tx, businessId);
     const paymentEvidence = await evidence(tx, businessId, row, provider);
+    const intake = await metaIntakeView(tx, businessId);
     const issues: string[] = [];
     for (const [name, ready] of Object.entries(provider.setup))
       if (!ready && name !== "coexistence") issues.push(name);
@@ -270,6 +272,7 @@ export function createWhatsAppRepository(database: Database, clock: Clock) {
       issues.push("unsupported_coexistence");
     return {
       canManage,
+      intake,
       paymentEvidence,
       setup: provider.setup,
       connection: row
@@ -288,6 +291,12 @@ export function createWhatsAppRepository(database: Database, clock: Clock) {
       readiness: {
         onboardingReady: issues.length === 0,
         automationReady: false,
+        inboundReady: intake.enabled && intake.inboundObserved,
+        manualVisibilityReady:
+          intake.enabled &&
+          intake.replyVisibility === "supported_app_events" &&
+          !intake.gap,
+        sendingReady: false,
         issues,
       },
       billing: whatsAppBilling,
