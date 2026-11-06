@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { preparePaymentSecurity } from "./payment-security";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -62,6 +63,11 @@ import {
   taxScopeForeignKeys,
   subscriptionPricingRevision,
   subscriptionQuote,
+  subscriptionPayment,
+  subscriptionPaymentEvent,
+  subscriptionPaymentHistory,
+  subscriptionPeriod,
+  subscriptionUsage,
   commercialAuthorityRevision,
   discoveryConfiguration,
   discoveryRun,
@@ -184,6 +190,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
   await prepareFileCleanup(pool);
+  await preparePaymentSecurity(pool);
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
     RETURNS TABLE(payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -738,6 +745,11 @@ export async function secureDatabase(pool: Pool) {
       taxCalculation,
       subscriptionPricingRevision,
       subscriptionQuote,
+      subscriptionPayment,
+      subscriptionPaymentEvent,
+      subscriptionPaymentHistory,
+      subscriptionPeriod,
+      subscriptionUsage,
       commercialAuthorityRevision,
       discoveryConfiguration,
       discoveryRun,
@@ -1021,6 +1033,14 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON subscription_pricing_revision TO app_runtime;
       ALTER TABLE subscription_pricing_revision FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON subscription_quote FROM app_runtime;
+      REVOKE ALL PRIVILEGES ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage FROM app_runtime;
+      GRANT SELECT,INSERT ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage TO app_runtime;
+      GRANT UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON subscription_payment TO app_runtime;
+      ALTER TABLE subscription_payment FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_payment_event FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_payment_history FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_period FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_usage FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON subscription_quote TO app_runtime;
       ALTER TABLE subscription_quote FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON billing_profile_revision TO app_runtime;

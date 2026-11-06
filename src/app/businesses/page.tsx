@@ -73,6 +73,27 @@ export default async function BusinessesPage() {
       Review WhatsApp evidence
     </Link>
   ) : null;
+  const canReconcile = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(
+        await headers(),
+        "reconciliation.manage",
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const paymentsLink = canReconcile ? (
+    <Link
+      href="/platform/subscription-payments"
+      className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+    >
+      Review subscription payments
+    </Link>
+  ) : null;
   const senderHealthLink = await (async () => {
     try {
       await (
@@ -95,6 +116,7 @@ export default async function BusinessesPage() {
       <div className="mx-auto max-w-2xl space-y-8">
         {billingReviewLink}
         {pricingLink}
+        {paymentsLink}
         {whatsAppReviewLink}
         {senderHealthLink}
         <div>
@@ -116,6 +138,7 @@ export default async function BusinessesPage() {
     <div className="space-y-8">
       {billingReviewLink}
       {pricingLink}
+      {paymentsLink}
       {senderHealthLink}
       {whatsAppReviewLink}
       <div className="flex flex-wrap items-center justify-between gap-4">

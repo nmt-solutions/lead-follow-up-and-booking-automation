@@ -58,11 +58,13 @@ describe("Approved email sequences at the persisted application seam", () => {
     google?: ReturnType<typeof gmailFixture>,
     message?: { subject: string; body: string },
     microsoft?: ReturnType<typeof microsoftMailFixture>,
+    paidAutomation = 10000,
   ) {
     const f = await campaignFixture(h, {
       multipleSources: multiple,
       at,
       mailboxProvider: microsoft ? "microsoft" : "gmail",
+      automationQuantity: paidAutomation,
     });
     let health: Awaited<ReturnType<typeof reviewedSenderHealth>> | undefined;
     let native:
@@ -324,6 +326,29 @@ describe("Approved email sequences at the persisted application seam", () => {
       health,
     };
   }
+  it("stops new sequence attempts when paid automation is exhausted despite a larger operational allowance", async () => {
+    const f = await setup(
+      false,
+      "2026-11-05T14:00:00Z",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1,
+    );
+    await f.app.start(f.owner, f.business.id, f.ref(f.revision));
+    const first = f.queued.shift()!;
+    await f.app.execute(first.work);
+    expect(f.mail.effects).toHaveLength(1);
+    const next = f.queued.shift()!;
+    h.clock.set(next.dueAt.toISOString());
+    await h.reverifyAuthenticator(f.owner);
+    await f.app.execute(next.work);
+    expect(f.mail.effects).toHaveLength(1);
+    const state = await f.app.workspace(f.owner, f.business.id);
+    expect(state.usage.remaining).toBe(0);
+    expect(state.runs[0].recipients[0].actions[1].state).toBe("paused");
+  });
   it("records Microsoft sequence processing acceptance and reserves follow-up until exact Sent identity is known", async () => {
     const graph = microsoftMailFixture(h.clock);
     graph.identity.scopes += " Mail.Send";

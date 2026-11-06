@@ -23,11 +23,13 @@ export async function readCommercialResponse<T>(
           ? "Sign in again in another tab, then retry to preserve your edits."
           : code === "CONFLICT"
             ? "The saved pricing or billing details changed. Refresh the saved state and review the current version before retrying. Your edits remain here."
-            : code === "PRICING_SETUP_REQUIRED"
-              ? "This quote needs reviewed billing details and explicit prices and allowances. Refresh and review the setup gaps."
-              : code === "FORBIDDEN" || code === "NOT_FOUND"
-                ? "Your current access does not allow this action. Ask the Business Owner or platform operator."
-                : "Unable to complete the action. Check the fields and effective date, then retry.",
+            : code === "SETUP_REQUIRED"
+              ? "The payment provider or selected currency is unavailable. Ask the operator to review checkout configuration. Saved records remain available."
+              : code === "PRICING_SETUP_REQUIRED"
+                ? "This quote needs reviewed billing details and explicit prices and allowances. Refresh and review the setup gaps."
+                : code === "FORBIDDEN" || code === "NOT_FOUND"
+                  ? "Your current access does not allow this action. Ask the Business Owner or platform operator."
+                  : "Unable to complete the action. Check the fields and effective date, then retry.",
     );
   }
   const parsed = z

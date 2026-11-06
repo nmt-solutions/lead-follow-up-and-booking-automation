@@ -1,3 +1,4 @@
+import { persistPaidSubscription } from "./paid-subscription";
 import type { createHarness } from "./harness";
 import { createCampaignApplication } from "../../src/application/campaigns";
 import { createCampaignRepository } from "../../src/db/campaign-repository";
@@ -24,6 +25,7 @@ export async function campaignFixture(
     multipleSources?: boolean;
     namedGeneral?: boolean;
     mailboxProvider?: "gmail" | "microsoft";
+    automationQuantity?: number;
   } = {},
 ) {
   h.clock.set(options.at ?? "2026-11-05T09:00:00Z");
@@ -60,6 +62,14 @@ export async function campaignFixture(
     ],
     buyersReviewed: true,
     exclusions: [],
+  });
+  await persistPaidSubscription(h, owner, business.id, {
+    markets: ["New Jersey, United States"],
+    discovery: { quantity: 100000, unit: "fixture units" },
+    automation: {
+      quantity: options.automationQuantity ?? 10000,
+      unit: "provider calls",
+    },
   });
   const policy = discoveryPolicySchema.parse({
     adapterId: "campaign-research-fixture",

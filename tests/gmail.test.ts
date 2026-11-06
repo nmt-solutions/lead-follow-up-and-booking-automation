@@ -1,3 +1,4 @@
+import { persistPaidSubscription } from "./support/paid-subscription";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
@@ -44,6 +45,11 @@ describe("Selected Gmail at the persisted application seam", () => {
       offering: "Steel",
       homeMarket: "US",
       website: "",
+    });
+    await persistPaidSubscription(h, credentials, business.id, {
+      markets: ["US"],
+      discovery: { quantity: 0, unit: "research units" },
+      automation: { quantity: 10000, unit: "provider calls" },
     });
     const database = runtimeDatabase(h.runtime);
     const senders = createSenderApplication({

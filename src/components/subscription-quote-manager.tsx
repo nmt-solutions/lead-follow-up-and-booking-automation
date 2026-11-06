@@ -77,6 +77,12 @@ export function SubscriptionQuoteManager({
       <BillingStatus state={state.billing} />
       <div className="flex flex-wrap gap-4">
         <Link
+          href={`/businesses/${businessId}/subscription-payments`}
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Review tax and hosted checkout
+        </Link>
+        <Link
           href={`/businesses/${businessId}/billing`}
           className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
