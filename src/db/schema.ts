@@ -2757,8 +2757,15 @@ export const opportunityDueAction = pgTable(
   },
   (t) => [
     uniqueIndex("opportunity_due_action_scope").on(t.id, t.businessId),
-    uniqueIndex("whatsapp_plan_action").on(t.whatsappPlanId, t.whatsappPeer, t.whatsappStep),
-    check("opportunity_action_origin", sql`(${t.whatsappPlanId} IS NULL AND ${t.whatsappStep} IS NULL AND ${t.whatsappPeer} IS NULL AND ${t.messageId} IS NOT NULL AND ${t.conversationId} IS NOT NULL) OR (${t.whatsappPlanId} IS NOT NULL AND ${t.whatsappStep}>=0 AND ${t.whatsappPeer} ~ '^[1-9][0-9]{6,14}$' AND ${t.messageId} IS NULL AND ${t.conversationId} IS NULL AND ${t.inquiryRunId} IS NULL)`),
+    uniqueIndex("whatsapp_plan_action").on(
+      t.whatsappPlanId,
+      t.whatsappPeer,
+      t.whatsappStep,
+    ),
+    check(
+      "opportunity_action_origin",
+      sql`(${t.whatsappPlanId} IS NULL AND ${t.whatsappStep} IS NULL AND ${t.whatsappPeer} IS NULL AND ${t.messageId} IS NOT NULL AND ${t.conversationId} IS NOT NULL) OR (${t.whatsappPlanId} IS NOT NULL AND ${t.whatsappStep}>=0 AND ${t.whatsappPeer} ~ '^[1-9][0-9]{6,14}$' AND ${t.messageId} IS NULL AND ${t.conversationId} IS NULL AND ${t.inquiryRunId} IS NULL)`,
+    ),
     pgPolicy("opportunity_due_action_read", {
       for: "select",
       to: appRuntime,
@@ -3234,15 +3241,25 @@ export const whatsAppOutbound = pgTable(
     position: bigserial("position", { mode: "number" }).notNull(),
     connectionId: uuid("connection_id").notNull(),
     key: text("key").notNull(),
-    actorId: text("actor_id").notNull().references(() => user.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
     at: timestamp("at", { withTimezone: true }).notNull(),
     data: jsonb("data").$type<MetaOutboundData>().notNull(),
   },
   (t) => [
     uniqueIndex("whatsapp_outbound_scope").on(t.id, t.businessId),
     uniqueIndex("whatsapp_outbound_key").on(t.businessId, t.key),
-    pgPolicy("whatsapp_outbound_read", { for: "select", to: appRuntime, using: inboxScope }),
-    pgPolicy("whatsapp_outbound_insert", { for: "insert", to: appRuntime, withCheck: sql`(${inboxScope}) and ${t.actorId}=current_setting('app.actor_id',true) and (${t.data}->>'kind' NOT IN ('decision','permission','revoke_permission','template','cancel_plan','estimate') OR public.current_business_role() IN ('owner','admin')) and (${t.data}->>'kind'<>'decision' OR public.current_business_role()='owner')` }),
+    pgPolicy("whatsapp_outbound_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("whatsapp_outbound_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and ${t.actorId}=current_setting('app.actor_id',true) and (${t.data}->>'kind' NOT IN ('decision','permission','revoke_permission','template','cancel_plan','estimate') OR public.current_business_role() IN ('owner','admin')) and (${t.data}->>'kind'<>'decision' OR public.current_business_role()='owner')`,
+    }),
   ],
 ).enableRLS();
 export const whatsAppIntake = pgTable(
@@ -3285,7 +3302,8 @@ export const whatsAppReceipt = pgTable(
     peer: text("peer"),
     replyTo: text("reply_to"),
     status: text("provider_status"),
-    statusEvidence: jsonb("status_evidence").$type<MetaActivity["statusEvidence"]>(),
+    statusEvidence:
+      jsonb("status_evidence").$type<MetaActivity["statusEvidence"]>(),
     state: text("state")
       .$type<"pending" | "processed" | "historical" | "review" | "expired">()
       .notNull(),
@@ -3480,8 +3498,25 @@ export const whatsAppEvidence = pgTable(
   ],
 ).enableRLS();
 export const whatsAppScopeForeignKeys = [
-  new ForeignKey(whatsAppOutbound, foreignKey({ name: "whatsapp_outbound_connection_scope", columns: [whatsAppOutbound.connectionId, whatsAppOutbound.businessId], foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId] })),
-  new ForeignKey(opportunityDueAction, foreignKey({ name: "whatsapp_action_plan_scope", columns: [opportunityDueAction.whatsappPlanId, opportunityDueAction.businessId], foreignColumns: [whatsAppOutbound.id, whatsAppOutbound.businessId] })),
+  new ForeignKey(
+    whatsAppOutbound,
+    foreignKey({
+      name: "whatsapp_outbound_connection_scope",
+      columns: [whatsAppOutbound.connectionId, whatsAppOutbound.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityDueAction,
+    foreignKey({
+      name: "whatsapp_action_plan_scope",
+      columns: [
+        opportunityDueAction.whatsappPlanId,
+        opportunityDueAction.businessId,
+      ],
+      foreignColumns: [whatsAppOutbound.id, whatsAppOutbound.businessId],
+    }),
+  ),
   new ForeignKey(
     whatsAppEvidence,
     foreignKey({

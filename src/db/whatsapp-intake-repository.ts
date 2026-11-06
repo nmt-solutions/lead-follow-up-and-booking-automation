@@ -573,7 +573,15 @@ export function createWhatsAppIntakeRepository(
                     eq(inboxMessage.messageRef, activity.replyTo),
                   ),
                 );
-              const outgoing = !parent ? await resolveMetaOutgoing(tx,scope.businessId,intake.inboxConnectionId,activity.peer,activity.replyTo) : null;
+              const outgoing = !parent
+                ? await resolveMetaOutgoing(
+                    tx,
+                    scope.businessId,
+                    intake.inboxConnectionId,
+                    activity.peer,
+                    activity.replyTo,
+                  )
+                : null;
               if (!parent && !outgoing) {
                 await tx
                   .update(whatsAppReceipt)
@@ -654,6 +662,23 @@ export function createWhatsAppIntakeRepository(
             activity.from ===
               connection.configuration.requestedNumber.replace(/^\+/, "")
           ) {
+            const application = await resolveMetaOutgoing(
+              tx,
+              scope.businessId,
+              intake.inboxConnectionId,
+              activity.peer,
+              activity.messageRef,
+            );
+            if (application && activity.text === application.body) {
+              await tx
+                .update(whatsAppReceipt)
+                .set({
+                  state: "processed",
+                  opportunityId: application.opportunityId,
+                })
+                .where(eq(whatsAppReceipt.id, row.id));
+              continue;
+            }
             await tx
               .update(whatsAppIntake)
               .set({ echoAt: at })
@@ -677,15 +702,25 @@ export function createWhatsAppIntakeRepository(
                     : []),
                 ),
               );
+            const outboundParent = activity.replyTo
+              ? await resolveMetaOutgoing(
+                  tx,
+                  scope.businessId,
+                  intake.inboxConnectionId,
+                  activity.peer,
+                  activity.replyTo,
+                )
+              : null;
             const ids = [
-              ...new Set(
-                candidates.flatMap((c) =>
+              ...new Set([
+                ...candidates.flatMap((c) =>
                   c.opportunityId ? [c.opportunityId] : [],
                 ),
-              ),
+                ...(outboundParent ? [outboundParent.opportunityId] : []),
+              ]),
             ];
             if (ids.length === 1) {
-              conversationId = candidates[0].conversationId;
+              conversationId = candidates[0]?.conversationId ?? null;
               opportunityId = ids[0];
               const [lastHandback] = await tx
                 .select()

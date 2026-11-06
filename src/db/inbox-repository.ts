@@ -198,17 +198,27 @@ export async function captureInboxInquiry(
     return result;
   }
   if (event.kind === "opt_out") throw new ApplicationError("INVALID_INPUT");
-  const metaReference = connection.mode === "meta" && metaAuthorization && event.replyToMessageRef
-    ? await resolveMetaOutgoing(tx,businessId,connectionId,event.senderRef,event.replyToMessageRef) : null;
-  const sequenceOpportunityId = metaReference?.opportunityId ?? await observeSequenceReply(
-    tx,
-    businessId,
-    connectionId,
-    actor.userId,
-    event,
-    at,
-    authorization?.metadata,
-  );
+  const metaReference =
+    connection.mode === "meta" && metaAuthorization && event.replyToMessageRef
+      ? await resolveMetaOutgoing(
+          tx,
+          businessId,
+          connectionId,
+          event.senderRef,
+          event.replyToMessageRef,
+        )
+      : null;
+  const sequenceOpportunityId =
+    metaReference?.opportunityId ??
+    (await observeSequenceReply(
+      tx,
+      businessId,
+      connectionId,
+      actor.userId,
+      event,
+      at,
+      authorization?.metadata,
+    ));
   if (event.kind === "public_signal" || event.kind === "other_reply") {
     await recordEvent(null);
     return { status: "ignored", conversationId: null };

@@ -108,7 +108,7 @@ export async function metaOpportunityVisible(
       return false;
     // Accepted but unprocessed activity must stop dispatch even before the durable worker runs.
     const pending = await tx
-      .select({ replyTo: whatsAppReceipt.replyTo })
+      .select()
       .from(whatsAppReceipt)
       .where(
         and(
@@ -118,6 +118,20 @@ export async function metaOpportunityVisible(
         ),
       );
     for (const receipt of pending) {
+      if (
+        receipt.kind === "app_echo" &&
+        receipt.messageRef &&
+        receipt.activity?.text
+      ) {
+        const origin = await resolveMetaOutgoing(
+          tx,
+          businessId,
+          source.connectionId,
+          source.content.senderRef,
+          receipt.messageRef,
+        );
+        if (origin?.body === receipt.activity.text) continue;
+      }
       if (!receipt.replyTo) return false;
       const [anchor] = await tx
         .select({ opportunityId: inboxMessageLink.opportunityId })
@@ -132,24 +146,87 @@ export async function metaOpportunityVisible(
           ),
         );
       // A known exact reference fences its need. Unresolved references still fence the peer.
-      const outgoing = !anchor?.opportunityId ? await resolveMetaOutgoing(tx,businessId,source.connectionId,source.content.senderRef,receipt.replyTo) : null;
+      const outgoing = !anchor?.opportunityId
+        ? await resolveMetaOutgoing(
+            tx,
+            businessId,
+            source.connectionId,
+            source.content.senderRef,
+            receipt.replyTo,
+          )
+        : null;
       const referencedNeed = anchor?.opportunityId ?? outgoing?.opportunityId;
-      if (!referencedNeed || referencedNeed === opportunityId)
-        return false;
+      if (!referencedNeed || referencedNeed === opportunityId) return false;
     }
   }
   return true;
 }
 /** Same need/peer fencing for an approved prospect that has no incoming-message row yet. */
-export async function metaPeerVisible(tx: Transaction, businessId: string, connectionId: string, peer: string, opportunityId: string) {
-  if (!(await metaInboundAllowed(tx,businessId,connectionId))) return false;
-  const [intake] = await tx.select().from(whatsAppIntake).where(and(eq(whatsAppIntake.businessId,businessId),eq(whatsAppIntake.inboxConnectionId,connectionId)));
-  if (!intake?.inboundAt || !intake.echoAt || (intake.gap && !["manual_activity_needs_association","unsupported_event_coverage","unprocessed_event_expired"].includes(intake.gap))) return false;
-  const pending = await tx.select().from(whatsAppReceipt).where(and(eq(whatsAppReceipt.connectionId,intake.id),eq(whatsAppReceipt.connectionVersion,intake.connectionVersion),sql`(${whatsAppReceipt.state} IN ('pending','review','expired') OR (${whatsAppReceipt.kind}='gap' AND ${whatsAppReceipt.state}<>'historical')) AND ${whatsAppReceipt.kind}<>'status' AND (${whatsAppReceipt.peer} IS NULL OR ${whatsAppReceipt.peer}=${peer})`));
+export async function metaPeerVisible(
+  tx: Transaction,
+  businessId: string,
+  connectionId: string,
+  peer: string,
+  opportunityId: string,
+) {
+  if (!(await metaInboundAllowed(tx, businessId, connectionId))) return false;
+  const [intake] = await tx
+    .select()
+    .from(whatsAppIntake)
+    .where(
+      and(
+        eq(whatsAppIntake.businessId, businessId),
+        eq(whatsAppIntake.inboxConnectionId, connectionId),
+      ),
+    );
+  if (
+    !intake?.inboundAt ||
+    !intake.echoAt ||
+    (intake.gap &&
+      ![
+        "manual_activity_needs_association",
+        "unsupported_event_coverage",
+        "unprocessed_event_expired",
+      ].includes(intake.gap))
+  )
+    return false;
+  const pending = await tx
+    .select()
+    .from(whatsAppReceipt)
+    .where(
+      and(
+        eq(whatsAppReceipt.connectionId, intake.id),
+        eq(whatsAppReceipt.connectionVersion, intake.connectionVersion),
+        sql`(${whatsAppReceipt.state} IN ('pending','review','expired') OR (${whatsAppReceipt.kind}='gap' AND ${whatsAppReceipt.state}<>'historical')) AND ${whatsAppReceipt.kind}<>'status' AND (${whatsAppReceipt.peer} IS NULL OR ${whatsAppReceipt.peer}=${peer})`,
+      ),
+    );
   for (const r of pending) {
+    if (r.kind === "app_echo" && r.messageRef && r.activity?.text) {
+      const origin = await resolveMetaOutgoing(
+        tx,
+        businessId,
+        connectionId,
+        peer,
+        r.messageRef,
+      );
+      if (origin?.body === r.activity.text) continue;
+    }
     if (!r.replyTo) return false;
-    const [parent] = await tx.select({opportunityId:inboxMessageLink.opportunityId}).from(inboxMessage).innerJoin(inboxMessageLink,eq(inboxMessage.id,inboxMessageLink.id)).where(and(eq(inboxMessage.businessId,businessId),eq(inboxMessage.connectionId,connectionId),eq(inboxMessage.messageRef,r.replyTo),sql`${inboxMessage.content}->>'senderRef'=${peer}`));
-    const outgoing = !parent?.opportunityId ? await resolveMetaOutgoing(tx,businessId,connectionId,peer,r.replyTo) : null;
+    const [parent] = await tx
+      .select({ opportunityId: inboxMessageLink.opportunityId })
+      .from(inboxMessage)
+      .innerJoin(inboxMessageLink, eq(inboxMessage.id, inboxMessageLink.id))
+      .where(
+        and(
+          eq(inboxMessage.businessId, businessId),
+          eq(inboxMessage.connectionId, connectionId),
+          eq(inboxMessage.messageRef, r.replyTo),
+          sql`${inboxMessage.content}->>'senderRef'=${peer}`,
+        ),
+      );
+    const outgoing = !parent?.opportunityId
+      ? await resolveMetaOutgoing(tx, businessId, connectionId, peer, r.replyTo)
+      : null;
     const need = parent?.opportunityId ?? outgoing?.opportunityId;
     if (!need || need === opportunityId) return false;
   }

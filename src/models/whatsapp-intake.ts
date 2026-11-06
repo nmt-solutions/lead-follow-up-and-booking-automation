@@ -11,7 +11,14 @@ export const metaStatusEvidenceSchema = z.object({
   callbackData: z.string().max(512).nullable(),
   occurredAt: z.iso.datetime(),
   supported: z.boolean(),
-  pricing: z.object({ billable: z.boolean().optional(), pricing_model: z.string().max(80).optional(), category: z.string().max(80).optional(), type: z.string().max(80).optional() }).nullable(),
+  pricing: z
+    .object({
+      billable: z.boolean().optional(),
+      pricing_model: z.string().max(80).optional(),
+      category: z.string().max(80).optional(),
+      type: z.string().max(80).optional(),
+    })
+    .nullable(),
 });
 export const metaActivitySchema = z.object({
   kind: z.enum(["incoming", "app_echo", "status", "gap"]),
@@ -103,14 +110,27 @@ export const metaWebhookSchema = z.object({
                   message_echoes: z.array(message).max(100).optional(),
                   statuses: z
                     .array(
-                      z.object({
-                        id: ref,
-                        status: z.string().min(1).max(80),
-                        timestamp: z.string().regex(/^\d{1,12}$/),
-                        recipient_id: phone,
-                        biz_opaque_callback_data: z.string().max(512).optional(),
-                        pricing: z.object({ billable: z.boolean().optional(), pricing_model: z.string().max(80).optional(), category: z.string().max(80).optional(), type: z.string().max(80).optional() }).passthrough().optional(),
-                      }).passthrough(),
+                      z
+                        .object({
+                          id: ref,
+                          status: z.string().min(1).max(80),
+                          timestamp: z.string().regex(/^\d{1,12}$/),
+                          recipient_id: phone,
+                          biz_opaque_callback_data: z
+                            .string()
+                            .max(512)
+                            .optional(),
+                          pricing: z
+                            .object({
+                              billable: z.boolean().optional(),
+                              pricing_model: z.string().max(80).optional(),
+                              category: z.string().max(80).optional(),
+                              type: z.string().max(80).optional(),
+                            })
+                            .passthrough()
+                            .optional(),
+                        })
+                        .passthrough(),
                     )
                     .max(100)
                     .optional(),
