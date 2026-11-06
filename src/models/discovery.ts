@@ -205,7 +205,17 @@ export const reviewResultSchema = z.strictObject({
     .nullable(),
 });
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
+export const discoveryProviderCostSchema = z.strictObject({
+  provider: z.literal("exa"),
+  estimatedUsd: z.number().finite().nonnegative().max(1e12).nullable(),
+  requestId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_.:-]{1,160}$/)
+    .nullable(),
+});
+export type DiscoveryProviderCost = z.infer<typeof discoveryProviderCostSchema>;
 export type SearchInput = {
+  recordCost?(value: DiscoveryProviderCost): Promise<void>;
   policy: DiscoveryPolicy;
   businessId: string;
   runId: string;
@@ -236,6 +246,7 @@ export type DiscoveryProvider = {
   review(input: ReviewInput): Promise<unknown>;
 };
 export type ContentsInput = {
+  recordCost?(value: DiscoveryProviderCost): Promise<void>;
   policy: DiscoveryPolicy;
   source: SearchResult;
   signal: AbortSignal;

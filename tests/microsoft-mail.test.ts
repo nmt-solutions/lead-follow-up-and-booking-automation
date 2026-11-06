@@ -1,4 +1,5 @@
 import { persistPaidSubscription } from "./support/paid-subscription";
+import { readOperatorCosts } from "./support/costs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eligibilityApplication } from "./support/email-eligibility";
@@ -576,6 +577,50 @@ describe("Selected MicrosoftMail at the persisted application seam", () => {
       detail.messages[0].opportunityId,
       detail.messages[0].opportunityId,
     ]);
+  });
+  it("ingests recorded native Outlook usage into cost coverage without retaining mailbox content", async () => {
+    const f = await setup();
+    await connect(f);
+    const inquiry = f.graph.add("cost-source");
+    f.graph.pages.set("sales", {
+      value: [inquiry],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=cost-base",
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    await synchronize(f);
+    const ws = await f.inbox.workspace(f.credentials, f.businessId);
+    const detail = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      ws.conversations[0].id,
+    );
+    await createMailboxSendRecorder(f.database, h.clock).record(
+      await h.access.authenticateForWork(f.credentials),
+      f.businessId,
+      {
+        mailboxId: f.mailbox.id,
+        messageRef: "cost-app-send",
+        internetMessageId: "<cost-app-send@example.com>",
+        replyToMessageId: detail.messages[0].id,
+      },
+    );
+    const costs = await readOperatorCosts(h, f.credentials);
+    const rows = costs.sources.filter(
+      (r) =>
+        r.source.businessId === f.businessId &&
+        r.sourceId.startsWith("native:native-mail:"),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toMatchObject({
+      provider: "microsoft",
+      category: "messaging",
+      amount: null,
+      quantity: 1,
+    });
+    expect(JSON.stringify(rows)).not.toMatch(
+      /buyer@example.com|cost-app-send@example.com|private|Hello/,
+    );
   });
   it("retains a partial checkpoint through Graph throttling and does not call Graph again before the controlled retry time", async () => {
     const f = await setup();

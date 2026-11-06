@@ -111,6 +111,23 @@ export default async function BusinessesPage() {
       return null;
     }
   })();
+  const costsLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "costs.manage");
+      return (
+        <Link
+          href="/platform/costs"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Review operator costs and budgets
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   const documentsLink = await (async () => {
     try {
       await (
@@ -135,6 +152,7 @@ export default async function BusinessesPage() {
         {pricingLink}
         {paymentsLink}
         {documentsLink}
+        {costsLink}
         {whatsAppReviewLink}
         {senderHealthLink}
         <div>
@@ -158,6 +176,7 @@ export default async function BusinessesPage() {
       {pricingLink}
       {paymentsLink}
       {documentsLink}
+      {costsLink}
       {senderHealthLink}
       {whatsAppReviewLink}
       <div className="flex flex-wrap items-center justify-between gap-4">

@@ -26,6 +26,7 @@ import {
   sourceCheckSchema,
   evidenceUrlSchema,
   searchResultSchema,
+  discoveryProviderCostSchema,
   type DiscoveryWork,
   type RunView,
 } from "../models/discovery";
@@ -829,6 +830,36 @@ export function createDiscoveryRepository(
         },
         { lock: true },
       );
+    },
+    recordProviderCost(work, operationId, value) {
+      return scoped(database, work, work.businessId, async (tx) => {
+        const run = await ownedRun(tx, work);
+        await requireWorkSession(tx, work, clock.now());
+        const parsed = discoveryProviderCostSchema.safeParse(value);
+        if (!parsed.success)
+          throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+        const [usage] = await tx
+          .select()
+          .from(discoveryUsage)
+          .where(
+            and(
+              eq(discoveryUsage.id, operationId),
+              eq(discoveryUsage.runId, run.id),
+              eq(discoveryUsage.businessId, work.businessId),
+            ),
+          );
+        if (!usage || usage.kind === "review")
+          throw new ApplicationError("NOT_FOUND");
+        if (usage.providerCost) {
+          if (!isDeepStrictEqual(usage.providerCost, parsed.data))
+            throw new ApplicationError("CONFLICT");
+          return;
+        }
+        await tx
+          .update(discoveryUsage)
+          .set({ providerCost: parsed.data })
+          .where(eq(discoveryUsage.id, usage.id));
+      });
     },
     record(work, operationId, prospect, at, details) {
       return scoped(

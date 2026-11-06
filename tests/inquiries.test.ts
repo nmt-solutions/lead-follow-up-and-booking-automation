@@ -1,4 +1,5 @@
 import { persistPaidSubscription } from "./support/paid-subscription";
+import { readOperatorCosts } from "./support/costs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
@@ -2562,6 +2563,26 @@ describe("Inquiry handling at the persisted application seam", () => {
       .restart()
       .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
     expect(google.sends).toHaveLength(1);
+    const costs = await readOperatorCosts(h, f.credentials);
+    const ordinary = costs.sources.filter(
+      (r) =>
+        r.source.businessId === f.business.id &&
+        r.sourceId.startsWith("native:opportunity-mail:"),
+    );
+    expect(ordinary).toHaveLength(1);
+    expect(ordinary[0]).toMatchObject({
+      sourceId: `native:opportunity-mail:${result.action?.id}`,
+      source: {
+        kind: "consumption",
+        unit: "send_attempt",
+        quantity: 1,
+        amount: null,
+      },
+    });
+    expect(ordinary[0].source.provider).toContain("gmail");
+    expect(JSON.stringify(ordinary)).not.toMatch(
+      /buyer@example.com|Collection only|Steel inquiry/,
+    );
   });
   it("keeps lost acceptance committed across restart and reconciles only the exact authorized Sent reply without resending", async () => {
     const google = gmailFixture();

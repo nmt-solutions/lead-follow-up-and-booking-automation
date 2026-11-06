@@ -7,6 +7,12 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "operator_cost_record",
+    "operator_cost_planning",
+    "operator_cost_scan",
+    "operator_cost_budget",
+    "operator_cost_alert",
+    "operator_cost_notification_event",
     "seller_issuer_revision",
     "seller_issuer_decision",
     "seller_document",
