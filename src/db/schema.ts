@@ -3,6 +3,13 @@ import type {
   MicrosoftIdentity,
 } from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
+import type {
+  SenderConnectionConfiguration,
+  ReplyRouteConfiguration,
+  SenderIdentityConfiguration,
+  SenderEvidence,
+  SenderInspection,
+} from "../models/senders";
 import type { GoogleCalendarStatus } from "../models/google-calendar";
 import {
   bigint,
@@ -1292,6 +1299,100 @@ function inboxColumns() {
 }
 const inboxScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
 const inboxWrite = sql`(${inboxScope}) and public.current_business_role() in ('owner', 'admin')`;
+function senderPolicies(name: string, mutable: boolean) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxWrite}) and created_by = current_setting('app.actor_id', true)`,
+    }),
+    ...(mutable
+      ? [
+          pgPolicy(`${name}_update`, {
+            for: "update",
+            to: appRuntime,
+            using: inboxWrite,
+            withCheck: inboxWrite,
+          }),
+        ]
+      : []),
+  ];
+}
+function senderColumns() {
+  return {
+    ...inboxColumns(),
+    version: integer("version").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  };
+}
+export const senderConnection = pgTable(
+  "sender_connection",
+  {
+    ...senderColumns(),
+    configuration: jsonb("configuration")
+      .$type<SenderConnectionConfiguration>()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("sender_connection_scope").on(t.id, t.businessId),
+    check("sender_connection_version", sql`${t.version} > 0`),
+    ...senderPolicies("sender_connection", true),
+  ],
+).enableRLS();
+export const senderReplyRoute = pgTable(
+  "sender_reply_route",
+  {
+    ...senderColumns(),
+    configuration: jsonb("configuration")
+      .$type<ReplyRouteConfiguration>()
+      .notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    inboxConnectionId: uuid("inbox_connection_id").notNull(),
+  },
+  (t) => [
+    uniqueIndex("sender_reply_route_scope").on(t.id, t.businessId),
+    uniqueIndex("sender_reply_route_inbox").on(t.inboxConnectionId),
+    ...senderPolicies("sender_reply_route", true),
+  ],
+).enableRLS();
+export const senderIdentity = pgTable(
+  "sender_identity",
+  {
+    ...senderColumns(),
+    configuration: jsonb("configuration")
+      .$type<SenderIdentityConfiguration>()
+      .notNull(),
+    connectionId: uuid("connection_id"),
+    replyRouteId: uuid("reply_route_id"),
+  },
+  (t) => [
+    uniqueIndex("sender_identity_scope").on(t.id, t.businessId),
+    uniqueIndex("sender_identity_reply_selection").on(t.replyRouteId),
+    ...senderPolicies("sender_identity", true),
+  ],
+).enableRLS();
+export const senderObservation = pgTable(
+  "sender_observation",
+  {
+    ...inboxColumns(),
+    identityId: uuid("identity_id").notNull(),
+    evidence: jsonb("evidence").$type<SenderEvidence>().notNull(),
+    context: jsonb("context").$type<SenderInspection>().notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  () => [...senderPolicies("sender_observation", false)],
+).enableRLS();
 function inboxPolicies(name: string) {
   return [
     pgPolicy(`${name}_read`, {
@@ -1590,6 +1691,51 @@ export const inboxOpportunityHistory = pgTable(
 ).enableRLS();
 
 // Installed after unique indexes by secureDatabase, matching the pinned push contract.
+export const senderScopeForeignKeys = [
+  new ForeignKey(
+    senderReplyRoute,
+    foreignKey({
+      name: "sender_route_connection_scope",
+      columns: [senderReplyRoute.connectionId, senderReplyRoute.businessId],
+      foreignColumns: [senderConnection.id, senderConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    senderReplyRoute,
+    foreignKey({
+      name: "sender_route_inbox_scope",
+      columns: [
+        senderReplyRoute.inboxConnectionId,
+        senderReplyRoute.businessId,
+      ],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    senderIdentity,
+    foreignKey({
+      name: "sender_identity_connection_scope",
+      columns: [senderIdentity.connectionId, senderIdentity.businessId],
+      foreignColumns: [senderConnection.id, senderConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    senderIdentity,
+    foreignKey({
+      name: "sender_identity_route_scope",
+      columns: [senderIdentity.replyRouteId, senderIdentity.businessId],
+      foreignColumns: [senderReplyRoute.id, senderReplyRoute.businessId],
+    }),
+  ),
+  new ForeignKey(
+    senderObservation,
+    foreignKey({
+      name: "sender_observation_identity_scope",
+      columns: [senderObservation.identityId, senderObservation.businessId],
+      foreignColumns: [senderIdentity.id, senderIdentity.businessId],
+    }),
+  ),
+];
 export const inboxScopeForeignKeys = [
   new ForeignKey(
     inboxAssociationHistory,

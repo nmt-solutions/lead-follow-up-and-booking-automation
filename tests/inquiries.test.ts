@@ -27,6 +27,7 @@ import { createInquiryHttp } from "../src/http/inquiries";
 import { AiProviderFailure } from "../src/models/ai";
 import { createCommercialAuthorityApplication } from "../src/application/commercial-authority";
 import { createCommercialAuthorityRepository } from "../src/db/commercial-authority-repository";
+import { readySender, fixtureMailBinding } from "./support/senders";
 
 describe("Inquiry handling at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -142,6 +143,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       conversationRefs: [],
       manualRepliesObservable: true,
     });
+    await readySender(h, credentials, business.id, connection.id);
     async function capture(ref: string, text: string) {
       await inbox.capture(credentials, business.id, connection.id, {
         eventId: `event-${ref}`,
@@ -173,6 +175,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       repository: createOpportunityRepository(database, h.clock),
       clock: h.clock,
       provider: {
+        emailIdentity: fixtureMailBinding,
         channels: ["email", "whatsapp"],
         async dispatch(action) {
           effects.push(action);

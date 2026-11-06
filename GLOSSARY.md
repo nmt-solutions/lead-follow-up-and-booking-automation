@@ -92,6 +92,15 @@ A business-specific email address on a domain operated by the service.
 **Outreach sender**:
 A dedicated email identity a business uses to initiate conversations with discovered prospects.
 
+**Sending identity**:
+A Business-owned email identity with a stated address origin, dedicated outreach or ordinary sales purpose, and explicit intended uses.
+
+**Ordinary sales identity**:
+An email identity used for a Business's incoming inquiries and established sales conversations, separate from its dedicated Outreach sender.
+
+**Reply route**:
+The explicit reply-to address and selected sales inbox through which replies reach the Business's conversation workflow.
+
 **Sender health**:
 The authentication and delivery condition of an email sender, assessed through delivery failures and recipient complaints.
 

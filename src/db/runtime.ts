@@ -14,6 +14,22 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*) = 4 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
+        AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname IN ('sender_connection','sender_reply_route','sender_identity','sender_observation'))
+      AND (SELECT count(*) = 11 AND bool_and('app_runtime' = ANY(roles) AND CASE
+        WHEN policyname LIKE '%_read' THEN qual IS NOT NULL
+        WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL
+        WHEN policyname LIKE '%_update' THEN qual IS NOT NULL AND with_check IS NOT NULL ELSE false END)
+        FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('sender_connection','sender_reply_route','sender_identity','sender_observation'))
+      AND (SELECT count(*) = 5 AND bool_and(convalidated) FROM pg_constraint WHERE contype = 'f'
+        AND conname IN ('sender_route_connection_scope','sender_route_inbox_scope','sender_identity_connection_scope','sender_identity_route_scope','sender_observation_identity_scope'))
+      AND NOT has_table_privilege(current_user, 'public.sender_identity', 'DELETE,TRUNCATE')
+      AND NOT has_column_privilege(current_user, 'public.sender_identity', 'business_id', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.sender_connection', 'created_by', 'UPDATE')
+      AND NOT has_column_privilege(current_user, 'public.sender_reply_route', 'business_id', 'UPDATE')
+      AND NOT has_table_privilege(current_user, 'public.sender_observation', 'UPDATE,DELETE,TRUNCATE')
       AND (SELECT count(*) = 2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
         AND NOT pg_has_role(current_user, c.relowner, 'MEMBER'))
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

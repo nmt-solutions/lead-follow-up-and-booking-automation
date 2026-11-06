@@ -4,6 +4,11 @@ import {
 } from "./application-error";
 
 const failures = {
+  INVALID_PROVIDER_RESPONSE: {
+    status: 502,
+    message:
+      "The connection check could not be validated. Refresh setup or ask an Admin to review the integration.",
+  },
   CALENDAR_SETUP_REQUIRED: {
     status: 503,
     message:

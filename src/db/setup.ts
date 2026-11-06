@@ -4,6 +4,11 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  senderConnection,
+  senderReplyRoute,
+  senderIdentity,
+  senderObservation,
+  senderScopeForeignKeys,
   business,
   membership,
   invitation,
@@ -347,6 +352,12 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, account_kind, tenant_id, scopes, authorized_at, actor_id, at) ON public.microsoft_calendar_grant FROM app_runtime;
         REVOKE UPDATE (consumed) ON public.microsoft_calendar_oauth FROM app_runtime;
       END IF;
+      IF to_regclass('public.sender_identity') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.sender_connection, public.sender_reply_route, public.sender_identity, public.sender_observation FROM app_runtime;
+        REVOKE UPDATE (version, configuration, updated_at) ON public.sender_connection FROM app_runtime;
+        REVOKE UPDATE (version, configuration, updated_at, connection_id, inbox_connection_id) ON public.sender_reply_route FROM app_runtime;
+        REVOKE UPDATE (version, configuration, updated_at, connection_id, reply_route_id) ON public.sender_identity FROM app_runtime;
+      END IF;
       -- The pinned push can replace ai_execution_scope before dropping its
       -- dependents. Access above is paused; remove only these named FKs so push
       -- can reconcile that unique constraint. secureDatabase validates/restores
@@ -365,6 +376,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...senderScopeForeignKeys,
     ...inboxScopeForeignKeys,
     ...opportunityScopeForeignKeys,
     ...commercialScopeForeignKeys,
@@ -413,6 +425,7 @@ export async function secureDatabase(pool: Pool) {
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...senderScopeForeignKeys,
       ...aiExecutionScopeForeignKeys,
       ...inboxScopeForeignKeys,
       ...opportunityScopeForeignKeys,
@@ -451,6 +464,10 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      senderConnection,
+      senderReplyRoute,
+      senderIdentity,
+      senderObservation,
       microsoftCalendarGrant,
       microsoftCalendarOauth,
       googleCalendarGrant,
@@ -516,6 +533,15 @@ export async function secureDatabase(pool: Pool) {
     }
     await client.query(`
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON sender_connection, sender_reply_route, sender_identity, sender_observation FROM app_runtime;
+      GRANT SELECT, INSERT ON sender_connection, sender_reply_route, sender_identity, sender_observation TO app_runtime;
+      GRANT UPDATE (version, configuration, updated_at) ON sender_connection TO app_runtime;
+      GRANT UPDATE (version, configuration, updated_at, connection_id, inbox_connection_id) ON sender_reply_route TO app_runtime;
+      GRANT UPDATE (version, configuration, updated_at, connection_id, reply_route_id) ON sender_identity TO app_runtime;
+      ALTER TABLE sender_connection FORCE ROW LEVEL SECURITY;
+      ALTER TABLE sender_reply_route FORCE ROW LEVEL SECURITY;
+      ALTER TABLE sender_identity FORCE ROW LEVEL SECURITY;
+      ALTER TABLE sender_observation FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON google_calendar_grant, google_calendar_oauth FROM app_runtime;
       GRANT SELECT, INSERT ON google_calendar_grant, google_calendar_oauth TO app_runtime;
       GRANT UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON google_calendar_grant TO app_runtime;

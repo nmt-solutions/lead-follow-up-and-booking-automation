@@ -2,9 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, or } from "drizzle-orm";
 import type { OpportunityRepository } from "../application/opportunity-control";
 import { ApplicationError } from "../models/application-error";
-import { hasMfa } from "../auth/access";
+import { requireSalesSession } from "./sales-session";
+export { requireSalesSession } from "./sales-session";
 import type { BusinessRole } from "../models/team";
-import type { WorkIdentity } from "../models/discovery";
 import type { Clock } from "../models/business";
 import type { Actor } from "../models/business";
 import {
@@ -22,9 +22,9 @@ import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { readCommercialPolicy } from "./commercial-authority-repository";
 import { inquiryDispatchContext, lockInquiryProfile } from "./inquiry-context";
+import { responseSender } from "./sender-repository";
 import {
   membership,
-  session,
   user,
   inboxOpportunity,
   inboxMessage,
@@ -36,36 +36,6 @@ import {
   opportunityDueAction,
 } from "./schema";
 
-// Recheck persisted session/factor on this same transaction connection. No nested
-// authentication transaction while holding the dispatch lock (which could exhaust the pool).
-export async function requireSalesSession(
-  tx: Transaction,
-  identity: WorkIdentity,
-  at: Date,
-  role: BusinessRole,
-) {
-  const [current] = await tx
-    .select({
-      token: session.token,
-      expiresAt: session.expiresAt,
-      enrolled: user.twoFactorEnabled,
-    })
-    .from(session)
-    .innerJoin(user, eq(user.id, session.userId))
-    .where(
-      and(
-        eq(session.id, identity.sessionId),
-        eq(session.userId, identity.userId),
-      ),
-    );
-  if (!current || current.expiresAt <= at)
-    throw new ApplicationError("UNAUTHENTICATED");
-  if (
-    (role !== "salesperson" || current.enrolled) &&
-    !(await hasMfa(tx, current.token, at))
-  )
-    throw new ApplicationError("MFA_REQUIRED");
-}
 type Need = typeof inboxOpportunity.$inferSelect;
 type Action = typeof opportunityDueAction.$inferSelect;
 function snapshot(row: Need): ControlSnapshot {
@@ -663,6 +633,29 @@ export function createOpportunityRepository(
                           : null));
           if (reason)
             return { action: await cancel(tx, reason), failure: null };
+          const sender =
+            ctx.connection.channel === "email"
+              ? await responseSender(
+                  tx,
+                  businessId,
+                  ctx.connection.id,
+                  now(),
+                  ctx.message.content.kind === "direct_inquiry"
+                    ? "inbound"
+                    : "existing_conversation",
+                )
+              : null;
+          if (sender?.reason)
+            return { action: await cancel(tx, sender.reason), failure: null };
+          if (
+            sender?.sender &&
+            (sender.sender.adapterKey !== provider.emailIdentity?.adapterKey ||
+              sender.sender.mode !== provider.emailIdentity.mode)
+          )
+            return {
+              action: await cancel(tx, "sender_transport_unavailable"),
+              failure: null,
+            };
           // Reviewed exception to external-I/O-outside-transactions: the shared lock is held
           // through bounded adapter I/O, so a committed pause cannot precede a stale send.
           // Policy/team/connection changes use this same lock. Providers must never retry here.
@@ -675,6 +668,7 @@ export function createOpportunityRepository(
                 connectionId: ctx.connection.id,
                 channel: ctx.connection.channel,
                 evaluation: action.evaluation,
+                ...(sender?.sender ? { sender: sender.sender } : {}),
                 ...(inquiry?.reply ? { reply: inquiry.reply } : {}),
               },
               signal,

@@ -7,6 +7,10 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "sender_connection",
+    "sender_reply_route",
+    "sender_identity",
+    "sender_observation",
     "call_activity",
     "call_revision",
     "microsoft_calendar_grant",

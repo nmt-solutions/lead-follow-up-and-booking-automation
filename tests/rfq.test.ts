@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { readySender, fixtureMailBinding } from "./support/senders";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
 import { createInboxApplication } from "../src/application/inbox";
@@ -86,6 +87,7 @@ describe("Quotation requests through the persisted application seam", () => {
       conversationRefs: [],
       manualRepliesObservable: true,
     });
+    await readySender(h, credentials, business.id, connection.id);
     await inbox.capture(credentials, business.id, connection.id, {
       eventId: "first",
       messageRef: "first",
@@ -106,6 +108,7 @@ describe("Quotation requests through the persisted application seam", () => {
       repository: createOpportunityRepository(database, h.clock),
       clock: h.clock,
       provider: {
+        emailIdentity: fixtureMailBinding,
         channels: ["email"],
         async dispatch(action) {
           effects.push(action);

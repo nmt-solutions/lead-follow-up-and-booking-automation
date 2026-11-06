@@ -5,6 +5,10 @@ import { configuredMicrosoftCalendar } from "../microsoft-calendar/configuration
 import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
 import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
+import { createSenderApplication } from "../application/senders";
+import { createSenderRepository } from "../db/sender-repository";
+import { createSenderHttp } from "../http/senders";
+import { unavailableSenderAdapter } from "../senders/adapter";
 import { createCallApplication } from "../application/calls";
 import { createCallRepository } from "../db/call-repository";
 import { createCallHttp } from "../http/calls";
@@ -109,6 +113,14 @@ async function composeServices() {
     clock: { now: () => new Date() },
   });
   const { authenticate, authenticatePrivileged, authenticatePlatform } = access;
+  const senders = createSenderApplication({
+    authenticate: access.authenticateForWork,
+    repository: createSenderRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    adapter: unavailableSenderAdapter,
+    clock: { now: () => new Date() },
+  });
   const application = createBusinessApplication({
     authenticate,
     authenticatePrivileged,
@@ -276,6 +288,12 @@ async function composeServices() {
     timeoutMs: 5000,
   });
   return {
+    senders,
+    sendersHttp: createSenderHttp({
+      application: senders,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     microsoftCalendar,
     microsoftCalendarHttp: createMicrosoftCalendarHttp({
       application: microsoftCalendar,

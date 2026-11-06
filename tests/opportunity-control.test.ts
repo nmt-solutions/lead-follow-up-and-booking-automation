@@ -10,6 +10,7 @@ import { createCommercialAuthorityRepository } from "../src/db/commercial-author
 import type { OpportunityDispatch } from "../src/models/opportunity-control";
 import { createOpportunityHttp } from "../src/http/opportunity-control";
 import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
+import { readySender, fixtureMailBinding } from "./support/senders";
 
 describe("Opportunity control at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -45,6 +46,7 @@ describe("Opportunity control at the persisted application seam", () => {
       repository: createOpportunityRepository(database, h.clock),
       clock: h.clock,
       provider: {
+        emailIdentity: fixtureMailBinding,
         channels: ["email", "whatsapp"],
         dispatch: (action) => effect(action),
       },
@@ -54,7 +56,7 @@ describe("Opportunity control at the persisted application seam", () => {
     await h?.close();
   });
 
-  async function setup(suffix: string) {
+  async function setup(suffix: string, withSender = true) {
     h.clock.set("2026-11-05T09:00:00Z");
     const credentials = await h.signIn(`control-${suffix}@example.com`);
     const actor = await h.authenticate(credentials);
@@ -70,6 +72,9 @@ describe("Opportunity control at the persisted application seam", () => {
       conversationRefs: [],
       manualRepliesObservable: true,
     });
+    const sender = withSender
+      ? await readySender(h, credentials, business.id, connection.id)
+      : null;
     await inbox.capture(credentials, business.id, connection.id, {
       eventId: `in-${suffix}`,
       messageRef: `m-${suffix}`,
@@ -90,6 +95,7 @@ describe("Opportunity control at the persisted application seam", () => {
       need: workspace.opportunities[0],
       conversationId: workspace.conversations[0].id,
       suffix,
+      sender,
     };
   }
 
@@ -202,6 +208,48 @@ describe("Opportunity control at the persisted application seam", () => {
       dueAt: h.clock.now().toISOString(),
     });
   }
+  it("blocks enabled email delivery without a ready persisted sender and explicit reply path", async () => {
+    const f = await setup("sender-required", false);
+    await enable(f);
+    const action = await queue(f);
+    const before = outbound.length;
+    expect(
+      await app.dispatch(f.credentials, f.businessId, action.id),
+    ).toMatchObject({ state: "cancelled", reason: "sender_setup_required" });
+    expect(outbound).toHaveLength(before);
+  });
+  it("rechecks sender proof at dispatch, includes truthful identity in effects, and blocks after reply capture is lost", async () => {
+    const f = await setup("sender-health");
+    await enable(f);
+    const action = await queue(f);
+    const before = outbound.length;
+    expect(
+      await app.dispatch(f.credentials, f.businessId, action.id),
+    ).toMatchObject({ state: "dispatched" });
+    expect(outbound[before].sender).toMatchObject({
+      fromAddress: "sales@supplier.example",
+      fromName: "Sales team · Supplier",
+      replyTo: "sales@supplier.example",
+      platformDisclosure: "Sent through Business operations for Supplier",
+      mode: "fixture",
+    });
+    const queued = await queue(f);
+    if (!f.sender) throw new Error("Sender fixture missing");
+    f.sender.fixture.changes.reply_capture = "unavailable";
+    await f.sender.app.check(
+      f.credentials,
+      f.businessId,
+      f.sender.identity.id,
+      { expectedVersion: 1 },
+    );
+    expect(
+      await app.dispatch(f.credentials, f.businessId, queued.id),
+    ).toMatchObject({ state: "cancelled", reason: "sender_not_ready" });
+    expect(outbound).toHaveLength(before + 1);
+    expect(
+      (await inbox.workspace(f.credentials, f.businessId)).conversations,
+    ).toHaveLength(1);
+  });
   const manual = (f: Fixture) => ({
     eventId: `manual-${f.suffix}`,
     messageRef: `sent-${f.suffix}`,

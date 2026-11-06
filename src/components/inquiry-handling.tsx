@@ -131,6 +131,12 @@ export function InquiryHandling({
       <div className="flex flex-wrap gap-x-4 text-sm">
         <Link
           className="inline-flex min-h-11 items-center text-primary underline"
+          href={`/businesses/${businessId}/senders`}
+        >
+          Review sender and reply setup
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center text-primary underline"
           href={`/businesses/${businessId}/knowledge`}
         >
           Review Business knowledge

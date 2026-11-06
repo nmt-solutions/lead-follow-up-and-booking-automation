@@ -75,6 +75,17 @@ export type DueAction = {
   dueAt: string;
 };
 export type OpportunityDispatch = {
+  sender?: {
+    identityId: string;
+    identityVersion: number;
+    fromAddress: string;
+    fromName: string;
+    replyTo: string;
+    platformDisclosure: string;
+    evidenceId: string;
+    adapterKey: string;
+    mode: "unconfigured" | "fixture" | "live";
+  };
   actionId: string;
   businessId: string;
   opportunityId: string;
@@ -94,6 +105,7 @@ export type OpportunityDispatch = {
  * Implementations must bound/cancel their I/O and honor actionId as an idempotency key.
  */
 export type OpportunityActionProvider = {
+  emailIdentity?: { adapterKey: string; mode: "fixture" | "live" };
   channels: readonly ("email" | "whatsapp")[];
   dispatch(action: OpportunityDispatch, signal: AbortSignal): Promise<void>;
 };
