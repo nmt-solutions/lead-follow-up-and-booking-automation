@@ -13,7 +13,11 @@ import {
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { requireBillingReviewer } from "./billing-access";
 
-async function read(tx: Transaction, businessId: string, at: Date) {
+export async function readBillingWorkspace(
+  tx: Transaction,
+  businessId: string,
+  at: Date,
+) {
   const rows = await tx
     .select()
     .from(billingProfileRevision)
@@ -46,6 +50,7 @@ async function read(tx: Transaction, businessId: string, at: Date) {
   }
   return state;
 }
+const read = readBillingWorkspace;
 async function actorName(tx: Transaction, actorId: string) {
   const [identity] = await tx
     .select({ name: user.name })
