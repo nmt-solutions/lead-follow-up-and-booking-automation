@@ -35,7 +35,7 @@ export async function retainMailManual(
     throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
   const { work } = batch.snapshot;
   if (
-    (await isOpportunityMailObservation(tx, batch, selected)) ||
+    (await isOpportunityMailObservation(tx, batch, selected, at)) ||
     (await observeSequenceSent(tx, batch, selected, at))
   ) {
     await retainMailObservation(tx, batch, selected, at);

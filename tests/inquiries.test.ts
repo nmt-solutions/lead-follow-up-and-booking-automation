@@ -1959,6 +1959,47 @@ describe("Inquiry handling at the persisted application seam", () => {
     );
     expect(control.state).toBe("automation");
   });
+  it("pauses automation for a changed manual Sent reply even when its RFC identity matches the application intent", async () => {
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    google.control.sendLost = true;
+    const f = await fixture("native-manual-conflict", "rfq", true, google);
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    h.clock.set("2026-11-05T09:00:01Z");
+    await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    const sent = google.messages.get("gmail-sent-1")!;
+    sent.internalDate = String(h.clock.now().getTime());
+    (sent.payload as { body: { data: string } }).body.data = Buffer.from(
+      "I will handle this inquiry personally.",
+    ).toString("base64url");
+    google.histories.set("18446744073709551630", {
+      historyId: "18446744073709551631",
+      history: [
+        {
+          id: "18446744073709551631",
+          messagesAdded: [
+            { message: { id: "gmail-sent-1", threadId: "abc123" } },
+          ],
+        },
+      ],
+    });
+    await f.synchronize!();
+    expect(
+      (await f.opportunities.read(f.credentials, f.business.id, f.need.id))
+        .state,
+    ).toBe("human");
+    expect(
+      (await f.app.reconcile(f.credentials, f.business.id, f.need.id, ready.id))
+        .action,
+    ).toMatchObject({
+      state: "committed",
+      email: { result: { status: "unknown" }, sent: null },
+    });
+    expect(google.sends).toHaveLength(1);
+  });
   it("associates a native buyer reply to the same inquiry even before its application Sent message is synchronized", async () => {
     const google = gmailFixture();
     google.control.scopes += ` ${gmailSendScope}`;

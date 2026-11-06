@@ -355,7 +355,7 @@ export function InquiryHandling({
                     onClick={() => delivery(run.id, "dispatch")}
                   >
                     {working === `${run.id}:dispatch`
-                      ? "Sending prepared reply?"
+                      ? "Sending prepared reply…"
                       : "Send prepared Gmail reply"}
                   </Button>
                   {!run.reply.nativeGmail && (
@@ -376,7 +376,7 @@ export function InquiryHandling({
                     onClick={() => delivery(run.id, "reconcile")}
                   >
                     {working === `${run.id}:reconcile`
-                      ? "Checking Sent evidence?"
+                      ? "Checking Sent evidence…"
                       : "Check Sent evidence"}
                   </Button>
                 )}

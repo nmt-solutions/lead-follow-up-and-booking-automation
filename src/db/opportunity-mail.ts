@@ -34,6 +34,7 @@ export async function isOpportunityMailObservation(
   tx: Transaction,
   batch: MailboxBatch,
   selected: MailboxBatch["selected"][number],
+  at: Date,
 ) {
   const { snapshot } = batch,
     { event, metadata } = selected;
@@ -55,9 +56,20 @@ export async function isOpportunityMailObservation(
     (e) =>
       e.mailboxId === snapshot.work.mailboxId &&
       metadata.native?.internetMessageId === e.internetMessageId &&
+      metadata.folderRefs.includes("SENT") &&
       event.native.from === e.fromAddress &&
       event.native.to.length === 1 &&
-      event.native.to[0] === e.recipient,
+      event.native.to[0] === e.recipient &&
+      metadata.native.replyTo?.length === 1 &&
+      metadata.native.replyTo[0] === e.replyTo &&
+      metadata.native.inReplyTo === e.parent.internetMessageId &&
+      event.native.inReplyTo === e.parent.internetMessageId &&
+      event.conversationRef === e.parent.threadRef &&
+      event.subject === e.subject &&
+      event.text.replace(/\r\n|\r/g, "\n") ===
+        e.body.replace(/\r\n|\r/g, "\n") &&
+      new Date(event.occurredAt) >= new Date(e.reservedAt) &&
+      new Date(event.occurredAt) <= at,
   );
 }
 
