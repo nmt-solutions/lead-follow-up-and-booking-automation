@@ -143,6 +143,7 @@ export type SenderInspection = {
   replyRoute: ReplyRoute | null;
   replyConnection: SenderConnection | null;
   nativeGmail?: { send: boolean; reply: boolean };
+  nativeMicrosoft?: { send: boolean; reply: boolean };
 };
 export function sameSenderBinding(a: SenderBinding, b: SenderBinding) {
   return Object.entries(a).every(
@@ -150,6 +151,7 @@ export function sameSenderBinding(a: SenderBinding, b: SenderBinding) {
   );
 }
 export type SenderAdapter = {
+  select?(provider: string): SenderAdapter;
   key: string;
   mode: "unconfigured" | "fixture" | "live";
   inspect(context: SenderInspection, signal: AbortSignal): Promise<unknown>;

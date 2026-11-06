@@ -73,6 +73,7 @@ export type InquiryResult = z.infer<typeof inquiryResultSchema>;
 export const inquiryRunSchema = inquiryResultSchema.extend({
   reply: z.strictObject({
     nativeGmail: z.boolean(),
+    nativeProvider: z.enum(["gmail", "microsoft"]).nullable().optional(),
     recipient: z.string(),
     subject: z.string(),
     fromAddress: z.string().nullable(),

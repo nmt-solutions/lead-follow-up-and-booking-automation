@@ -23,7 +23,11 @@ import {
   type AiProfile,
   type AiProvider,
 } from "../src/models/ai";
-import type { OpportunityDispatch } from "../src/models/opportunity-control";
+import { routeOpportunityMail } from "../src/email-sequences/opportunity-provider";
+import type {
+  OpportunityActionProvider,
+  OpportunityDispatch,
+} from "../src/models/opportunity-control";
 import { createInquiryHttp } from "../src/http/inquiries";
 import { AiProviderFailure } from "../src/models/ai";
 import { createCommercialAuthorityApplication } from "../src/application/commercial-authority";
@@ -43,6 +47,12 @@ import { createGmailConnection } from "../src/gmail/connection";
 import { createGmailProvider } from "../src/gmail/provider";
 import { createGmailOpportunityMail } from "../src/gmail/opportunity-mail";
 import { createGmailSenderAdapter } from "../src/gmail/sender";
+import { microsoftMailFixture } from "./support/microsoft-mail";
+import { createMicrosoftMailApplication } from "../src/application/microsoft-mail";
+import { createMicrosoftMailConnection } from "../src/microsoft-mail/connection";
+import { createMicrosoftMailProvider } from "../src/microsoft-mail/provider";
+import { createMicrosoftOpportunityMail } from "../src/microsoft-mail/opportunity-mail";
+import { createMicrosoftSenderAdapter } from "../src/microsoft-mail/sender";
 import { reviewedSenderHealth } from "./support/sender-health";
 
 describe("Inquiry handling at the persisted application seam", () => {
@@ -98,6 +108,7 @@ describe("Inquiry handling at the persisted application seam", () => {
     activateProfile = true,
     google?: ReturnType<typeof gmailFixture>,
     evidenceUntil = "2028-01-01T00:00:00Z",
+    microsoft?: ReturnType<typeof microsoftMailFixture>,
   ) {
     h.clock.set("2026-11-05T09:00:00Z");
     let health: Awaited<ReturnType<typeof reviewedSenderHealth>> | undefined;
@@ -172,6 +183,8 @@ describe("Inquiry handling at the persisted application seam", () => {
       credentials,
       business.id,
       connection.id,
+      {},
+      microsoft ? "microsoft" : "gmail",
     );
     let synchronize: (() => Promise<unknown>) | undefined;
     let reauthorize: (() => Promise<void>) | undefined;
@@ -181,7 +194,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       ReturnType<typeof createMailboxApplication<Headers>> | undefined;
     let nativeMailbox:
       import("../src/models/mailboxes").MailboxView | undefined;
-    if (google) {
+    if (google || microsoft) {
       mailboxes = createMailboxApplication({
         authenticate: h.access.authenticateForWork,
         repository: createMailboxRepository(database, h.clock),
@@ -196,25 +209,50 @@ describe("Inquiry handling at the persisted application seam", () => {
           requestedRead: true,
           requestedSend: true,
           enabled: true,
-          scope: { kind: "folders", refs: ["Label_sales"] },
+          scope: {
+            kind: "folders",
+            refs: [microsoft ? "sales" : "Label_sales"],
+          },
           history: null,
           salesSubjectTerms: ["steel"],
         },
       });
-      const nativeConnection = createGmailConnection(database, {
-        clock: h.clock,
-        configuration: google.configuration,
-        fetch: google.fetch,
-      });
-      const gmail = createGmailApplication({
-        access: h.access,
-        connection: nativeConnection,
-      });
+      const nativeServices = microsoft
+        ? (() => {
+            const connection = createMicrosoftMailConnection(database, {
+              clock: h.clock,
+              configuration: microsoft.configuration,
+              fetch: microsoft.fetch,
+            });
+            return {
+              auth: createMicrosoftMailApplication({
+                access: h.access,
+                connection,
+              }),
+              provider: createMicrosoftMailProvider(connection, h.clock),
+            };
+          })()
+        : (() => {
+            const connection = createGmailConnection(database, {
+              clock: h.clock,
+              configuration: google!.configuration,
+              fetch: google!.fetch,
+            });
+            return {
+              auth: createGmailApplication({ access: h.access, connection }),
+              provider: createGmailProvider(connection, h.clock),
+            };
+          })();
+      const gmail = nativeServices.auth;
       const oauth = await gmail.start(
         credentials,
         business.id,
         nativeMailbox.id,
       );
+      if (microsoft)
+        microsoft.identity.nonce = new URL(
+          oauth.authorizationUrl,
+        ).searchParams.get("nonce")!;
       await gmail.callback(credentials, business.id, nativeMailbox.id, {
         state: new URL(oauth.authorizationUrl).searchParams.get("state"),
         code: "fixture-code",
@@ -228,6 +266,10 @@ describe("Inquiry handling at the persisted application seam", () => {
           business.id,
           authorizedMailboxId,
         );
+        if (microsoft)
+          microsoft.identity.nonce = new URL(
+            oauth.authorizationUrl,
+          ).searchParams.get("nonce")!;
         await gmail.callback(credentials, business.id, authorizedMailboxId, {
           state: new URL(oauth.authorizationUrl).searchParams.get("state"),
           code: "fixture-code",
@@ -236,7 +278,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       const sync = createMailboxApplication({
         authenticate: h.access.authenticateForWork,
         repository: createMailboxRepository(database, h.clock),
-        provider: createGmailProvider(nativeConnection, h.clock),
+        provider: nativeServices.provider,
         clock: h.clock,
         enqueue: async () => {},
       });
@@ -253,7 +295,15 @@ describe("Inquiry handling at the persisted application seam", () => {
       connection = { ...connection, id: mailboxId };
     }
     async function capture(ref: string, text: string) {
-      if (google) {
+      if (microsoft) {
+        microsoft.add(ref, { text, at: h.clock.now().toISOString() });
+        microsoft.pages.set("sales", {
+          value: [{ id: ref }],
+          "@odata.deltaLink":
+            "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=sales-steady",
+        });
+        await synchronize!();
+      } else if (google) {
         google.add(ref, { text, at: h.clock.now().toISOString() });
         google.pages.set("Label_sales", {
           messages: [{ id: ref, threadId: "abc123" }],
@@ -280,7 +330,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       return conversation.messages.find((m) => m.messageRef === ref)!;
     }
     const first = await capture("first", "Delivery?\nQuantity: 500");
-    if (google && mailboxes && nativeMailbox) {
+    if ((google || microsoft) && mailboxes && nativeMailbox) {
       nativeMailbox = await mailboxes.save(credentials, business.id, {
         id: nativeMailbox.id,
         expectedVersion: nativeMailbox.version,
@@ -298,12 +348,15 @@ describe("Inquiry handling at the persisted application seam", () => {
           inboxConnectionId: nativeMailbox.id,
         },
       });
-      sender.adapter.key = "gmail-sequence-v1";
+      sender.adapter.key = microsoft
+        ? "microsoft-mail-send-v1"
+        : "gmail-sequence-v1";
       sender.adapter.mode = "live";
-      sender.adapter.inspect = createGmailSenderAdapter({
-        clock: h.clock,
-        evidence: [],
-      }).inspect;
+      sender.adapter.inspect = (
+        microsoft
+          ? createMicrosoftSenderAdapter({ clock: h.clock })
+          : createGmailSenderAdapter({ clock: h.clock, evidence: [] })
+      ).inspect;
       health = await reviewedSenderHealth(
         h,
         business.id,
@@ -321,7 +374,7 @@ describe("Inquiry handling at the persisted application seam", () => {
       credentials,
       business.id,
       need.id,
-      google ? "buyer@example.com" : "buyer@example.net",
+      google || microsoft ? "buyer@example.com" : "buyer@example.net",
     );
     const effects: OpportunityDispatch[] = [];
     let failAfterSend = false;
@@ -329,20 +382,26 @@ describe("Inquiry handling at the persisted application seam", () => {
       database,
       h.clock,
     );
-    const provider = google
-      ? createGmailOpportunityMail({
-          configuration: google.configuration,
-          fetch: google.fetch,
+    const provider = microsoft
+      ? createMicrosoftOpportunityMail({
+          configuration: microsoft.configuration,
+          fetch: microsoft.fetch,
           clock: h.clock,
         })
-      : {
-          emailIdentity: fixtureMailBinding,
-          channels: ["email", "whatsapp"] as const,
-          async dispatch(action: OpportunityDispatch) {
-            effects.push(action);
-            if (failAfterSend) throw new Error("private-channel-error");
-          },
-        };
+      : google
+        ? createGmailOpportunityMail({
+            configuration: google.configuration,
+            fetch: google.fetch,
+            clock: h.clock,
+          })
+        : {
+            emailIdentity: fixtureMailBinding,
+            channels: ["email", "whatsapp"] as const,
+            async dispatch(action: OpportunityDispatch) {
+              effects.push(action);
+              if (failAfterSend) throw new Error("private-channel-error");
+            },
+          };
     const opportunities = createOpportunityApplication({
       authenticate: h.authenticate,
       authenticateForWork: h.access.authenticateForWork,
@@ -476,14 +535,14 @@ describe("Inquiry handling at the persisted application seam", () => {
       readAuthorization,
       mailboxes,
       nativeMailbox,
-      restart: () =>
+      restart: (selectedProvider: OpportunityActionProvider = provider) =>
         createInquiryApplication({
           authenticate: h.authenticate,
           authenticateForWork: h.access.authenticateForWork,
           repository: createInquiryRepository(database, h.clock),
           ai,
           opportunityRepository: createOpportunityRepository(database, h.clock),
-          provider,
+          provider: selectedProvider,
           clock: h.clock,
         }),
       failAfterSend() {
@@ -1831,6 +1890,620 @@ describe("Inquiry handling at the persisted application seam", () => {
     }
     await verifyRuntimeRole(h.runtime);
   });
+  it("accepts an ordinary Microsoft reply once without inventing native IDs or delivery", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const f = await fixture(
+      "microsoft-native",
+      "rfq",
+      true,
+      undefined,
+      undefined,
+      graph,
+    );
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    const result = await f.app.dispatch(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      ready.id,
+    );
+    expect(result.action).toMatchObject({
+      state: "dispatched",
+      email: {
+        result: {
+          status: "accepted_pending_identity",
+          acceptance: {
+            provider: "microsoft",
+            evidence: "provider_response",
+            recipient: "buyer@example.com",
+          },
+        },
+        sent: null,
+      },
+    });
+    expect(graph.sends).toHaveLength(1);
+    await f
+      .restart()
+      .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    expect(graph.sends).toHaveLength(1);
+  });
+  it("reconciles exact current Microsoft Sent evidence and treats changed Outlook replies as human takeover", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const f = await fixture(
+      "microsoft-sent",
+      "rfq",
+      true,
+      undefined,
+      undefined,
+      graph,
+    );
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+    const wire = graph.sends[0],
+      rfc = /^Message-ID: (.+)$/m.exec(wire)![1].trim();
+    const sent = graph.add("ms-sent", {
+      folder: "sent",
+      from: "sales@supplier.example",
+      to: "buyer@example.com",
+      reply: "<first@example.com>",
+      at: h.clock.now().toISOString(),
+      text: ready.body!,
+    });
+    sent.internetMessageId = rfc;
+    Object.assign(sent, {
+      replyTo: [{ emailAddress: { address: "sales@supplier.example" } }],
+    });
+    graph.pages.set("sent-steady", {
+      value: [{ id: "ms-sent" }],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sent/messages/delta?$deltatoken=sent-next",
+    });
+    await f.synchronize!();
+    const result = await f.app.reconcile(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      ready.id,
+    );
+    expect(result.action).toMatchObject({
+      state: "dispatched",
+      email: {
+        result: {
+          status: "accepted",
+          receipt: {
+            messageRef: "ms-sent",
+            threadRef: "thread-1",
+            evidence: "sent_folder",
+          },
+        },
+        sent: { provider: "microsoft", inReplyTo: "<first@example.com>" },
+      },
+    });
+    expect(
+      (await f.opportunities.read(f.credentials, f.business.id, f.need.id))
+        .state,
+    ).toBe("automation");
+    h.clock.set("2026-11-05T09:00:01Z");
+    graph.add("ms-manual", {
+      folder: "sent",
+      from: "sales@supplier.example",
+      to: "buyer@example.com",
+      reply: "<first@example.com>",
+      at: h.clock.now().toISOString(),
+      text: "Human changed answer",
+    });
+    graph.pages.set("sent-next", {
+      value: [{ id: "ms-manual" }],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sent/messages/delta?$deltatoken=sent-last",
+    });
+    await f.synchronize!();
+    expect(
+      (await f.opportunities.read(f.credentials, f.business.id, f.need.id))
+        .state,
+    ).toBe("human");
+    expect(graph.sends).toHaveLength(1);
+  });
+  it.each(["lost", "malformed", "server"] as const)(
+    "keeps Microsoft %s transport outcomes committed across restart and HTTP recovery",
+    async (mode) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await fixture(
+        `ms-unknown-${mode}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      graph.control.sendLost = mode === "lost";
+      graph.control.sendMalformed = mode === "malformed";
+      graph.control.sendError = mode === "server" ? 503 : 0;
+      const result = await f.app.dispatch(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(result.action).toMatchObject({
+        state: "committed",
+        email: { result: { status: "unknown" }, sent: null },
+      });
+      await f
+        .restart()
+        .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      const http = createInquiryHttp({
+        application: f.restart(),
+        origin: "http://localhost:3000",
+        reportFailure() {},
+      });
+      const headers = new Headers(f.credentials);
+      headers.set("origin", "http://localhost:3000");
+      headers.set("content-type", "application/json");
+      const response = await http.reconcile(
+        new Request("http://localhost:3000/reconcile", {
+          method: "POST",
+          headers,
+          body: "{}",
+        }),
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(await response.json()).toMatchObject({
+        success: true,
+        data: { action: { state: "committed" } },
+      });
+      expect(graph.sends).toHaveLength(1);
+    },
+  );
+  it.each([401, 403, 429])(
+    "records Microsoft %s transport rejection, persistent authorization health and separate read access",
+    async (status) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await fixture(
+        `ms-rejected-${status}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      graph.control.sendError = status;
+      const result = await f.app.dispatch(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(result.action).toMatchObject({
+        state: "cancelled",
+        email: {
+          result: {
+            status: "not_accepted",
+            reason: status === 429 ? "rate_limited" : "rejected",
+          },
+        },
+      });
+      expect(await f.readAuthorization!()).toMatchObject({
+        read: status !== 401,
+        send: status === 429,
+      });
+      const health = await f.health!.app.workspace(
+        f.health!.operator,
+        f.business.id,
+        true,
+      );
+      expect(
+        health.identities.find((i) => i.id === f.sender.identity.id)!.incidents
+          .length,
+      ).toBe(status === 429 ? 0 : 1);
+      await f
+        .restart()
+        .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      expect(graph.sends).toHaveLength(1);
+    },
+  );
+  it.each(["scope", "owner", "session", "mfa", "health"] as const)(
+    "rechecks Microsoft %s after refresh under the shared dispatch lock",
+    async (change) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      graph.control.expiresIn = 90;
+      const f = await fixture(
+        `ms-refresh-${change}`,
+        "rfq",
+        true,
+        undefined,
+        "2026-11-05T09:01:00Z",
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      h.clock.set("2026-11-05T09:00:40Z");
+      graph.identity.beforeRefresh = async () => {
+        if (change === "scope")
+          graph.identity.scopes = graph.identity.scopes.replace(
+            "Mail.Send",
+            "",
+          );
+        if (change === "owner") graph.control.ownerId = "substituted-owner";
+        if (change === "session") await h.signOut(f.credentials);
+        if (change === "mfa") h.clock.set("2026-11-05T22:00:00Z");
+        if (change === "health") h.clock.set("2026-11-05T09:01:01Z");
+      };
+      if (change === "session" || change === "mfa")
+        await expect(
+          f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+        ).rejects.toMatchObject({
+          code: change === "session" ? "UNAUTHENTICATED" : "MFA_REQUIRED",
+        });
+      else
+        expect(
+          (
+            await f.app.dispatch(
+              f.credentials,
+              f.business.id,
+              f.need.id,
+              ready.id,
+            )
+          ).action?.state,
+        ).toBe("cancelled");
+      expect(graph.identity.refreshes).toBe(1);
+      expect(graph.sends).toEqual([]);
+    },
+  );
+  it("routes ordinary Gmail and Microsoft replies simultaneously and rejects another Business actor", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const google = gmailFixture();
+    google.control.scopes += ` ${gmailSendScope}`;
+    const m = await fixture(
+      "ms-router",
+      "rfq",
+      true,
+      undefined,
+      undefined,
+      graph,
+    );
+    const g = await fixture("gmail-router", "rfq", true, google);
+    const router = routeOpportunityMail([
+      createMicrosoftOpportunityMail({
+        configuration: graph.configuration,
+        fetch: graph.fetch,
+        clock: h.clock,
+      }),
+      createGmailOpportunityMail({
+        configuration: google.configuration,
+        fetch: google.fetch,
+        clock: h.clock,
+      }),
+    ]);
+    await handback(m);
+    await handback(g);
+    const ma = m.restart(router),
+      ga = g.restart(router);
+    const mr = await ma.process(m.credentials, m.business.id, m.need.id, {
+      messageId: m.first.id,
+    });
+    const gr = await ga.process(g.credentials, g.business.id, g.need.id, {
+      messageId: g.first.id,
+    });
+    await expect(
+      ma.dispatch(g.credentials, m.business.id, m.need.id, mr.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await Promise.all([
+      ma.dispatch(m.credentials, m.business.id, m.need.id, mr.id),
+      ga.dispatch(g.credentials, g.business.id, g.need.id, gr.id),
+    ]);
+    expect(graph.sends).toHaveLength(1);
+    expect(google.sends).toHaveLength(1);
+  });
+  it.each([
+    "replyTo",
+    "toRecipients",
+    "ccRecipients",
+    "bccRecipients",
+  ] as const)(
+    "rejects current Microsoft parent %s expansion before transport",
+    async (field) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await fixture(
+        `ms-expanded-${field}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        {
+          messageId: f.first.id,
+        },
+      );
+      const parent = graph.messages.get("first")!;
+      Object.assign(parent, {
+        [field]: [
+          ...(Array.isArray(parent[field]) ? parent[field] : []),
+          { emailAddress: { address: "attacker@example.com" } },
+        ],
+      });
+      expect(
+        (
+          await f.app.dispatch(
+            f.credentials,
+            f.business.id,
+            f.need.id,
+            ready.id,
+          )
+        ).action,
+      ).toMatchObject({
+        state: "cancelled",
+        email: { result: { status: "not_accepted" } },
+      });
+      expect(graph.sends).toEqual([]);
+    },
+  );
+  it.each([
+    "body",
+    "reply_to",
+    "recipient",
+    "duplicate",
+    "moved",
+    "stale",
+    "grant",
+    "parent",
+    "thread",
+    "future",
+    "normalization",
+  ] as const)(
+    "keeps Microsoft %s Sent evidence unresolved without blind resend",
+    async (change) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await fixture(
+        `ms-evidence-${change}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      graph.control.sendLost = true;
+      await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      const rfc = /^Message-ID: (.+)$/m.exec(graph.sends[0])![1].trim();
+      const sent = graph.add("evidence-sent", {
+        folder: change === "moved" ? "sales" : "sent",
+        from: "sales@supplier.example",
+        to: "buyer@example.com",
+        reply:
+          change === "parent"
+            ? "<unapproved@example.com>"
+            : "<first@example.com>",
+        thread: change === "thread" ? "other-thread" : "thread-1",
+        at:
+          change === "future"
+            ? "2026-11-05T09:01:00Z"
+            : h.clock.now().toISOString(),
+        text: change === "body" ? "Unapproved body" : ready.body!,
+      });
+      sent.internetMessageId = rfc;
+      Object.assign(sent, {
+        replyTo: [
+          {
+            emailAddress: {
+              address:
+                change === "reply_to"
+                  ? "other@example.com"
+                  : "sales@supplier.example",
+            },
+          },
+        ],
+        ...(change === "recipient"
+          ? {
+              ccRecipients: [
+                { emailAddress: { address: "other@example.com" } },
+              ],
+            }
+          : {}),
+      });
+      if (change === "normalization")
+        Object.assign(sent, {
+          toRecipients: [{ emailAddress: { address: "BUYER@example.com" } }],
+        });
+      const refs = [{ id: "evidence-sent" }];
+      if (change === "duplicate") {
+        graph.messages.set("conflicting-sent", {
+          ...structuredClone(sent),
+          id: "conflicting-sent",
+        });
+        refs.push({ id: "conflicting-sent" });
+      }
+      graph.pages.set("sent-steady", {
+        value: refs,
+        "@odata.deltaLink":
+          "https://graph.microsoft.com/v1.0/me/mailFolders/sent/messages/delta?$deltatoken=evidence-next",
+      });
+      await f.synchronize!();
+      if (change === "stale") h.clock.set("2026-11-05T09:05:01Z");
+      if (change === "grant") {
+        graph.identity.scopes =
+          "openid email profile offline_access User.Read Mail.Send MailboxSettings.Read";
+        await f.reauthorize!();
+      }
+      const result = await f.app.reconcile(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        ready.id,
+      );
+      expect(result.action).toMatchObject({
+        state: "committed",
+        email: { result: { status: "unknown" }, sent: null },
+      });
+      await f
+        .restart()
+        .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      expect(graph.sends).toHaveLength(1);
+    },
+  );
+  it("keeps Microsoft intent committed if acceptance persistence fails after transport", async () => {
+    const graph = microsoftMailFixture(h.clock);
+    graph.identity.scopes += " Mail.Send";
+    const f = await fixture(
+      "ms-result-write",
+      "rfq",
+      true,
+      undefined,
+      undefined,
+      graph,
+    );
+    await handback(f);
+    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
+      messageId: f.first.id,
+    });
+    await h.admin.query(
+      `CREATE FUNCTION fail_ms_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = '${ready.action!.id}' AND NEW.state = 'dispatched' THEN RAISE EXCEPTION 'synthetic result persistence failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_ms_result BEFORE UPDATE ON opportunity_due_action FOR EACH ROW EXECUTE FUNCTION fail_ms_result()`,
+    );
+    try {
+      await expect(
+        f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id),
+      ).rejects.toBeDefined();
+    } finally {
+      await h.admin.query(
+        "DROP TRIGGER fail_ms_result ON opportunity_due_action; DROP FUNCTION fail_ms_result()",
+      );
+    }
+    expect(
+      (
+        await f
+          .restart()
+          .dispatch(f.credentials, f.business.id, f.need.id, ready.id)
+      ).action,
+    ).toMatchObject({ state: "committed", email: { result: null } });
+    expect(graph.sends).toHaveLength(1);
+  });
+  it.each(["non-identity", "unreadable"] as const)(
+    "retains positive Microsoft 202 processing acceptance with a %s body",
+    async (body) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await fixture(
+        `ms-positive-202-${body}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        {
+          messageId: f.first.id,
+        },
+      );
+      graph.control.unexpectedAcceptedBody = body === "non-identity";
+      graph.control.unreadableAcceptedBody = body === "unreadable";
+      expect(
+        (
+          await f.app.dispatch(
+            f.credentials,
+            f.business.id,
+            f.need.id,
+            ready.id,
+          )
+        ).action,
+      ).toMatchObject({
+        state: "dispatched",
+        email: { result: { status: "accepted_pending_identity" } },
+      });
+      expect(graph.sends).toHaveLength(1);
+      await f
+        .restart()
+        .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      expect(graph.sends).toHaveLength(1);
+    },
+  );
+  it.each(["member", "guest", "resource"] as const)(
+    "checks current Microsoft work-school %s capabilities at dispatch",
+    async (capability) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      graph.identity.tenant = "11111111-1111-4111-8111-111111111111";
+      const f = await fixture(
+        `ms-work-${capability}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        { messageId: f.first.id },
+      );
+      if (capability === "guest") graph.control.userType = "Guest";
+      if (capability === "resource") graph.control.purpose = "room";
+      expect(
+        (
+          await f.app.dispatch(
+            f.credentials,
+            f.business.id,
+            f.need.id,
+            ready.id,
+          )
+        ).action?.state,
+      ).toBe(capability === "member" ? "dispatched" : "cancelled");
+      expect(graph.sends).toHaveLength(capability === "member" ? 1 : 0);
+    },
+  );
   it("sends one exact grounded ordinary Gmail inquiry reply through the guarded public command", async () => {
     const google = gmailFixture();
     google.control.scopes += ` ${gmailSendScope}`;

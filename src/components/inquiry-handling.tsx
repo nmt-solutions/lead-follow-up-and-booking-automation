@@ -80,10 +80,12 @@ export function InquiryHandling({
         action?.email?.sent
           ? "Exact Sent-folder evidence saved. Delivery remains unconfirmed."
           : action?.email?.result?.status === "accepted"
-            ? "Gmail accepted the prepared reply. Delivery remains unconfirmed."
+            ? "The provider accepted the prepared reply. Delivery remains unconfirmed."
             : action?.state === "dispatched" &&
                 action.reason?.startsWith("whatsapp_")
               ? "Meta accepted the saved WhatsApp reply. Review WhatsApp message evidence for Sent, delivery and read status."
+              : action?.email?.result?.status === "accepted_pending_identity"
+                ? "Microsoft accepted processing. Native message identity and delivery remain unconfirmed. Synchronize the selected mailbox and check Sent evidence; this action will not resend."
               : action?.state === "committed"
                 ? "Acceptance remains unknown. Review native mailbox or WhatsApp provider evidence. This action will not resend."
                 : action?.state === "cancelled"
@@ -320,18 +322,30 @@ export function InquiryHandling({
               </p>
               {run.action?.email && (
                 <div className="space-y-2 text-sm wrap-anywhere">
+                  {run.action.email.processingAcceptance && (
+                    <p>
+                      Microsoft accepted processing at{" "}
+                      {run.action.email.processingAcceptance.acceptedAt}.{" "}
+                      {run.action.email.sent
+                        ? "Native identity was later reconciled from Sent evidence."
+                        : "Native message identity is pending; this action will not resend."}
+                    </p>
+                  )}
                   <p>
                     Provider acceptance:{" "}
                     {run.action.email.result?.status === "accepted"
                       ? run.action.email.result.receipt.evidence ===
                         "sent_folder"
                         ? "Reconciled from exact Sent-folder evidence"
-                        : "Confirmed by Gmail response"
-                      : run.action.email.result?.status === "not_accepted"
-                        ? `Not accepted (${run.action.email.result.reason.replaceAll("_", " ")})`
-                        : run.action.state === "cancelled"
-                          ? "Not attempted; current checks blocked transport"
-                          : "Unknown"}
+                        : "Confirmed by provider response"
+                      : run.action.email.result?.status ===
+                          "accepted_pending_identity"
+                        ? "Microsoft accepted processing; native identity pending"
+                        : run.action.email.result?.status === "not_accepted"
+                          ? `Not accepted (${run.action.email.result.reason.replaceAll("_", " ")})`
+                          : run.action.state === "cancelled"
+                            ? "Not attempted; current checks blocked transport"
+                            : "Unknown"}
                     .
                   </p>
                   <p>
@@ -347,7 +361,7 @@ export function InquiryHandling({
                   </p>
                   {run.action.email.result?.status === "accepted" && (
                     <p>
-                      Gmail message:{" "}
+                      Native message:{" "}
                       {run.action.email.result.receipt.messageRef} · Thread:{" "}
                       {run.action.email.result.receipt.threadRef}
                     </p>
@@ -359,19 +373,22 @@ export function InquiryHandling({
                   <Button
                     type="button"
                     disabled={
-                      pending || !state.canProcess || !run.reply.nativeGmail
+                      pending ||
+                      !state.canProcess ||
+                      !(run.reply.nativeProvider || run.reply.nativeGmail)
                     }
                     aria-busy={working === `${run.id}:dispatch`}
                     onClick={() => delivery(run.id, "dispatch")}
                   >
                     {working === `${run.id}:dispatch`
                       ? "Sending prepared reply…"
-                      : "Send prepared Gmail reply"}
+                      : `Send prepared ${run.reply.nativeProvider === "microsoft" ? "Microsoft" : "Gmail"} reply`}
                   </Button>
-                  {!run.reply.nativeGmail && (
+                  {!(run.reply.nativeProvider || run.reply.nativeGmail) && (
                     <p className="text-sm text-muted-foreground">
-                      A current native Gmail sender and reply route are
-                      required. Review sender and mailbox setup, then reload.
+                      A current native Gmail or Microsoft sender and reply route
+                      are required. Review sender and mailbox setup, then
+                      reload.
                     </p>
                   )}
                 </div>

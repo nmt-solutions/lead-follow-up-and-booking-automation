@@ -21,11 +21,12 @@ import type {
   SenderRecord,
 } from "../models/senders";
 import { senderReadiness } from "../senders/readiness";
+import { microsoftTransportKey } from "../microsoft-mail/transport";
 import { gmailSequenceKey } from "../gmail/sequence-mail";
 import {
-  gmailSendingAuthorized,
-  gmailSequenceReplyReady,
-} from "./gmail-dispatch";
+  nativeSendingAuthorized,
+  nativeSequenceReplyReady,
+} from "./native-mail-dispatch";
 import { requireSalesSession } from "./sales-session";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
@@ -126,24 +127,31 @@ export async function inspectionAt(
     connection,
     replyRoute,
     replyConnection,
-    ...(connection?.configuration.provider === "gmail"
+    ...(connection?.configuration.provider === "gmail" ||
+    connection?.configuration.provider === "microsoft"
       ? {
-          nativeGmail: {
-            send: await gmailSendingAuthorized(
+          [connection.configuration.provider === "gmail"
+            ? "nativeGmail"
+            : "nativeMicrosoft"]: {
+            send: await nativeSendingAuthorized(
               tx,
               businessId,
               connection.id,
               config.fromAddress,
+              connection.configuration.provider,
             ),
             reply: Boolean(
               replyRoute &&
               replyConnection &&
-              (await gmailSequenceReplyReady(
+              (await nativeSequenceReplyReady(
                 tx,
                 businessId,
                 replyRoute.configuration.inboxConnectionId,
                 replyConnection.id,
                 requestedAt,
+                replyConnection.configuration.provider === "microsoft"
+                  ? "microsoft"
+                  : "gmail",
               )),
             ),
           },
@@ -156,9 +164,11 @@ export async function identityView(
   businessId: string,
   row: IdentityRow,
   at: Date,
-  adapter?: Pick<SenderAdapter, "key" | "mode">,
+  adapter?: Pick<SenderAdapter, "key" | "mode" | "select">,
 ) {
   const context = await inspectionAt(tx, businessId, row, at);
+  if (adapter?.select)
+    adapter = adapter.select(context.connection?.configuration.provider ?? "");
   const [latest] = await tx
     .select()
     .from(senderObservation)
@@ -197,16 +207,20 @@ export async function identityView(
           ),
         )
     : [];
-  const gmailSequence =
-    (adapter?.key ?? latest?.evidence.adapterKey) === gmailSequenceKey;
+  const nativeKey = adapter?.key ?? latest?.evidence.adapterKey;
+  const nativeSequence =
+    nativeKey === gmailSequenceKey || nativeKey === microsoftTransportKey;
+  const nativeProvider =
+    nativeKey === microsoftTransportKey ? "microsoft" : "gmail";
   const mailboxIssues =
-    (gmailSequence &&
+    (nativeSequence &&
       (!context.connection ||
-        !(await gmailSendingAuthorized(
+        !(await nativeSendingAuthorized(
           tx,
           businessId,
           context.connection.id,
           row.configuration.fromAddress,
+          nativeProvider,
         )))) ||
     (mailbox &&
       (!mailbox.configuration.enabled ||
@@ -246,13 +260,14 @@ export async function identityView(
       Boolean(
         inbox?.active &&
         inbox.channel === "email" &&
-        (gmailSequence
-          ? await gmailSequenceReplyReady(
+        (nativeSequence
+          ? await nativeSequenceReplyReady(
               tx,
               businessId,
               inbox.id,
               context.replyConnection?.id ?? "",
               at,
+              nativeProvider,
             )
           : inbox.mode === "normalized_import" ||
             (await mailboxReplyReady(
@@ -365,7 +380,7 @@ export function createSenderRepository(database: Database, clock: Clock) {
     businessId: string,
     context: SenderInspection,
     observation: SenderObservation,
-    adapter: Pick<SenderAdapter, "key" | "mode">,
+    adapter: Pick<SenderAdapter, "key" | "mode" | "select">,
   ) {
     return access(actor, businessId, true, async (tx) => {
       const row = await identityAt(tx, businessId, context.binding.identityId);
@@ -426,7 +441,7 @@ export function createSenderRepository(database: Database, clock: Clock) {
     workspace(
       actor: WorkIdentity,
       businessId: string,
-      adapter: Pick<SenderAdapter, "key" | "mode">,
+      adapter: Pick<SenderAdapter, "key" | "mode" | "select">,
     ): Promise<SenderWorkspace> {
       return access(actor, businessId, false, async (tx) => {
         const role = await requireCapability(
@@ -578,7 +593,7 @@ export function createSenderRepository(database: Database, clock: Clock) {
       actor: WorkIdentity,
       businessId: string,
       input: Save<SenderIdentityConfiguration>,
-      adapter: Pick<SenderAdapter, "key" | "mode">,
+      adapter: Pick<SenderAdapter, "key" | "mode" | "select">,
     ) {
       return access(actor, businessId, true, async (tx) => {
         const current = input.id

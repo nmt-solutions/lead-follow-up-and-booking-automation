@@ -69,7 +69,12 @@ function continuation(value: string, path: string, filter: string | null) {
       throw new MicrosoftMailFailure("invalid_response");
   if (
     (url.searchParams.has("$select") &&
-      url.searchParams.get("$select") !== graphMetadataFields) ||
+      ![
+        graphMetadataFields,
+        // Existing #30 delta links remain opaque and usable. Each referenced message is
+        // still fetched independently with the current metadata selection (including Reply-To).
+        graphMetadataFields.replace(",replyTo", ""),
+      ].includes(url.searchParams.get("$select")!)) ||
     (url.searchParams.has("$filter") &&
       url.searchParams.get("$filter") !== filter)
   )

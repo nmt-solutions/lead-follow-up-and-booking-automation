@@ -14,7 +14,25 @@ export const mailReceiptSchema = z.strictObject({
   evidence: z.enum(["provider_response", "sent_folder"]).optional(),
 });
 export type MailReceipt = z.infer<typeof mailReceiptSchema>;
+/** Graph's positive empty 202 accepts processing, without a native message/conversation identity. */
+export const mailAcceptanceSchema = mailReceiptSchema
+  .omit({
+    messageRef: true,
+    threadRef: true,
+    internetMessageId: true,
+    evidence: true,
+  })
+  .extend({
+    provider: z.literal("microsoft"),
+    evidence: z.literal("provider_response"),
+    submittedInternetMessageId: z.string().min(1).max(256),
+  });
+export type MailAcceptance = z.infer<typeof mailAcceptanceSchema>;
 export const mailResultSchema = z.discriminatedUnion("status", [
+  z.strictObject({
+    status: z.literal("accepted_pending_identity"),
+    acceptance: mailAcceptanceSchema,
+  }),
   z.strictObject({
     status: z.literal("accepted"),
     receipt: mailReceiptSchema,
@@ -50,9 +68,13 @@ export type MailDispatchAccess = {
     MailboxAuthorizationStore,
     "policy" | "grant" | "processingEnabled" | "updateGrant" | "invalidate"
   > | null;
+  microsoft?: MailDispatchAccess["gmail"];
   previousReceipt: MailReceipt | null;
   previousSubject: string | null;
   replyParent?: {
+    messageRef?: string;
+    text?: string;
+    to?: string[];
     internetMessageId: string;
     threadRef: string;
     subject: string;
