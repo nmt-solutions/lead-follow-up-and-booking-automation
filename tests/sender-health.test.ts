@@ -506,4 +506,19 @@ describe("Sender health at the public application seam", () => {
       )?.incidents[0].resolved,
     ).toBe(false);
   });
+  it("requires both read and append grants and restores public evidence ingestion on schema reapplication", async () => {
+    const f = await configured();
+    await h.admin.query(
+      "REVOKE INSERT ON sender_health_record FROM app_runtime",
+    );
+    await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+      code: "SETUP_REQUIRED",
+    });
+    await h.reapplySchema();
+    await verifyRuntimeRole(h.runtime);
+    await app().ingest(f.operator, f.businessId, f.identityId, {
+      ...f.evidence,
+      eventKey: "after-grant-repair",
+    });
+  });
 });
