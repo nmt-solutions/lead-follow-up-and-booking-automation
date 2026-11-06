@@ -845,7 +845,7 @@ export function createOpportunityRepository(
               threadRef: ctx.message.content.conversationRef,
               internetMessageId: native.internetMessageId,
               ...(sender.sender.adapterKey === microsoftTransportKey
-                ? { text: ctx.message.content.text }
+                ? { text: ctx.message.content.text, to: native.to }
                 : {}),
             },
           };

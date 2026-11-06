@@ -2228,36 +2228,56 @@ describe("Inquiry handling at the persisted application seam", () => {
     expect(graph.sends).toHaveLength(1);
     expect(google.sends).toHaveLength(1);
   });
-  it("rejects current Microsoft parent Reply-To expansion before transport", async () => {
-    const graph = microsoftMailFixture(h.clock);
-    graph.identity.scopes += " Mail.Send";
-    const f = await fixture(
-      "ms-expanded",
-      "rfq",
-      true,
-      undefined,
-      undefined,
-      graph,
-    );
-    await handback(f);
-    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
-      messageId: f.first.id,
-    });
-    Object.assign(graph.messages.get("first")!, {
-      replyTo: [
-        { emailAddress: { address: "attacker@example.com" } },
-        { emailAddress: { address: "buyer@example.com" } },
-      ],
-    });
-    expect(
-      (await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id))
-        .action,
-    ).toMatchObject({
-      state: "cancelled",
-      email: { result: { status: "not_accepted" } },
-    });
-    expect(graph.sends).toEqual([]);
-  });
+  it.each([
+    "replyTo",
+    "toRecipients",
+    "ccRecipients",
+    "bccRecipients",
+  ] as const)(
+    "rejects current Microsoft parent %s expansion before transport",
+    async (field) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await fixture(
+        `ms-expanded-${field}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        {
+          messageId: f.first.id,
+        },
+      );
+      const parent = graph.messages.get("first")!;
+      Object.assign(parent, {
+        [field]: [
+          ...(Array.isArray(parent[field]) ? parent[field] : []),
+          { emailAddress: { address: "attacker@example.com" } },
+        ],
+      });
+      expect(
+        (
+          await f.app.dispatch(
+            f.credentials,
+            f.business.id,
+            f.need.id,
+            ready.id,
+          )
+        ).action,
+      ).toMatchObject({
+        state: "cancelled",
+        email: { result: { status: "not_accepted" } },
+      });
+      expect(graph.sends).toEqual([]);
+    },
+  );
   it.each([
     "body",
     "reply_to",
@@ -2404,31 +2424,50 @@ describe("Inquiry handling at the persisted application seam", () => {
     ).toMatchObject({ state: "committed", email: { result: null } });
     expect(graph.sends).toHaveLength(1);
   });
-  it("retains positive Microsoft 202 processing acceptance with an unexpected non-identity body", async () => {
-    const graph = microsoftMailFixture(h.clock);
-    graph.identity.scopes += " Mail.Send";
-    const f = await fixture(
-      "ms-positive-202",
-      "rfq",
-      true,
-      undefined,
-      undefined,
-      graph,
-    );
-    await handback(f);
-    const ready = await f.app.process(f.credentials, f.business.id, f.need.id, {
-      messageId: f.first.id,
-    });
-    graph.control.unexpectedAcceptedBody = true;
-    expect(
-      (await f.app.dispatch(f.credentials, f.business.id, f.need.id, ready.id))
-        .action,
-    ).toMatchObject({
-      state: "dispatched",
-      email: { result: { status: "accepted_pending_identity" } },
-    });
-    expect(graph.sends).toHaveLength(1);
-  });
+  it.each(["non-identity", "unreadable"] as const)(
+    "retains positive Microsoft 202 processing acceptance with a %s body",
+    async (body) => {
+      const graph = microsoftMailFixture(h.clock);
+      graph.identity.scopes += " Mail.Send";
+      const f = await fixture(
+        `ms-positive-202-${body}`,
+        "rfq",
+        true,
+        undefined,
+        undefined,
+        graph,
+      );
+      await handback(f);
+      const ready = await f.app.process(
+        f.credentials,
+        f.business.id,
+        f.need.id,
+        {
+          messageId: f.first.id,
+        },
+      );
+      graph.control.unexpectedAcceptedBody = body === "non-identity";
+      graph.control.unreadableAcceptedBody = body === "unreadable";
+      expect(
+        (
+          await f.app.dispatch(
+            f.credentials,
+            f.business.id,
+            f.need.id,
+            ready.id,
+          )
+        ).action,
+      ).toMatchObject({
+        state: "dispatched",
+        email: { result: { status: "accepted_pending_identity" } },
+      });
+      expect(graph.sends).toHaveLength(1);
+      await f
+        .restart()
+        .dispatch(f.credentials, f.business.id, f.need.id, ready.id);
+      expect(graph.sends).toHaveLength(1);
+    },
+  );
   it.each(["member", "guest", "resource"] as const)(
     "checks current Microsoft work-school %s capabilities at dispatch",
     async (capability) => {

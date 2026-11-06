@@ -74,6 +74,7 @@ export type MailDispatchAccess = {
   replyParent?: {
     messageRef?: string;
     text?: string;
+    to?: string[];
     internetMessageId: string;
     threadRef: string;
     subject: string;

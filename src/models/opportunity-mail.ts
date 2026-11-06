@@ -31,6 +31,7 @@ export type OpportunityMailEnvelope = {
     threadRef: string;
     internetMessageId: string;
     text?: string;
+    to?: string[];
   };
 };
 export const opportunityMailEvidenceSchema = z.strictObject({

@@ -37,7 +37,11 @@ export function createMicrosoftMailHttp(
   fetcher: typeof fetch,
 ) {
   // Reuse #25's signed issuer/audience/nonce/expiry verification, with bounded transport for keys and profile too.
-  const boundedFetch: typeof fetch = async (url, init) => {
+  const boundedFetch = async (
+    url: Parameters<typeof fetch>[0],
+    init?: RequestInit,
+    acceptsProcessing = false,
+  ): Promise<Response> => {
     const response = await fetcher(url, {
       ...init,
       cache: "no-store",
@@ -47,6 +51,12 @@ export function createMicrosoftMailHttp(
         ...(init?.signal ? [init.signal] : []),
       ]),
     });
+    // The send status already proves processing acceptance. An irrelevant body
+    // cannot erase it through decoding, streaming or size failures.
+    if (acceptsProcessing && response.status === 202) {
+      void response.body?.cancel().catch(() => {});
+      return response;
+    }
     const reader = response.body?.getReader();
     const chunks: Uint8Array[] = [];
     let size = 0;
@@ -84,7 +94,7 @@ export function createMicrosoftMailHttp(
   ): Promise<unknown> {
     let response: Response;
     try {
-      response = await boundedFetch(url, { ...init, signal });
+      response = await boundedFetch(url, { ...init, signal }, accepted);
     } catch (error) {
       if (error instanceof MicrosoftMailFailure) throw error;
       throw new MicrosoftMailFailure("unavailable");

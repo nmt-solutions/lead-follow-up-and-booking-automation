@@ -191,7 +191,14 @@ export function createMicrosoftTransport(d: {
             ),
           );
           const from = current.from.emailAddress.address,
-            replyTo = current.replyTo.map((r) => r.emailAddress.address);
+            replyTo = current.replyTo.map((r) => r.emailAddress.address),
+            recipients = [
+              ...current.toRecipients,
+              ...current.ccRecipients,
+              ...current.bccRecipients,
+            ]
+              .map((r) => r.emailAddress.address)
+              .sort();
           if (
             current.subject !== e.subject ||
             (access.replyParent.text !== undefined &&
@@ -203,6 +210,9 @@ export function createMicrosoftTransport(d: {
             current.internetMessageId !== previous?.internetMessageId ||
             from !== e.recipient ||
             current.sender.emailAddress.address !== from ||
+            (access.replyParent.to !== undefined &&
+              JSON.stringify(recipients) !==
+                JSON.stringify([...access.replyParent.to].sort())) ||
             replyTo.length > 1 ||
             (replyTo.length === 1 && replyTo[0] !== e.recipient) ||
             !current.toRecipients.some(

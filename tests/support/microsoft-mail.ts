@@ -20,6 +20,7 @@ export function microsoftMailFixture(clock: Clock) {
     sendLost: false,
     sendMalformed: false,
     unexpectedAcceptedBody: false,
+    unreadableAcceptedBody: false,
     expiresIn: 3600,
     errorCode: "ErrorAccessDenied",
     retryAfter: "60",
@@ -70,9 +71,11 @@ export function microsoftMailFixture(clock: Clock) {
           },
         );
       return new Response(
-        control.sendMalformed || control.unexpectedAcceptedBody
-          ? "malformed-private"
-          : null,
+        control.unreadableAcceptedBody
+          ? new Uint8Array([0xff])
+          : control.sendMalformed || control.unexpectedAcceptedBody
+            ? "malformed-private"
+            : null,
         {
           status: control.sendMalformed ? 200 : 202,
         },
