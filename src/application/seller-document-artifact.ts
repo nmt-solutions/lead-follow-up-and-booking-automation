@@ -1,0 +1,97 @@
+import type { DocumentSnapshot } from "../models/seller-documents";
+import { formatTaxMoney } from "../models/tax";
+
+/** Deterministic UTF-8 attachment. A template version never changes after issuance. */
+export function renderSellerDocument(document: {
+  id: string;
+  number: string;
+  kind: "invoice" | "credit_note";
+  actorId: string;
+  at: string;
+  snapshot: DocumentSnapshot;
+}) {
+  const s = document.snapshot,
+    c = s.issuer.revision.configuration;
+  const money = (v: string) => formatTaxMoney(v, s.currency);
+  const customer = s.financial.tax.billing.current!.profile;
+  const lines = [
+    `${document.kind === "invoice" ? c.template.invoiceTitle : c.template.creditTitle} ${document.number}`,
+    `Issued: ${document.at}`,
+    `Document ID: ${document.id}`,
+    `Issued by: ${document.actorId}`,
+    "",
+    "SELLER",
+    c.seller.legalName,
+    c.seller.address,
+    c.seller.country,
+    c.seller.contact,
+    ...c.legalFields.map((f) => `${f.label}: ${f.value}`),
+    "",
+    "CUSTOMER",
+    customer.legalName,
+    customer.registrationNumber,
+    ...Object.values(customer.address).filter(Boolean),
+    `${customer.invoiceContact.name}: ${customer.invoiceContact.email}`,
+    ...customer.taxIdentifiers.map(
+      (t) => `${t.kind} (${t.country}): ${t.value}`,
+    ),
+    "",
+    "TRANSACTION",
+    `Payment: ${s.source.paymentId}`,
+    `Period: ${s.source.start} to ${s.source.end}`,
+    `Billing currency: ${s.currency}; precision: ${s.precision}`,
+    ...(s.original
+      ? [
+          `Original invoice: ${s.original.number} (${s.original.id})`,
+          `Original seller: ${s.original.issuer.revision.configuration.seller.legalName}; issuer version ${s.original.issuer.revision.version}`,
+          "Amounts below are credits reducing the original invoice.",
+        ]
+      : []),
+    ...(s.adjustment
+      ? [
+          `Adjustment: ${s.adjustment.adjustmentId}`,
+          `Source: ${s.adjustment.source.kind} ${s.adjustment.source.reference}`,
+          `Reason: ${s.adjustment.reason}`,
+          ...s.adjustment.evidence.map((e) => `Adjustment evidence: ${e}`),
+          `Allocation: ${s.adjustment.allocation}`,
+        ]
+      : []),
+    "",
+    "LINES",
+    ...s.lines.flatMap((l) => [
+      `${l.input.id}: ${l.input.description}`,
+      `Quantity: ${l.input.quantity}; original unit price: ${money(l.input.unitAmountMinor)}`,
+      `Net: ${money(l.netMinor)}; tax: ${money(l.taxMinor)}; total: ${money(l.totalMinor)}`,
+      ...l.components.map((t) => `  ${t.name}: ${money(t.amountMinor)}`),
+      `Treatment: ${l.rule.revision.rule.treatment}; jurisdiction: ${l.rule.revision.rule.jurisdiction.name}`,
+      `Registration: ${l.rule.revision.rule.registration.identifier}`,
+      `Tax rule: ${l.rule.revision.key} v${l.rule.revision.version}; approval: ${l.rule.approval.id}`,
+      ...l.rule.revision.rule.rates.map(
+        (r) => `  ${r.name}: ${r.numerator}/${r.denominator}`,
+      ),
+      `Rounding: ${l.rule.revision.rule.rounding.mode}, ${l.rule.revision.rule.rounding.scope}, increment ${l.rule.revision.rule.rounding.incrementMinor} minor units`,
+      ...l.rule.revision.rule.evidence.map(
+        (e) => `Evidence: ${e.title}; ${e.reference}; checked ${e.checkedAt}`,
+      ),
+    ]),
+    "",
+    `Net: ${money(s.totals.netMinor)}`,
+    `Tax: ${money(s.totals.taxMinor)}`,
+    `Total: ${money(s.totals.totalMinor)}`,
+    "",
+    `Issuer configuration: v${s.issuer.revision.version}; approval: ${s.issuer.approval.id}`,
+    `Customer revision: ${s.financial.tax.billing.current!.id}; pricing revision: ${s.financial.quote.pricing.version}`,
+    ...s.financial.tax.billing.current!.evidence.map(
+      (e) => `Customer evidence: ${e.name}; SHA-256 ${e.sha256}`,
+    ),
+    ...c.evidence.map(
+      (e) =>
+        `Seller review: ${e.title}; ${e.reference}; checked ${e.checkedAt}`,
+    ),
+    `Retention policy: ${c.retention.policyReference}`,
+    "",
+    c.template.footer,
+    "",
+  ];
+  return new TextEncoder().encode(lines.join("\n"));
+}

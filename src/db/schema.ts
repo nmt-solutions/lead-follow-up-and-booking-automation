@@ -10,6 +10,10 @@ import type { HealthPayload } from "../models/sender-health";
 import type { MetaActivity } from "../models/whatsapp-intake";
 import type { TaxRule, TaxCalculation } from "../models/tax";
 import type {
+  IssuerConfiguration,
+  DocumentSnapshot,
+} from "../models/seller-documents";
+import type {
   PaymentSnapshot,
   CheckoutReference,
   PaymentObservation,
@@ -687,7 +691,7 @@ function paymentHistoryPolicies(name: string, action: ReturnType<typeof sql>) {
     pgPolicy(`${name}_read`, {
       for: "select",
       to: appRuntime,
-      using: sql`(${paymentOperator}) or ((${scope}) and (public.current_business_role() in ('owner','admin') or (${worker})))`,
+      using: sql`(${paymentOperator}) ${name === "subscription_period" ? sql`or exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.documents)` : sql``} or ((${scope}) and (public.current_business_role() in ('owner','admin') or (${worker})))`,
     }),
     pgPolicy(`${name}_insert`, {
       for: "insert",
@@ -1076,6 +1080,7 @@ export const platformOperator = pgTable(
     pricing: boolean("pricing").notNull().default(false),
     whatsAppReview: boolean("whatsapp_review").notNull().default(false),
     senderHealth: boolean("sender_health").notNull().default(false),
+    documents: boolean("documents").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {
@@ -1085,6 +1090,280 @@ export const platformOperator = pgTable(
     }),
   ],
 ).enableRLS();
+
+const documentOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.documents)`;
+const documentScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and (public.current_business_role() in ('owner','admin') or (${documentOperator}))`;
+const documentWorker = sql`public.seller_artifact_worker_authorized(id,business_id)`;
+export const issuerRevision = pgTable(
+  "seller_issuer_revision",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration")
+      .$type<IssuerConfiguration>()
+      .notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_issuer_version").on(t.version),
+    pgPolicy("seller_issuer_revision_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentOperator}) or public.current_business_role() in ('owner','admin')`,
+    }),
+    pgPolicy("seller_issuer_revision_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const issuerDecision = pgTable(
+  "seller_issuer_decision",
+  {
+    id: uuid("id").primaryKey(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => issuerRevision.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_issuer_decision_version").on(t.revisionId, t.version),
+    pgPolicy("seller_issuer_decision_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentOperator}) or public.current_business_role() in ('owner','admin')`,
+    }),
+    pgPolicy("seller_issuer_decision_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+
+export const sellerDocument = pgTable(
+  "seller_document",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    periodId: uuid("period_id").notNull(),
+    originalId: uuid("original_id"),
+    adjustmentId: uuid("adjustment_id"),
+    adjustmentSource: text("adjustment_source"),
+    recoveryKey: uuid("recovery_key").notNull(),
+    retryAfter: timestamp("retry_after", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    kind: text("kind").$type<"invoice" | "credit_note">().notNull(),
+    seriesKey: text("series_key").notNull(),
+    ordinal: bigint("ordinal", { mode: "bigint" }).notNull(),
+    number: text("number").notNull(),
+    snapshot: jsonb("snapshot").$type<DocumentSnapshot>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+    accountScope: text("account_scope").notNull(),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    artifactState: text("artifact_state")
+      .$type<"pending" | "ready" | "failed">()
+      .notNull(),
+    failure: text("failure"),
+  },
+  (t) => [
+    unique("seller_document_scope").on(t.id, t.businessId),
+    uniqueIndex("seller_document_number").on(t.number),
+    uniqueIndex("seller_document_series_ordinal").on(t.seriesKey, t.ordinal),
+    uniqueIndex("seller_document_invoice_once")
+      .on(t.periodId)
+      .where(sql`${t.kind}='invoice'`),
+    uniqueIndex("seller_document_adjustment_once").on(
+      t.businessId,
+      t.adjustmentId,
+    ),
+    uniqueIndex("seller_document_adjustment_source_once").on(
+      t.originalId,
+      t.adjustmentSource,
+    ),
+    check(
+      "seller_document_binding",
+      sql`${t.snapshot}->'source'->>'periodId'=${t.periodId}::text and ((${t.kind}='invoice' and ${t.originalId} is null) or (${t.kind}='credit_note' and ${t.originalId} is not null))`,
+    ),
+    pgPolicy("seller_document_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentScope}) or (${documentWorker})`,
+    }),
+    pgPolicy("seller_document_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true) and (kind='invoice' or (${documentOperator}))`,
+    }),
+    pgPolicy("seller_document_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${documentScope}) or (${documentWorker})`,
+      withCheck: sql`(${documentScope}) or (${documentWorker})`,
+    }),
+    pgPolicy("seller_document_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const sellerDocumentRequest = pgTable(
+  "seller_document_request",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_document_request_once").on(t.businessId, t.requestKey),
+    pgPolicy("seller_document_request_read", {
+      for: "select",
+      to: appRuntime,
+      using: documentScope,
+    }),
+    pgPolicy("seller_document_request_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const sellerDocumentScopeForeignKeys = [
+  new ForeignKey(
+    sellerDocument,
+    foreignKey({
+      name: "seller_document_period_scope",
+      columns: [sellerDocument.periodId, sellerDocument.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+  new ForeignKey(
+    sellerDocument,
+    foreignKey({
+      name: "seller_document_original_scope",
+      columns: [sellerDocument.originalId, sellerDocument.businessId],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+  new ForeignKey(
+    sellerDocumentRequest,
+    foreignKey({
+      name: "seller_document_request_scope",
+      columns: [
+        sellerDocumentRequest.documentId,
+        sellerDocumentRequest.businessId,
+      ],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+];
+export const sellerDocumentAccess = pgTable(
+  "seller_document_access",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_document_access_hash").on(t.tokenHash),
+    pgPolicy("seller_document_access_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy("seller_document_access_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const sellerDocumentStorage = pgTable(
+  "seller_document_storage",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    action: text("action").$type<"put" | "get">().notNull(),
+    outcome: text("outcome").$type<"uncertain" | "confirmed">().notNull(),
+  },
+  () => [
+    pgPolicy("seller_document_storage_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentScope}) or public.seller_artifact_worker_authorized(document_id,business_id)`,
+    }),
+    pgPolicy("seller_document_storage_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`((${documentScope}) and actor_id=current_setting('app.actor_id',true)) or (actor_id is null and public.seller_artifact_worker_authorized(document_id,business_id))`,
+    }),
+    pgPolicy("seller_document_storage_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${documentScope}) or public.seller_artifact_worker_authorized(document_id,business_id)`,
+      withCheck: sql`(${documentScope}) or public.seller_artifact_worker_authorized(document_id,business_id)`,
+    }),
+  ],
+).enableRLS();
+sellerDocumentScopeForeignKeys.push(
+  new ForeignKey(
+    sellerDocumentAccess,
+    foreignKey({
+      name: "seller_document_access_scope",
+      columns: [
+        sellerDocumentAccess.documentId,
+        sellerDocumentAccess.businessId,
+      ],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+  new ForeignKey(
+    sellerDocumentStorage,
+    foreignKey({
+      name: "seller_document_storage_scope",
+      columns: [
+        sellerDocumentStorage.documentId,
+        sellerDocumentStorage.businessId,
+      ],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+);
 
 const aiOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.ai)`;
 const aiMemberScope = sql`public.current_business_role() is not null`;

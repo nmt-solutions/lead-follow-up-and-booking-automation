@@ -113,6 +113,10 @@ import { createSubscriptionPaymentApplication } from "../application/subscriptio
 import { createSubscriptionPaymentRepository } from "../db/subscription-payment-repository";
 import { createSubscriptionPaymentHttp } from "../http/subscription-payments";
 import { configuredPayments } from "../subscription-payments/configuration";
+import { createSellerDocumentApplication } from "../application/seller-documents";
+import { createSellerDocumentRepository } from "../db/seller-document-repository";
+import { createSellerDocumentHttp } from "../http/seller-documents";
+import { configuredSellerDocumentStorage } from "../seller-documents/configuration";
 import { createFileRepository } from "../db/file-repository";
 import { createFilesHttp } from "../http/files";
 import { filesConfiguration } from "./files-configuration";
@@ -314,6 +318,14 @@ async function composeServices() {
     repository: createSubscriptionPaymentRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
     gateway: configuredPayments(),
+  });
+  const sellerDocuments = createSellerDocumentApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createSellerDocumentRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    mode: "live",
+    ...configuredSellerDocumentStorage(process.env),
   });
   const billingReviewFiles = createFileApplication({
     authenticate: authenticatePlatform,
@@ -648,6 +660,12 @@ async function composeServices() {
     }),
     subscriptionQuotes,
     subscriptionPayments,
+    sellerDocuments,
+    sellerDocumentsHttp: createSellerDocumentHttp({
+      application: sellerDocuments,
+      origin: environment.BETTER_AUTH_URL,
+      reportFailure,
+    }),
     subscriptionPaymentsHttp: createSubscriptionPaymentHttp({
       application: subscriptionPayments,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

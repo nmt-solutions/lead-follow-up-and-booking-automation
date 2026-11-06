@@ -7,6 +7,12 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "seller_issuer_revision",
+    "seller_issuer_decision",
+    "seller_document",
+    "seller_document_request",
+    "seller_document_access",
+    "seller_document_storage",
     "subscription_payment",
     "subscription_payment_event",
     "subscription_payment_history",

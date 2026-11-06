@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { preparePaymentSecurity } from "./payment-security";
+import { prepareSellerDocumentSecurity } from "./seller-document-security";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -69,6 +70,13 @@ import {
   subscriptionPeriod,
   subscriptionUsage,
   subscriptionPaymentScopeForeignKeys,
+  issuerRevision,
+  issuerDecision,
+  sellerDocument,
+  sellerDocumentRequest,
+  sellerDocumentAccess,
+  sellerDocumentStorage,
+  sellerDocumentScopeForeignKeys,
   commercialAuthorityRevision,
   discoveryConfiguration,
   discoveryRun,
@@ -192,6 +200,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   );
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
+  await prepareSellerDocumentSecurity(pool);
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
     RETURNS TABLE(payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -366,6 +375,23 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.subscription_payment') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.subscription_payment, public.subscription_payment_event, public.subscription_payment_history, public.subscription_period, public.subscription_usage FROM app_runtime;
         REVOKE UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON public.subscription_payment FROM app_runtime;
+      END IF;
+      IF to_regclass('public.seller_issuer_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.seller_issuer_revision,public.seller_issuer_decision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.seller_document') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.seller_document,public.seller_document_request FROM app_runtime;
+        REVOKE UPDATE (artifact_state,failure) ON public.seller_document FROM app_runtime;
+      END IF;
+      IF to_regprocedure('public.claim_seller_artifacts(text,integer)') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.claim_seller_artifacts(text,integer),public.seller_artifact_worker_authorized(uuid,uuid) FROM app_runtime;
+      END IF;
+      IF to_regprocedure('public.seller_next_number(uuid,text,bigint)') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.seller_next_number(uuid,text,bigint) FROM app_runtime;
+      END IF;
+      IF to_regclass('public.seller_document_access') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.seller_document_access,public.seller_document_storage FROM app_runtime;
+        REVOKE UPDATE (outcome) ON public.seller_document_storage FROM app_runtime;
       END IF;
       IF to_regclass('public.billing_profile_review') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.billing_profile_review FROM app_runtime;
@@ -559,6 +585,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...sellerDocumentScopeForeignKeys,
     ...subscriptionPaymentScopeForeignKeys,
     ...taxScopeForeignKeys,
     ...emailSequenceScopeForeignKeys,
@@ -618,6 +645,7 @@ export async function secureDatabase(pool: Pool) {
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...sellerDocumentScopeForeignKeys,
       ...subscriptionPaymentScopeForeignKeys,
       ...taxScopeForeignKeys,
       ...emailSequenceScopeForeignKeys,
@@ -757,6 +785,12 @@ export async function secureDatabase(pool: Pool) {
       subscriptionPaymentHistory,
       subscriptionPeriod,
       subscriptionUsage,
+      issuerRevision,
+      issuerDecision,
+      sellerDocument,
+      sellerDocumentRequest,
+      sellerDocumentAccess,
+      sellerDocumentStorage,
       commercialAuthorityRevision,
       discoveryConfiguration,
       discoveryRun,
@@ -1023,6 +1057,31 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE invitation FORCE ROW LEVEL SECURITY;
       ALTER TABLE team_audit FORCE ROW LEVEL SECURITY;
       ALTER TABLE platform_operator FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON seller_issuer_revision,seller_issuer_decision FROM app_runtime;
+      GRANT SELECT,INSERT ON seller_issuer_revision,seller_issuer_decision TO app_runtime;
+      ALTER TABLE seller_issuer_revision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE seller_issuer_decision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON seller_document,seller_document_request FROM app_runtime;
+      GRANT SELECT,INSERT ON seller_document,seller_document_request TO app_runtime;
+      GRANT UPDATE (artifact_state,failure) ON seller_document TO app_runtime;
+      ALTER TABLE seller_document FORCE ROW LEVEL SECURITY;
+      ALTER TABLE seller_document_request FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON seller_document_access,seller_document_storage FROM app_runtime;
+      GRANT SELECT,INSERT ON seller_document_access,seller_document_storage TO app_runtime;
+      GRANT UPDATE (outcome) ON seller_document_storage TO app_runtime;
+      ALTER TABLE seller_document_access FORCE ROW LEVEL SECURITY;
+      ALTER TABLE seller_document_storage FORCE ROW LEVEL SECURITY;
+      CREATE OR REPLACE FUNCTION public.seller_next_number(tenant uuid, series text, first_number bigint)
+      RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
+        IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT (
+          coalesce(public.current_business_role() in ('owner','admin'),false) OR EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.documents)
+        ) THEN RAISE EXCEPTION 'forbidden'; END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended('seller-documents',0));
+        RETURN (SELECT greatest(first_number,coalesce(max(d.ordinal)+1,first_number)) FROM public.seller_document d WHERE d.series_key=series);
+      END $$;
+      REVOKE ALL ON FUNCTION public.seller_next_number(uuid,text,bigint) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.seller_next_number(uuid,text,bigint) TO app_runtime;
+      GRANT EXECUTE ON FUNCTION public.claim_seller_artifacts(text,integer),public.seller_artifact_worker_authorized(uuid,uuid) TO app_runtime;
       REVOKE ALL PRIVILEGES ON business_file, file_access, file_usage FROM app_runtime;
       GRANT SELECT, INSERT ON business_file TO app_runtime;
       GRANT UPDATE (state, operation_id, sha256, failure, cleanup_after, completed_at) ON business_file TO app_runtime;
