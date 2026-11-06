@@ -58,7 +58,7 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
     CREATE OR REPLACE FUNCTION public.payment_renewal_context(action uuid,tenant uuid)
     RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE country text; mode text; BEGIN
       IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT public.payment_worker_authorized(action,tenant) THEN RETURN NULL; END IF;
-      SELECT a.snapshot->'quote'->'profile'->'profile'->'address'->>'country', CASE WHEN a.snapshot->'provider'->>'mode'='live' THEN 'live' ELSE 'fixture' END INTO country,mode FROM public.subscription_payment a WHERE a.id=action AND a.business_id=tenant AND a.started;
+      SELECT (SELECT p.profile->'address'->>'country' FROM public.billing_profile_revision p WHERE p.business_id=tenant ORDER BY p.version DESC LIMIT 1), CASE WHEN a.snapshot->'provider'->>'mode'='live' THEN 'live' ELSE 'fixture' END INTO country,mode FROM public.subscription_payment a WHERE a.id=action AND a.business_id=tenant AND a.started;
       IF NOT FOUND THEN RETURN NULL; END IF;
       RETURN jsonb_build_object(
         'history',coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.version) FROM public.billing_profile_revision p WHERE p.business_id=tenant),'[]'::jsonb),

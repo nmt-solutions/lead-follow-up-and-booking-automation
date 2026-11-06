@@ -413,6 +413,36 @@ describe("Native recurring cards at the public application seam", () => {
       false,
     );
   });
+  it("requires the exact frozen account review before creating a mandate, even when its ID and version were reused", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      app = compose(native);
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    for (const review of [
+      {
+        ...native.review,
+        plans: native.review.plans.map((plan) => ({ ...plan, totalCount: 24 })),
+      },
+      {
+        ...native.review,
+        terms: { ...native.review.terms, recurringSurcharge: "Changed terms" },
+      },
+    ]) {
+      native.configuration.env.RAZORPAY_ACCOUNT_REVIEW = JSON.stringify(review);
+      await expect(
+        compose(native).start(f.owner, f.business.id, { actionId: action.id }),
+      ).rejects.toMatchObject({ code: "SETUP_REQUIRED" });
+      expect(native.creations).toHaveLength(0);
+    }
+    native.configuration.env.RAZORPAY_ACCOUNT_REVIEW = JSON.stringify(
+      native.review,
+    );
+    await app.start(f.owner, f.business.id, { actionId: action.id });
+    expect(native.creations).toMatchObject([{ total_count: 12 }]);
+  });
   it("freezes original renewal prices and allowances while evaluating the current approved tax binding and preserving old replay", async () => {
     const { f, native, app } = await checkout();
     native.charge(
@@ -476,6 +506,123 @@ describe("Native recurring cards at the public application seam", () => {
     expect(state.periods[0]).toEqual(original);
     expect(state.access.active).toBe(false);
     expect(state.actions[0].state).toBe("review_required");
+  });
+  it("keeps a contradictory paid renewal visibly under review after an earlier confirmed charge, then recovers without another creation", async () => {
+    const { f, native, app } = await checkout();
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    await app.recover();
+    const original = (await app.workspace(f.owner, f.business.id)).periods[0];
+    await h.admin.query(
+      "UPDATE business_file SET retention_until='2028-01-01' WHERE business_id=$1",
+      [f.business.id],
+    );
+    h.clock.set("2026-12-05T09:00:00.000Z");
+    native.charge(
+      "pay_renewal",
+      "2026-12-05T09:00:00.000Z",
+      "2027-01-05T09:00:00.000Z",
+    );
+    native.payments.get("pay_renewal")!.method = "emandate";
+    await app.recover();
+    const owner = await h.signIn("tax-owner@example.com");
+    let state = await app.workspace(owner, f.business.id);
+    expect(state.periods).toEqual([original]);
+    expect(state.access.active).toBe(false);
+    expect(state.actions[0]).toMatchObject({
+      state: "review_required",
+      reason: "provider_binding_mismatch",
+      observation: {
+        paymentId: "pay_renewal",
+        review: {
+          invoiceId: "inv_renewal",
+          reason: "paid_invoice_binding_mismatch",
+        },
+      },
+    });
+    // Corrected authoritative card evidence reconciles the same native payment exactly once.
+    native.payments.get("pay_renewal")!.method = "card";
+    await app.recover();
+    await app.recover();
+    state = await app.workspace(owner, f.business.id);
+    expect(state.actions[0].state).toBe("confirmed");
+    expect(state.periods).toHaveLength(2);
+    expect(state.periods[0]).toEqual(original);
+    expect(state.access.active).toBe(true);
+    expect(native.creations).toHaveLength(1);
+  });
+  it("uses the current reviewed billing country for a new USD renewal while retaining the original charge identity", async () => {
+    const { f, native, app } = await checkout("US");
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+      "USD",
+    );
+    await app.recover();
+    const original = (await app.workspace(f.owner, f.business.id)).periods[0];
+    await h.admin.query(
+      "UPDATE business_file SET retention_until='2028-01-01' WHERE business_id=$1",
+      [f.business.id],
+    );
+    const current = await f.billing.workspace(f.owner, f.business.id);
+    await f.billing.save(f.owner, f.business.id, {
+      expectedVersion: current.version,
+      note: "Synthetic reviewed move within the USD billing path",
+      profile: {
+        ...current.current!.profile,
+        address: { ...current.current!.profile.address, country: "GB" },
+      },
+    });
+    await f.billing.review(f.operator, f.business.id, {
+      expectedVersion: 2,
+      expectedReviewVersion: 1,
+      outcome: "reviewed",
+      findings: [],
+      note: "Synthetic current-country evidence reviewed",
+    });
+    const rules = await f.tax.saveRule(f.operator, {
+      key: "fixture-gb",
+      expectedVersion: 0,
+      note: "Explicit synthetic GB coverage",
+      rule: {
+        ...f.rules.revisions[0].rule,
+        customerCountry: "GB",
+        jurisdiction: {
+          code: "fixture-gb",
+          name: "Synthetic GB jurisdiction",
+          country: "GB",
+        },
+      },
+    });
+    await f.tax.decideRule(f.operator, {
+      revisionId: rules.revisions.find((r) => r.key === "fixture-gb")!.id,
+      expectedDecisionVersion: 0,
+      outcome: "approved",
+      note: "Synthetic GB coverage approved",
+    });
+    h.clock.set("2026-12-05T09:00:00.000Z");
+    native.charge(
+      "pay_renewal",
+      "2026-12-05T09:00:00.000Z",
+      "2027-01-05T09:00:00.000Z",
+      "USD",
+    );
+    await app.recover();
+    const owner = await h.signIn("tax-owner@example.com");
+    const state = await app.workspace(owner, f.business.id);
+    expect(state.periods).toHaveLength(2);
+    expect(state.periods[0]).toEqual(original);
+    expect(state.periods[1].snapshot.tax).toMatchObject({
+      billing: { current: { profile: { address: { country: "GB" } } } },
+      totals: { totalMinor: "2750" },
+      lines: [{ rule: { revision: { key: "fixture-gb" } } }],
+    });
+    expect(state.access.active).toBe(true);
+    expect(native.creations).toHaveLength(1);
   });
   it("preserves the native January-end monthly anchor across February and March instead of using a thirty-day term", async () => {
     h.clock.set("2027-01-31T09:00:00.000Z");

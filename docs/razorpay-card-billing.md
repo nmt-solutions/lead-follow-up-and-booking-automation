@@ -26,6 +26,8 @@ The adapter verifies the mapped plan's native `monthly`/interval-one/currency/gr
 
 ## Native creation and recovery
 
+Creation requires the complete current account review to equal the saved review, including cycle limits and commercial terms. Reusing a review ID/version with changed contents does not authorize a changed mandate.
+
 `POST /v1/subscriptions` sends only the trusted plan ID, quantity one, explicit cycle count, customer notifications and durable notes binding operation, action, Business, financial hash and account-review ID. It sends no invented idempotency header. The action's started marker commits before I/O; a concurrent start, crash, timeout or lost response never repeats creation. Pre-authorization `customer_id` is honestly null. Only the documented exact HTTPS `rzp.io/i/...` hosted origin/path is accepted.
 
 Saved subscription and plan references allow direct lookup. Lost creation uses native `plan_id/from/to/count/skip` listing, 100 entries per sweep, with a durable candidate/cursor. The stable creation window spans one minute before the persisted checkout-start intent through five minutes afterward; it is independent of an earlier quote/payment review time. A full page persists progress; only the exhausted window with one exactly bound candidate can recover a URL. Missing results restart lookup but never permit creation. Multiple candidates or a changed binding remain under review. A delayed creation outside that window is intentionally unresolved for operator investigation; there is no unsafe create fallback.
@@ -43,6 +45,8 @@ Authenticated/activated subscription states, pending/authorized payments and ref
 Native add-on examples conflict with the provider FAQ's deprecation notice. Therefore this card adapter explicitly blocks paid-pilot checkout until a supported separate paid-pilot collection flow is validated; an authentication token does not pay for pilot days. The provider-agnostic application retains its existing configured-days pilot contract. UPI/eMandate and upgrade flows remain separate validation work.
 
 ## Frozen financial source for invoices and paid scope
+
+Contradictory paid invoices retain their native invoice reference and a safe review reason even after an earlier cycle was confirmed. They cannot extend access; corrected authoritative evidence can reconcile the same payment without another subscription creation. New renewal tax lookup follows the current reviewed billing country's approved coverage while earlier charge snapshots remain unchanged.
 
 `subscription_period` is the canonical provider-agnostic per-charge source consumed by payment workspace and paid-scope readers. It now allows multiple non-overlapping periods per action, uniquely allocates each provider/account/payment, and stores `charge` (normalized authoritative observation) beside the frozen `snapshot`. No separate unused renewal table is introduced. Fees/fee tax and native INR base amount/currency are retained separately from the customer's gross charge currency; observed base money is not a settlement/bank receipt claim. The provider invoice ID is correlation evidence, **not** an app-issued seller invoice.
 

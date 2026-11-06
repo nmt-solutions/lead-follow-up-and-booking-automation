@@ -732,6 +732,16 @@ export function createSubscriptionPaymentRepository(database: Database) {
       at: Date,
     ) {
       return worker(work, async (tx, row) => {
+        if (observation?.review)
+          return record(
+            tx,
+            row,
+            "charge_evidence_conflict",
+            "review_required",
+            "provider_binding_mismatch",
+            at,
+            observation,
+          );
         if (row.state === "confirmed" && !observation?.charge)
           return paymentView(row);
         if (!observation)

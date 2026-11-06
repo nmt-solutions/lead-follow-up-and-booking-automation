@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type {
   PaymentGateway,
@@ -114,8 +115,7 @@ export function createRazorpayGateway(d: {
       !supports(s.quote.currency) ||
       s.term.kind !== "calendar_month" ||
       plans.length !== 1 ||
-      s.provider.review?.id !== review.id ||
-      s.provider.review.version !== review.version
+      !isDeepStrictEqual(s.provider.review, review)
     )
       throw new ApplicationError("SETUP_REQUIRED");
     const maximum = BigInt(
@@ -376,7 +376,12 @@ export function createRazorpayGateway(d: {
                   p.base_currency === "INR" ? ("INR" as const) : null,
               },
             }
-          : {}),
+          : {
+              review: {
+                invoiceId: invoice.id,
+                reason: "paid_invoice_binding_mismatch" as const,
+              },
+            }),
       });
     }
     recovery.invoiceSkip =

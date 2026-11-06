@@ -30,7 +30,7 @@ const reasons: Record<string, string> = {
   native_preflight_rejected:
     "The native plan or card availability could not be verified before creation. No subscription creation was attempted. Ask the operator to review account and plan setup, then prepare a new checkout review.",
   native_paid_pilot_mapping_unverified:
-    "Paid pilot checkout is unavailable: the provider's add-on documentation conflicts with its deprecation notice. Choose a supported monthly quote or ask the operator to validate a separate paid-pilot collection flow.",
+    "Paid pilot checkout is unavailable for this card configuration. Choose a supported monthly quote or ask the operator about paid-pilot payment options.",
   native_plan_or_capability_review_required:
     "The native plan, amount limit or approved card capability does not match this quote. Ask the operator to review the account and plan mapping.",
   creation_lookup_ambiguous:

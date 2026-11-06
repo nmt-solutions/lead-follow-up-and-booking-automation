@@ -124,6 +124,12 @@ export const paymentObservationSchema = z.strictObject({
   periodStart: z.iso.datetime().nullable(),
   periodEnd: z.iso.datetime().nullable(),
   checkout: checkoutReferenceSchema.nullable().default(null),
+  review: z
+    .strictObject({
+      invoiceId: ref,
+      reason: z.literal("paid_invoice_binding_mismatch"),
+    })
+    .optional(),
   charge: z
     .strictObject({
       kind: z.enum(["initial", "renewal"]).optional(),
