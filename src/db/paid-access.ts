@@ -4,6 +4,18 @@ import type { Transaction } from "./scope";
 import { lockBusiness } from "./scope";
 import { subscriptionUsage } from "./schema";
 import { ApplicationError } from "../models/application-error";
+import { paidContractSchema } from "../models/subscription-payments";
+
+export async function readPaidContract(
+  tx: Transaction,
+  businessId: string,
+  at: Date,
+) {
+  const result = await tx.execute<{ contract: unknown }>(
+    sql`select public.current_paid_contract(${businessId}::uuid,${at.toISOString()}::timestamptz) as contract`,
+  );
+  return paidContractSchema.nullable().parse(result.rows[0]?.contract ?? null);
+}
 
 export async function paidAllowance(
   tx: Transaction,

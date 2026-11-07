@@ -4,6 +4,19 @@ import type { Clock } from "../models/business";
 import { razorpayAccountReviewSchema } from "../models/razorpay-account";
 import { createRazorpayGateway } from "./razorpay";
 import { lifecyclePolicySchema } from "../models/subscription-lifecycle";
+import { reachPolicySchema } from "../models/reach-changes";
+
+export function configuredReachPolicy(
+  env: Record<string, string | undefined> = process.env,
+) {
+  try {
+    return reachPolicySchema.parse(
+      JSON.parse(env.SUBSCRIPTION_REACH_POLICY ?? "null"),
+    );
+  } catch {
+    return undefined;
+  }
+}
 
 /** Both web and Trigger compose native cards and the independently reviewed lifecycle policy. */
 export function configuredPayments(

@@ -1,4 +1,5 @@
 import type { Clock } from "../../src/models/business";
+import type { RazorpayAccountReview } from "../../src/models/razorpay-account";
 
 /** Synthetic account review and HTTP boundary; no native credentials or account calls. */
 export function razorpayFixture(clock: Clock) {
@@ -39,7 +40,7 @@ export function razorpayFixture(clock: Clock) {
       evidence: ["fixture:calendar-month-approved"],
     },
     internationalUpdates: "unknown",
-    plans: [
+    plans: Array.from<RazorpayAccountReview["plans"][number]>([
       {
         offerId: "fixture",
         reservedCapacityId: null,
@@ -54,7 +55,7 @@ export function razorpayFixture(clock: Clock) {
         planId: "plan_fixtureUSD",
         totalCount: 12,
       },
-    ],
+    ]),
   };
   const creations: unknown[] = [];
   const subscriptions = new Map<string, Record<string, unknown>>();
@@ -70,6 +71,7 @@ export function razorpayFixture(clock: Clock) {
     requests,
     loseCreation: false,
     loseCancellation: false,
+    shortUrl: "https://rzp.io/i/fixture1",
     charge(
       paymentId: string,
       start: string,
@@ -140,7 +142,10 @@ export function razorpayFixture(clock: Clock) {
         RAZORPAY_ACCOUNT_REVIEW: JSON.stringify(review),
       },
       clock,
-      fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+      fetch: (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => {
         const url = new URL(
           typeof input === "string" || input instanceof URL ? input : input.url,
         );
@@ -177,7 +182,7 @@ export function razorpayFixture(clock: Clock) {
             id: "sub_fixture1",
             entity: "subscription",
             customer_id: null,
-            short_url: "https://rzp.io/i/fixture1",
+            short_url: fixture.shortUrl,
             status: "created",
             created_at: Math.floor(clock.now().getTime() / 1000),
           };
