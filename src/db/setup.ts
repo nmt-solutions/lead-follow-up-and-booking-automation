@@ -831,6 +831,9 @@ export async function secureDatabase(pool: Pool) {
     // Upgrade the original owner-only role check from the schema's definition.
     for (const table of [
       membership,
+      taxFilingExport,
+      taxFilingIntent,
+      taxFilingEvent,
       reconciliationEvidence,
       reconciliationRecord,
       reconciliationReview,

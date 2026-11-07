@@ -10,7 +10,6 @@ import { createTaxFilingRepository } from "../src/db/tax-filing-repository";
 import { runtimeDatabase, verifyRuntimeRole } from "../src/db/runtime";
 import {
   prepareTaxFilingSecurity,
-  secureTaxFilings,
   taxFilingTables,
 } from "../src/db/tax-filing-security";
 import { createTaxFilingHttp } from "../src/http/tax-filings";
@@ -39,7 +38,7 @@ describe("Tax filing confirmations at the public application seam", () => {
   });
   afterEach(async () => h?.close());
 
-  async function approvedPeriod() {
+  async function approvedPeriod(extraReviewerIds: string[] = []) {
     const f = await financialExportFixture(
       h,
       createMemoryStorage(),
@@ -74,7 +73,7 @@ describe("Tax filing confirmations at the public application seam", () => {
         basis: "document_issue_date",
         unissuedCharges: "require_invoice",
         preparerIds: [actor.userId],
-        reviewerIds: [actor.userId, reviewerId],
+        reviewerIds: [actor.userId, reviewerId, ...extraReviewerIds],
         distinctReviewer: false,
         evidence: ["synthetic legal fixture, no jurisdiction assertion"],
       },
@@ -1513,6 +1512,131 @@ describe("Tax filing confirmations at the public application seam", () => {
       blocker.release();
     }
   });
+  it("rejects a restricted insert when tax authority is revoked during its database guard wait", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f),
+      fact = await confirmed(f, policy, "submission", "901"),
+      principal = await h.access.authenticatePlatformForWork(f.operator),
+      blocker = await h.admin.connect(),
+      client = await h.runtime.connect();
+    try {
+      await blocker.query("begin");
+      await blocker.query(
+        "select pg_advisory_xact_lock(hashtextextended('tax-reporting',0))",
+      );
+      await client.query("begin");
+      const pid = (
+        await client.query<{ pid: number }>("select pg_backend_pid() pid")
+      ).rows[0].pid;
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id','',true),set_config('app.tax_session_id',$2,true),set_config('app.tax_at',$3,true)",
+        [principal.userId, principal.sessionId, h.clock.now().toISOString()],
+      );
+      const pending = client.query(
+        "insert into tax_filing_access(id,evidence_id,actor_id,session_id,access_hash) values(gen_random_uuid(),$1,$2,$3,repeat('b',64))",
+        [fact.artifact.id, principal.userId, principal.sessionId],
+      );
+      const result = expect(pending).rejects.toMatchObject({ code: "42501" });
+      let waiting = false;
+      for (let attempt = 0; attempt < 200 && !waiting; attempt++) {
+        waiting = (
+          await h.admin.query<{ waiting: boolean }>(
+            "select exists(select 1 from pg_stat_activity where pid=$1 and wait_event_type='Lock') waiting",
+            [pid],
+          )
+        ).rows[0].waiting;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(waiting).toBe(true);
+      await h.provisionOperator(f.operator, {
+        tax: false,
+        reconciliation: false,
+      });
+      await blocker.query("commit");
+      await result;
+    } finally {
+      await blocker.query("rollback");
+      await client.query("rollback");
+      blocker.release();
+      client.release();
+    }
+  });
+  it("denies original bytes when the grant expires while the database read is blocked", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f),
+      fact = await confirmed(f, policy, "submission", "901");
+    await app.downloadEvidence(f.operator, { evidenceId: fact.artifact.id });
+    const principal = await h.access.authenticatePlatformForWork(f.operator),
+      grant = (
+        await h.admin.query<{ id: string; access_hash: string }>(
+          "select id,access_hash from tax_filing_access where evidence_id=$1 order by at desc limit 1",
+          [fact.artifact.id],
+        )
+      ).rows[0],
+      blocker = await h.admin.connect(),
+      client = await h.runtime.connect();
+    try {
+      await blocker.query("begin");
+      await blocker.query(
+        "lock table tax_filing_bytes in access exclusive mode",
+      );
+      await client.query("begin");
+      const pid = (
+        await client.query<{ pid: number }>("select pg_backend_pid() pid")
+      ).rows[0].pid;
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id','',true),set_config('app.tax_session_id',$2,true),set_config('app.tax_at',$3,true)",
+        [principal.userId, principal.sessionId, h.clock.now().toISOString()],
+      );
+      const pending = client.query(
+        "select public.tax_filing_artifact_read($1,$2) body",
+        [grant.id, grant.access_hash],
+      );
+      let waiting = false;
+      for (let attempt = 0; attempt < 200 && !waiting; attempt++) {
+        waiting = (
+          await h.admin.query<{ waiting: boolean }>(
+            "select exists(select 1 from pg_stat_activity where pid=$1 and wait_event_type='Lock') waiting",
+            [pid],
+          )
+        ).rows[0].waiting;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(waiting).toBe(true);
+      await h.admin.query(
+        "update tax_filing_access set at=clock_timestamp()-interval '30 seconds',expires_at=clock_timestamp()-interval '1 millisecond' where id=$1",
+        [grant.id],
+      );
+      await blocker.query("commit");
+      expect((await pending).rows[0]).toEqual({ body: null });
+    } finally {
+      await blocker.query("rollback");
+      await client.query("rollback");
+      blocker.release();
+      client.release();
+    }
+  });
+  it("rejects missing original export bindings instead of accepting SQL unknown", async () => {
+    const f = await approvedPeriod(),
+      principal = await h.access.authenticatePlatformForWork(f.operator),
+      client = await h.runtime.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id','',true)",
+        [principal.userId],
+      );
+      await expect(
+        client.query(
+          "insert into tax_filing_export(id,report_id,report,actor_id,actor_name,note,request_key,input,at) values(gen_random_uuid(),$1,'{}'::jsonb,$2,'Fixture operator','Invalid original binding',gen_random_uuid(),'{}'::jsonb,statement_timestamp())",
+          [f.report.id, principal.userId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  });
   it.each(["pending", "unknown", "failed"])(
     "never turns a %s manual attempt into a second initiation through a review cycle",
     async (outcome) => {
@@ -1714,7 +1838,13 @@ describe("Tax filing confirmations at the public application seam", () => {
     expect(f.native.refunds).toHaveLength(1);
   });
   it("requires fresh attributable approval when other confirmed facts change the displayed source basis", async () => {
-    const f = await approvedPeriod(),
+    const priorReviewer = await h.signIn("prior-filing-reviewer@example.com");
+    await h.provisionOperator(priorReviewer, {
+      tax: true,
+      reconciliation: false,
+    });
+    const priorReviewerId = (await h.authenticate(priorReviewer)).userId;
+    const f = await approvedPeriod([priorReviewerId]),
       policy = await manualPolicy(f);
     const filing = await app.prepare(f.operator, {
       ...identity(f.report),
@@ -1741,7 +1871,7 @@ describe("Tax filing confirmations at the public application seam", () => {
       amendmentOf: null,
       note: "Original partial payment",
     });
-    await app.act(f.reviewer, {
+    await app.act(priorReviewer, {
       requestKey: randomUUID(),
       intentId: payment.id,
       expectedVersion: 0,
@@ -1782,6 +1912,10 @@ describe("Tax filing confirmations at the public application seam", () => {
       acknowledgementId: ack.events.at(-1)!.id,
       note: "Independent confirmation",
     });
+    await h.provisionOperator(priorReviewer, {
+      tax: false,
+      reconciliation: false,
+    });
     await expect(
       app.act(f.operator, {
         requestKey: randomUUID(),
@@ -1817,6 +1951,9 @@ describe("Tax filing confirmations at the public application seam", () => {
       note: "New attributable review of the actual current facts",
     });
     expect(reviewed.events.filter((e) => e.kind === "approve")).toHaveLength(2);
+    expect(
+      reviewed.events.filter((e) => e.kind === "approve").at(-1)?.actorId,
+    ).toBe((await h.authenticate(f.reviewer)).userId);
     expect(
       await app.act(f.operator, {
         requestKey: randomUUID(),

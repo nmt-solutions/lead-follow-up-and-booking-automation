@@ -279,23 +279,21 @@ async function invalidateProcedureReports(
       .where(eq(taxReportAction.reportId, report.id))
       .orderBy(asc(taxReportAction.version));
     if (history.some((a) => a.kind === "invalidated")) continue;
-    await tx
-      .insert(taxReportAction)
-      .values({
-        id: randomUUID(),
-        reportId: report.id,
-        version: (history.at(-1)?.version ?? 0) + 1,
-        kind: "invalidated",
-        detail: { issueId: sourceId, evidence: [sourceTable] },
-        requestKey: randomUUID(),
-        input: { sourceTable, sourceId },
-        ...(await attribution(
-          tx,
-          actor,
-          at,
-          "Filing procedure changed; prepare and review an explicit successor report",
-        )),
-      });
+    await tx.insert(taxReportAction).values({
+      id: randomUUID(),
+      reportId: report.id,
+      version: (history.at(-1)?.version ?? 0) + 1,
+      kind: "invalidated",
+      detail: { issueId: sourceId, evidence: [sourceTable] },
+      requestKey: randomUUID(),
+      input: { sourceTable, sourceId },
+      ...(await attribution(
+        tx,
+        actor,
+        at,
+        "Filing procedure changed; prepare and review an explicit successor report",
+      )),
+    });
   }
 }
 async function intentView(
@@ -523,20 +521,18 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
           },
         });
         const recordId = randomUUID();
-        await tx
-          .insert(costRecord)
-          .values({
-            id: recordId,
-            sourceId,
-            version: 1,
-            month: source.month,
-            origin: "operator",
-            source,
-            reason: input.note,
-            actorId: actor.userId,
-            at: sql`statement_timestamp()`,
-            retainUntil: sql`statement_timestamp()+make_interval(secs=>${input.retentionSeconds})`,
-          });
+        await tx.insert(costRecord).values({
+          id: recordId,
+          sourceId,
+          version: 1,
+          month: source.month,
+          origin: "operator",
+          source,
+          reason: input.note,
+          actorId: actor.userId,
+          at: sql`statement_timestamp()`,
+          retainUntil: sql`statement_timestamp()+make_interval(secs=>${input.retentionSeconds})`,
+        });
         await costsAllowed();
         return { sourceId, recordId };
       }),
@@ -849,7 +845,9 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
             new Date(input.occurredAt) > at
           )
             throw new ApplicationError("CONFLICT");
-          const approval = current.events.find((e) => e.kind === "approve");
+          const approval = current.events
+            .filter((e) => e.kind === "approve")
+            .at(-1);
           if (!approval) throw new ApplicationError("CONFLICT");
           await reviewer(
             tx,
@@ -1004,35 +1002,31 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
           }
         }
         const eventId = randomUUID();
-        await tx
-          .insert(events)
-          .values({
-            id: eventId,
+        await tx.insert(events).values({
+          id: eventId,
+          intentId: row.id,
+          version: input.expectedVersion + 1,
+          kind: input.kind,
+          detail,
+          confirmationKey,
+          input,
+          requestKey: input.requestKey,
+          ...(await attribution(tx, actor, at, input.note)),
+        });
+        if (allocation)
+          await tx.insert(allocations).values({
+            id: randomUUID(),
             intentId: row.id,
-            version: input.expectedVersion + 1,
-            kind: input.kind,
-            detail,
-            confirmationKey,
+            confirmationId: eventId,
+            evidenceId: allocation.id,
+            reportId: row.reportId,
+            referenceKey: confirmationKey!,
+            amountMinor: allocation.metadata.amountMinor,
+            currency: row.target.currency,
             input,
             requestKey: input.requestKey,
             ...(await attribution(tx, actor, at, input.note)),
           });
-        if (allocation)
-          await tx
-            .insert(allocations)
-            .values({
-              id: randomUUID(),
-              intentId: row.id,
-              confirmationId: eventId,
-              evidenceId: allocation.id,
-              reportId: row.reportId,
-              referenceKey: confirmationKey!,
-              amountMinor: allocation.metadata.amountMinor,
-              currency: row.target.currency,
-              input,
-              requestKey: input.requestKey,
-              ...(await attribution(tx, actor, at, input.note)),
-            });
         return intentView(tx, row, clock.now());
       }),
     reconcileRemittance: (

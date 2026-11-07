@@ -6064,7 +6064,7 @@ export const taxFilingExport = pgTable(
     uniqueIndex("tax_filing_export_request").on(t.requestKey),
     check(
       "tax_filing_export_binding",
-      sql`${t.report}->>'id'=${t.reportId}::text and ${t.report}->>'status'='approved' and (${t.report}->>'current')::boolean`,
+      sql`coalesce(${t.report}->>'id'=${t.reportId}::text and ${t.report}->>'status'='approved' and (${t.report}->>'current')::boolean,false)`,
     ),
     ...taxReportingPolicies("tax_filing_export"),
   ],
@@ -6155,7 +6155,7 @@ export const taxFilingIntent = pgTable(
     ),
     check(
       "tax_filing_intent_binding",
-      sql`${t.kind} in ('submission','remittance') and ${t.report}->>'id'=${t.reportId}::text and ${t.target}->>'reportId'=${t.reportId}::text and ${t.policy}->>'id'=${t.policyId}::text and ${t.amountMinor} ~ '^-?(0|[1-9][0-9]{0,59})$' and (${t.kind}='submission' or ${t.amountMinor} not like '-%') and ${t.amendmentOf} is distinct from ${t.id}`,
+      sql`coalesce(${t.kind} in ('submission','remittance') and ${t.report}->>'id'=${t.reportId}::text and ${t.target}->>'reportId'=${t.reportId}::text and ${t.policy}->>'id'=${t.policyId}::text and ${t.amountMinor} ~ '^-?(0|[1-9][0-9]{0,59})$' and (${t.kind}='submission' or ${t.amountMinor} not like '-%') and ${t.amendmentOf} is distinct from ${t.id},false)`,
     ),
     ...taxReportingPolicies("tax_filing_intent"),
   ],
@@ -6185,7 +6185,7 @@ export const taxFilingEvent = pgTable(
       .where(sql`${t.kind}='confirm'`),
     check(
       "tax_filing_confirmation_key",
-      sql`(${t.kind}='confirm' and ${t.confirmationKey} ~ '^[a-f0-9]{64}$') or (${t.kind}<>'confirm' and ${t.confirmationKey} is null)`,
+      sql`coalesce((${t.kind}='confirm' and ${t.confirmationKey} ~ '^[a-f0-9]{64}$') or (${t.kind}<>'confirm' and ${t.confirmationKey} is null),false)`,
     ),
     check(
       "tax_filing_event_valid",

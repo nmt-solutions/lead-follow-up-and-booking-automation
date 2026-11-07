@@ -110,14 +110,19 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
       RETURN EXISTS(SELECT 1 FROM public.tax_filing_bytes b WHERE b.id=e.id AND b.body=original_base64);
     END $$;
     CREATE OR REPLACE FUNCTION public.tax_filing_artifact_read(access_ref uuid,grant_hash text) RETURNS text
-    LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$ DECLARE result text; BEGIN
+    LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path='' AS $$ DECLARE result text; BEGIN
       IF NOT public.tax_filing_session_current() THEN RETURN NULL; END IF;
       SELECT b.body INTO result FROM public.tax_filing_access a JOIN public.tax_filing_evidence e ON e.id=a.evidence_id JOIN public.tax_filing_bytes b ON b.id=e.id
       WHERE a.id=access_ref AND a.access_hash=grant_hash AND a.actor_id=current_setting('app.actor_id',true)
         AND a.session_id=current_setting('app.tax_session_id',true)
-        AND a.at<=statement_timestamp() AND a.expires_at>statement_timestamp()
+        AND a.at<=clock_timestamp() AND a.expires_at>clock_timestamp()
         AND encode(sha256(decode(b.body,'base64')),'hex')=e.metadata->>'sha256'
         AND octet_length(decode(b.body,'base64'))=(e.metadata->>'size')::integer;
+      IF NOT public.tax_filing_session_current() OR NOT EXISTS(
+        SELECT 1 FROM public.tax_filing_access a WHERE a.id=access_ref AND a.access_hash=grant_hash
+          AND a.actor_id=current_setting('app.actor_id',true) AND a.session_id=current_setting('app.tax_session_id',true)
+          AND a.at<=clock_timestamp() AND a.expires_at>clock_timestamp()
+      ) THEN RETURN NULL; END IF;
       RETURN result;
     END $$;
     REVOKE ALL ON FUNCTION public.tax_filing_fulfillment(uuid) FROM PUBLIC,app_runtime;
@@ -130,6 +135,7 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
     BEGIN
       IF NOT public.tax_filing_session_current() OR NEW.actor_id<>current_setting('app.actor_id',true) THEN RAISE EXCEPTION 'Tax filing scope denied' USING ERRCODE='42501'; END IF;
       PERFORM pg_advisory_xact_lock(hashtextextended('tax-reporting',0));
+      IF NOT public.tax_filing_session_current() THEN RAISE EXCEPTION 'Tax filing current scope denied' USING ERRCODE='42501'; END IF;
       IF TG_TABLE_NAME='tax_filing_access' THEN
         IF NEW.session_id<>current_setting('app.tax_session_id',true) THEN RAISE EXCEPTION 'Tax filing access denied' USING ERRCODE='42501'; END IF;
         NEW.at:=statement_timestamp(); NEW.expires_at:=NEW.at+interval '30 seconds'; RETURN NEW;
