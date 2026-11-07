@@ -35,7 +35,16 @@ export function createFileRepository(
     const file = await getFile(tx, id, lock);
     if (options.billingReview && file.purpose !== "billing")
       throw new ApplicationError("NOT_FOUND");
-    return file;
+    return retainedFile(tx, file);
+  }
+  async function retainedFile(tx: Transaction, file: FileRecord) {
+    const result = await tx.execute<{ until: string | null }>(
+      sql`select public.business_file_retained_until(${file.id}::uuid,${file.businessId}::uuid)::text until`,
+    );
+    const until = result.rows[0]?.until;
+    return until && new Date(until) > file.retentionUntil
+      ? { ...file, retentionUntil: new Date(until) }
+      : file;
   }
   function access<T>(
     actor: Actor,
@@ -68,15 +77,19 @@ export function createFileRepository(
   return {
     async list(actor: Actor, businessId: string) {
       return access(actor, businessId, false, async (tx) => ({
-        files: await tx
-          .select()
-          .from(businessFile)
-          .where(
-            options.billingReview
-              ? eq(businessFile.purpose, "billing")
-              : undefined,
-          )
-          .orderBy(businessFile.createdAt, businessFile.id),
+        files: await Promise.all(
+          (
+            await tx
+              .select()
+              .from(businessFile)
+              .where(
+                options.billingReview
+                  ? eq(businessFile.purpose, "billing")
+                  : undefined,
+              )
+              .orderBy(businessFile.createdAt, businessFile.id)
+          ).map((file) => retainedFile(tx, file)),
+        ),
         usage: await tx
           .select()
           .from(fileUsage)
@@ -111,6 +124,13 @@ export function createFileRepository(
           // the other's lease or lifecycle state.
           const previous = await visibleFile(tx, id, "update");
           const changes = update(previous);
+          if (changes.state === "deleting") {
+            const protectedFile = await tx.execute<{ protected: boolean }>(
+              sql`select public.business_file_protected(${id}::uuid,${businessId}::uuid) protected`,
+            );
+            if (protectedFile.rows[0]?.protected)
+              throw new ApplicationError("FORBIDDEN");
+          }
           const [file] = await tx
             .update(businessFile)
             .set(changes)
@@ -208,6 +228,16 @@ export function createFileRepository(
       await database.execute(
         sql`select public.finish_file_cleanup(${id}::uuid, ${operationId}::uuid, ${at.toISOString()}::timestamptz, ${success})`,
       );
+    },
+    async cleanupCurrent(
+      id: string,
+      operationId: string,
+      accountScope: string,
+    ) {
+      const result = await database.execute<{ current: boolean }>(
+        sql`select public.business_file_cleanup_current(${id}::uuid,${operationId}::uuid,${accountScope}) current`,
+      );
+      return result.rows[0]?.current === true;
     },
   };
 }

@@ -7,6 +7,11 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "business_data_request",
+    "business_data_export",
+    "business_data_grant",
+    "business_data_step",
+    "business_data_event",
     "notification_terms",
     "notification_preference",
     "notification_setup",

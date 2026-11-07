@@ -7,6 +7,7 @@ import {
   notificationTables,
 } from "./notification-security";
 import { operationSourceTables } from "./operations-security";
+import { verifyDataGovernance } from "./data-governance-security";
 
 export function runtimeDatabase(pool: Pool) {
   return drizzle(pool, { schema });
@@ -17,6 +18,7 @@ export type Database = ReturnType<typeof runtimeDatabase>;
 export async function verifyRuntimeRole(
   pool: Pool | PoolClient,
 ): Promise<void> {
+  await verifyDataGovernance(pool);
   const result = await pool.query<{ safe: boolean }>(`
     SELECT (SELECT count(*)=3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('financial_case','financial_case_event','financial_receipt'))
       AND (SELECT count(*)=3 AND bool_and(convalidated) FROM pg_constraint WHERE conname IN ('financial_case_period_scope','financial_case_invoice_scope','financial_case_event_scope'))

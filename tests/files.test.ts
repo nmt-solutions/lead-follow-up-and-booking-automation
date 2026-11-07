@@ -250,6 +250,12 @@ describe("private Business files at the application seam", () => {
     });
     storage.failDelete = false;
     h.clock.set("2026-11-05T09:02:10Z");
+    // Advancing the application clock does not expire a DB-time worker lease.
+    expect(await files.cleanup()).toEqual({ attempted: 0, failed: 0 });
+    await h.admin.query(
+      "update business_file set cleanup_after=least(statement_timestamp(),$2::timestamptz)-interval '1 second' where id=$1",
+      [upload.file.id, h.clock.now()],
+    );
     await Promise.all([files.cleanup(), files.cleanup()]);
     const deleted = await files.list(owner, a.id);
     expect(deleted.files[0]).toMatchObject({
@@ -624,6 +630,11 @@ describe("private Business files at the application seam", () => {
     });
     storage.failAfterDelete = false;
     h.clock.set("2026-11-05T09:01:05Z");
+    expect(await files.cleanup()).toEqual({ attempted: 0, failed: 0 });
+    await h.admin.query(
+      "update business_file set cleanup_after=least(statement_timestamp(),$2::timestamptz)-interval '1 second' where id=$1",
+      [upload.file.id, h.clock.now()],
+    );
     expect(await files.cleanup()).toEqual({ attempted: 1, failed: 0 });
     expect((await files.list(owner, a.id)).usage).toMatchObject({
       deleteAttempts: 2,
