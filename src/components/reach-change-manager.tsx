@@ -340,7 +340,9 @@ export function ReachChangeManager({
               work are retained. Reach alone does not grant sending permission.
             </p>
             <p role="status">
-              Captured delta: {captured ? "Confirmed" : "Not confirmed"}.{" "}
+              {s.direction === "expansion"
+                ? `Captured delta: ${captured ? "Confirmed" : "Not confirmed"}.`
+                : `Eligible target renewal: ${c.state === "applied" ? "Confirmed" : "Not confirmed"}.`}{" "}
               {s.path === "replacement_mandate"
                 ? `Old renewal stopped: ${native?.oldStopped ? "confirmed" : "not confirmed"}. New mandate: ${native?.mandateReady ? "authenticated" : "not authenticated"}.`
                 : `Native target: ${native?.updated ? "acknowledged; payment is checked separately" : "not yet acknowledged"}.`}
