@@ -1,4 +1,8 @@
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
+import {
+  prepareReconciliationSecurity,
+  secureReconciliationRecords,
+} from "./reconciliation-security";
 import type { Pool } from "pg";
 import { prepareReachSecurity, reachFunctions } from "./reach-change-security";
 import {
@@ -114,6 +118,10 @@ import {
   financialCase,
   financialCaseEvent,
   financialReceipt,
+  reconciliationEvidence,
+  reconciliationRecord,
+  reconciliationReview,
+  reconciliationAccess,
   financialCaseScopeForeignKeys,
   commercialAuthorityRevision,
   discoveryConfiguration,
@@ -249,6 +257,20 @@ export async function prepareDatabaseRole(pool: Pool) {
     `DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY(ARRAY[${reachFunctions.map((n) => `'${n}'`).join(",")}]) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP; END $$;`,
   );
   await prepareFinancialSecurity(pool);
+  await prepareReconciliationSecurity(pool);
+  for (const name of [
+    "reconciliation_evidence",
+    "reconciliation_record",
+    "reconciliation_review",
+    "reconciliation_access",
+  ]) {
+    await pool.query(
+      `DO $$ BEGIN IF to_regclass('public.${name}') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.${name} FROM app_runtime; END IF; END $$;`,
+    );
+  }
+  await pool.query(
+    "REVOKE ALL ON FUNCTION public.reconciliation_sources(timestamptz,timestamptz) FROM app_runtime",
+  );
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
   await prepareDataGovernance(pool);
@@ -783,6 +805,10 @@ export async function secureDatabase(pool: Pool) {
     // Upgrade the original owner-only role check from the schema's definition.
     for (const table of [
       membership,
+      reconciliationEvidence,
+      reconciliationRecord,
+      reconciliationReview,
+      reconciliationAccess,
       opportunityDueAction,
       notificationNotice,
       inboxOpportunity,
@@ -907,6 +933,10 @@ export async function secureDatabase(pool: Pool) {
       issuerRevision,
       issuerDecision,
       financialCase,
+      reconciliationEvidence,
+      reconciliationRecord,
+      reconciliationReview,
+      reconciliationAccess,
       financialCaseEvent,
       financialReceipt,
       sellerDocument,
@@ -1377,6 +1407,16 @@ export async function secureDatabase(pool: Pool) {
     await preparePaymentSecurity(client);
     await prepareReachSecurity(client);
     await prepareFinancialSecurity(client);
+    await prepareReconciliationSecurity(client);
+    await secureReconciliationRecords(client);
+    await client.query(`
+      REVOKE ALL PRIVILEGES ON reconciliation_evidence,reconciliation_record,reconciliation_review,reconciliation_access FROM app_runtime;
+      GRANT SELECT,INSERT ON reconciliation_evidence,reconciliation_record,reconciliation_review,reconciliation_access TO app_runtime;
+      ALTER TABLE reconciliation_evidence FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reconciliation_record FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reconciliation_review FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reconciliation_access FORCE ROW LEVEL SECURITY;
+    `);
     await prepareCostSecurity(client);
     await prepareNotificationSecurity(client);
     for (const name of notificationTables) {

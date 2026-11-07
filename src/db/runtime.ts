@@ -9,6 +9,7 @@ import {
 import { operationSourceTables } from "./operations-security";
 import { reachFunctions } from "./reach-change-security";
 import { verifyDataGovernance } from "./data-governance-security";
+import { verifyReconciliationRuntime } from "./reconciliation-security";
 
 export function runtimeDatabase(pool: Pool) {
   return drizzle(pool, { schema });
@@ -19,6 +20,7 @@ export type Database = ReturnType<typeof runtimeDatabase>;
 export async function verifyRuntimeRole(
   pool: Pool | PoolClient,
 ): Promise<void> {
+  await verifyReconciliationRuntime(pool);
   await verifyDataGovernance(pool);
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
