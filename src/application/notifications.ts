@@ -325,11 +325,14 @@ export function createNotificationApplication<C>(d: {
             !needsAttention(source.currentSnapshot))
         )
           continue;
-        const path = source.healthOnly
-          ? "/platform/sender-health"
-          : candidate.businessId
-            ? `/businesses/${candidate.businessId}/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`
-            : `/platform/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`;
+        const path =
+          source.financial && candidate.businessId
+            ? `/businesses/${candidate.businessId}/financial-adjustments`
+            : source.healthOnly
+              ? "/platform/sender-health"
+              : candidate.businessId
+                ? `/businesses/${candidate.businessId}/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`
+                : `/platform/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`;
         try {
           await produce(
             {
@@ -339,8 +342,9 @@ export function createNotificationApplication<C>(d: {
             {
               from: config.from,
               to: [source.email],
-              subject:
-                candidate.purpose === "subscription"
+              subject: source.financial
+                ? "Refund or dispute status updated"
+                : candidate.purpose === "subscription"
                   ? "Subscription status updated"
                   : "Platform action needs attention",
               text: `A saved ${candidate.purpose === "subscription" ? "subscription" : "platform"} notice is available. Recorded stage: ${candidate.sourceStage}. Review current status and the responsible next action:\n\n${new URL(path, config.origin).toString()}`,

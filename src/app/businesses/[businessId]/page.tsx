@@ -117,6 +117,14 @@ export default async function BusinessPage({
       )}
       {access.role !== "salesperson" && (
         <Link
+          href={`/businesses/${businessId}/financial-adjustments`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Refund and dispute history
+        </Link>
+      )}
+      {access.role !== "salesperson" && (
+        <Link
           href={`/businesses/${businessId}/seller-documents`}
           className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
         >

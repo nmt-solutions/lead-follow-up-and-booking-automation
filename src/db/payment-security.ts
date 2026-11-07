@@ -33,6 +33,9 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
       RETURN QUERY SELECT p.id,p.snapshot->'quote'->'pricing'->'offer'->'markets',coalesce(p.snapshot->'basis'->'discovery',p.snapshot->'quote'->'initial'->'discovery'),coalesce(p.snapshot->'basis'->'automation',p.snapshot->'quote'->'initial'->'automation')
       FROM public.subscription_period p JOIN public.subscription_payment a ON a.id=p.action_id AND a.business_id=p.business_id
       WHERE p.business_id=tenant AND p.start<=at_time
+      AND NOT EXISTS(SELECT 1 FROM public.financial_case c JOIN LATERAL (
+        SELECT e.detail FROM public.financial_case_event e WHERE e.case_id=c.id AND e.kind='observation' ORDER BY e.position DESC LIMIT 1
+      ) effect ON true WHERE c.period_id=p.id AND c.business_id=p.business_id AND effect.detail->>'access'='block_period')
       AND (p.end>at_time OR (
         a.lifecycle->>'failedThrough'=to_char(p.end AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
         AND a.lifecycle->'policy'->>'graceAccess'='remaining_allowance'

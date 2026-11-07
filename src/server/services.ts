@@ -1,3 +1,7 @@
+import { createFinancialAdjustmentApplication } from "../application/financial-adjustments";
+import { createFinancialAdjustmentRepository } from "../db/financial-adjustment-repository";
+import { createFinancialAdjustmentHttp } from "../http/financial-adjustments";
+import { configuredFinancialAdjustments } from "../financial-adjustments/configuration";
 import { routeOpportunityMail } from "../email-sequences/opportunity-provider";
 import { createDataGovernanceApplication } from "../application/data-governance";
 import { createDataGovernanceRepository } from "../db/data-governance-repository";
@@ -377,6 +381,15 @@ async function composeServices() {
     cancel: subscriptionPayments.cancel,
     documents: sellerDocuments,
   });
+  const financialAdjustments = createFinancialAdjustmentApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createFinancialAdjustmentRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    gateway: configuredFinancialAdjustments(),
+    documents: sellerDocuments,
+  });
+
   const billingReviewFiles = createFileApplication({
     authenticate: authenticatePlatform,
     repository: createFileRepository(runtimeDatabase(pool), {
@@ -782,6 +795,12 @@ async function composeServices() {
       reportFailure,
     }),
     subscriptionPayments,
+    financialAdjustments,
+    financialAdjustmentsHttp: createFinancialAdjustmentHttp({
+      application: financialAdjustments,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     sellerDocuments,
     sellerDocumentsHttp: createSellerDocumentHttp({
       application: sellerDocuments,

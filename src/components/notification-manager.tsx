@@ -275,7 +275,7 @@ function Preferences({
             <span>
               {p === "operations"
                 ? "Handoffs, sender health and operational exceptions"
-                : "Subscription status and payment recovery"}
+                : "Subscription, refund and dispute status"}
               : {v?.enabled ? "Email enabled" : "In-app only"}
             </span>
             <Button

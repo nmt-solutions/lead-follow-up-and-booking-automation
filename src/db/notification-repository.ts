@@ -41,6 +41,7 @@ const sourceSchema = z.object({
   invitationExpiresAt: z.coerce.date().optional(),
   summary: z.string().optional(),
   healthOnly: z.boolean().optional(),
+  financial: z.boolean().optional(),
   snapshot: operationSnapshotSchema.optional(),
   currentSnapshot: operationSnapshotSchema.optional(),
   outcome: z.string().optional(),
