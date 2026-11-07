@@ -1298,5 +1298,139 @@ describe("Subscription money reconciliation through the public application", () 
         client.release();
       }
     });
+    it("requires retained conversion evidence and canonical money precision at the restricted database write boundary", async () => {
+      if (saved.data.kind !== "settlement")
+        throw Error("Settlement fixture expected");
+      const data = saved.data,
+        line = data.lines[0];
+      if (!line.original) throw Error("Original money fixture expected");
+      const conversion = {
+        numerator: "1",
+        denominator: "1",
+        units: "target_minor_per_source_minor",
+        effectiveAt: data.observedAt,
+        rounding: "half_up",
+        reference: "synthetic conversion",
+      };
+      const cases = [
+        {
+          ...data,
+          lines: [
+            {
+              ...line,
+              conversion: { ...conversion, evidenceId: randomUUID() },
+            },
+          ],
+        },
+        {
+          ...data,
+          lines: [{ ...line, conversion: { ...conversion, evidenceId: e.id } }],
+        },
+        {
+          ...data,
+          lines: [{ ...line, original: { ...line.original, precision: 3 } }],
+        },
+        { ...data, money: { ...data.money, precision: 3 } },
+        { ...data, money: { ...data.money, currency: "EUR" } },
+        {
+          ...data,
+          lines: [
+            {
+              ...line,
+              kind: "unclassified",
+              sourceId: null,
+              businessId: null,
+              paymentId: null,
+              original: null,
+              nativeInvoiceId: "forged-invoice",
+              orderId: "forged-order",
+            },
+          ],
+        },
+      ];
+      const actor = await h.authenticate(f.operator),
+        client = await h.runtime.connect();
+      try {
+        for (const sample of cases) {
+          const requestKey = randomUUID();
+          await client.query("begin");
+          try {
+            await client.query("select set_config('app.actor_id',$1,true)", [
+              actor.userId,
+            ]);
+            await expect(
+              client.query(
+                "insert into reconciliation_record(id,request_key,actor_id,evidence_id,identity,data) values($1,$2,$3,$4,'untrusted',$5)",
+                [
+                  randomUUID(),
+                  requestKey,
+                  actor.userId,
+                  e.id,
+                  { ...sample, requestKey },
+                ],
+              ),
+            ).rejects.toThrow();
+          } finally {
+            await client.query("rollback");
+          }
+        }
+      } finally {
+        client.release();
+      }
+    });
+    it("requires current reconciliation authority after a direct insert waits for serialization", async () => {
+      const actor = await h.authenticate(f.operator),
+        client = await h.runtime.connect(),
+        blocker = await h.admin.connect();
+      try {
+        await blocker.query("begin");
+        await blocker.query(
+          "select pg_advisory_xact_lock(hashtextextended('reconciliation',0))",
+        );
+        await client.query("begin");
+        await client.query("select set_config('app.actor_id',$1,true)", [
+          actor.userId,
+        ]);
+        const pid = (await client.query("select pg_backend_pid() as pid"))
+            .rows[0].pid,
+          requestKey = randomUUID();
+        const outcome = client
+          .query(
+            "insert into reconciliation_record(id,request_key,actor_id,evidence_id,identity,data) values($1,$2,$3,$4,'untrusted',$5)",
+            [
+              randomUUID(),
+              requestKey,
+              actor.userId,
+              e.id,
+              { ...saved.data, requestKey },
+            ],
+          )
+          .then(
+            () => "accepted",
+            () => "denied",
+          );
+        let waiting = false;
+        for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+          waiting = (
+            await h.admin.query(
+              "select cardinality(pg_blocking_pids($1))>0 as waiting",
+              [pid],
+            )
+          ).rows[0].waiting;
+        }
+        expect(waiting).toBe(true);
+        await h.admin.query(
+          "update platform_operator set reconciliation=false where user_id=$1",
+          [actor.userId],
+        );
+        await blocker.query("commit");
+        expect(await outcome).toBe("denied");
+      } finally {
+        await blocker.query("rollback");
+        await client.query("rollback");
+        blocker.release();
+        client.release();
+      }
+    });
   });
 });
