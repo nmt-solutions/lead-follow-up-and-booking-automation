@@ -1,3 +1,4 @@
+import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import type { Pool } from "pg";
 import { secureOperations, prepareOperations } from "./operations-security";
 import { preparePaymentSecurity } from "./payment-security";
@@ -90,6 +91,10 @@ import {
   sellerDocumentAccess,
   sellerDocumentStorage,
   sellerDocumentScopeForeignKeys,
+  financialCase,
+  financialCaseEvent,
+  financialReceipt,
+  financialCaseScopeForeignKeys,
   commercialAuthorityRevision,
   discoveryConfiguration,
   discoveryRun,
@@ -213,6 +218,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   );
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
+  await prepareFinancialSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
   await prepareCostSecurity(pool);
@@ -414,6 +420,10 @@ export async function prepareDatabaseRole(pool: Pool) {
       END IF;
       IF to_regclass('public.seller_issuer_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.seller_issuer_revision,public.seller_issuer_decision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.financial_case') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.financial_case,public.financial_case_event,public.financial_receipt FROM app_runtime;
+        REVOKE ALL ON FUNCTION public.financial_credit_allowed(jsonb),public.financial_capture_receipt(jsonb),public.financial_receipt_work(text,text),public.financial_adjustments_feed(),public.financial_refunded(uuid,uuid),public.financial_worker_authorized(uuid,uuid),public.financial_pending(text,text),public.financial_reserved(uuid,uuid),public.financial_public(uuid) FROM app_runtime;
       END IF;
       IF to_regclass('public.seller_document') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.seller_document,public.seller_document_request FROM app_runtime;
@@ -628,6 +638,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   const database = drizzle(pool);
   for (const key of [
     ...sellerDocumentScopeForeignKeys,
+    ...financialCaseScopeForeignKeys,
     ...subscriptionPaymentScopeForeignKeys,
     ...taxScopeForeignKeys,
     ...emailSequenceScopeForeignKeys,
@@ -688,6 +699,7 @@ export async function secureDatabase(pool: Pool) {
     );
     for (const key of [
       ...sellerDocumentScopeForeignKeys,
+      ...financialCaseScopeForeignKeys,
       ...subscriptionPaymentScopeForeignKeys,
       ...taxScopeForeignKeys,
       ...emailSequenceScopeForeignKeys,
@@ -841,6 +853,9 @@ export async function secureDatabase(pool: Pool) {
       subscriptionUsage,
       issuerRevision,
       issuerDecision,
+      financialCase,
+      financialCaseEvent,
+      financialReceipt,
       sellerDocument,
       sellerDocumentRequest,
       sellerDocumentAccess,
@@ -1146,6 +1161,12 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT,INSERT ON seller_issuer_revision,seller_issuer_decision TO app_runtime;
       ALTER TABLE seller_issuer_revision FORCE ROW LEVEL SECURITY;
       ALTER TABLE seller_issuer_decision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON financial_case,financial_case_event,financial_receipt FROM app_runtime;
+      GRANT SELECT,INSERT ON financial_case,financial_case_event,financial_receipt TO app_runtime;
+      GRANT USAGE ON SEQUENCE financial_case_event_position_seq,financial_case_position_seq TO app_runtime;
+      ALTER TABLE financial_receipt FORCE ROW LEVEL SECURITY;
+      ALTER TABLE financial_case FORCE ROW LEVEL SECURITY;
+      ALTER TABLE financial_case_event FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON seller_document,seller_document_request FROM app_runtime;
       GRANT SELECT,INSERT ON seller_document,seller_document_request TO app_runtime;
       GRANT UPDATE (artifact_state,failure) ON seller_document TO app_runtime;
@@ -1296,6 +1317,7 @@ export async function secureDatabase(pool: Pool) {
       GRANT EXECUTE ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) TO app_runtime;
     `);
     await preparePaymentSecurity(client);
+    await prepareFinancialSecurity(client);
     await prepareCostSecurity(client);
     await client.query(`
       CREATE OR REPLACE FUNCTION public.pending_meta_outbound()

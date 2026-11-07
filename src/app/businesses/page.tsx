@@ -145,6 +145,23 @@ export default async function BusinessesPage() {
       return null;
     }
   })();
+  const refundsLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "refunds.manage");
+      return (
+        <Link
+          href="/platform/financial-adjustments"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Review refunds and disputes
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   const documentsLink = await (async () => {
     try {
       await (
@@ -167,6 +184,7 @@ export default async function BusinessesPage() {
       <div className="mx-auto max-w-2xl space-y-8">
         {billingReviewLink}
         {pricingLink}
+        {refundsLink}
         {paymentsLink}
         {documentsLink}
         {costsLink}
@@ -193,6 +211,7 @@ export default async function BusinessesPage() {
       {operationsLink}
       {billingReviewLink}
       {pricingLink}
+      {refundsLink}
       {paymentsLink}
       {documentsLink}
       {costsLink}
