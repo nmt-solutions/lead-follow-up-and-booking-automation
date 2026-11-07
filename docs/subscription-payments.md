@@ -1,6 +1,6 @@
 # Reviewed subscription purchase and paid scope
 
-Issue #44 composes trusted subscription quotes and approved app-owned tax with hosted checkout. Issue #45 supplies native Razorpay recurring cards, durable resource recovery and positive per-charge renewal reconciliation. See [native card configuration and evidence](razorpay-card-billing.md). Seller invoices, failed-renewal/grace/cancellation policy, refunds, plan changes/proration and reserved worker routing remain separate work.
+Issue #44 composes trusted subscription quotes and approved app-owned tax with hosted checkout. Issue #45 supplies native Razorpay recurring cards, durable resource recovery and positive per-charge renewal reconciliation. See [native card configuration and evidence](razorpay-card-billing.md). Issue #46 adds [reviewed lifecycle, grace, native card recovery, cancellation and in-app notifications](subscription-lifecycle.md). Seller invoices are composed by #48; refunds, plan changes/proration and reserved worker routing remain separate work.
 
 ## Review and checkout
 

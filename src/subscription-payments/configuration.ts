@@ -3,9 +3,9 @@ import { ApplicationError } from "../models/application-error";
 import type { Clock } from "../models/business";
 import { razorpayAccountReviewSchema } from "../models/razorpay-account";
 import { createRazorpayGateway } from "./razorpay";
+import { lifecyclePolicySchema } from "../models/subscription-lifecycle";
 
-/** Native Razorpay composition is #45. Replacing this adapter enables the same persisted workflow;
- * no permanent false readiness condition is imposed by the application. */
+/** Both web and Trigger compose native cards and the independently reviewed lifecycle policy. */
 export function configuredPayments(
   options: {
     env?: Record<string, string | undefined>;
@@ -33,7 +33,7 @@ export function configuredPayments(
       !secrets.every((s): s is string => typeof s === "string" && s.length > 0)
     )
       throw new Error("configuration");
-    return createRazorpayGateway({
+    const gateway = createRazorpayGateway({
       review,
       keyId,
       secret,
@@ -41,6 +41,14 @@ export function configuredPayments(
       fetch: options.fetch ?? fetch,
       clock: options.clock ?? { now: () => new Date() },
     });
+    try {
+      gateway.lifecyclePolicy = lifecyclePolicySchema.parse(
+        JSON.parse(env.SUBSCRIPTION_LIFECYCLE_POLICY ?? "null"),
+      );
+    } catch {
+      /* Missing policy blocks grace and cancellation, not payment capture reconciliation. */
+    }
+    return gateway;
   } catch {
     /* Invalid deployment configuration stays visibly unavailable. */
   }

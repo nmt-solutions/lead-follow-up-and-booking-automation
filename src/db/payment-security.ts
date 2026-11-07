@@ -12,7 +12,7 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
     RETURNS TABLE(id uuid,business_id uuid,recovery_key uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
     BEGIN RETURN QUERY SELECT a.id,a.business_id,a.recovery_key FROM public.subscription_payment a
       WHERE a.snapshot->'provider'->>'key'=provider_key AND a.snapshot->'provider'->>'account'=account_ref
-      AND (a.state IN ('pending','checkout','review_required') OR a.reconciliation_pending OR (a.state='confirmed' AND a.snapshot->'provider'->>'key'='razorpay')) AND a.started
+      AND (a.state IN ('pending','checkout','review_required') OR a.reconciliation_pending OR (a.state='confirmed' AND a.snapshot->'provider'->>'key'='razorpay') OR a.lifecycle IS NOT NULL) AND a.started
       ORDER BY coalesce(a.reconciled_at,a.at),a.id LIMIT 50; END $$;
     CREATE OR REPLACE FUNCTION public.subscription_payment_target(provider_key text, account_ref text, operation uuid)
     RETURNS TABLE(id uuid,business_id uuid,recovery_key uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -31,7 +31,25 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
       IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT EXISTS(
         SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=current_setting('app.actor_id',true)) THEN RETURN; END IF;
       RETURN QUERY SELECT p.id,p.snapshot->'quote'->'pricing'->'offer'->'markets',coalesce(p.snapshot->'basis'->'discovery',p.snapshot->'quote'->'initial'->'discovery'),coalesce(p.snapshot->'basis'->'automation',p.snapshot->'quote'->'initial'->'automation')
-      FROM public.subscription_period p WHERE p.business_id=tenant AND p.start<=at_time AND p.end>at_time ORDER BY p.end,p.id LIMIT 1;
+      FROM public.subscription_period p JOIN public.subscription_payment a ON a.id=p.action_id AND a.business_id=p.business_id
+      WHERE p.business_id=tenant AND p.start<=at_time
+      AND (p.end>at_time OR (
+        a.lifecycle->>'failedThrough'=to_char(p.end AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        AND a.lifecycle->'policy'->>'graceAccess'='remaining_allowance'
+        AND (a.lifecycle->>'graceEnd')::timestamptz>at_time
+        AND (a.lifecycle->'policy'->>'effectiveUntil')::timestamptz>at_time
+        AND (a.lifecycle->'policy'->>'effectiveFrom')::timestamptz<=at_time
+        AND coalesce(a.lifecycle->'cancellation'->>'status','')<>'confirmed'
+        AND coalesce(a.lifecycle->'provider'->>'status','') NOT IN ('cancelled','completed','expired')
+      ))
+      AND NOT (
+        coalesce(a.lifecycle->'cancellation'->>'status','')='confirmed'
+        AND a.lifecycle->'cancellation'->>'effectiveEnd' IS NOT NULL
+        AND ((a.lifecycle->'cancellation'->>'access'='provider_end' AND at_time >= (a.lifecycle->'cancellation'->>'effectiveEnd')::timestamptz)
+          OR (CASE WHEN a.lifecycle->'cancellation'->>'timing'='cycle_end' THEN p.start >= (a.lifecycle->'cancellation'->>'effectiveEnd')::timestamptz ELSE p.start > (a.lifecycle->'cancellation'->>'effectiveEnd')::timestamptz END)
+          OR coalesce((p.charge->>'paidAt')::timestamptz > (a.lifecycle->'cancellation'->>'effectiveEnd')::timestamptz,false))
+      )
+      ORDER BY p.end DESC,p.id LIMIT 1;
     END $$;
     REVOKE ALL ON FUNCTION public.current_paid_scope(uuid,timestamptz) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.current_paid_scope(uuid,timestamptz) TO app_runtime;

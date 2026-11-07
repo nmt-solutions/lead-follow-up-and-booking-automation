@@ -78,6 +78,7 @@ import {
   subscriptionQuote,
   subscriptionPayment,
   subscriptionPaymentEvent,
+  subscriptionLifecycleEvent,
   subscriptionPaymentHistory,
   subscriptionPeriod,
   subscriptionUsage,
@@ -408,6 +409,7 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.subscription_payment') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.subscription_payment, public.subscription_payment_event, public.subscription_payment_history, public.subscription_period, public.subscription_usage FROM app_runtime;
         REVOKE UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON public.subscription_payment FROM app_runtime;
+        IF to_regclass('public.subscription_lifecycle_event') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.subscription_lifecycle_event FROM app_runtime; REVOKE UPDATE(lifecycle) ON public.subscription_payment FROM app_runtime; END IF;
         IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='subscription_payment' AND column_name='recovery') THEN REVOKE UPDATE(recovery) ON public.subscription_payment FROM app_runtime; END IF;
       END IF;
       IF to_regclass('public.seller_issuer_revision') IS NOT NULL THEN
@@ -833,6 +835,7 @@ export async function secureDatabase(pool: Pool) {
       subscriptionQuote,
       subscriptionPayment,
       subscriptionPaymentEvent,
+      subscriptionLifecycleEvent,
       subscriptionPaymentHistory,
       subscriptionPeriod,
       subscriptionUsage,
@@ -1183,7 +1186,10 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON subscription_quote FROM app_runtime;
       REVOKE ALL PRIVILEGES ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage FROM app_runtime;
       GRANT SELECT,INSERT ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage TO app_runtime;
-      GRANT UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending,recovery) ON subscription_payment TO app_runtime;
+      REVOKE ALL PRIVILEGES ON subscription_lifecycle_event FROM app_runtime;
+      GRANT SELECT,INSERT ON subscription_lifecycle_event TO app_runtime;
+      ALTER TABLE subscription_lifecycle_event FORCE ROW LEVEL SECURITY;
+      GRANT UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending,recovery,lifecycle) ON subscription_payment TO app_runtime;
       ALTER TABLE subscription_payment FORCE ROW LEVEL SECURITY;
       ALTER TABLE subscription_payment_event FORCE ROW LEVEL SECURITY;
       ALTER TABLE subscription_payment_history FORCE ROW LEVEL SECURITY;
