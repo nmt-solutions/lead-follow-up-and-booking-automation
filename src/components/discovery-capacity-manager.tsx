@@ -367,8 +367,13 @@ export function DiscoveryCapacityManager({
             <Alert variant="destructive">
               <AlertDescription>
                 {error}{" "}
-                <Link href="/security" className="underline">
-                  Security
+                <Link
+                  href="/security"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  Verify in Security (new tab)
                 </Link>
               </AlertDescription>
             </Alert>

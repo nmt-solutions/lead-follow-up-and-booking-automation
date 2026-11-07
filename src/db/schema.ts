@@ -305,6 +305,11 @@ export const business = pgTable(
       "business_offering_length",
       sql`char_length(btrim(${table.offering})) between 1 and 4000`,
     ),
+    pgPolicy("business_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.business'::regclass)`,
+    }),
     pgPolicy("business_access", {
       for: "all",
       to: appRuntime,
@@ -1259,6 +1264,11 @@ export const platformOperator = pgTable(
     notifications: boolean("notifications").notNull().default(false),
   },
   (table) => [
+    pgPolicy("operator_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.platform_operator'::regclass)`,
+    }),
     pgPolicy("operator_read", {
       for: "select",
       to: appRuntime,
@@ -2445,6 +2455,11 @@ export const discoveryCapacityPolicy = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   () => [
+    pgPolicy("discovery_capacity_policy_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.discovery_capacity_policy'::regclass)`,
+    }),
     pgPolicy("discovery_capacity_policy_read", {
       for: "select",
       to: appRuntime,
@@ -2565,6 +2580,11 @@ export const discoveryCapacityBinding = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   () => [
+    pgPolicy("discovery_capacity_binding_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.discovery_capacity_binding'::regclass)`,
+    }),
     pgPolicy("discovery_capacity_binding_read", {
       for: "select",
       to: appRuntime,

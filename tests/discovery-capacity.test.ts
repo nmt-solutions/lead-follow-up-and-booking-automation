@@ -1,3 +1,8 @@
+import {
+  prepareDiscoveryCapacity,
+  secureDiscoveryCapacity,
+} from "../src/db/discovery-capacity-security";
+import { createDiscoveryCapacityHttp } from "../src/http/discovery-capacity";
 import { scheduleWorkSchema } from "../src/models/discovery-schedules";
 import { subscriptionFixture } from "./support/subscription";
 import { deterministicPayments } from "./support/payment-gateway";
@@ -621,6 +626,15 @@ describe("Discovery capacity at the public application seam", () => {
       }
     }
     await verifyRuntimeRole(h.runtime);
+    await h.admin.query(
+      "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO PUBLIC",
+    );
+    await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
+      "capacity database security is incomplete",
+    );
+    await prepareDiscoveryCapacity(h.admin);
+    await secureDiscoveryCapacity(h.admin);
+    await verifyRuntimeRole(h.runtime);
     const operator = await h.signIn("capacity-invalid@example.com");
     const actor = await h.authenticate(operator);
     await h.admin.query(
@@ -791,5 +805,89 @@ describe("Discovery capacity at the public application seam", () => {
     f.behavior.unavailable = false;
     await f.app.execute(f.queued[0].work);
     expect(f.searches).toHaveLength(1);
+  });
+  it("validates attributable operator configuration through the real HTTP boundary and preserves the request on replay", async () => {
+    const operator = await h.signIn("capacity-http@example.com");
+    const actor = await h.authenticate(operator);
+    await h.admin.query(
+      "insert into platform_operator(user_id,discovery) values($1,true)",
+      [actor.userId],
+    );
+    const http = createDiscoveryCapacityHttp({
+      application: capacity(),
+      origin: "http://localhost:3000",
+      reportFailure: () => {},
+    });
+    const headers = new Headers(operator);
+    headers.set("origin", "http://localhost:3000");
+    headers.set("content-type", "application/json");
+    const payload = {
+      requestKey: crypto.randomUUID(),
+      expectedVersion: 0,
+      policy: policy(),
+    };
+    const post = (body: unknown) =>
+      http.configure(
+        new Request("http://localhost:3000/api/platform/discovery-capacity", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        }),
+      );
+    const saved = await post(payload);
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).data).toMatchObject({
+      actorId: actor.userId,
+      version: 1,
+    });
+    expect((await post(payload)).status).toBe(200);
+    expect((await capacity().configuration(operator)).revisions).toHaveLength(
+      1,
+    );
+    expect((await post({ ...payload, expectedVersion: 1 })).status).toBe(409);
+    expect(
+      (await post({ ...payload, operator: { userId: actor.userId } })).status,
+    ).toBe(400);
+    const foreign = await h.signIn("capacity-http-foreign@example.com");
+    const denied = await http.get(
+      new Request("http://localhost:3000/api/platform/discovery-capacity", {
+        headers: foreign,
+      }),
+    );
+    expect(denied.status).toBe(403);
+    expect(await denied.text()).not.toContain("fixture-trigger-project");
+  });
+  it("executes a purchased reservation when capacity helpers and ledgers use a non-bypass schema owner", async () => {
+    const f = await purchased();
+    await h.admin
+      .query(`CREATE ROLE capacity_test_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
+      GRANT USAGE,CREATE ON SCHEMA public TO capacity_test_owner;
+      ALTER TABLE public.discovery_capacity_policy OWNER TO capacity_test_owner;
+      ALTER TABLE public.discovery_capacity_binding OWNER TO capacity_test_owner;
+      ALTER TABLE public.platform_operator OWNER TO capacity_test_owner;
+      ALTER TABLE public.business OWNER TO capacity_test_owner;
+      ALTER TABLE public.discovery_run OWNER TO capacity_test_owner;
+      GRANT SELECT ON ALL TABLES IN SCHEMA public TO capacity_test_owner;
+      ALTER FUNCTION public.protect_discovery_capacity() OWNER TO capacity_test_owner;
+      ALTER FUNCTION public.discovery_capacity_route(uuid,jsonb) OWNER TO capacity_test_owner;
+      GRANT EXECUTE ON FUNCTION public.current_business_role(),public.business_data_stopped(uuid),public.current_paid_contract(uuid,timestamptz) TO capacity_test_owner;
+      ALTER DEFAULT PRIVILEGES FOR ROLE capacity_test_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;`);
+    await verifyRuntimeRole(h.runtime);
+    await f.app.start(f.owner, f.business.id, f.request());
+    await f.app.execute(f.queued[0].work);
+    expect(
+      (await f.app.workspace(f.owner, f.business.id)).runs[0],
+    ).toMatchObject({
+      status: "completed",
+      used: 2,
+      executionCapacity: { mode: "reserved", slots: 1 },
+    });
+    expect(
+      await capacity().configure(f.operator, {
+        requestKey: crypto.randomUUID(),
+        expectedVersion: 1,
+        policy: f.approved.policy,
+      }),
+    ).toMatchObject({ version: 2 });
   });
 });

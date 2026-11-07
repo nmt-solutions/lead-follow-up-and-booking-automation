@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from "pg";
 
 export async function prepareDiscoveryCapacity(pool: Pool | PoolClient) {
   await pool.query(
-    `ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC; ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM PUBLIC; ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC; DO $$ BEGIN IF to_regclass('public.discovery_capacity_policy') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.discovery_capacity_policy FROM app_runtime; END IF; IF to_regclass('public.discovery_capacity_binding') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.discovery_capacity_binding FROM app_runtime; END IF; END $$`,
+    `ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC; ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC; ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM PUBLIC; ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC; DO $$ BEGIN IF to_regclass('public.discovery_capacity_policy') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.discovery_capacity_policy FROM app_runtime; END IF; IF to_regclass('public.discovery_capacity_binding') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.discovery_capacity_binding FROM app_runtime; END IF; END $$`,
   );
 }
 export async function secureDiscoveryCapacity(pool: Pool | PoolClient) {
@@ -68,6 +68,7 @@ export async function verifyDiscoveryCapacity(pool: Pool | PoolClient) {
     AND (SELECT count(*)=2 FROM pg_trigger WHERE tgname IN ('discovery_capacity_policy_guard','discovery_capacity_binding_guard') AND tgenabled='O' AND tgfoid='public.protect_discovery_capacity()'::regprocedure)
     AND EXISTS(SELECT 1 FROM pg_default_acl d WHERE d.defaclobjtype='f' AND d.defaclnamespace=0 AND d.defaclrole=(SELECT p.proowner FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='discovery_capacity_route') AND NOT EXISTS(SELECT 1 FROM aclexplode(d.defaclacl) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE'))
     AND NOT EXISTS(SELECT 1 FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) a WHERE d.defaclrole=(SELECT p.proowner FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='discovery_capacity_route') AND d.defaclobjtype IN ('f','r') AND a.grantee=0 AND (d.defaclnamespace=0 OR d.defaclnamespace='public'::regnamespace))
+    AND (SELECT count(*)=4 FROM pg_policies WHERE schemaname='public' AND policyname IN ('business_owner_read','operator_owner_read','discovery_capacity_policy_owner_read','discovery_capacity_binding_owner_read') AND roles=ARRAY['public']::name[] AND cmd='SELECT' AND qual LIKE '%relowner%' AND with_check IS NULL)
     AND NOT has_column_privilege(current_user,'public.platform_operator','discovery','UPDATE') AS safe`);
   if (result.rows[0]?.safe !== true)
     throw new Error("Discovery capacity database security is incomplete");
