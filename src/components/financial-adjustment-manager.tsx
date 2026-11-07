@@ -390,6 +390,14 @@ export function FinancialAdjustmentManager({
         >
           Security and MFA
         </Link>
+        {!operator && (
+          <Link
+            className="inline-flex min-h-11 items-center text-primary underline"
+            href={`/businesses/${businessId}/notifications`}
+          >
+            Email preferences and delivery history
+          </Link>
+        )}
         <Link
           className="inline-flex min-h-11 items-center text-primary underline"
           href={

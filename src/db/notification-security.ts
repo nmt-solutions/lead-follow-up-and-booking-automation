@@ -82,6 +82,14 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
           IF tenant IS NOT NULL AND NOT (e.source='sender_health' AND EXISTS(SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=p.actor_id AND m.role IN ('owner','admin'))) AND coalesce((SELECT o.owner_id FROM public.inbox_opportunity o WHERE o.id=(e.snapshot->>'opportunityId')::uuid AND o.business_id=e.business_id),e.snapshot->>'responsibleUserId') IS DISTINCT FROM p.actor_id THEN RETURN NULL; END IF;
           RETURN jsonb_build_object('expiresAt',statement_timestamp()+interval '23 hours','email',(SELECT u.email FROM public."user" u WHERE u.id=p.actor_id),'userId',p.actor_id,'healthOnly',tenant IS NULL AND e.source='sender_health' AND NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=p.actor_id AND o.operations),'snapshot',e.snapshot,'currentSnapshot',current_event.snapshot,'outcome',e.outcome,'sourceStage',CASE WHEN e.outcome='escalated' THEN 'escalated' ELSE e.snapshot->>'status' END);
         END IF;
+        IF tenant IS NOT NULL THEN
+          SELECT x.*,c.kind AS financial_kind INTO e FROM public.financial_case_event x JOIN public.financial_case c ON c.id=x.case_id AND c.business_id=x.business_id
+            WHERE x.id::text=split_part(authority,':',2) AND x.business_id=tenant AND x.detail->>'message' IS NOT NULL;
+          IF FOUND THEN
+            IF source_ref<>(e.id::text||':'||p.actor_id||':business') OR NOT EXISTS(SELECT 1 FROM public.financial_case_event fresh WHERE fresh.id=e.id AND fresh.position=(SELECT max(latest.position) FROM public.financial_case_event latest WHERE latest.case_id=e.case_id AND latest.detail->>'message' IS NOT NULL)) THEN RETURN NULL; END IF;
+            RETURN jsonb_build_object('expiresAt',statement_timestamp()+interval '23 hours','email',(SELECT u.email FROM public."user" u WHERE u.id=p.actor_id),'userId',p.actor_id,'financial',true,'sourceStage','financial_'||CASE WHEN e.kind='observation' THEN e.financial_kind||'_'||(e.detail->'observation'->>'status') ELSE e.kind END);
+          END IF;
+        END IF;
         SELECT * INTO e FROM public.subscription_lifecycle_event x WHERE x.id::text=split_part(authority,':',2) AND x.notice IS NOT NULL AND (tenant IS NULL OR x.business_id=tenant);
         IF NOT FOUND OR source_ref<>(e.id::text||':'||p.actor_id||':'||(CASE WHEN tenant IS NULL THEN 'operator' ELSE 'business' END)) THEN RETURN NULL; END IF;
         IF NOT EXISTS(SELECT 1 FROM public.subscription_payment a WHERE a.id=e.action_id AND a.business_id=e.business_id AND ((a.lifecycle-'evaluatedAt') #- '{provider,observedAt}')=((e.lifecycle-'evaluatedAt') #- '{provider,observedAt}')) THEN RETURN NULL; END IF;
@@ -299,6 +307,12 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
           FROM public.notification_preference p JOIN public.subscription_lifecycle_event e ON (p.business_id IS NULL OR p.business_id=e.business_id) AND e.notice IS NOT NULL
           WHERE p.account=account_ref AND p.purpose='subscription' AND public.notification_preference_current(p.id)
             AND EXISTS(SELECT 1 FROM public.subscription_payment a WHERE a.id=e.action_id AND a.business_id=e.business_id AND ((a.lifecycle-'evaluatedAt') #- '{provider,observedAt}')=((e.lifecycle-'evaluatedAt') #- '{provider,observedAt}'))
+        UNION ALL
+        SELECT jsonb_build_object('id',gen_random_uuid(),'purpose',p.purpose,'sourceId',e.id::text||':'||p.actor_id||':business','businessId',p.business_id,'actorId',p.actor_id,'authority',p.id::text||':'||e.id::text,'sourceStage','financial_'||CASE WHEN e.kind='observation' THEN c.kind||'_'||(e.detail->'observation'->>'status') ELSE e.kind END) candidate
+          FROM public.notification_preference p JOIN public.financial_case_event e ON p.business_id=e.business_id AND e.detail->>'message' IS NOT NULL
+          JOIN public.financial_case c ON c.id=e.case_id AND c.business_id=e.business_id
+          WHERE p.account=account_ref AND p.purpose='subscription' AND p.business_id IS NOT NULL AND public.notification_preference_current(p.id)
+            AND e.position=(SELECT max(latest.position) FROM public.financial_case_event latest WHERE latest.case_id=e.case_id AND latest.detail->>'message' IS NOT NULL)
       ) v WHERE public.notification_source(v.candidate->>'purpose',v.candidate->>'sourceId',v.candidate->>'authority',v.candidate->>'actorId',(v.candidate->>'businessId')::uuid) IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.notification_notice n WHERE n.account=account_ref AND n.purpose=v.candidate->>'purpose' AND n.source_id=v.candidate->>'sourceId') LIMIT 100;
     END $$;
     CREATE OR REPLACE FUNCTION public.notification_begin_maintenance_setup(deployment jsonb) RETURNS jsonb

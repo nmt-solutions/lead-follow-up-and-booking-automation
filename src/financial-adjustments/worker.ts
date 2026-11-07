@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { databaseConnectionUrl } from "../db/connection";
 import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { createFinancialAdjustmentRepository } from "../db/financial-adjustment-repository";
 import { createFinancialAdjustmentApplication } from "../application/financial-adjustments";
@@ -8,7 +9,7 @@ import { ApplicationError } from "../models/application-error";
 export async function recoverFinancialAdjustments() {
   if (!process.env.DATABASE_URL) throw new ApplicationError("SETUP_REQUIRED");
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseConnectionUrl(process.env.DATABASE_URL),
     max: 2,
     connectionTimeoutMillis: 10000,
     statement_timeout: 10000,

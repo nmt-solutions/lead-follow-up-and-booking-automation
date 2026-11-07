@@ -19,6 +19,7 @@ import { createFinancialAdjustmentHttp } from "../src/http/financial-adjustments
 import { verifyRuntimeRole } from "../src/db/runtime";
 import { secureDatabase } from "../src/db/setup";
 import { financialResearch } from "./support/financial-operational";
+import { financialNotifications } from "./support/financial-notifications";
 
 describe("Refunds and disputes at the public application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -598,19 +599,6 @@ describe("Refunds and disputes at the public application seam", () => {
     await verifyRuntimeRole(h.runtime);
     expect(await app.workspace(f.op, f.business.id, true)).toEqual(before);
     expect(await f.documents.workspace(f.owner, f.business.id)).toEqual(docs);
-    for (const table of [
-      "financial_case",
-      "financial_case_event",
-      "financial_receipt",
-    ])
-      for (const privilege of ["SELECT", "INSERT"]) {
-        await h.admin.query(`revoke ${privilege} on ${table} from app_runtime`);
-        await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
-          code: "SETUP_REQUIRED",
-        });
-        await secureDatabase(h.admin);
-        await verifyRuntimeRole(h.runtime);
-      }
     expect(
       (await h.runtime.query("select * from financial_case")).rows,
     ).toEqual([]);
@@ -628,6 +616,48 @@ describe("Refunds and disputes at the public application seam", () => {
     await expect(
       h.runtime.query("delete from financial_case_event"),
     ).rejects.toBeDefined();
+  });
+  it.each(
+    ["financial_case", "financial_case_event", "financial_receipt"].flatMap(
+      (table) =>
+        ["SELECT", "INSERT"].map((privilege) => ({ table, privilege })),
+    ),
+  )(
+    "requires $privilege independently on $table",
+    async ({ table, privilege }) => {
+      await h.admin.query(`revoke ${privilege} on ${table} from app_runtime`);
+      try {
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+          code: "SETUP_REQUIRED",
+        });
+      } finally {
+        await secureDatabase(h.admin);
+      }
+      await verifyRuntimeRole(h.runtime);
+    },
+  );
+  it.each([
+    "financial_credit_allowed(jsonb)",
+    "financial_capture_receipt(jsonb)",
+    "financial_receipt_work(text,text)",
+    "financial_adjustments_feed()",
+    "financial_refunded(uuid,uuid)",
+    "financial_worker_authorized(uuid,uuid)",
+    "financial_pending(text,text)",
+    "financial_reserved(uuid,uuid)",
+    "financial_public(uuid)",
+  ])("requires the restricted financial helper %s", async (signature) => {
+    await h.admin.query(
+      `revoke execute on function public.${signature} from app_runtime`,
+    );
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
+      await secureDatabase(h.admin);
+    }
+    await verifyRuntimeRole(h.runtime);
   });
   it("accepts a signed action-required reopening, then restores only the existing paid scope on a win", async () => {
     const f = await purchase(),
@@ -1131,5 +1161,49 @@ describe("Refunds and disputes at the public application seam", () => {
       app.refresh(f.op, f.business.id, { caseId: c.id }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(f.native.refundPosts).toHaveLength(1);
+  });
+  it("composes actual opt-in customer financial emails through the final notification seam without repeating money", async () => {
+    const f = await purchase(),
+      app = f.compose(),
+      c = await app.review(f.op, f.business.id, f.input());
+    await app.execute(f.op, f.business.id, { caseId: c.id });
+    f.native.refunds[0].status = "processed";
+    await app.recover();
+    const notifications = await financialNotifications(h),
+      owner = await h.signIn("tax-owner@example.com");
+    await notifications.app.recoverPending();
+    expect(notifications.effects).toHaveLength(0);
+    await notifications.app.setPreference(owner, f.business.id, {
+      purpose: "subscription",
+      enabled: true,
+      expectedVersion: 0,
+    });
+    await notifications.app.recoverPending();
+    const financial = notifications.effects.filter((e) =>
+      String(e.body.text).includes("/financial-adjustments"),
+    );
+    expect(financial).toHaveLength(1);
+    expect(financial[0].body.to).toEqual(["tax-owner@example.com"]);
+    expect(
+      (await notifications.app.businessWorkspace(owner, f.business.id)).notices,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceStage: "financial_refund_processed",
+          state: "accepted",
+          providerId: financial[0].id,
+        }),
+      ]),
+    );
+    await notifications.app.recoverPending();
+    expect(
+      notifications.effects.filter((e) =>
+        String(e.body.text).includes("/financial-adjustments"),
+      ),
+    ).toHaveLength(1);
+    expect(f.native.refundPosts).toHaveLength(1);
+    expect(
+      (await app.workspace(owner, f.business.id)).cases[0].notices.at(-1),
+    ).toMatchObject({ channel: "in_app", status: "available" });
   });
 });
