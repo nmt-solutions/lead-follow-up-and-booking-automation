@@ -14,6 +14,15 @@ import { createMemoryStorage } from "./storage";
 export async function subscriptionFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
   options: {
+    reservedCapacity?: {
+      id: string;
+      label: string;
+      capacity: { quantity: number; unit: string };
+      prices: {
+        INR: { monthlyMinor: number; pilotMinor: number | null };
+        USD: null;
+      };
+    };
     country?: string;
     discovery?: number;
     automation?: number;
@@ -174,6 +183,27 @@ export async function subscriptionFixture(
     outcome: "approved",
     note: "Synthetic fixture approval",
   });
+  if (options.reservedCapacity) {
+    const capacityRules = await tax.saveRule(f.operator, {
+      key: `${options.ruleKey ?? "fixture"}-capacity`,
+      expectedVersion: 0,
+      note: "Synthetic capacity tax fixture",
+      rule: {
+        ...rule,
+        productCode: "reserved_capacity",
+        customerCountry: options.country ?? "IN",
+        currency: options.country === "US" ? "USD" : "INR",
+      },
+    });
+    await tax.decideRule(f.operator, {
+      revisionId: capacityRules.revisions.find(
+        (r) => r.key === `${options.ruleKey ?? "fixture"}-capacity`,
+      )!.id,
+      expectedDecisionVersion: 0,
+      outcome: "approved",
+      note: "Synthetic capacity treatment approval",
+    });
+  }
   const quotes = createSubscriptionQuoteApplication({
     ...dependencies,
     repository: createSubscriptionQuoteRepository(database),
@@ -206,13 +236,15 @@ export async function subscriptionFixture(
         },
         renewalTerms:
           "Explicit fixture calendar monthly term; no automatic renewal authorized here",
-        reservedCapacity: [],
+        reservedCapacity: options.reservedCapacity
+          ? [options.reservedCapacity]
+          : [],
       },
     ],
   });
   const quote = await quotes.createQuote(f.owner, f.business.id, {
     offerId: "fixture",
-    reservedCapacityId: null,
+    reservedCapacityId: options.reservedCapacity?.id ?? null,
     term: options.term ?? "monthly",
     expectedCatalogVersion: (options.catalogVersion ?? 0) + 1,
     expectedBillingVersion: 1,

@@ -2,6 +2,9 @@ import { createPilotApplication } from "../application/pilots";
 import { createPilotRepository } from "../db/pilot-repository";
 import { createPilotInspector } from "../pilots/preflight";
 import { createPilotHttp } from "../http/pilots";
+import { createDiscoveryCapacityApplication } from "../application/discovery-capacity";
+import { createDiscoveryCapacityHttp } from "../http/discovery-capacity";
+import { createDiscoveryCapacityRepository } from "../db/discovery-capacity-repository";
 import { createRecoveryApplication } from "../application/infrastructure-recovery";
 import { createRecoveryRepository } from "../db/recovery-repository";
 import { createRecoveryHttp } from "../http/infrastructure-recovery";
@@ -143,6 +146,9 @@ import { createBillingRepository } from "../db/billing-repository";
 import { createBillingHttp } from "../http/billing";
 import { createTaxApplication } from "../application/tax";
 import { createTaxPeriodApplication } from "../application/tax-periods";
+import { createTaxFilingApplication } from "../application/tax-filings";
+import { createTaxFilingRepository } from "../db/tax-filing-repository";
+import { createTaxFilingHttp } from "../http/tax-filings";
 import { createTaxPeriodRepository } from "../db/tax-period-repository";
 import { createTaxPeriodHttp } from "../http/tax-periods";
 import { createTaxRepository } from "../db/tax-repository";
@@ -374,6 +380,14 @@ async function composeServices() {
     repository: createTaxPeriodRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
   });
+  const taxFilings = createTaxFilingApplication({
+    authenticatePlatform: access.authenticatePlatformForWork,
+    repository: createTaxFilingRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    periods: taxPeriods,
+    clock: { now: () => new Date() },
+  });
   const subscriptionQuotes = createSubscriptionQuoteApplication({
     authenticate,
     authenticatePlatform,
@@ -463,6 +477,10 @@ async function composeServices() {
     clock: { now: () => new Date() },
     ...configuredAi(process.env),
   });
+  const discoveryCapacity = createDiscoveryCapacityApplication({
+    authenticate: access.authenticateForWork,
+    repository: createDiscoveryCapacityRepository(runtimeDatabase(pool)),
+  });
   const discovery = createDiscoveryApplication({
     authenticate,
     authenticateForWork: access.authenticateForWork,
@@ -475,7 +493,11 @@ async function composeServices() {
       ai,
       configuredExaRetrieval(process.env),
     ),
-    queue: configuredDiscoveryQueue(process.env),
+    queue: configuredDiscoveryQueue(
+      process.env,
+      createDiscoveryCapacityRepository(runtimeDatabase(pool)),
+    ),
+    requireCapacity: true,
     reportFailure: ({ businessId, runId, code }) =>
       console.error(
         JSON.stringify({ event: "discovery_failed", businessId, runId, code }),
@@ -881,6 +903,12 @@ async function composeServices() {
     billing,
     tax,
     taxPeriods,
+    taxFilings,
+    taxFilingsHttp: createTaxFilingHttp({
+      application: taxFilings,
+      origin: environment.BETTER_AUTH_URL,
+      reportFailure,
+    }),
     taxPeriodsHttp: createTaxPeriodHttp({
       application: taxPeriods,
       notifications,
@@ -951,6 +979,12 @@ async function composeServices() {
     ai,
     aiHttp: createAiHttp({
       application: ai,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
+    discoveryCapacity,
+    discoveryCapacityHttp: createDiscoveryCapacityHttp({
+      application: discoveryCapacity,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
       reportFailure,
     }),

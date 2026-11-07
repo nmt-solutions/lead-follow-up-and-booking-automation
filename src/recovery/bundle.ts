@@ -35,6 +35,13 @@ export async function recoverySchemaBundle(root = process.cwd()) {
       .sort()
       .map((f) => `src/subscription-payments/${f}`),
     "src/application/infrastructure-recovery.ts",
+    "src/application/tax-filings.ts",
+    "src/application/tax-periods.ts",
+    "src/models/tax-filings.ts",
+    "src/models/tax-periods.ts",
+    "src/models/tax-filing-status.ts",
+    "src/tax-filings/evidence.ts",
+    "src/tax-periods/digest.ts",
     ...(await readdir(join(root, "src/db")))
       .filter((f) => f.endsWith(".ts"))
       .sort()

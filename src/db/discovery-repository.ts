@@ -11,6 +11,7 @@ import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import {
   discoveryRun,
+  discoveryCapacityBinding,
   discoveryDispatch,
   discoverySchedule,
   discoveryProspect,
@@ -41,6 +42,7 @@ import {
   briefFor,
   settings,
   checkCurrent,
+  checkCurrentScope,
   requireDiscoveryAvailable,
 } from "./discovery-state";
 import { coverageCounts } from "../discovery/evidence";
@@ -235,7 +237,23 @@ export function createDiscoveryRepository(
             clock.now(),
             checks.filter((c) => c.runId === row.id),
           );
+          const [capacityBinding] = await tx
+            .select()
+            .from(discoveryCapacityBinding)
+            .where(
+              and(
+                eq(discoveryCapacityBinding.id, row.executionId),
+                eq(discoveryCapacityBinding.businessId, businessId),
+              ),
+            );
           runs.push({
+            executionCapacity: capacityBinding
+              ? {
+                  mode: capacityBinding.route.mode,
+                  slots: capacityBinding.route.slots,
+                  policyVersion: capacityBinding.route.version,
+                }
+              : null,
             id: row.id,
             businessId,
             queueState:
@@ -336,6 +354,7 @@ export function createDiscoveryRepository(
           sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
         );
         const stopped = stop.rows[0]?.stopped === true;
+        await requireCapability(tx, actor, businessId, "sales.work");
         return {
           schedules: [],
           canRun: role !== "salesperson" && !stopped,
@@ -554,7 +573,7 @@ export function createDiscoveryRepository(
             );
             status = "stopped";
           } else {
-            await checkCurrent(tx, run, clock.now());
+            await checkCurrentScope(tx, run, clock.now());
             if (run.status !== "stopped")
               throw new ApplicationError("CONFLICT");
             if (input.action === "increase") {
@@ -840,6 +859,9 @@ export function createDiscoveryRepository(
             query: run.policy.permissions.retainQueries ? query : null,
             at,
           });
+          // Paid/usage serialization may wait after native availability was
+          // confirmed. Recheck current authority before committing a call.
+          await checkCurrent(tx, run, clock.now());
           return { id, units, completed: false, sources: null };
         },
         { lock: true },

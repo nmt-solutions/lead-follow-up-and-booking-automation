@@ -190,5 +190,12 @@ export function createSessionAccess(options: {
     authenticatePrivileged: (headers: Headers) => privileged(headers),
     authenticatePlatform: (headers: Headers) =>
       privileged(headers, operatorMfaLifetime),
+    authenticatePlatformForWork: async (headers: Headers) => {
+      const actor = await privileged(headers, operatorMfaLifetime);
+      const identity = await primary(headers);
+      if (identity.user.id !== actor.userId)
+        throw new ApplicationError("UNAUTHENTICATED");
+      return { ...actor, sessionId: identity.session.id };
+    },
   };
 }

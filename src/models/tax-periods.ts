@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { taxFilingStatusSchema } from "./tax-filing-status";
 import { documentSnapshotSchema } from "./seller-documents";
 import { taxModeSchema, taxCurrencySchema, taxCalculationSchema } from "./tax";
 
@@ -284,6 +285,7 @@ export const taxPeriodWorkspaceSchema = z.object({
       reports: z.array(liabilityReportSchema),
       status: z.string(),
       overdue: z.boolean(),
+      confirmation: taxFilingStatusSchema,
     }),
   ),
   reminders: z.array(taxReminderSchema),

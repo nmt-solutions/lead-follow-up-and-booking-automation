@@ -1,7 +1,9 @@
 import { verifyPilots } from "./pilot-security";
+import { verifyDiscoveryCapacity } from "./discovery-capacity-security";
 import { verifyRecoverySecurity } from "./recovery-security";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { verifyTaxPeriods } from "./tax-period-security";
+import { verifyTaxFilings } from "./tax-filing-security";
 import type { Pool, PoolClient } from "pg";
 import { ApplicationError } from "../models/application-error";
 import * as schema from "./schema";
@@ -34,9 +36,11 @@ export async function verifyRuntimeRole(
   if (!(await verifyPilots(pool))) throw new ApplicationError("SETUP_REQUIRED");
   if (!(await verifyRecoverySecurity(pool)))
     throw new ApplicationError("SETUP_REQUIRED");
+  await verifyDiscoveryCapacity(pool);
   await verifyReconciliationRuntime(pool);
   await verifyDataGovernance(pool);
   await verifyTaxPeriods(pool);
+  await verifyTaxFilings(pool);
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
       AND (SELECT count(*)=2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('reach_change','reach_change_event'))
