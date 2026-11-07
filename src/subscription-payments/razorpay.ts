@@ -294,13 +294,7 @@ export function createRazorpayGateway(d: {
     };
     let sub: z.infer<typeof subscriptionSchema> | null = null;
     if (action.checkout?.subscriptionId) {
-      sub = subscriptionSchema.parse(
-        await request(
-          `subscriptions/${id("sub").parse(action.checkout.subscriptionId)}`,
-        ),
-      );
-      if (sub.id !== action.checkout.subscriptionId || !bound(sub, action))
-        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      sub = await currentSubscription(action);
     } else {
       const plan = action.snapshot.provider.review?.plans.find(
         (p) =>

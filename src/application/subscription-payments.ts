@@ -175,13 +175,11 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       } catch {
         /* Persisted intent remains unconfirmed. Recovery only polls; it NEVER repeats cancel. */
       }
-      await d.repository.authorizeWork(
+      return d.repository.readAuthorizedAction(
         await d.authenticate(credentials),
         id,
         input.actionId,
-        d.clock.now(),
       );
-      return d.repository.readWork(result.work);
     },
     async prepare(
       credentials: Credentials,
@@ -236,13 +234,20 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       businessId: unknown,
       value: unknown,
     ) {
+      const id = parse(businessIdSchema, businessId),
+        actionId = parse(paymentCommandSchema, value).actionId;
       const work = await d.repository.authorizeWork(
         await d.authenticate(credentials),
-        parse(businessIdSchema, businessId),
-        parse(paymentCommandSchema, value).actionId,
+        id,
+        actionId,
         d.clock.now(),
       );
-      return reconcile(work);
+      await reconcile(work);
+      return d.repository.readAuthorizedAction(
+        await d.authenticate(credentials),
+        id,
+        actionId,
+      );
     },
     async event(input: { body: Uint8Array; headers: Headers }) {
       const event = parse(
@@ -291,14 +296,22 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       businessId: unknown,
       value: unknown,
     ) {
-      return reconcile(
+      const id = parse(businessIdSchema, businessId),
+        actionId = parse(paymentCommandSchema, value).actionId;
+      await reconcile(
         await d.repository.authorizeWork(
           await d.authenticatePlatform(credentials),
-          parse(businessIdSchema, businessId),
-          parse(paymentCommandSchema, value).actionId,
+          id,
+          actionId,
           d.clock.now(),
           true,
         ),
+      );
+      return d.repository.readAuthorizedAction(
+        await d.authenticatePlatform(credentials),
+        id,
+        actionId,
+        true,
       );
     },
   };

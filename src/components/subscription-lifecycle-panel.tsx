@@ -85,7 +85,7 @@ export function SubscriptionLifecyclePanel({
       </dl>
       {policy ? (
         <p className="text-sm text-muted-foreground">
-          Reviewed policy {policy.id}, version {policy.version}. Grace:{" "}
+          Current reviewed policy {policy.id}, version {policy.version}. Grace:{" "}
           {policy.graceSeconds} seconds,{" "}
           {policy.graceAccess === "remaining_allowance"
             ? "using only remaining units from the prior paid period"
@@ -113,8 +113,13 @@ export function SubscriptionLifecyclePanel({
           {c.status === "requested"
             ? "requested; provider confirmation pending. Reconciliation will check its outcome without sending another cancellation."
             : `confirmed. Provider end: ${time(c.effectiveEnd)}.`}{" "}
-          Request saved {time(c.requestedAt)}. A captured payment and current
-          policy determine access separately.
+          Request saved {time(c.requestedAt)} under{" "}
+          {c.timing === "cycle_end" ? "cycle-end" : "immediate"} cancellation
+          terms. This request retains access{" "}
+          {c.access === "paid_through"
+            ? "through eligible captured paid periods"
+            : "only until the provider-confirmed end"}
+          .
         </p>
       )}
       {onUpdate && action.started && !c && l.state !== "cancelled" && (

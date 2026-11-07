@@ -327,6 +327,34 @@ export function createSubscriptionPaymentRepository(database: Database) {
       .returning();
     return paymentView(updated);
   }
+  async function authorizedAction<T>(
+    actor: Actor,
+    businessId: string,
+    actionId: string,
+    operator: boolean,
+    operation: (tx: Transaction, row: Row) => Promise<T>,
+  ) {
+    return scoped(database, actor, businessId, async (tx) => {
+      if (operator) {
+        const [grant] = await tx
+          .select()
+          .from(platformOperator)
+          .where(eq(platformOperator.userId, actor.userId));
+        if (!grant?.reconciliation) throw new ApplicationError("FORBIDDEN");
+      } else await requireCapability(tx, actor, businessId, "billing.manage");
+      const [row] = await tx
+        .select()
+        .from(subscriptionPayment)
+        .where(
+          and(
+            eq(subscriptionPayment.id, actionId),
+            eq(subscriptionPayment.businessId, businessId),
+          ),
+        );
+      if (!row || !row.started) throw new ApplicationError("NOT_FOUND");
+      return operation(tx, row);
+    });
+  }
   return {
     prepare(
       actor: Actor,
@@ -1187,27 +1215,30 @@ export function createSubscriptionPaymentRepository(database: Database) {
       at: Date,
       operator = false,
     ) {
-      return scoped(database, actor, businessId, async (tx) => {
-        if (operator) {
-          const [grant] = await tx
-            .select()
-            .from(platformOperator)
-            .where(eq(platformOperator.userId, actor.userId));
-          if (!grant?.reconciliation) throw new ApplicationError("FORBIDDEN");
-        } else await requireCapability(tx, actor, businessId, "billing.manage");
-        const [row] = await tx
-          .select()
-          .from(subscriptionPayment)
-          .where(
-            and(
-              eq(subscriptionPayment.id, actionId),
-              eq(subscriptionPayment.businessId, businessId),
-            ),
-          );
-        if (!row || !row.started) throw new ApplicationError("NOT_FOUND");
-        await requestAudit(tx, row, actor, "reconciliation_requested", at);
-        return workFor(row);
-      });
+      return authorizedAction(
+        actor,
+        businessId,
+        actionId,
+        operator,
+        async (tx, row) => {
+          await requestAudit(tx, row, actor, "reconciliation_requested", at);
+          return workFor(row);
+        },
+      );
+    },
+    readAuthorizedAction(
+      actor: Actor,
+      businessId: string,
+      actionId: string,
+      operator = false,
+    ) {
+      return authorizedAction(
+        actor,
+        businessId,
+        actionId,
+        operator,
+        async (_tx, row) => paymentView(row),
+      );
     },
   };
 }

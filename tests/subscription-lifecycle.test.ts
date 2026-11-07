@@ -279,7 +279,12 @@ describe("Subscription lifecycle at the public application seam", () => {
     const command = { actionId: action.id, requestKey: randomUUID() };
     const result = await app.cancel(f.owner, f.business.id, command);
     expect(result.lifecycle?.cancellation?.status).toBe("requested");
-    app = compose(native);
+    app = compose(native, {
+      ...policy,
+      version: 2,
+      cancellationTiming: "immediate",
+      cancellationAccess: "provider_end",
+    });
     await app.cancel(f.owner, f.business.id, command);
     await app.recover();
     expect(
@@ -309,6 +314,8 @@ describe("Subscription lifecycle at the public application seam", () => {
       state: "cancelled",
       cancellation: {
         status: "confirmed",
+        timing: "cycle_end",
+        access: "paid_through",
         effectiveEnd: "2026-12-05T09:00:00.000Z",
       },
     });
@@ -319,6 +326,11 @@ describe("Subscription lifecycle at the public application seam", () => {
         (e) => e.notice?.kind === "cancellation_requested",
       ),
     ).toHaveLength(1);
+    expect(
+      state.actions[0].lifecycleEvents.find(
+        (e) => e.notice?.kind === "cancellation_requested",
+      )?.lifecycle.policy?.version,
+    ).toBe(1);
   });
   it("offers genuine bound native card-change input with current authority and records in-app availability without claiming delivered email", async () => {
     const f = await subscriptionFixture(h),
@@ -708,6 +720,165 @@ describe("Subscription lifecycle at the public application seam", () => {
     expect(
       native.requests.filter(
         (r) => r.method === "POST" && r.path.endsWith("/cancel"),
+      ),
+    ).toHaveLength(0);
+  });
+  it.each(["before cancel POST", "after cancel POST", "card update"])(
+    "enforces current authority %s while retaining intent and authoritative outcomes for sessionless recovery",
+    async (boundary) => {
+      const f = await subscriptionFixture(h),
+        native = razorpayFixture(h.clock),
+        app = compose(native, { ...policy, cancellationTiming: "immediate" });
+      const action = await app.prepare(f.owner, f.business.id, {
+        quoteId: f.quote.id,
+        requestKey: randomUUID(),
+      });
+      await app.start(f.owner, f.business.id, { actionId: action.id });
+      native.charge(
+        "pay_initial",
+        "2026-11-05T09:00:00.000Z",
+        "2026-12-05T09:00:00.000Z",
+      );
+      await app.recover();
+      const original = (await app.workspace(f.owner, f.business.id)).periods;
+      const actor = await h.authenticate(f.owner);
+      const fetchNative = native.configuration.fetch;
+      native.configuration.fetch = async (input, init) => {
+        const response = await fetchNative(input, init);
+        const url = new URL(
+          typeof input === "string" || input instanceof URL ? input : input.url,
+        );
+        if (
+          boundary === "after cancel POST"
+            ? url.pathname.endsWith("/cancel") && init?.method === "POST"
+            : url.pathname === "/v1/subscriptions/sub_fixture1"
+        )
+          await h.admin.query(
+            "UPDATE membership SET role='salesperson' WHERE business_id=$1 AND user_id=$2",
+            [f.business.id, actor.userId],
+          );
+        return response;
+      };
+      const refreshed = compose(native, {
+        ...policy,
+        cancellationTiming: "immediate",
+      });
+      const command = { actionId: action.id, requestKey: randomUUID() };
+      await expect(
+        boundary === "card update"
+          ? refreshed.updatePayment(f.owner, f.business.id, command)
+          : refreshed.cancel(f.owner, f.business.id, command),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await refreshed.recover();
+      native.configuration.fetch = fetchNative;
+      await h.admin.query(
+        "UPDATE membership SET role='owner' WHERE business_id=$1 AND user_id=$2",
+        [f.business.id, actor.userId],
+      );
+      const state = await refreshed.workspace(f.owner, f.business.id);
+      expect(state.periods).toEqual(original);
+      if (boundary === "card update") {
+        expect(state.actions[0].lifecycle?.cancellation).toBeNull();
+        expect(
+          state.actions[0].lifecycleEvents.filter(
+            (e) => e.notice?.kind === "payment_method_ready",
+          ),
+        ).toHaveLength(0);
+      } else {
+        expect(state.actions[0].lifecycle?.cancellation?.status).toBe(
+          boundary === "after cancel POST" ? "confirmed" : "requested",
+        );
+        await refreshed.cancel(f.owner, f.business.id, command);
+      }
+      expect(
+        native.requests.filter(
+          (r) => r.method === "POST" && r.path.endsWith("/cancel"),
+        ),
+      ).toHaveLength(boundary === "after cancel POST" ? 1 : 0);
+      expect(native.creations).toHaveLength(1);
+    },
+  );
+  it.each(["Business", "operator", "operator MFA"])(
+    "rechecks current %s reconciliation authority after native I/O before returning financial state",
+    async (caller) => {
+      const f = await subscriptionFixture(h),
+        native = razorpayFixture(h.clock),
+        app = compose(native);
+      const action = await app.prepare(f.owner, f.business.id, {
+        quoteId: f.quote.id,
+        requestKey: randomUUID(),
+      });
+      await app.start(f.owner, f.business.id, { actionId: action.id });
+      const operator = await h.signIn("lifecycle-refresh-operator@example.com");
+      await h.provisionOperator(operator, { tax: false, reconciliation: true });
+      const credentials = caller === "Business" ? f.owner : operator;
+      const actor = await h.authenticate(credentials);
+      const fetchNative = native.configuration.fetch;
+      native.configuration.fetch = async (input, init) => {
+        const response = await fetchNative(input, init);
+        const url = new URL(
+          typeof input === "string" || input instanceof URL ? input : input.url,
+        );
+        if (url.pathname === "/v1/subscriptions/sub_fixture1") {
+          if (caller === "Business")
+            await h.admin.query(
+              "UPDATE membership SET role='salesperson' WHERE business_id=$1 AND user_id=$2",
+              [f.business.id, actor.userId],
+            );
+          else if (caller === "operator MFA")
+            h.clock.set("2026-11-05T09:15:00.000Z");
+          else
+            await h.admin.query(
+              "UPDATE platform_operator SET reconciliation=false WHERE user_id=$1",
+              [actor.userId],
+            );
+        }
+        return response;
+      };
+      const refreshed = compose(native);
+      await expect(
+        caller === "Business"
+          ? refreshed.refresh(credentials, f.business.id, {
+              actionId: action.id,
+            })
+          : refreshed.operatorRefresh(credentials, f.business.id, {
+              actionId: action.id,
+            }),
+      ).rejects.toMatchObject({
+        code: caller === "operator MFA" ? "MFA_REQUIRED" : "FORBIDDEN",
+      });
+      expect(native.creations).toHaveLength(1);
+    },
+  );
+  it("rejects lifecycle evidence rebound to another native customer before changing access", async () => {
+    const f = await subscriptionFixture(h),
+      native = razorpayFixture(h.clock),
+      app = compose(native, { ...policy, cancellationAccess: "provider_end" });
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    await app.start(f.owner, f.business.id, { actionId: action.id });
+    native.charge(
+      "pay_initial",
+      "2026-11-05T09:00:00.000Z",
+      "2026-12-05T09:00:00.000Z",
+    );
+    await app.recover();
+    const original = await app.workspace(f.owner, f.business.id);
+    const subscription = native.subscriptions.get("sub_fixture1")!;
+    subscription.customer_id = "cust_other";
+    subscription.status = "cancelled";
+    subscription.ended_at = Math.floor(h.clock.now().getTime() / 1000);
+    await app.recover();
+    const state = await app.workspace(f.owner, f.business.id);
+    expect(state.access.active).toBe(true);
+    expect(state.actions[0].lifecycle?.provider?.status).toBe("active");
+    expect(state.actions[0].lifecycle?.cancellation).toBeNull();
+    expect(state.periods).toEqual(original.periods);
+    expect(
+      state.actions[0].lifecycleEvents.filter(
+        (e) => e.notice?.kind === "cancellation_confirmed",
       ),
     ).toHaveLength(0);
   });
