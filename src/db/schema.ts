@@ -1,4 +1,5 @@
 import type { MailAcceptance } from "../models/mail-dispatch";
+import type { ReconciliationEntry } from "../models/reconciliation";
 import type {
   FilingPolicyDefinition,
   FilingTarget,
@@ -6321,5 +6322,141 @@ export const taxRemittanceReview = pgTable(
     uniqueIndex("tax_remittance_review_version").on(t.allocationId, t.version),
     check("tax_remittance_review_positive_version", sql`${t.version}>0`),
     ...taxReportingPolicies("tax_remittance_review"),
+  ],
+).enableRLS();
+
+const reconciliationAuthority = sql`coalesce(current_setting('app.business_id',true),'')='' and (${paymentOperator})`;
+function reconciliationPolicies(name: string) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: reconciliationAuthority,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${reconciliationAuthority}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy(`${name}_system`, {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ];
+}
+export const reconciliationEvidence = pgTable(
+  "reconciliation_evidence",
+  {
+    id: uuid("id").primaryKey(),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    source: text("source").notNull(),
+    reference: text("reference").notNull(),
+    name: text("name").notNull(),
+    contentType: text("content_type").notNull(),
+    contentBase64: text("content_base64").notNull(),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    note: text("note").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_evidence_request").on(t.requestKey),
+    check(
+      "reconciliation_evidence_bounds",
+      sql`${t.bytes}>0 and ${t.bytes}<=262144 and length(${t.contentBase64})<=350000 and ${t.sha256} ~ '^[a-f0-9]{64}$' and ${t.source} in ('provider_statement','bank_statement','conversion_confirmation') and octet_length(decode(${t.contentBase64},'base64'))=${t.bytes} and encode(sha256(decode(${t.contentBase64},'base64')),'hex')=${t.sha256}`,
+    ),
+    ...reconciliationPolicies("reconciliation_evidence"),
+  ],
+).enableRLS();
+export const reconciliationRecord = pgTable(
+  "reconciliation_record",
+  {
+    id: uuid("id").primaryKey(),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => reconciliationEvidence.id),
+    supersedes: uuid("supersedes"),
+    identity: text("identity").notNull(),
+    data: jsonb("data").$type<ReconciliationEntry>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_record_request").on(t.requestKey),
+    uniqueIndex("reconciliation_record_correction").on(t.supersedes),
+    foreignKey({
+      name: "reconciliation_record_predecessor",
+      columns: [t.supersedes],
+      foreignColumns: [t.id],
+    }),
+    check(
+      "reconciliation_record_binding",
+      sql`coalesce((${t.data}->>'requestKey'=${t.requestKey}::text and ${t.data}->>'evidenceId'=${t.evidenceId}::text and (${t.data}->>'supersedes') is not distinct from ${t.supersedes}::text and ${t.data}->>'kind' in ('settlement','bank_receipt') and octet_length(${t.data}::text)<=1048576),false)`,
+    ),
+    ...reconciliationPolicies("reconciliation_record"),
+  ],
+).enableRLS();
+export const reconciliationReview = pgTable(
+  "reconciliation_review",
+  {
+    id: uuid("id").primaryKey(),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    recordId: uuid("record_id")
+      .notNull()
+      .references(() => reconciliationRecord.id),
+    reportHash: text("report_hash").notNull(),
+    outcome: text("outcome").notNull(),
+    note: text("note").notNull(),
+    evidenceIds: jsonb("evidence_ids").$type<string[]>().notNull(),
+    discrepancy: jsonb("discrepancy")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_review_request").on(t.requestKey),
+    check(
+      "reconciliation_review_outcome",
+      sql`${t.outcome} in ('acknowledged','resolved') and ${t.reportHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    ...reconciliationPolicies("reconciliation_review"),
+  ],
+).enableRLS();
+export const reconciliationAccess = pgTable(
+  "reconciliation_access",
+  {
+    id: uuid("id").primaryKey(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => reconciliationEvidence.id),
+    tokenHash: text("token_hash").notNull(),
+    at: timestamp("at", { withTimezone: true })
+      .notNull()
+      .default(sql`statement_timestamp()`),
+    expiresAt: timestamp("expires_at", { withTimezone: true })
+      .notNull()
+      .default(sql`(statement_timestamp()+interval '60 seconds')`),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_access_token").on(t.tokenHash),
+    check(
+      "reconciliation_access_expiry",
+      sql`${t.expiresAt}>${t.at} and ${t.expiresAt}<=${t.at}+interval '60 seconds'`,
+    ),
+    ...reconciliationPolicies("reconciliation_access"),
   ],
 ).enableRLS();

@@ -8,6 +8,8 @@ import { subscriptionFixture } from "./support/subscription";
 import { financialNativeFixture } from "./support/financial-native";
 import { createFinancialAdjustmentApplication } from "../src/application/financial-adjustments";
 import { createFinancialAdjustmentRepository } from "../src/db/financial-adjustment-repository";
+import { createReconciliationApplication } from "../src/application/reconciliation";
+import { createReconciliationRepository } from "../src/db/reconciliation-repository";
 import { configuredFinancialAdjustments } from "../src/financial-adjustments/configuration";
 import { createSellerDocumentApplication } from "../src/application/seller-documents";
 import { createSellerDocumentRepository } from "../src/db/seller-document-repository";
@@ -1328,6 +1330,49 @@ describe("Approved reach changes at the public application seam", () => {
       ).toEqual(invoice.snapshot.totals);
       await app.execute(op, f.business.id, { caseId: reviewed.id });
       expect(f.native.refundPosts).toHaveLength(1);
+      const reconciliation = createReconciliationApplication({
+        authenticatePlatform: h.access.authenticatePlatform,
+        repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
+        clock: h.clock,
+      });
+      const cohort = {
+        from: "2026-11-01T00:00:00.000Z",
+        until: "2026-12-01T00:00:00.000Z",
+      };
+      const bankReport = await reconciliation.workspace(f.operator, cohort);
+      expect(
+        bankReport.sources.find((s) => s.periodId === delta.id),
+      ).toMatchObject({
+        kind: "reach_delta",
+        paymentId: country === "US" ? "pay_delta" : "pay_separate",
+        nativeInvoiceId: country === "US" ? "inv_delta" : null,
+        orderId: country === "US" ? "order_delta" : "order_separate",
+      });
+      expect(bankReport.expected).toMatchObject([
+        country === "US"
+          ? {
+              currency: "USD",
+              grossMinor: "5500",
+              salesTaxMinor: "500",
+              revenueMinor: "5000",
+              refundCashMinor: "1375",
+              creditGrossMinor: "1375",
+              creditTaxMinor: "125",
+            }
+          : {
+              currency: "INR",
+              grossMinor: "16509",
+              salesTaxMinor: "1501",
+              revenueMinor: "15008",
+              refundCashMinor: "5503",
+              creditGrossMinor: "5503",
+              creditTaxMinor: "500",
+            },
+      ]);
+      expect(
+        JSON.parse((await reconciliation.export(f.operator, cohort)).content)
+          .sources,
+      ).toHaveLength(country === "US" ? 3 : 2);
       const tax = createTaxPeriodApplication({
         authenticatePlatform: h.access.authenticatePlatform,
         repository: createTaxPeriodRepository(runtimeDatabase(h.runtime)),
