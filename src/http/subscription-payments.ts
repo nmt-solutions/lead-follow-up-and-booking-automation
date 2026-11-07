@@ -13,6 +13,14 @@ export function createSubscriptionPaymentHttp(options: {
     respond = createResponder(options.reportFailure),
     body = createJsonBodyReader(options.origin, 16 * 1024);
   return {
+    cancel: (r: Request, id: string) =>
+      respond(async () =>
+        dataResponse(await app.cancel(r.headers, id, await body(r))),
+      ),
+    updatePayment: (r: Request, id: string) =>
+      respond(async () =>
+        dataResponse(await app.updatePayment(r.headers, id, await body(r))),
+      ),
     workspace: (r: Request, id: string) =>
       respond(async () => dataResponse(await app.workspace(r.headers, id))),
     prepare: (r: Request, id: string) =>

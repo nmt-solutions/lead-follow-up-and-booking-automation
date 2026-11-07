@@ -69,6 +69,7 @@ export function razorpayFixture(clock: Clock) {
     payments,
     requests,
     loseCreation: false,
+    loseCancellation: false,
     charge(
       paymentId: string,
       start: string,
@@ -197,6 +198,24 @@ export function razorpayFixture(clock: Clock) {
             )
             .slice(skip, skip + count);
           return json({ entity: "collection", count: items.length, items });
+        }
+        if (url.pathname.endsWith("/cancel") && method === "POST") {
+          const sub = subscriptions.get(url.pathname.split("/").at(-2)!);
+          if (!sub) throw new Error("Missing native subscription");
+          const value: unknown = JSON.parse(String(init?.body));
+          if (
+            !value ||
+            typeof value !== "object" ||
+            !("cancel_at_cycle_end" in value)
+          )
+            throw new Error("Invalid cancellation input");
+          if (!value.cancel_at_cycle_end) {
+            sub.status = "cancelled";
+            sub.ended_at = Math.floor(clock.now().getTime() / 1000);
+          }
+          if (fixture.loseCancellation)
+            throw new Error("Lost native cancellation acknowledgement");
+          return json(sub);
         }
         if (url.pathname.startsWith("/v1/subscriptions/"))
           return json(subscriptions.get(url.pathname.split("/").at(-1)!));

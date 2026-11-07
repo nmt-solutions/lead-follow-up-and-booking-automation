@@ -1,5 +1,13 @@
 import type { MailAcceptance } from "../models/mail-dispatch";
 import type {
+  OperationSnapshot,
+  DiagnosticRetention,
+} from "../models/operations";
+import type {
+  SubscriptionLifecycle,
+  LifecycleEvent,
+} from "../models/subscription-lifecycle";
+import type {
   MailboxConfiguration,
   MailboxGrant,
   MailboxJobState,
@@ -732,6 +740,7 @@ export const subscriptionPayment = pgTable(
     checkout: jsonb("checkout").$type<CheckoutReference>(),
     observation: jsonb("observation").$type<PaymentObservation>(),
     recovery: jsonb("recovery").$type<PaymentAction["recovery"]>(),
+    lifecycle: jsonb("lifecycle").$type<SubscriptionLifecycle>(),
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
     reconciliationPending: boolean("reconciliation_pending")
       .notNull()
@@ -767,6 +776,27 @@ export const subscriptionPayment = pgTable(
       using: paymentOwner,
       withCheck: paymentOwner,
     }),
+  ],
+).enableRLS();
+export const subscriptionLifecycleEvent = pgTable(
+  "subscription_lifecycle_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    lifecycle: jsonb("lifecycle").$type<SubscriptionLifecycle>().notNull(),
+    notice: jsonb("notice").$type<LifecycleEvent["notice"]>(),
+  },
+  (t) => [
+    uniqueIndex("subscription_lifecycle_event_identity").on(t.actionId, t.key),
+    ...paymentHistoryPolicies(
+      "subscription_lifecycle_event",
+      sql`${t.actionId}`,
+    ),
   ],
 ).enableRLS();
 export const subscriptionPaymentEvent = pgTable(
@@ -884,6 +914,17 @@ export const subscriptionUsage = pgTable(
 // Reconcile these composite keys after the pinned push replaces referenced
 // UNIQUE constraints, while financial runtime access remains paused.
 export const subscriptionPaymentScopeForeignKeys = [
+  new ForeignKey(
+    subscriptionLifecycleEvent,
+    foreignKey({
+      name: "subscription_lifecycle_event_scope",
+      columns: [
+        subscriptionLifecycleEvent.actionId,
+        subscriptionLifecycleEvent.businessId,
+      ],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
   new ForeignKey(
     subscriptionPaymentEvent,
     foreignKey({
@@ -1089,6 +1130,7 @@ export const platformOperator = pgTable(
     whatsAppReview: boolean("whatsapp_review").notNull().default(false),
     senderHealth: boolean("sender_health").notNull().default(false),
     documents: boolean("documents").notNull().default(false),
+    operations: boolean("operations").notNull().default(false),
     costs: boolean("costs").notNull().default(false),
     notifications: boolean("notifications").notNull().default(false),
   },
@@ -1098,6 +1140,129 @@ export const platformOperator = pgTable(
       to: appRuntime,
       using: sql`${table.userId} = current_setting('app.actor_id', true)`,
     }),
+  ],
+).enableRLS();
+
+const operationsOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.operations)`;
+const operationsScope = sql`(${operationsOperator}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() is not null)`;
+const operationsOwner = sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.operation_event'::regclass)`;
+export const operationEvent = pgTable(
+  "operation_event",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    source: text("source").notNull(),
+    targetId: uuid("target_id").notNull(),
+    snapshot: jsonb("snapshot").$type<OperationSnapshot>().notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    action: text("action").notNull(),
+    outcome: text("outcome").notNull(),
+    requestKey: uuid("request_key"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("operation_request_once").on(
+      t.businessId,
+      t.requestKey,
+      t.outcome,
+    ),
+    index("operation_source_history").on(
+      t.businessId,
+      t.source,
+      t.targetId,
+      t.position,
+    ),
+    check(
+      "operation_snapshot_scope",
+      sql`${t.snapshot}->>'businessId'=${t.businessId}::text and ${t.snapshot}->>'targetId'=${t.targetId}::text and ${t.snapshot}->>'source'=${t.source}`,
+    ),
+    pgPolicy("operation_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: operationsScope,
+    }),
+    pgPolicy("operation_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${operationsScope}) and actor_id=current_setting('app.actor_id',true) and action in ('retry','reconcile','escalate','acknowledge') and outcome in ('requested','queued','checked','escalated','acknowledged','blocked','unavailable')`,
+    }),
+    pgPolicy("operation_event_system", {
+      for: "all",
+      to: "public",
+      using: operationsOwner,
+      withCheck: operationsOwner,
+    }),
+  ],
+).enableRLS();
+export const operationRetention = pgTable(
+  "operation_retention",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    policy: jsonb("policy").$type<DiagnosticRetention>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("operation_retention_version").on(t.version),
+    check(
+      "operation_retention_positive",
+      sql`${t.version}>0 and (${t.policy}->>'diagnosticSeconds')::integer>0 and (${t.policy}->>'auditDetailSeconds')::integer>0`,
+    ),
+    pgPolicy("operation_retention_read", {
+      for: "select",
+      to: appRuntime,
+      using: operationsOperator,
+    }),
+    pgPolicy("operation_retention_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${operationsOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy("operation_retention_system", {
+      for: "select",
+      to: "public",
+      using: operationsOwner,
+    }),
+  ],
+).enableRLS();
+export const operationDetail = pgTable(
+  "operation_detail",
+  {
+    id: uuid("id").primaryKey(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => operationEvent.id),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => operationRetention.id),
+    kind: text("kind").$type<"diagnostic" | "audit">().notNull(),
+    requestId: uuid("request_id").notNull(),
+    code: text("code").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operation_detail_once").on(t.eventId, t.kind),
+    pgPolicy("operation_detail_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${operationsOperator}) and expires_at>statement_timestamp()`,
+    }),
+    pgPolicy("operation_detail_system", {
+      for: "all",
+      to: "public",
+      using: operationsOwner,
+      withCheck: operationsOwner,
+    }),
+    check(
+      "operation_detail_kind",
+      sql`${t.kind} in ('diagnostic','audit') and ${t.code} ~ '^[A-Z_]{1,80}$'`,
+    ),
   ],
 ).enableRLS();
 

@@ -1,4 +1,6 @@
 import { persistPaidSubscription } from "./support/paid-subscription";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import type { ScheduleWork } from "../src/models/discovery-schedules";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
@@ -2963,6 +2965,86 @@ describe("Bounded discovery at the primary application seam", () => {
       "succeeded",
       "failed",
     ]);
+  });
+
+  it("recovers a failed run through operations after restart with original progress, budget and attributable history", async () => {
+    const { owner, business } = await setup();
+    behavior.search = async (input) =>
+      ["first", "second"].map((name) => ({
+        name,
+        market: input.market,
+        url: `https://${name}.example/about`,
+        excerpt: "We fabricate galvanized steel sheet to ASTM A653.",
+      }));
+    behavior.review = async () => {
+      if (reviews.length > 1)
+        throw new DiscoveryProviderFailure("rate_limited");
+      return {
+        relevant: true,
+        reason: "Uses sheet",
+        evidenceQuote: "galvanized steel sheet",
+        uncertainty: "Purchase timing unknown",
+        request: null,
+      };
+    };
+    const run = await application.start(owner, business.id, request(6));
+    await execute();
+    const repository = createOperationsRepository(
+      runtimeDatabase(harness.runtime),
+      harness.clock,
+    );
+    const operations = () =>
+      createOperationsApplication({
+        authenticate: harness.access.authenticateForWork,
+        repository,
+        commands: { discovery: newApplication() },
+      });
+    expect(
+      (await operations().workspace(owner, business.id)).resources.find(
+        (r) => r.id === run.id,
+      ),
+    ).toMatchObject({
+      status: "stopped",
+      reason: "provider_rate_limited",
+      context: { approvedBudget: 6, used: 4, completedSteps: 0 },
+    });
+    behavior.review = undefined;
+    expect(
+      await operations().recover(owner, business.id, {
+        source: "discovery",
+        targetId: run.id,
+        action: "retry",
+        requestKey: crypto.randomUUID(),
+      }),
+    ).toEqual({ outcome: "queued" });
+    await newApplication().execute(queued.at(-1));
+    expect(
+      (await application.workspace(owner, business.id)).runs[0],
+    ).toMatchObject({ id: run.id, status: "completed", used: 5 });
+    expect(searches).toHaveLength(1);
+    const state = await operations().workspace(owner, business.id);
+    expect(
+      state.history.some(
+        (e) => e.targetId === run.id && e.reason === "provider_rate_limited",
+      ),
+    ).toBe(true);
+    expect(
+      state.notifications
+        .filter((e) => e.targetId === run.id)
+        .every((e) => e.resolved),
+    ).toBe(true);
+    const second = await application.start(owner, business.id, request(2));
+    await execute();
+    const queuedBefore = queued.length;
+    await expect(
+      operations().recover(owner, business.id, {
+        source: "discovery",
+        targetId: second.id,
+        action: "retry",
+        requestKey: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(queued).toHaveLength(queuedBefore);
   });
 
   it("validates external source and AI evidence, separating malformed responses from programmer defects", async () => {

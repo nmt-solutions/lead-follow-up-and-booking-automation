@@ -456,15 +456,34 @@ describe("Business team access", () => {
     );
   });
 
-  it("accepts a concurrent invitation once and persists team access across schema pushes", async () => {
+  it("upgrades the legacy owner-only membership check before accepting an administrator", async () => {
     h.clock.set("2026-11-05T16:00:00Z");
-    const owner = await h.signIn("concurrent-owner@example.com");
+    const owner = await h.signIn("legacy-check-owner@example.com");
     const business = await h.application.createBusiness(owner, profile);
     // Upgrade fixture: issue #3's existing check allowed only owners.
     await h.admin.query(
       "ALTER TABLE membership DROP CONSTRAINT membership_role; ALTER TABLE membership ADD CONSTRAINT membership_role CHECK (role = 'owner') NOT VALID",
     );
     await h.reapplySchema();
+    await h.team.invite(owner, business.id, {
+      email: "legacy-check-recipient@example.com",
+      role: "admin",
+    });
+    const recipient = await h.signIn("legacy-check-recipient@example.com");
+    await h.team.accept(recipient, {
+      token: tokenFor("legacy-check-recipient@example.com"),
+    });
+    expect((await h.team.getTeam(owner, business.id)).members).toContainEqual(
+      expect.objectContaining({
+        email: "legacy-check-recipient@example.com",
+        role: "admin",
+      }),
+    );
+  });
+  it("accepts a concurrent invitation once and persists team access across schema pushes", async () => {
+    h.clock.set("2026-11-05T16:00:00Z");
+    const owner = await h.signIn("concurrent-owner@example.com");
+    const business = await h.application.createBusiness(owner, profile);
     const results = await Promise.allSettled(
       [1, 2].map(() =>
         h.team.invite(owner, business.id, {

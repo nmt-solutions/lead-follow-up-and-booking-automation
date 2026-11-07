@@ -44,6 +44,56 @@ export function createMailboxApplication<Credentials>(dependencies: {
     };
   }
   return {
+    async recoverConnection(
+      credentials: Credentials,
+      id: unknown,
+      mailboxId: unknown,
+      input: unknown,
+    ) {
+      const c = await context(credentials, id),
+        { mode } = parse(queueMailboxSchema, input);
+      const work = await repository.queue(
+        c.identity,
+        c.businessId,
+        parse(z.uuid(), mailboxId),
+        mode,
+      );
+      if (provider.mode !== "unconfigured" && dependencies.enqueue) {
+        try {
+          await dependencies.enqueue(work);
+          return { outcome: "queued" as const };
+        } catch {
+          /* The same persisted work remains recoverable. */
+        }
+      }
+      const snapshot = await repository.prepare(work);
+      if (snapshot)
+        await repository.fail(
+          snapshot,
+          provider.mode === "unconfigured"
+            ? "setup_required"
+            : "worker_required",
+        );
+      return { outcome: "unavailable" as const };
+    },
+    // Trusted maintenance composition preserves the original actor and selected
+    // work. It cannot transfer ownership, extend history or read private output.
+    async recoverExisting(input: unknown) {
+      const work = parse(mailboxWorkSchema, input);
+      const snapshot = await repository.prepare(work);
+      if (!snapshot) return { outcome: "checked" as const };
+      if (!dependencies.enqueue || provider.mode === "unconfigured") {
+        await repository.fail(
+          snapshot,
+          provider.mode === "unconfigured"
+            ? "setup_required"
+            : "worker_required",
+        );
+        throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+      }
+      await dependencies.enqueue(work);
+      return { outcome: "queued" as const };
+    },
     async workspace(credentials: Credentials, id: unknown) {
       const c = await context(credentials, id);
       return {

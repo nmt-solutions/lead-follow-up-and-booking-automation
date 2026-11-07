@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
 import { runtimeDatabase } from "../src/db/runtime";
@@ -417,9 +419,32 @@ describe("Seller documents at the public application seam", () => {
     });
     storage.failPut = false;
     storage.failAfterPut = true;
-    const recovered = await app.recover(f.owner, f.business.id, {
-      documentId: failed.id,
+    const operations = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { documents: app },
     });
+    expect(
+      (await operations.workspace(f.owner, f.business.id)).resources.find(
+        (r) => r.id === failed.id,
+      ),
+    ).toMatchObject({
+      source: "document",
+      status: "failed",
+      context: { periodId: f.period.id },
+    });
+    await operations.recover(f.owner, f.business.id, {
+      source: "document",
+      targetId: failed.id,
+      action: "reconcile",
+      requestKey: randomUUID(),
+    });
+    const recovered = (
+      await app.workspace(f.owner, f.business.id)
+    ).documents.find((d) => d.id === failed.id)!;
     expect(recovered).toMatchObject({
       id: failed.id,
       number: failed.number,
@@ -945,7 +970,7 @@ describe("Seller documents at the public application seam", () => {
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
-  it("preserves real financial history through schema reapplication and detects missing SELECT and INSERT privileges independently", async () => {
+  it("preserves real financial history through schema reapplication and denies unscoped artifact workers", async () => {
     const f = await reviewedPurchase(),
       op = await operator(),
       { app } = compose();
@@ -964,32 +989,6 @@ describe("Seller documents at the public application seam", () => {
     expect((await app.workspace(f.owner, f.business.id)).documents[0]).toEqual(
       doc,
     );
-    for (const table of [
-      "seller_issuer_revision",
-      "seller_issuer_decision",
-      "seller_document",
-      "seller_document_request",
-      "seller_document_access",
-      "seller_document_storage",
-    ])
-      for (const privilege of ["SELECT", "INSERT"]) {
-        await h.admin.query(`REVOKE ${privilege} ON ${table} FROM app_runtime`);
-        await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
-        await secureDatabase(h.admin);
-        await verifyRuntimeRole(h.runtime);
-      }
-    for (const signature of [
-      "seller_next_number(uuid,text,bigint)",
-      "seller_artifact_worker_authorized(uuid,uuid)",
-      "claim_seller_artifacts(text,integer)",
-    ]) {
-      await h.admin.query(
-        `REVOKE EXECUTE ON FUNCTION public.${signature} FROM app_runtime`,
-      );
-      await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
-      await secureDatabase(h.admin);
-      await verifyRuntimeRole(h.runtime);
-    }
     expect(
       (
         await h.runtime.query(
@@ -1005,6 +1004,38 @@ describe("Seller documents at the public application seam", () => {
         )
       ).rows[0].allowed,
     ).toBe(false);
+  });
+  it.each(["SELECT", "INSERT"])(
+    "requires each document ledger %s privilege independently",
+    async (privilege) => {
+      for (const table of [
+        "seller_issuer_revision",
+        "seller_issuer_decision",
+        "seller_document",
+        "seller_document_request",
+        "seller_document_access",
+        "seller_document_storage",
+      ]) {
+        await h.admin.query(`REVOKE ${privilege} ON ${table} FROM app_runtime`);
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
+        await secureDatabase(h.admin);
+        await verifyRuntimeRole(h.runtime);
+      }
+    },
+  );
+  it("requires every restricted document recovery helper grant independently", async () => {
+    for (const signature of [
+      "seller_next_number(uuid,text,bigint)",
+      "seller_artifact_worker_authorized(uuid,uuid)",
+      "claim_seller_artifacts(text,integer)",
+    ]) {
+      await h.admin.query(
+        `REVOKE EXECUTE ON FUNCTION public.${signature} FROM app_runtime`,
+      );
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toBeDefined();
+      await secureDatabase(h.admin);
+      await verifyRuntimeRole(h.runtime);
+    }
   });
   it("issues USD from its captured billing basis without assuming an exemption", async () => {
     const f = await reviewedPurchase({ country: "US" }),

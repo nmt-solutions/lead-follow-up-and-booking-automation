@@ -71,6 +71,12 @@ export default async function BusinessPage({
       >
         Offerings, buyers and geography
       </Link>
+      <Link
+        href={`/businesses/${businessId}/operations`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Action history and recovery
+      </Link>
       {access.role !== "salesperson" && (
         <Link
           href={`/businesses/${businessId}/whatsapp`}

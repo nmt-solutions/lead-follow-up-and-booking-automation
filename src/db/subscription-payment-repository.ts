@@ -1,4 +1,14 @@
 import { randomUUID } from "node:crypto";
+import {
+  reconcileLifecycle,
+  appendLifecycleEvent,
+} from "./subscription-lifecycle";
+import {
+  effectiveLifecyclePolicy,
+  lifecycleEventSchema,
+  type LifecycleObservation,
+  type LifecyclePolicy,
+} from "../models/subscription-lifecycle";
 import { isDeepStrictEqual } from "node:util";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Database } from "./runtime";
@@ -18,6 +28,7 @@ import {
   subscriptionPeriod,
   subscriptionPaymentEvent,
   subscriptionPaymentHistory,
+  subscriptionLifecycleEvent,
   platformOperator,
 } from "./schema";
 import {
@@ -69,8 +80,19 @@ async function paymentAudit(tx: Transaction, row: Row) {
       asc(subscriptionPaymentEvent.at),
       asc(subscriptionPaymentEvent.id),
     );
+  const lifecycleEvents = await tx
+    .select()
+    .from(subscriptionLifecycleEvent)
+    .where(eq(subscriptionLifecycleEvent.actionId, row.id))
+    .orderBy(
+      asc(subscriptionLifecycleEvent.at),
+      asc(subscriptionLifecycleEvent.id),
+    );
   return paymentActionSchema.parse({
     ...paymentView(row),
+    lifecycleEvents: lifecycleEvents.map((e) =>
+      lifecycleEventSchema.parse({ ...e, at: e.at.toISOString() }),
+    ),
     history: history.map((h) => ({ ...h, at: h.at.toISOString() })),
     events: events.map((e) => ({ ...e, at: e.at.toISOString() })),
   });
@@ -90,10 +112,10 @@ export async function paymentAccess(
     start: row.start.toISOString(),
     end: row.end.toISOString(),
   }));
-  const period =
-    periods.find(
-      (row) => new Date(row.start) <= at && new Date(row.end) > at,
-    ) ?? null;
+  const scope = await tx.execute<{ id: string }>(
+    sql`select id from public.current_paid_scope(${businessId}::uuid,${at.toISOString()}::timestamptz)`,
+  );
+  const period = periods.find((row) => row.id === scope.rows[0]?.id) ?? null;
   return {
     periods,
     access: {
@@ -305,6 +327,34 @@ export function createSubscriptionPaymentRepository(database: Database) {
       .returning();
     return paymentView(updated);
   }
+  async function authorizedAction<T>(
+    actor: Actor,
+    businessId: string,
+    actionId: string,
+    operator: boolean,
+    operation: (tx: Transaction, row: Row) => Promise<T>,
+  ) {
+    return scoped(database, actor, businessId, async (tx) => {
+      if (operator) {
+        const [grant] = await tx
+          .select()
+          .from(platformOperator)
+          .where(eq(platformOperator.userId, actor.userId));
+        if (!grant?.reconciliation) throw new ApplicationError("FORBIDDEN");
+      } else await requireCapability(tx, actor, businessId, "billing.manage");
+      const [row] = await tx
+        .select()
+        .from(subscriptionPayment)
+        .where(
+          and(
+            eq(subscriptionPayment.id, actionId),
+            eq(subscriptionPayment.businessId, businessId),
+          ),
+        );
+      if (!row || !row.started) throw new ApplicationError("NOT_FOUND");
+      return operation(tx, row);
+    });
+  }
   return {
     prepare(
       actor: Actor,
@@ -410,11 +460,23 @@ export function createSubscriptionPaymentRepository(database: Database) {
     ): Promise<PaymentWorkspace> {
       return scoped(database, actor, businessId, async (tx) => {
         await requireCapability(tx, actor, businessId, "billing.read");
+        await lockBusiness(tx, businessId);
         const rows = await tx
           .select()
           .from(subscriptionPayment)
           .where(eq(subscriptionPayment.businessId, businessId))
           .orderBy(asc(subscriptionPayment.at), asc(subscriptionPayment.id));
+        for (const row of rows) {
+          await tx.execute(
+            sql`select set_config('app.payment_action',${row.id},true),set_config('app.payment_capability',${row.recoveryKey},true)`,
+          );
+          row.lifecycle = await reconcileLifecycle(
+            tx,
+            row,
+            at,
+            gateway.lifecyclePolicy,
+          );
+        }
         const discovery = await paidAllowance(tx, businessId, "discovery", at),
           automation = await paidAllowance(tx, businessId, "automation", at);
         const allowance = (item: NonNullable<typeof discovery>) => ({
@@ -633,6 +695,148 @@ export function createSubscriptionPaymentRepository(database: Database) {
           .where(eq(subscriptionPayment.id, row.id));
       });
     },
+    lifecycle(
+      work: Work,
+      at: Date,
+      policy?: LifecyclePolicy,
+      observation?: LifecycleObservation,
+    ) {
+      return worker(work, async (tx, row) =>
+        reconcileLifecycle(tx, row, at, policy, observation),
+      );
+    },
+    beginCancellation(
+      actor: Actor,
+      businessId: string,
+      actionId: string,
+      requestKey: string,
+      at: Date,
+      gateway: PaymentGateway,
+    ) {
+      return scoped(database, actor, businessId, async (tx) => {
+        await lockBusiness(tx, businessId);
+        await requireCapability(tx, actor, businessId, "billing.manage");
+        const [row] = await tx
+          .select()
+          .from(subscriptionPayment)
+          .where(
+            and(
+              eq(subscriptionPayment.id, actionId),
+              eq(subscriptionPayment.businessId, businessId),
+            ),
+          );
+        if (!row?.started || !row.checkout?.subscriptionId)
+          throw new ApplicationError("NOT_FOUND");
+        const policy = effectiveLifecyclePolicy(
+          gateway.lifecyclePolicy,
+          row.snapshot.provider.mode,
+          at,
+        );
+        if (
+          !policy ||
+          !gateway.cancel ||
+          gateway.key !== row.snapshot.provider.key ||
+          gateway.account !== row.snapshot.provider.account ||
+          gateway.mode !== row.snapshot.provider.mode
+        )
+          throw new ApplicationError("SETUP_REQUIRED");
+        await tx.execute(
+          sql`select set_config('app.payment_action',${row.id},true),set_config('app.payment_capability',${row.recoveryKey},true)`,
+        );
+        row.lifecycle = await reconcileLifecycle(tx, row, at, policy);
+        if (row.lifecycle.cancellation || row.lifecycle.state === "cancelled")
+          return { action: paymentView(row), work: null };
+        row.lifecycle.cancellation = {
+          requestKey,
+          requestedAt: at.toISOString(),
+          actorId: actor.userId,
+          timing: policy.cancellationTiming,
+          access: policy.cancellationAccess,
+          paidThroughAtRequest: row.lifecycle.paidThrough,
+          status: "requested",
+          confirmedAt: null,
+          effectiveEnd: null,
+        };
+        await tx
+          .update(subscriptionPayment)
+          .set({ lifecycle: row.lifecycle, reconciliationPending: true })
+          .where(eq(subscriptionPayment.id, row.id));
+        await appendLifecycleEvent(
+          tx,
+          row,
+          row.lifecycle,
+          "cancellation_requested",
+          `cancel:${requestKey}`,
+          at,
+          actor.userId,
+          {
+            kind: "cancellation_requested",
+            channel: "in_app",
+            status: "available",
+          },
+        );
+        return { action: paymentView(row), work: workFor(row) };
+      });
+    },
+    paymentMethodPrepared(
+      actor: Actor,
+      businessId: string,
+      actionId: string,
+      requestKey: string,
+      at: Date,
+      gateway: PaymentGateway,
+    ) {
+      return scoped(database, actor, businessId, async (tx) => {
+        await lockBusiness(tx, businessId);
+        await requireCapability(tx, actor, businessId, "billing.manage");
+        const [row] = await tx
+          .select()
+          .from(subscriptionPayment)
+          .where(
+            and(
+              eq(subscriptionPayment.id, actionId),
+              eq(subscriptionPayment.businessId, businessId),
+            ),
+          );
+        if (!row?.started || !row.checkout?.subscriptionId)
+          throw new ApplicationError("NOT_FOUND");
+        await tx.execute(
+          sql`select set_config('app.payment_action',${row.id},true),set_config('app.payment_capability',${row.recoveryKey},true)`,
+        );
+        row.lifecycle = await reconcileLifecycle(
+          tx,
+          row,
+          at,
+          gateway.lifecyclePolicy,
+        );
+        if (row.lifecycle.cancellation || row.lifecycle.state === "cancelled")
+          throw new ApplicationError("CONFLICT");
+        await appendLifecycleEvent(
+          tx,
+          row,
+          row.lifecycle,
+          "payment_method_prepared",
+          `payment-method:${requestKey}`,
+          at,
+          actor.userId,
+          {
+            kind: "payment_method_ready",
+            channel: "in_app",
+            status: "available",
+          },
+        );
+      });
+    },
+    cancellationResult(
+      work: Work,
+      at: Date,
+      policy: LifecyclePolicy | undefined,
+      observation: LifecycleObservation,
+    ) {
+      return worker(work, async (tx, row) => {
+        await reconcileLifecycle(tx, row, at, policy, observation, true);
+      });
+    },
     pollUnavailable(work: Work, at: Date) {
       return worker(work, async (tx, row) =>
         record(
@@ -656,7 +860,15 @@ export function createSubscriptionPaymentRepository(database: Database) {
           : sql`select * from public.subscription_payment_reference_target(${o.provider},${o.account},${o.subscriptionId})`,
       );
       if (target.rows.length > 1) throw new ApplicationError("CONFLICT");
-      const work = target.rows[0];
+      let work: Work | undefined = target.rows[0];
+      if (work && o.subscriptionId) {
+        const action = await worker(work, async (_tx, row) => paymentView(row));
+        if (
+          action.checkout?.subscriptionId &&
+          action.checkout.subscriptionId !== o.subscriptionId
+        )
+          work = undefined;
+      }
       if (!work) {
         await database.transaction(async (tx) => {
           await tx.execute(
@@ -694,10 +906,15 @@ export function createSubscriptionPaymentRepository(database: Database) {
             ),
           );
         if (previous) {
+          // Older receipts did not normalize lifecycle hints. The exact signed-byte hash
+          // still has to match; keep their original stored observation immutable.
+          const comparable = { ...o };
+          if (previous.observation.native === undefined)
+            delete comparable.native;
           if (
             previous.payloadHash !== event.payloadHash ||
             previous.actionId !== row.id ||
-            !isDeepStrictEqual(previous.observation, o)
+            !isDeepStrictEqual(previous.observation, comparable)
           )
             throw new ApplicationError("CONFLICT");
           if (row.started)
@@ -864,6 +1081,23 @@ export function createSubscriptionPaymentRepository(database: Database) {
             o,
           );
         }
+        const nativeRenewal =
+          renewal &&
+          s.provider.key === "razorpay" &&
+          row.snapshot.term.kind === "calendar_month" &&
+          o.charge?.kind === "renewal";
+        // A halted native subscription may resume with a later paid cycle while older
+        // invoices remain unpaid. Require its real initial basis, never fund the gap.
+        const renewalBasisKnown = nativeRenewal
+          ? periods.some(
+              (p) =>
+                p.start.toISOString() === o.charge?.subscriptionStart &&
+                p.snapshot.basis?.kind !== "renewal",
+            )
+          : periods.some(
+              (p) =>
+                p.end.getTime() === new Date(o.periodStart ?? "").getTime(),
+            );
         if (
           !o.checkoutId ||
           !o.customerId ||
@@ -875,12 +1109,9 @@ export function createSubscriptionPaymentRepository(database: Database) {
           !o.periodEnd ||
           new Date(o.periodStart) < row.at ||
           (!renewal && periods.length > 0) ||
-          (renewal &&
-            !periods.some(
-              (p) => p.end.getTime() === new Date(o.periodStart!).getTime(),
-            )) ||
+          (renewal && !renewalBasisKnown) ||
           new Date(o.periodStart) > new Date(o.paidAt) ||
-          new Date(o.periodEnd) <= new Date(o.paidAt) ||
+          (!nativeRenewal && new Date(o.periodEnd) <= new Date(o.paidAt)) ||
           new Date(o.paidAt) > at ||
           (o.charge
             ? !monthlyPeriodMatches(
@@ -984,27 +1215,30 @@ export function createSubscriptionPaymentRepository(database: Database) {
       at: Date,
       operator = false,
     ) {
-      return scoped(database, actor, businessId, async (tx) => {
-        if (operator) {
-          const [grant] = await tx
-            .select()
-            .from(platformOperator)
-            .where(eq(platformOperator.userId, actor.userId));
-          if (!grant?.reconciliation) throw new ApplicationError("FORBIDDEN");
-        } else await requireCapability(tx, actor, businessId, "billing.manage");
-        const [row] = await tx
-          .select()
-          .from(subscriptionPayment)
-          .where(
-            and(
-              eq(subscriptionPayment.id, actionId),
-              eq(subscriptionPayment.businessId, businessId),
-            ),
-          );
-        if (!row || !row.started) throw new ApplicationError("NOT_FOUND");
-        await requestAudit(tx, row, actor, "reconciliation_requested", at);
-        return workFor(row);
-      });
+      return authorizedAction(
+        actor,
+        businessId,
+        actionId,
+        operator,
+        async (tx, row) => {
+          await requestAudit(tx, row, actor, "reconciliation_requested", at);
+          return workFor(row);
+        },
+      );
+    },
+    readAuthorizedAction(
+      actor: Actor,
+      businessId: string,
+      actionId: string,
+      operator = false,
+    ) {
+      return authorizedAction(
+        actor,
+        businessId,
+        actionId,
+        operator,
+        async (_tx, row) => paymentView(row),
+      );
     },
   };
 }

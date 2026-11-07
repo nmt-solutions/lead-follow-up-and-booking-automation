@@ -55,8 +55,19 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   }): void;
 }) {
   const { repository, clock } = dependencies;
-  async function publish(actor?: Actor, businessId?: string) {
-    const pending = await repository.pendingDispatches(actor, businessId);
+  async function publish(
+    actor?: Actor,
+    businessId?: string,
+    target?: { businessId: string; dispatchId: string },
+  ) {
+    const pending = (
+      await repository.pendingDispatches(actor, businessId)
+    ).filter(
+      (item) =>
+        !target ||
+        (item.id === target.dispatchId &&
+          item.payload.work.businessId === target.businessId),
+    );
     let failed = false;
     for (const item of pending) {
       let accepted = false;
@@ -225,7 +236,8 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
         return { outcome: reason };
       }
     },
-    recoverDispatches: () => publish(),
+    recoverDispatches: (target?: { businessId: string; dispatchId: string }) =>
+      publish(undefined, undefined, target),
     async stopSchedule(payload: unknown) {
       const work = validate(scheduleWorkSchema, payload);
       await repository.failSchedule(work, "worker_lost", clock.now());

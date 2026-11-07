@@ -10,6 +10,23 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Your Businesses" };
 
 export default async function BusinessesPage() {
+  const operationsLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "operations.manage");
+      return (
+        <Link
+          href="/platform/operations"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Inspect platform operations
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   const businesses = await (async () => {
     try {
       return await (
@@ -167,11 +184,13 @@ export default async function BusinessesPage() {
             whenever they change.
           </p>
         </div>
+        {operationsLink}
         <ProfileForm />
       </div>
     );
   return (
     <div className="space-y-8">
+      {operationsLink}
       {billingReviewLink}
       {pricingLink}
       {paymentsLink}
