@@ -17,6 +17,7 @@ import {
   adjustmentViewSchema,
   disputeIntentSchema,
   creditBasisSchema,
+  reviewedNativeAmount,
   type ReviewCredit,
   type FinancialReceipt,
   type DisputeIntent,
@@ -59,7 +60,7 @@ export function financialView(row: Case, events: Event[]) {
     paymentId: row.intent.period.paymentId,
     kind: row.kind,
     currency: row.intent.invoice.snapshot.currency,
-    amountMinor: row.intent.allocation.totals.totalMinor,
+    amountMinor: reviewedNativeAmount(row.intent),
     state:
       o?.detail.observation?.status ??
       (events.some((e) => e.kind === "withdrawn")
@@ -421,7 +422,13 @@ export function createFinancialAdjustmentRepository(database: Database) {
               },
             );
           const amount = BigInt(allocation.totals.totalMinor);
-          if (amount <= 0n || amount > BigInt(Number.MAX_SAFE_INTEGER))
+          if (
+            amount <= 0n ||
+            amount > BigInt(Number.MAX_SAFE_INTEGER) ||
+            (input.disputeAmountMinor !== undefined &&
+              BigInt(input.disputeAmountMinor) >
+                BigInt(invoice.snapshot.totals.totalMinor))
+          )
             throw new ApplicationError("CONFLICT");
           const intent: AdjustmentIntent = {
             input,
@@ -850,8 +857,7 @@ export function createFinancialAdjustmentRepository(database: Database) {
           if (
             observation.paymentId !== row.intent.period.paymentId ||
             observation.currency !== row.intent.invoice.snapshot.currency ||
-            observation.amountMinor !==
-              row.intent.allocation.totals.totalMinor ||
+            observation.amountMinor !== reviewedNativeAmount(row.intent) ||
             (previous && previous.nativeId !== observation.nativeId)
           )
             throw new ApplicationError("CONFLICT");

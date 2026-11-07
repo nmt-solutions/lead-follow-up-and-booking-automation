@@ -61,13 +61,19 @@ export const reviewAdjustmentSchema = z
       .string()
       .regex(/^disp_[A-Za-z0-9]+$/)
       .optional(),
+    disputeAmountMinor: z
+      .string()
+      .regex(/^[1-9]\d{0,14}$/)
+      .optional(),
     lines: adjustDocumentSchema.shape.lines,
     reason: text,
     evidence: z.array(text).min(1).max(20),
   })
   .refine(
     (v) =>
-      (v.kind === "dispute" ? !!v.disputeId : !v.disputeId) &&
+      (v.kind === "dispute"
+        ? !!v.disputeId
+        : !v.disputeId && v.disputeAmountMinor === undefined) &&
       new Set(v.lines.map((l) => l.lineId)).size === v.lines.length,
   );
 export type ReviewAdjustment = z.infer<typeof reviewAdjustmentSchema>;
@@ -203,6 +209,11 @@ export const adjustmentIntentSchema = z.object({
   }),
 });
 export type AdjustmentIntent = z.infer<typeof adjustmentIntentSchema>;
+export function reviewedNativeAmount(intent: AdjustmentIntent) {
+  return intent.input.kind === "dispute"
+    ? (intent.input.disputeAmountMinor ?? intent.allocation.totals.totalMinor)
+    : intent.allocation.totals.totalMinor;
+}
 export const creditBasisSchema = z.object({
   input: reviewCreditSchema,
   allocation: adjustmentIntentSchema.shape.allocation,

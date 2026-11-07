@@ -1416,6 +1416,97 @@ describe("Refunds and disputes at the public application seam", () => {
     ]);
     expect(f.native.refundPosts).toHaveLength(2);
   });
+  it("binds a native dispute claim separately from its original-tax credit allocation and retains the actual residual", async () => {
+    const f = await purchase(),
+      app = f.compose(),
+      disputeId = "disp_separateClaim",
+      native = {
+        id: disputeId,
+        entity: "dispute",
+        payment_id: "pay_original",
+        amount: 500,
+        currency: "INR",
+        amount_deducted: 0,
+        status: "open",
+        phase: "chargeback",
+        reason_code: "chargeback",
+        respond_by: Math.floor(
+          new Date("2026-11-06T09:00:00Z").getTime() / 1000,
+        ),
+        created_at: Math.floor(h.clock.now().getTime() / 1000),
+        evidence: { submitted_at: null },
+      };
+    f.native.disputes.set(disputeId, native);
+    const input = {
+      ...f.input("454"),
+      kind: "dispute",
+      disputeId,
+      disputeAmountMinor: "500",
+    };
+    const c = await app.review(f.op, f.business.id, input);
+    expect(c).toMatchObject({ amountMinor: "500", creditAmountMinor: "499" });
+    await expect(
+      app.review(f.op, f.business.id, {
+        ...input,
+        requestKey: randomUUID(),
+        disputeId: "disp_excessClaim",
+        disputeAmountMinor: "11007",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      app.review(f.op, f.business.id, { ...input, disputeAmountMinor: "501" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    native.amount = 501;
+    await expect(
+      app.refresh(f.op, f.business.id, { caseId: c.id }),
+    ).rejects.toMatchObject({ code: "INVALID_PROVIDER_RESPONSE" });
+    expect(f.native.disputePosts).toHaveLength(0);
+    native.amount = 500;
+    await app.refresh(f.op, f.business.id, { caseId: c.id });
+    const result = await app.dispute(f.op, f.business.id, {
+      caseId: c.id,
+      requestKey: randomUUID(),
+      action: "accept",
+    });
+    expect(result).toMatchObject({
+      amountMinor: "500",
+      creditState: "review_required",
+      observation: { amountMinor: "500", deductedMinor: "500", status: "lost" },
+    });
+    await expect(
+      app.credit(f.op, f.business.id, { caseId: c.id }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await app.reviewCredit(f.op, f.business.id, {
+      caseId: c.id,
+      requestKey: randomUUID(),
+      lines: input.lines,
+      reason: "Approve original-tax credit499 against actual native claim500",
+      evidence: ["fixture:explicit-native-claim-residual-review"],
+    });
+    await app.credit(f.op, f.business.id, { caseId: c.id });
+    expect(await app.financialFeed(f.operator)).toEqual([
+      expect.objectContaining({
+        effect: expect.objectContaining({
+          actualMinor: "500",
+          bankSettlementConfirmed: false,
+        }),
+        approvedCredit: expect.objectContaining({
+          uncreditedDifferenceMinor: "1",
+        }),
+      }),
+    ]);
+    expect(
+      (await app.workspace(f.owner, f.business.id)).cases[0],
+    ).toMatchObject({
+      amountMinor: "500",
+      creditAmountMinor: "499",
+      creditState: "issued",
+    });
+    expect(f.native.disputePosts).toHaveLength(1);
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).periods,
+    ).toEqual([f.period]);
+  });
   it("composes actual opt-in customer financial emails through the final notification seam without repeating money", async () => {
     const f = await purchase(),
       app = f.compose(),

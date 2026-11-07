@@ -247,6 +247,7 @@ export function FinancialAdjustmentManager({
   const [invoiceId, setInvoiceId] = useState(initial.invoices[0]?.id ?? ""),
     [kind, setKind] = useState<"refund" | "dispute">("refund"),
     [disputeId, setDisputeId] = useState(""),
+    [disputeAmountMinor, setDisputeAmountMinor] = useState(""),
     [reason, setReason] = useState(""),
     [evidence, setEvidence] = useState(""),
     [lines, setLines] = useState<Record<string, string>>({});
@@ -473,7 +474,9 @@ export function FinancialAdjustmentManager({
                       kind,
                       invoiceId,
                       requestKey: reviewKey.current,
-                      ...(kind === "dispute" ? { disputeId } : {}),
+                      ...(kind === "dispute"
+                        ? { disputeId, disputeAmountMinor }
+                        : {}),
                       lines: Object.entries(lines)
                         .filter(([, v]) => v && v !== "0")
                         .map(([lineId, netMinor]) => ({ lineId, netMinor })),
@@ -535,16 +538,41 @@ export function FinancialAdjustmentManager({
                 </NativeSelect>
               </div>
               {kind === "dispute" && (
-                <div className="space-y-2">
-                  <Label htmlFor="adjustment-dispute">Native dispute ID</Label>
-                  <Input
-                    id="adjustment-dispute"
-                    value={disputeId}
-                    onChange={(e) => setDisputeId(e.target.value)}
-                    required
-                    pattern="disp_[A-Za-z0-9]+"
-                  />
-                </div>
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="adjustment-dispute">
+                      Native dispute ID
+                    </Label>
+                    <Input
+                      id="adjustment-dispute"
+                      value={disputeId}
+                      onChange={(e) => setDisputeId(e.target.value)}
+                      required
+                      pattern="disp_[A-Za-z0-9]+"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="adjustment-disputed-amount">
+                      Reviewed native claim amount, in currency subunits
+                    </Label>
+                    <Input
+                      id="adjustment-disputed-amount"
+                      value={disputeAmountMinor}
+                      onChange={(e) => setDisputeAmountMinor(e.target.value)}
+                      inputMode="numeric"
+                      pattern="[1-9][0-9]*"
+                      maxLength={15}
+                      required
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Use the exact claimed amount from the dispute in the
+                      selected merchant account. Native reads must confirm it
+                      against this charge. The original-tax credit basis below
+                      is separate; any difference needs an explicit credit
+                      review after an actual deduction.
+                    </p>
+                  </div>
+                </>
               )}
               <fieldset className="space-y-3">
                 <legend className="mb-3 font-medium">

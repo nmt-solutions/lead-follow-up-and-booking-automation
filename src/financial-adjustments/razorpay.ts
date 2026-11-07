@@ -15,6 +15,7 @@ import {
   type FinancialGateway,
   type DisputeIntent,
   currentAdjustmentPolicy,
+  reviewedNativeAmount,
 } from "../models/financial-adjustments";
 
 const payment = z.object({
@@ -125,7 +126,7 @@ export function createRazorpayAdjustments(d: {
     const r = nativeRefundSchema.parse(value);
     if (
       r.payment_id !== intent.period.paymentId ||
-      String(r.amount) !== intent.allocation.totals.totalMinor ||
+      String(r.amount) !== reviewedNativeAmount(intent) ||
       r.currency !== intent.invoice.snapshot.currency ||
       r.receipt !== intent.key ||
       r.notes.financial_case !== intent.key
@@ -151,7 +152,8 @@ export function createRazorpayAdjustments(d: {
     if (
       r.id !== intent.input.disputeId ||
       r.payment_id !== intent.period.paymentId ||
-      String(r.amount) !== intent.allocation.totals.totalMinor ||
+      String(r.amount) !== reviewedNativeAmount(intent) ||
+      BigInt(r.amount) > BigInt(intent.invoice.snapshot.totals.totalMinor) ||
       r.currency !== intent.invoice.snapshot.currency ||
       r.amount_deducted > r.amount ||
       (r.status !== "lost" && r.amount_deducted !== 0)
