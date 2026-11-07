@@ -8,7 +8,11 @@ import type { DiscoveryWork } from "../../src/models/discovery";
 import type { ScheduleWork } from "../../src/models/discovery-schedules";
 export async function financialResearch(
   h: Awaited<ReturnType<typeof createHarness>>,
-  f: Awaited<ReturnType<typeof subscriptionFixture>>,
+  f: Pick<
+    Awaited<ReturnType<typeof subscriptionFixture>>,
+    "owner" | "business"
+  >,
+  withProspect = false,
 ) {
   await h.application.saveConfiguration(f.owner, f.business.id, {
     offering: "Steel",
@@ -84,9 +88,40 @@ export async function financialResearch(
       id: "fixture",
       search: async (input) => {
         searches.push(input.offering);
-        return [];
+        return withProspect
+          ? [
+              {
+                name: "Fabricator",
+                market: "Pune",
+                url: "https://fabricator.example/about",
+                excerpt: "We fabricate steel. Contact sales@fabricator.example",
+              },
+            ]
+          : [];
       },
-      review: async () => null,
+      review: async () =>
+        withProspect
+          ? {
+              relevant: true,
+              reason: "Steel fabrication",
+              evidenceQuote: "We fabricate steel",
+              uncertainty: "Timing unconfirmed",
+              company: null,
+              request: null,
+              contacts: [
+                {
+                  name: null,
+                  nameQuote: null,
+                  roleEvidence: null,
+                  route: {
+                    kind: "email",
+                    value: "sales@fabricator.example",
+                    quote: "Contact sales@fabricator.example",
+                  },
+                },
+              ],
+            }
+          : null,
     },
   });
   const request = () => ({

@@ -17,6 +17,8 @@ export default defineConfig({
     "tax_filing_access",
     "tax_remittance_allocation",
     "tax_remittance_review",
+    "infrastructure_recovery",
+    "infrastructure_recovery_event",
     "reconciliation_evidence",
     "reconciliation_record",
     "reconciliation_review",

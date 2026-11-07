@@ -1259,6 +1259,7 @@ export const platformOperator = pgTable(
     senderHealth: boolean("sender_health").notNull().default(false),
     documents: boolean("documents").notNull().default(false),
     operations: boolean("operations").notNull().default(false),
+    recovery: boolean("recovery").notNull().default(false),
     costs: boolean("costs").notNull().default(false),
     notifications: boolean("notifications").notNull().default(false),
   },
@@ -5872,6 +5873,83 @@ export const financialReceipt = pgTable(
       to: "public",
       using: paymentOwner,
       withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+
+const recoveryScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.recovery_operator_authorized()`;
+const recoveryOwner = sql`current_user=(select pg_get_userbyid(relowner) from pg_class where oid='public.infrastructure_recovery'::regclass)`;
+export const infrastructureRecovery = pgTable(
+  "infrastructure_recovery",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    authorizedSessionId: text("authorized_session_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    plan: jsonb("plan").notNull(),
+    planHash: text("plan_hash").notNull(),
+    stage: text("stage").notNull().default("requested"),
+    lease: uuid("lease"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("recovery_business_scope").on(t.id, t.businessId),
+    unique("recovery_request_once").on(t.requestKey),
+    uniqueIndex("recovery_plan_once").on(sql`(${t.plan}->>'id')`),
+    check(
+      "recovery_plan_scope",
+      sql`${t.plan}->>'businessId'=${t.businessId}::text and ${t.planHash}=encode(sha256(convert_to(${t.plan}::text,'UTF8')),'hex')`,
+    ),
+    pgPolicy("recovery_read", {
+      for: "select",
+      to: appRuntime,
+      using: recoveryScope,
+    }),
+    pgPolicy("recovery_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${recoveryScope} and actor_id=current_setting('app.actor_id',true) and session_id=current_setting('app.recovery_session',true) and authorized_session_id=session_id and stage='requested' and lease is null and lease_until is null`,
+    }),
+    pgPolicy("recovery_owner", {
+      for: "all",
+      to: "public",
+      using: recoveryOwner,
+      withCheck: recoveryOwner,
+    }),
+  ],
+).enableRLS();
+export const infrastructureRecoveryEvent = pgTable(
+  "infrastructure_recovery_event",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    operationId: uuid("operation_id").notNull(),
+    stage: text("stage").notNull(),
+    outcome: text("outcome").notNull(),
+    evidence: jsonb("evidence").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [
+    pgPolicy("recovery_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: recoveryScope,
+    }),
+    pgPolicy("recovery_event_owner", {
+      for: "all",
+      to: "public",
+      using: recoveryOwner,
+      withCheck: recoveryOwner,
     }),
   ],
 ).enableRLS();

@@ -48,6 +48,7 @@ export function privilegedRoles(database: Database, userId: string) {
         operator?.senderHealth ||
         operator?.documents ||
         operator?.operations ||
+        operator?.recovery ||
         operator?.costs ||
         operator?.notifications,
       ),
