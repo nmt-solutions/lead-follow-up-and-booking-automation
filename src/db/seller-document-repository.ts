@@ -407,6 +407,15 @@ export function createSellerDocumentRepository(database: Database) {
           await lockIssuers(tx);
           const { requestKey, ...adjustment } = input,
             payload = { kind: "credit_note", ...adjustment };
+          const native = await tx.execute<{ allowed: boolean }>(
+            sql`select public.financial_credit_allowed(${JSON.stringify(input)}::jsonb) as allowed`,
+          );
+          if (!native.rows[0]?.allowed) throw new ApplicationError("CONFLICT");
+          const reservation = await tx.execute<{ reserved: boolean }>(
+            sql`select public.financial_reserved(${input.invoiceId}::uuid,${input.adjustmentId}::uuid) as reserved`,
+          );
+          if (reservation.rows[0]?.reserved)
+            throw new ApplicationError("CONFLICT");
           const [request] = await tx
             .select()
             .from(sellerDocumentRequest)
@@ -474,6 +483,11 @@ export function createSellerDocumentRepository(database: Database) {
               rows.filter((d) => d.originalId === original.id).map(view),
               input,
             );
+            const nativeAllocation = await tx.execute<{ allowed: boolean }>(
+              sql`select public.financial_credit_allowed(${JSON.stringify({ ...input, allocation: allocated })}::jsonb) as allowed`,
+            );
+            if (!nativeAllocation.rows[0]?.allowed)
+              throw new ApplicationError("CONFLICT");
             const series = configuration.series.credit_note,
               allocation = await tx.execute<{ ordinal: string }>(
                 sql`select public.seller_next_number(${businessId}::uuid,${series.key},${series.first}::bigint)::text as ordinal`,

@@ -1,3 +1,7 @@
+import { createFinancialAdjustmentApplication } from "../application/financial-adjustments";
+import { createFinancialAdjustmentRepository } from "../db/financial-adjustment-repository";
+import { createFinancialAdjustmentHttp } from "../http/financial-adjustments";
+import { configuredFinancialAdjustments } from "../financial-adjustments/configuration";
 import { routeOpportunityMail } from "../email-sequences/opportunity-provider";
 import { createReachChangeApplication } from "../application/reach-changes";
 import { createReachChangeRepository } from "../db/reach-change-repository";
@@ -374,6 +378,15 @@ async function composeServices() {
     mode: paymentGateway.mode === "test" ? "fixture" : "live",
     ...configuredSellerDocumentStorage(process.env),
   });
+  const financialAdjustments = createFinancialAdjustmentApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createFinancialAdjustmentRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    gateway: configuredFinancialAdjustments(),
+    documents: sellerDocuments,
+  });
+
   const billingReviewFiles = createFileApplication({
     authenticate: authenticatePlatform,
     repository: createFileRepository(runtimeDatabase(pool), {
@@ -776,6 +789,12 @@ async function composeServices() {
     reachChanges,
     reachChangesHttp: createReachChangeHttp({
       application: reachChanges,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
+    financialAdjustments,
+    financialAdjustmentsHttp: createFinancialAdjustmentHttp({
+      application: financialAdjustments,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
       reportFailure,
     }),

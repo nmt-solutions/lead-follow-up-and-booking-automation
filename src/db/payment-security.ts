@@ -37,6 +37,9 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
       AND NOT EXISTS(SELECT 1 FROM public.reach_change c WHERE c.action_id=p.action_id AND c.business_id=p.business_id AND c.snapshot->>'path'='replacement_mandate' AND p.start>=(c.snapshot->>'renewalAt')::timestamptz AND EXISTS(SELECT 1 FROM public.reach_change_event e WHERE e.change_id=c.id AND e.fact->'native'->>'oldStopped'='true'))
       AND (p.snapshot->'replacement' IS NULL OR EXISTS(SELECT 1 FROM public.reach_change_event e WHERE e.change_id=(p.snapshot->'replacement'->>'changeId')::uuid AND e.business_id=tenant AND e.fact->>'kind'='applied' AND e.at<=at_time))
       AND (p.snapshot->'reachRenewal' IS NULL OR EXISTS(SELECT 1 FROM public.reach_change_event e WHERE e.change_id=(p.snapshot->'reachRenewal'->>'changeId')::uuid AND e.business_id=tenant AND e.fact->>'kind'='applied' AND e.at<=at_time))
+      AND NOT EXISTS(SELECT 1 FROM public.financial_case c JOIN LATERAL (
+        SELECT e.detail FROM public.financial_case_event e WHERE e.case_id=c.id AND e.kind='observation' ORDER BY e.position DESC LIMIT 1
+      ) effect ON true WHERE c.period_id=p.id AND c.business_id=p.business_id AND effect.detail->>'access'='block_period')
       AND (p.end>at_time OR (
         a.lifecycle->>'failedThrough'=to_char(p.end AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
         AND a.lifecycle->'policy'->>'graceAccess'='remaining_allowance'
