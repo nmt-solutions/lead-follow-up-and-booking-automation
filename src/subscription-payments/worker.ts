@@ -1,14 +1,17 @@
 import { Pool } from "pg";
+import { databaseConnectionUrl } from "../db/connection";
 import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { createSubscriptionPaymentRepository } from "../db/subscription-payment-repository";
 import { createSubscriptionPaymentApplication } from "../application/subscription-payments";
-import { configuredPayments } from "./configuration";
+import { configuredPayments, configuredReachPolicy } from "./configuration";
+import { createReachChangeApplication } from "../application/reach-changes";
+import { createReachChangeRepository } from "../db/reach-change-repository";
 import { ApplicationError } from "../models/application-error";
 
 export async function recoverSubscriptionPayments() {
   if (!process.env.DATABASE_URL) throw new ApplicationError("SETUP_REQUIRED");
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseConnectionUrl(process.env.DATABASE_URL),
     max: 2,
     connectionTimeoutMillis: 10000,
     statement_timeout: 10000,
@@ -19,13 +22,30 @@ export async function recoverSubscriptionPayments() {
     const denied = async () => {
       throw new ApplicationError("FORBIDDEN");
     };
-    return await createSubscriptionPaymentApplication({
+    const gateway = configuredPayments(),
+      clock = { now: () => new Date() },
+      database = runtimeDatabase(pool);
+    const reach = createReachChangeApplication({
+      authenticate: denied,
+      authenticatePlatform: denied,
+      repository: createReachChangeRepository(database),
+      gateway,
+      policy: configuredReachPolicy(),
+      clock,
+    });
+    const before = await reach.recover();
+    const payments = await createSubscriptionPaymentApplication({
       authenticate: denied,
       authenticatePlatform: denied,
       repository: createSubscriptionPaymentRepository(runtimeDatabase(pool)),
       clock: { now: () => new Date() },
-      gateway: configuredPayments(),
+      gateway,
     }).recover();
+    return {
+      payments,
+      reach: before,
+      reachAfterPayments: await reach.recover(),
+    };
   } finally {
     await pool.end();
   }

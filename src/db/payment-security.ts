@@ -7,12 +7,12 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
     RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
     BEGIN RETURN EXISTS (SELECT 1 FROM public.subscription_payment a WHERE a.id=action AND a.business_id=tenant
       AND a.id::text=current_setting('app.payment_action',true)
-      AND a.recovery_key::text=current_setting('app.payment_capability',true)); END $$;
+      AND a.recovery_key::text=current_setting('app.payment_capability',true)) OR public.reach_payment_authorized(action,tenant); END $$;
     CREATE OR REPLACE FUNCTION public.pending_subscription_payments(provider_key text, account_ref text)
     RETURNS TABLE(id uuid,business_id uuid,recovery_key uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
     BEGIN RETURN QUERY SELECT a.id,a.business_id,a.recovery_key FROM public.subscription_payment a
       WHERE a.snapshot->'provider'->>'key'=provider_key AND a.snapshot->'provider'->>'account'=account_ref
-      AND (a.state IN ('pending','checkout','review_required') OR a.reconciliation_pending OR (a.state='confirmed' AND a.snapshot->'provider'->>'key'='razorpay') OR a.lifecycle IS NOT NULL) AND a.started
+      AND a.snapshot->'adjustment' IS NULL AND (a.state IN ('pending','checkout','review_required') OR a.reconciliation_pending OR (a.state='confirmed' AND a.snapshot->'provider'->>'key'='razorpay') OR a.lifecycle IS NOT NULL) AND a.started
       ORDER BY coalesce(a.reconciled_at,a.at),a.id LIMIT 50; END $$;
     CREATE OR REPLACE FUNCTION public.subscription_payment_target(provider_key text, account_ref text, operation uuid)
     RETURNS TABLE(id uuid,business_id uuid,recovery_key uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -29,10 +29,14 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
     CREATE OR REPLACE FUNCTION public.current_paid_scope(tenant uuid,at_time timestamptz)
     RETURNS TABLE(id uuid,markets jsonb,discovery jsonb,automation jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
       IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT EXISTS(
-        SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=current_setting('app.actor_id',true)) THEN RETURN; END IF;
-      RETURN QUERY SELECT p.id,p.snapshot->'quote'->'pricing'->'offer'->'markets',coalesce(p.snapshot->'basis'->'discovery',p.snapshot->'quote'->'initial'->'discovery'),coalesce(p.snapshot->'basis'->'automation',p.snapshot->'quote'->'initial'->'automation')
+        SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=current_setting('app.actor_id',true)) AND NOT EXISTS(SELECT 1 FROM public.reach_change r WHERE r.business_id=tenant AND public.reach_worker_authorized(r.id,tenant)) THEN RETURN; END IF;
+      RETURN QUERY SELECT p.id,coalesce(r.value->'scope'->'markets',p.snapshot->'quote'->'pricing'->'offer'->'markets'),coalesce(r.value->'scope'->'discovery',p.snapshot->'basis'->'discovery',p.snapshot->'quote'->'initial'->'discovery'),coalesce(r.value->'scope'->'automation',p.snapshot->'basis'->'automation',p.snapshot->'quote'->'initial'->'automation')
       FROM public.subscription_period p JOIN public.subscription_payment a ON a.id=p.action_id AND a.business_id=p.business_id
-      WHERE p.business_id=tenant AND p.start<=at_time
+      LEFT JOIN LATERAL(SELECT public.reach_effective_scope(tenant,p.id,at_time) as value) r ON true
+      WHERE p.business_id=tenant AND p.snapshot->'adjustment' IS NULL AND p.start<=at_time
+      AND NOT EXISTS(SELECT 1 FROM public.reach_change c WHERE c.action_id=p.action_id AND c.business_id=p.business_id AND c.snapshot->>'path'='replacement_mandate' AND p.start>=(c.snapshot->>'renewalAt')::timestamptz AND EXISTS(SELECT 1 FROM public.reach_change_event e WHERE e.change_id=c.id AND e.fact->'native'->>'oldStopped'='true'))
+      AND (p.snapshot->'replacement' IS NULL OR EXISTS(SELECT 1 FROM public.reach_change_event e WHERE e.change_id=(p.snapshot->'replacement'->>'changeId')::uuid AND e.business_id=tenant AND e.fact->>'kind'='applied' AND e.at<=at_time))
+      AND (p.snapshot->'reachRenewal' IS NULL OR EXISTS(SELECT 1 FROM public.reach_change_event e WHERE e.change_id=(p.snapshot->'reachRenewal'->>'changeId')::uuid AND e.business_id=tenant AND e.fact->>'kind'='applied' AND e.at<=at_time))
       AND NOT EXISTS(SELECT 1 FROM public.financial_case c JOIN LATERAL (
         SELECT e.detail FROM public.financial_case_event e WHERE e.case_id=c.id AND e.kind='observation' ORDER BY e.position DESC LIMIT 1
       ) effect ON true WHERE c.period_id=p.id AND c.business_id=p.business_id AND effect.detail->>'access'='block_period')
@@ -85,7 +89,7 @@ export async function preparePaymentSecurity(pool: Pool | PoolClient) {
         'history',coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.version) FROM public.billing_profile_revision p WHERE p.business_id=tenant),'[]'::jsonb),
         'reviews',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.version) FROM public.billing_profile_review r WHERE r.business_id=tenant),'[]'::jsonb),
         'files',coalesce((SELECT jsonb_agg(jsonb_build_object('id',f.id,'state',f.state,'sha256',f.sha256,'retentionUntil',f.retention_until)) FROM public.business_file f WHERE f.business_id=tenant AND EXISTS(SELECT 1 FROM public.billing_profile_revision p, jsonb_array_elements(p.evidence) e WHERE p.business_id=tenant AND e->>'fileId'=f.id::text)),'[]'::jsonb),
-        'revisions',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.key,r.version) FROM public.tax_rule_revision r WHERE r.rule->>'mode'=mode AND r.rule->>'customerCountry'=country AND EXISTS(SELECT 1 FROM public.subscription_payment a,jsonb_array_elements(a.snapshot->'quote'->'renewal'->'lines') l WHERE a.id=action AND l->>'kind'=r.rule->>'productCode')),'[]'::jsonb),
+        'revisions',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.key,r.version) FROM public.tax_rule_revision r WHERE r.rule->>'mode'=mode AND r.rule->>'customerCountry'=country AND (EXISTS(SELECT 1 FROM public.subscription_payment a,jsonb_array_elements(a.snapshot->'quote'->'renewal'->'lines') l WHERE a.id=action AND l->>'kind'=r.rule->>'productCode') OR EXISTS(SELECT 1 FROM public.reach_change c,jsonb_array_elements(c.snapshot->'target'->'quote'->'renewal'->'lines') l WHERE c.action_id=action AND c.business_id=tenant AND l->>'kind'=r.rule->>'productCode' AND EXISTS(SELECT 1 FROM public.reach_change_event e WHERE e.change_id=c.id AND e.fact->>'kind'='approved')))),'[]'::jsonb),
         'decisions',coalesce((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.version,d.id) FROM public.tax_rule_decision d JOIN public.tax_rule_revision r ON r.id=d.revision_id WHERE r.rule->>'mode'=mode AND r.rule->>'customerCountry'=country),'[]'::jsonb)
       );
     END $$;

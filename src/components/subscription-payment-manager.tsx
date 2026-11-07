@@ -79,7 +79,10 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
   return (
     <div className="space-y-4 wrap-anywhere">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold">{q.pricing.offer.label}</h3>
+        <h3 className="text-lg font-semibold">
+          {a.snapshot.adjustment ? "Reach adjustment · " : ""}
+          {q.pricing.offer.label}
+        </h3>
         <Badge>
           {a.reconciliationPending
             ? "Provider event awaiting reconciliation"
@@ -90,12 +93,19 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
         {q.currency} ·{" "}
         {q.initial.kind === "paid_pilot"
           ? `${q.initial.days} day paid pilot`
-          : "One calendar month, UTC"}
+          : a.snapshot.adjustment
+            ? `Prorated reach adjustment: ${paymentTime(a.snapshot.adjustment.start)} to ${paymentTime(a.snapshot.adjustment.end)}`
+            : "One calendar month, UTC"}
       </p>
       <dl className="grid gap-3 sm:grid-cols-3">
         <div>
           <dt className="text-sm text-muted-foreground">Before tax</dt>
-          <dd>{formatTaxMoney(String(q.initial.subtotalMinor), q.currency)}</dd>
+          <dd>
+            {formatTaxMoney(
+              t.totals?.netMinor ?? String(q.initial.subtotalMinor),
+              q.currency,
+            )}
+          </dd>
         </div>
         <div>
           <dt className="text-sm text-muted-foreground">Tax</dt>
@@ -114,19 +124,30 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
           </dd>
         </div>
       </dl>
-      <p className="text-sm">
-        Discovery: {q.initial.discovery.quantity} {q.initial.discovery.unit}.
-        Automation: {q.initial.automation.quantity} {q.initial.automation.unit}.
-        Reach: {q.pricing.offer.markets.join(", ")}.
-      </p>
-      <p className="text-sm text-muted-foreground">
-        Renewal terms: {q.renewal.terms} Monthly renewal before tax:{" "}
-        {formatTaxMoney(String(q.renewal.subtotalMinor), q.currency)}.{" "}
-        {a.snapshot.provider.review
-          ? "Hosted checkout authorizes recurring card collection for the reviewed native plan. Each captured cycle requires independent payment and invoice reconciliation before access is extended."
-          : "This purchase authorizes the initial period."}
-      </p>
-      {nativePlan && (
+      {a.snapshot.adjustment ? (
+        <p className="text-sm">
+          This captured prorated adjustment applies to the original paid period.
+          Its extra units share that period&apos;s usage; it does not create
+          another monthly allowance.
+        </p>
+      ) : (
+        <p className="text-sm">
+          Discovery: {q.initial.discovery.quantity} {q.initial.discovery.unit}.
+          Automation: {q.initial.automation.quantity}{" "}
+          {q.initial.automation.unit}. Reach:{" "}
+          {q.pricing.offer.markets.join(", ")}.
+        </p>
+      )}
+      {!a.snapshot.adjustment && (
+        <p className="text-sm text-muted-foreground">
+          Renewal terms: {q.renewal.terms} Monthly renewal before tax:{" "}
+          {formatTaxMoney(String(q.renewal.subtotalMinor), q.currency)}.{" "}
+          {a.snapshot.provider.review
+            ? "Hosted checkout authorizes recurring card collection for the reviewed native plan. Each captured cycle requires independent payment and invoice reconciliation before access is extended."
+            : "This purchase authorizes the initial period."}
+        </p>
+      )}
+      {nativePlan && !a.snapshot.adjustment && (
         <p className="text-sm">
           Hosted mandate: up to {nativePlan.totalCount} monthly collections on
           the reviewed plan. Account terms version{" "}
@@ -314,6 +335,11 @@ export function SubscriptionPaymentManager({
           {state.access.active ? "Paid access active" : "Paid access inactive"}
         </h2>
         <p>Paid through: {paymentTime(state.access.paidThrough)}.</p>
+        {state.effectiveScope && (
+          <p>
+            Current geographic reach: {state.effectiveScope.markets.join(", ")}.
+          </p>
+        )}
         {state.allowances && (
           <dl className="grid gap-3 sm:grid-cols-2">
             {(["discovery", "automation"] as const).map((kind) => (
@@ -506,9 +532,11 @@ export function SubscriptionPaymentManager({
                 {paymentTime(p.start)} through {paymentTime(p.end)}
               </h3>
               <p>
-                {p.snapshot.basis?.kind === "renewal"
-                  ? "Monthly renewal"
-                  : "Initial payment"}{" "}
+                {p.snapshot.adjustment
+                  ? "Prorated reach adjustment"
+                  : p.snapshot.basis?.kind === "renewal"
+                    ? "Monthly renewal"
+                    : "Initial payment"}{" "}
                 ·{" "}
                 {p.snapshot.tax.totals
                   ? formatTaxMoney(
@@ -528,9 +556,12 @@ export function SubscriptionPaymentManager({
               {p.charge?.charge && (
                 <p className="text-sm text-muted-foreground">
                   {p.charge.charge.international ? "International" : "Domestic"}{" "}
-                  captured card payment {p.paymentId}. Provider invoice
-                  reference: {p.charge.charge.invoiceId}. This reference is
-                  collection evidence; seller invoices are issued separately.
+                  captured card payment {p.paymentId}.{" "}
+                  {p.charge.charge.invoiceId
+                    ? `Provider invoice reference: ${p.charge.charge.invoiceId}`
+                    : `Provider order reference: ${p.charge.charge.orderId}`}
+                  . This reference is collection evidence; seller invoices are
+                  issued separately.
                 </p>
               )}
               <details>

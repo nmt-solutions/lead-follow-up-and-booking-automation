@@ -6,6 +6,10 @@ import { createFinancialAdjustmentRepository } from "../db/financial-adjustment-
 import { createFinancialAdjustmentHttp } from "../http/financial-adjustments";
 import { configuredFinancialAdjustments } from "../financial-adjustments/configuration";
 import { routeOpportunityMail } from "../email-sequences/opportunity-provider";
+import { createReachChangeApplication } from "../application/reach-changes";
+import { createReachChangeRepository } from "../db/reach-change-repository";
+import { createReachChangeHttp } from "../http/reach-changes";
+import { configuredReachPolicy } from "../subscription-payments/configuration";
 import { createDataGovernanceApplication } from "../application/data-governance";
 import { createDataGovernanceRepository } from "../db/data-governance-repository";
 import { createDataGovernanceHttp } from "../http/data-governance";
@@ -366,6 +370,14 @@ async function composeServices() {
     clock: { now: () => new Date() },
   });
   const paymentGateway = configuredPayments();
+  const reachChanges = createReachChangeApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createReachChangeRepository(runtimeDatabase(pool)),
+    gateway: paymentGateway,
+    policy: configuredReachPolicy(),
+    clock: { now: () => new Date() },
+  });
   const subscriptionPayments = createSubscriptionPaymentApplication({
     authenticate,
     authenticatePlatform,
@@ -826,6 +838,12 @@ async function composeServices() {
       reportFailure,
     }),
     subscriptionPayments,
+    reachChanges,
+    reachChangesHttp: createReachChangeHttp({
+      application: reachChanges,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     financialAdjustments,
     financialAdjustmentsHttp: createFinancialAdjustmentHttp({
       application: financialAdjustments,

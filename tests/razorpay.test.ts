@@ -175,6 +175,51 @@ describe("Native recurring cards at the public application seam", () => {
       }),
     };
   }
+  it("accepts the documented subscription link and preserves one unpaid native purchase", async () => {
+    const f = await subscriptionFixture(h);
+    const native = razorpayFixture(h.clock);
+    native.shortUrl = "https://rzp.io/rzp/Dqdqx3h";
+    const app = compose(native);
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    const started = await app.start(f.owner, f.business.id, {
+      actionId: action.id,
+    });
+    expect(started.checkout?.url).toBe(native.shortUrl);
+    await app.recover();
+    expect(native.creations).toHaveLength(1);
+    expect((await app.workspace(f.owner, f.business.id)).access.active).toBe(
+      false,
+    );
+  });
+  it.each([
+    "https://evil.example/i/fixture1",
+    "https://rzp.io.evil.example/i/fixture1",
+    "https://user:password@rzp.io/i/fixture1",
+    "https://rzp.io/i/fixture1?redirect=evil",
+    "https://rzp.io/i/fixture1#fragment",
+    "https://rzp.io/unreviewed/fixture1",
+  ])(
+    "rejects an unsafe native purchase link %s without repeating creation",
+    async (shortUrl) => {
+      const f = await subscriptionFixture(h);
+      const native = razorpayFixture(h.clock);
+      native.shortUrl = shortUrl;
+      const app = compose(native);
+      const action = await app.prepare(f.owner, f.business.id, {
+        quoteId: f.quote.id,
+        requestKey: randomUUID(),
+      });
+      await app.start(f.owner, f.business.id, { actionId: action.id });
+      await app.recover();
+      const workspace = await app.workspace(f.owner, f.business.id);
+      expect(workspace.actions[0].checkout).toBeNull();
+      expect(workspace.access.active).toBe(false);
+      expect(native.creations).toHaveLength(1);
+    },
+  );
   it("commits signed native receipts before HTTP recovery and never treats activation or a refundable token as a paid period", async () => {
     const { f, native, app, action } = await checkout();
     const sub = native.subscriptions.get("sub_fixture1")!;

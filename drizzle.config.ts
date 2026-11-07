@@ -13,6 +13,8 @@ export default defineConfig({
     "tax_liability_report",
     "tax_report_action",
     "tax_period_reminder",
+    "reach_change",
+    "reach_change_event",
     "business_data_request",
     "business_data_export",
     "business_data_grant",

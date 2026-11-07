@@ -5,6 +5,7 @@ import type {
   LiabilitySnapshot,
   TaxReminder,
 } from "../models/tax-periods";
+import type { ReachSnapshot, ReachFact } from "../models/reach-changes";
 import type { DataPolicy, OffboardInput } from "../models/data-governance";
 import type {
   OperationSnapshot,
@@ -689,6 +690,7 @@ export const subscriptionQuote = pgTable(
       t.businessId,
       t.requestKey,
     ),
+    unique("subscription_quote_scope").on(t.id, t.businessId),
     pgPolicy("subscription_quote_read", {
       for: "select",
       to: appRuntime,
@@ -775,7 +777,7 @@ export const subscriptionPayment = pgTable(
     pgPolicy("subscription_payment_insert", {
       for: "insert",
       to: appRuntime,
-      withCheck: sql`(${managerScope}) and ${t.actorId}=current_setting('app.actor_id',true) and exists(select 1 from public.subscription_quote q where q.id=${t.quoteId} and q.business_id=${t.businessId})`,
+      withCheck: sql`((${managerScope}) and ${t.actorId}=current_setting('app.actor_id',true) and exists(select 1 from public.subscription_quote q where q.id=${t.quoteId} and q.business_id=${t.businessId})) or public.reach_payment_insert(${t.id},${t.businessId},${t.snapshot},${t.actorId})`,
     }),
     pgPolicy("subscription_payment_update", {
       for: "update",
@@ -923,6 +925,110 @@ export const subscriptionUsage = pgTable(
     }),
   ],
 ).enableRLS();
+
+const reachOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.reconciliation)`;
+const reachWorker = sql`public.reach_worker_authorized(id,business_id)`;
+export const reachChange = pgTable(
+  "reach_change",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    periodId: uuid("period_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    quoteId: uuid("quote_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    recoveryKey: uuid("recovery_key").notNull(),
+    snapshot: jsonb("snapshot").$type<ReachSnapshot>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique("reach_change_scope").on(t.id, t.businessId),
+    uniqueIndex("reach_change_request").on(t.businessId, t.requestKey),
+    check(
+      "reach_change_snapshot_scope",
+      sql`${t.snapshot}->'original'->>'id'=${t.periodId}::text and ${t.snapshot}->'original'->>'businessId'=${t.businessId}::text and ${t.snapshot}->'action'->>'id'=${t.actionId}::text and ${t.snapshot}->'target'->'quote'->>'id'=${t.quoteId}::text`,
+    ),
+    pgPolicy("reach_change_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${reachOperator}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and (${reachWorker}))`,
+    }),
+    pgPolicy("reach_change_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const reachChangeEvent = pgTable(
+  "reach_change_event",
+  {
+    position: bigserial("position", { mode: "number" }).notNull(),
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    changeId: uuid("change_id").notNull(),
+    key: text("key").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    fact: jsonb("fact").$type<ReachFact>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("reach_change_event_identity").on(t.changeId, t.key),
+    uniqueIndex("reach_change_request_identity")
+      .on(t.businessId, t.key)
+      .where(sql`${t.key} like 'request:%'`),
+    pgPolicy("reach_change_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${reachOperator}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.reach_worker_authorized(change_id,business_id))`,
+    }),
+    pgPolicy("reach_change_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and (public.reach_worker_authorized(change_id,business_id) or (((${managerScope}) or (${reachOperator})) and actor_id=current_setting('app.actor_id',true)))`,
+    }),
+  ],
+).enableRLS();
+export const reachChangeScopeForeignKeys = [
+  new ForeignKey(
+    reachChange,
+    foreignKey({
+      name: "reach_change_period_scope",
+      columns: [reachChange.periodId, reachChange.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+  new ForeignKey(
+    reachChange,
+    foreignKey({
+      name: "reach_change_action_scope",
+      columns: [reachChange.actionId, reachChange.businessId],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    reachChange,
+    foreignKey({
+      name: "reach_change_quote_scope",
+      columns: [reachChange.quoteId, reachChange.businessId],
+      foreignColumns: [subscriptionQuote.id, subscriptionQuote.businessId],
+    }),
+  ),
+  new ForeignKey(
+    reachChangeEvent,
+    foreignKey({
+      name: "reach_change_event_scope",
+      columns: [reachChangeEvent.changeId, reachChangeEvent.businessId],
+      foreignColumns: [reachChange.id, reachChange.businessId],
+    }),
+  ),
+];
 
 // Reconcile these composite keys after the pinned push replaces referenced
 // UNIQUE constraints, while financial runtime access remains paused.

@@ -35,6 +35,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
     work: Awaited<ReturnType<typeof d.repository.authorizeWork>>,
   ) {
     const action = await d.repository.readWork(work);
+    if (action.snapshot.adjustment) return action;
     if (
       action.snapshot.provider.key !== d.gateway.key ||
       action.snapshot.provider.account !== d.gateway.account ||
@@ -154,7 +155,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         const observation = parse(
           lifecycleObservationSchema,
           await d.gateway.cancel!(
-            result.action,
+            await d.repository.readWork(result.work),
             result.action.lifecycle!.cancellation!.timing,
             async () => {
               await d.repository.authorizeWork(
