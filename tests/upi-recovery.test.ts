@@ -15,6 +15,7 @@ import { fixtureIssuer } from "./support/seller-issuer";
 import { createMemoryStorage } from "./support/storage";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";
 import { createSubscriptionPaymentRepository } from "../src/db/subscription-payment-repository";
+import { recoveryCapacityFixture } from "./support/recovery-capacity";
 
 describe.each(["physical", "reviewed_schema_repair"] as const)(
   "UPI history through %s recovery",
@@ -25,6 +26,7 @@ describe.each(["physical", "reviewed_schema_repair"] as const)(
     let owner: Headers, customer: Headers, operationId: string;
     let before: Record<string, unknown[]>;
     let filings: Awaited<ReturnType<typeof recoveryTaxFilingFixture>>;
+    let capacity: Awaited<ReturnType<typeof recoveryCapacityFixture>>;
     let filingBefore: unknown[],
       copies: { id: string; bytes: Buffer; retained: boolean }[];
     const filingTables = [
@@ -119,6 +121,7 @@ describe.each(["physical", "reviewed_schema_repair"] as const)(
         retained: true,
       }));
       h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
+      capacity = await recoveryCapacityFixture(h, f);
       filings = await recoveryTaxFilingFixture(h, { native: f.upi });
       filingBefore = await retainedFilings(h.admin);
     });
@@ -189,6 +192,7 @@ describe.each(["physical", "reviewed_schema_repair"] as const)(
         );
         expect(JSON.stringify(inspection)).not.toContain("upi-api-secret");
         expect(JSON.stringify(inspection)).not.toContain(filings.marker);
+        await capacity.assertRestored(r.target, inspection);
         const targetFilings = filings.application(
           runtimeDatabase(r.target.runtime),
         ).filings;
