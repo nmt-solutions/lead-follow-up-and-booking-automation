@@ -9,6 +9,7 @@ import {
   settings,
   briefFor,
   checkCurrent,
+  requireDiscoveryAvailable,
 } from "./discovery-state";
 import { ApplicationError } from "../models/application-error";
 import { paidAllowance } from "./paid-access";
@@ -58,6 +59,7 @@ async function validateSearch(
   input: SaveSchedule,
   at: Date,
 ) {
+  await requireDiscoveryAvailable(tx, businessId);
   const { profile, policy } = await settings(tx, businessId, at);
   if (!policy) throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
   const paid = await paidAllowance(tx, businessId, "discovery", at);

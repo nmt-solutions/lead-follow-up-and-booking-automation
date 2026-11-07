@@ -40,6 +40,7 @@ import {
   briefFor,
   settings,
   checkCurrent,
+  requireDiscoveryAvailable,
 } from "./discovery-state";
 import { coverageCounts } from "../discovery/evidence";
 import { reservePaidUsage, paidAllowance } from "./paid-access";
@@ -328,10 +329,19 @@ export function createDiscoveryRepository(
             ),
           });
         }
+        const stop = await tx.execute<{ stopped: boolean }>(
+          sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
+        );
+        const stopped = stop.rows[0]?.stopped === true;
         return {
           schedules: [],
-          canRun: role !== "salesperson",
+          canRun: role !== "salesperson" && !stopped,
           setup: [
+            ...(stopped
+              ? [
+                  "Business connections are stopped. Allow new setup from Data and offboarding before approving new discovery.",
+                ]
+              : []),
             ...(!policy
               ? [
                   "Active paid discovery scope, matching allowance units and operational configuration are required.",
@@ -365,6 +375,7 @@ export function createDiscoveryRepository(
         async (tx) => {
           await requireCapability(tx, actor, businessId, "profile.manage");
           await requireWorkSession(tx, actor, clock.now());
+          await requireDiscoveryAvailable(tx, businessId);
           const [existing] = await tx
             .select()
             .from(discoveryRun)

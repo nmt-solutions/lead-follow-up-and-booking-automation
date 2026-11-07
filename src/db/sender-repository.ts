@@ -3,7 +3,7 @@ import { senderHealthAt } from "./sender-health-repository";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { sameSenderBinding } from "../models/senders";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { ApplicationError } from "../models/application-error";
 import type { Clock } from "../models/business";
@@ -366,6 +366,12 @@ export function createSenderRepository(database: Database, clock: Clock) {
           manage ? "integrations.manage" : "profile.read",
         );
         await requireSalesSession(tx, actor, clock.now(), role);
+        if (manage) {
+          const stopped = await tx.execute<{ stopped: boolean }>(
+            sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
+          );
+          if (stopped.rows[0]?.stopped) throw new ApplicationError("FORBIDDEN");
+        }
         return run(tx);
       },
       { lock: true },

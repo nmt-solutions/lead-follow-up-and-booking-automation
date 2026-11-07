@@ -390,6 +390,14 @@ export function createFileApplication<Credentials>(dependencies: {
       for (const target of targets) {
         let success = true;
         try {
+          if (
+            !(await repository.cleanupCurrent(
+              target.id,
+              target.operation_id,
+              policy.accountScope,
+            ))
+          )
+            continue;
           await storage.delete(fileObjectKey(target.business_id, target.id));
         } catch {
           success = false;

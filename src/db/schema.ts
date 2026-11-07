@@ -1,4 +1,5 @@
 import type { MailAcceptance } from "../models/mail-dispatch";
+import type { DataPolicy, OffboardInput } from "../models/data-governance";
 import type {
   OperationSnapshot,
   DiagnosticRetention,
@@ -5407,6 +5408,199 @@ export const emailSequenceScopeForeignKeys = [
   ),
 ];
 
+// Customer exports are deliberately separate from private uploads and seller artifacts.
+const dataScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() in ('owner','admin')`;
+const dataOwner = sql`current_user=(select pg_get_userbyid(c.relowner) from pg_class c where c.oid='public.business_data_request'::regclass)`;
+function dataPolicies(name: string, insert = true) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: dataScope,
+    }),
+    ...(insert
+      ? [
+          pgPolicy(`${name}_insert`, {
+            for: "insert",
+            to: appRuntime,
+            withCheck: sql`(${dataScope}) and actor_id=current_setting('app.actor_id',true)`,
+          }),
+        ]
+      : []),
+    pgPolicy(`${name}_system`, {
+      for: "all",
+      to: "public",
+      using: dataOwner,
+      withCheck: dataOwner,
+    }),
+  ];
+}
+export const businessDataRequest = pgTable(
+  "business_data_request",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    kind: text("kind").$type<"offboard" | "reopen">().notNull(),
+    policy: jsonb("policy").$type<DataPolicy>().notNull(),
+    input: jsonb("input").$type<OffboardInput | null>(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("business_data_request_key").on(t.businessId, t.requestKey),
+    uniqueIndex("business_data_request_scope").on(t.id, t.businessId),
+    check(
+      "business_data_request_policy",
+      sql`${t.kind} in ('offboard','reopen') and ${t.policy}->'businessIds' ? ${t.businessId}::text and (${t.policy}->>'version')::integer>0 and (${t.policy}->>'effectiveUntil')::timestamptz>(${t.policy}->>'effectiveFrom')::timestamptz`,
+    ),
+    ...dataPolicies("business_data_request"),
+  ],
+).enableRLS();
+export const businessDataExport = pgTable(
+  "business_data_export",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    part: integer("part").notNull().default(1),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    policy: jsonb("policy").$type<DataPolicy>().notNull(),
+    state: text("state")
+      .$type<"pending" | "ready" | "deleting" | "deleted">()
+      .notNull(),
+    bytes: integer("bytes"),
+    sha256: text("sha256"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    cleanupDueAt: timestamp("cleanup_due_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    cleanupAttempts: integer("cleanup_attempts").notNull().default(0),
+    cleanupLease: uuid("cleanup_lease"),
+  },
+  (t) => [
+    uniqueIndex("business_data_export_key").on(t.businessId, t.requestKey),
+    uniqueIndex("business_data_export_scope").on(t.id, t.businessId),
+    check(
+      "business_data_export_state",
+      sql`${t.state} in ('pending','ready','deleting','deleted') and ${t.part}>0 and ${t.part}<=1000000 and ${t.cleanupAttempts}>=0 and (${t.state}<>'ready' or (${t.bytes}>0 and ${t.sha256} ~ '^[a-f0-9]{64}$'))`,
+    ),
+    ...dataPolicies("business_data_export"),
+    pgPolicy("business_data_export_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${dataScope}) and actor_id=current_setting('app.actor_id',true)`,
+      withCheck: dataScope,
+    }),
+  ],
+).enableRLS();
+export const businessDataGrant = pgTable(
+  "business_data_grant",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    exportId: uuid("export_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  () => [
+    ...dataPolicies("business_data_grant"),
+    pgPolicy("business_data_grant_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${dataScope}) and actor_id=current_setting('app.actor_id',true)`,
+      withCheck: dataScope,
+    }),
+  ],
+).enableRLS();
+export const businessDataStep = pgTable(
+  "business_data_step",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    kind: text("kind").notNull(),
+    targetId: text("target_id").notNull(),
+    details: jsonb("details").$type<Record<string, string>>().notNull(),
+    secret: jsonb("secret").$type<{
+      credentials: string | null;
+      rejected: string | null;
+    }>(),
+    state: text("state").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lease: uuid("lease"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    outcome: text("outcome"),
+    tokenWiped: boolean("token_wiped").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("business_data_step_target").on(
+      t.requestId,
+      t.kind,
+      t.targetId,
+    ),
+    uniqueIndex("business_data_step_scope").on(t.id, t.businessId),
+    check(
+      "business_data_step_state",
+      sql`${t.state} in ('pending','working','retry','complete','incomplete') and ${t.attempts}>=0 and ${t.kind} in ('local','gmail','google_calendar','microsoft_mail','microsoft_calendar','meta','file')`,
+    ),
+    ...dataPolicies("business_data_step", false),
+  ],
+).enableRLS();
+export const businessDataEvent = pgTable(
+  "business_data_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    stepId: uuid("step_id").notNull(),
+    attempt: integer("attempt").notNull(),
+    outcome: text("outcome").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    evidence: text("evidence"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [...dataPolicies("business_data_event", false)],
+).enableRLS();
+export const businessDataScopeForeignKeys = [
+  new ForeignKey(
+    businessDataGrant,
+    foreignKey({
+      name: "business_data_grant_export_scope",
+      columns: [businessDataGrant.exportId, businessDataGrant.businessId],
+      foreignColumns: [businessDataExport.id, businessDataExport.businessId],
+    }),
+  ),
+  new ForeignKey(
+    businessDataStep,
+    foreignKey({
+      name: "business_data_step_request_scope",
+      columns: [businessDataStep.requestId, businessDataStep.businessId],
+      foreignColumns: [businessDataRequest.id, businessDataRequest.businessId],
+    }),
+  ),
+  new ForeignKey(
+    businessDataEvent,
+    foreignKey({
+      name: "business_data_event_step_scope",
+      columns: [businessDataEvent.stepId, businessDataEvent.businessId],
+      foreignColumns: [businessDataStep.id, businessDataStep.businessId],
+    }),
+  ),
+];
 // Financial intents and native facts are append-only. Recovery tokens grant reads/events,
 // never creation of another refund or seller document.
 const financialWorker = sql`public.financial_worker_authorized(case_id,business_id)`;

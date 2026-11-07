@@ -215,6 +215,12 @@ export default async function BusinessPage({
       >
         Private Business files
       </Link>
+      <Link
+        className="inline-flex min-h-11 items-center text-primary underline"
+        href={`/businesses/${businessId}/data`}
+      >
+        Data export and offboarding
+      </Link>
       {(await searchParams).joined === "1" && (
         <p
           role="status"

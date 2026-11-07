@@ -1,5 +1,9 @@
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import type { Pool } from "pg";
+import {
+  secureDataGovernance,
+  prepareDataGovernance,
+} from "./data-governance-security";
 import { secureOperations, prepareOperations } from "./operations-security";
 import { preparePaymentSecurity } from "./payment-security";
 import { prepareSellerDocumentSecurity } from "./seller-document-security";
@@ -169,17 +173,21 @@ async function prepareFileCleanup(pool: Pool) {
     LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
     BEGIN
       IF lease_seconds <= 0 THEN RAISE EXCEPTION 'Invalid cleanup lease'; END IF;
+      at_time := least(at_time, statement_timestamp());
       DELETE FROM public.file_access a USING public.business_file f
         WHERE a.file_id = f.id AND f.account_scope = scope AND a.expires_at <= at_time;
       DELETE FROM public.business_file f WHERE f.account_scope = scope
-        AND f.state = 'deleted' AND f.purge_after <= at_time;
+        AND f.state = 'deleted' AND f.purge_after <= at_time
+        AND NOT public.business_file_protected(f.id,f.business_id);
       RETURN QUERY WITH due AS (
         SELECT f.id FROM public.business_file f
         WHERE f.account_scope = scope AND f.state <> 'deleted' AND f.cleanup_after <= at_time
+          AND NOT public.business_file_protected(f.id,f.business_id)
+          AND NOT EXISTS(SELECT 1 FROM public.business_data_step s WHERE s.business_id=f.business_id AND s.target_id=f.id::text AND s.kind='file' AND s.state IN ('pending','retry','working'))
         ORDER BY f.cleanup_after, f.id LIMIT 50 FOR UPDATE SKIP LOCKED
       ), claimed AS (
         UPDATE public.business_file f SET state = 'deleting', operation_id = gen_random_uuid(),
-          cleanup_after = at_time + make_interval(secs => lease_seconds)
+          cleanup_after = statement_timestamp() + make_interval(secs => lease_seconds)
         FROM due WHERE f.id = due.id RETURNING f.*
       ), attempts AS (
         INSERT INTO public.file_usage (id, file_id, business_id, account_scope, action, outcome, at)
@@ -189,13 +197,15 @@ async function prepareFileCleanup(pool: Pool) {
     CREATE OR REPLACE FUNCTION public.finish_file_cleanup(file_id uuid, operation uuid, at_time timestamptz, success boolean)
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
     BEGIN
+      at_time := least(at_time, statement_timestamp());
       UPDATE public.business_file f SET
         state = CASE WHEN success THEN 'deleted' ELSE 'deleting' END,
         deleted_at = CASE WHEN success THEN at_time ELSE NULL END,
         purge_after = CASE WHEN success THEN at_time + make_interval(secs => f.record_retention_seconds) ELSE NULL END,
         cleanup_after = CASE WHEN success THEN NULL ELSE f.cleanup_after END,
         failure = CASE WHEN success THEN NULL ELSE 'CLEANUP_FAILED' END
-      WHERE f.id = file_id AND f.operation_id = operation AND f.state = 'deleting';
+      WHERE f.id = file_id AND f.operation_id = operation AND f.state = 'deleting'
+        AND f.cleanup_after > statement_timestamp() AND NOT public.business_file_protected(f.id,f.business_id);
       IF FOUND AND success THEN
         UPDATE public.file_usage u SET outcome = 'succeeded' WHERE u.id = operation AND u.file_id = finish_file_cleanup.file_id;
         DELETE FROM public.file_access a WHERE a.file_id = finish_file_cleanup.file_id;
@@ -233,6 +243,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await prepareFinancialSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
+  await prepareDataGovernance(pool);
   await prepareCostSecurity(pool);
   await prepareNotificationSecurity(pool);
   for (const name of notificationTables) {
@@ -1368,6 +1379,7 @@ export async function secureDatabase(pool: Pool) {
       GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
     `);
     await secureOperations(client);
+    await secureDataGovernance(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");

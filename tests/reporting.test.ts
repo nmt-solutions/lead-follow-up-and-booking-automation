@@ -15,6 +15,10 @@ import { createAppointmentApplication } from "../src/application/appointments";
 import { createAppointmentRepository } from "../src/db/appointment-repository";
 import { deterministicCalendar } from "./support/calendar";
 import { createReportingHttp } from "../src/http/reporting";
+import { createDataGovernanceApplication } from "../src/application/data-governance";
+import { createDataGovernanceRepository } from "../src/db/data-governance-repository";
+import { dataPolicySchema } from "../src/models/data-governance";
+import { createMemoryStorage } from "./support/storage";
 
 describe("Honest Business reports through the public application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -737,6 +741,127 @@ describe("Honest Business reports through the public application seam", () => {
         (r) => r.kind === "rfq_revision" && r.version === 2,
       ),
     ).toBe(true);
+  });
+  it("retains scoped reporting after approved offboarding without reopening acquisition or granting export authority", async () => {
+    const f = await reportSalesFixture(h);
+    const foreign = await reportSalesFixture(h);
+    const email = `retained-sales-${crypto.randomUUID()}@example.com`;
+    await h.team.invite(f.owner, f.business.id, { email, role: "salesperson" });
+    const invitation = h.invitations.sent.at(-1)!;
+    const sales = await h.signIn(email);
+    await h.team.accept(sales, {
+      token: new URLSearchParams(new URL(invitation.url).hash.slice(1)).get(
+        "token",
+      ),
+    });
+    const salesActor = await h.authenticate(sales);
+    const storage = createMemoryStorage();
+    const policy = dataPolicySchema.parse({
+      id: "reviewed-retained-reporting",
+      version: 1,
+      businessIds: [f.business.id],
+      mode: "fixture",
+      reviewedBy: "Independent fixture policy reviewer",
+      evidence: ["Approved fixture retention and offboarding agreement"],
+      effectiveFrom: "2026-11-01T00:00:00Z",
+      effectiveUntil: "2027-11-01T00:00:00Z",
+      access: "owner_admin",
+      afterCancellation: true,
+      preserveFinancial: true,
+      retention: {
+        retainedRecords: "source_contract",
+        financialEvidenceUntil: "2027-11-01T00:00:00Z",
+        evidence: "Fixture financial evidence preservation review",
+      },
+      exportSeconds: 3600,
+      grantSeconds: 60,
+      maxBytes: 2_000_000,
+      maxRows: 200,
+      storageScope: "fixture-retained-reporting",
+      sourceRights: [],
+      deletion: null,
+      nativeRevocation: false,
+      maxAttempts: 3,
+      retrySeconds: 1,
+    });
+    const governance = createDataGovernanceApplication({
+      authenticate: h.access.authenticatePrivileged,
+      repository: createDataGovernanceRepository(f.db),
+      clock: h.clock,
+      storage,
+      storageScope: policy.storageScope,
+      policy: () => policy,
+      async revoke() {
+        throw new Error("No native cleanup expected");
+      },
+    });
+    const before = await application().read(f.owner, f.business.id, {
+      limit: 50,
+    });
+    await governance.offboard(f.owner, f.business.id, {
+      requestKey: crypto.randomUUID(),
+      policyId: policy.id,
+      policyVersion: policy.version,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    await governance.cleanup();
+    const stopped = await governance.workspace(f.owner, f.business.id);
+    expect(stopped).toMatchObject({ stopped: true, exports: [] });
+    for (const credentials of [f.owner, sales]) {
+      const report = await application().read(credentials, f.business.id, {
+        limit: 50,
+      });
+      expect(
+        report.metrics.find((m) => m.id === "direct_engagement")?.value,
+      ).toBe(1);
+      expect(report.details.items.map((row) => row.id)).toEqual(
+        expect.arrayContaining(before.details.items.map((row) => row.id)),
+      );
+      expect(
+        report.details.items.every(
+          (row) => row.opportunityId !== foreign.need.id,
+        ),
+      ).toBe(true);
+    }
+    await expect(
+      application().read(foreign.owner, f.business.id, {}),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      governance.export(sales, f.business.id, {
+        requestKey: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      f.inbox.capture(f.owner, f.business.id, f.connection.id, {
+        eventId: "after-stopped-report",
+        messageRef: "after-stopped-report",
+        conversationRef: "buyer",
+        senderRef: "buyer@example.net",
+        senderName: "Buyer",
+        subject: "Steel",
+        text: "New inquiry must stay fenced",
+        kind: "direct_inquiry",
+        occurredAt: h.clock.now().toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await governance.workspace(f.owner, f.business.id)).toEqual(stopped);
+    expect(storage.effects).toEqual([]);
+    expect(f.effects).toEqual([]);
+    const primaryOwner = await h.signIn(
+      (await h.auth.api.getSession({ headers: f.owner }))!.user.email,
+      false,
+    );
+    await expect(
+      application().read(primaryOwner, f.business.id, {}),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    await h.team.removeMember(f.owner, f.business.id, {
+      userId: salesActor.userId,
+    });
+    await expect(
+      application().read(sales, f.business.id, {}),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
   it("keeps complete counts beyond the detail page size and retains the report through populated managed schema reapplication", async () => {
     const f = await reportSalesFixture(h);
