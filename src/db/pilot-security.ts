@@ -6,14 +6,6 @@ import { sql } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { pilotRecord, pilotEvent, pilotEffect } from "./schema";
 export const pilotTables = ["pilot_record", "pilot_event", "pilot_effect"];
-// The pinned push can replace the referenced composite primary key. Use the
-// schema-owned definitions in the shared pause/validated-restore sequence.
-export const pilotScopeForeignKeys = [pilotEvent, pilotEffect].flatMap(
-  (table) =>
-    getTableConfig(table).foreignKeys.filter((key) =>
-      ["pilot_event_scope", "pilot_effect_scope"].includes(key.getName()),
-    ),
-);
 export const pilotFunctions = [
   "pilot_authorized",
   "pilot_operator",

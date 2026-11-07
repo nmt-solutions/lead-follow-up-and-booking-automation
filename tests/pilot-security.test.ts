@@ -7,6 +7,8 @@ import { verifyRuntimeRole } from "../src/db/runtime";
 import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 import { pilotFunctions, pilotTables } from "../src/db/pilot-security";
 import { pilotCostReadTables } from "../src/db/pilot-owner-policies";
+import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
+import { pilotRecord, pilotEvent, pilotEffect } from "../src/db/schema";
 
 describe("Pilot restricted-role authorization and populated reapplication", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
@@ -46,6 +48,16 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
       );
     const mutations = s.mutations.length;
     await prepareDatabaseRole(h.admin);
+    // Exercise the actual pinned ORM's creation plan between prepare and its
+    // composite-key replacement. Deferred references must stay out of that plan:
+    // push can otherwise re-add them before replacing the referenced key.
+    const statements = await generateMigration(
+      generateDrizzleJson({}),
+      generateDrizzleJson({ pilotRecord, pilotEvent, pilotEffect }),
+    );
+    for (const statement of statements)
+      if (/ADD CONSTRAINT "pilot_(event|effect)_scope"/.test(statement))
+        await h.admin.query(statement);
     // This is the exact replacement operation emitted by the pinned Drizzle push.
     await h.admin.query(
       "alter table public.pilot_record drop constraint pilot_record_pkey; alter table public.pilot_record add constraint pilot_record_pkey primary key(id,business_id)",

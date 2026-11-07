@@ -6698,11 +6698,6 @@ export const pilotEvent = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    foreignKey({
-      name: "pilot_event_scope",
-      columns: [t.pilotId, t.businessId],
-      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
-    }),
     check(
       "pilot_event_kind",
       sql`${t.kind} in ('prepared','approved','activated','effort','results','renewal','reuse','stopped')`,
@@ -6742,11 +6737,6 @@ export const pilotEffect = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    foreignKey({
-      name: "pilot_effect_scope",
-      columns: [t.pilotId, t.businessId],
-      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
-    }),
     uniqueIndex("pilot_effect_once").on(t.businessId, t.kind, t.operationId),
     check(
       "pilot_effect_nonnegative",
@@ -6764,3 +6754,24 @@ export const pilotEffect = pgTable(
     }),
   ],
 ).enableRLS();
+// Keep these outside Drizzle's table creation plan: push may replace the
+// referenced composite key after adding inline foreign keys. The shared
+// prepare/secure sequence pauses and restores these validated bindings.
+export const pilotScopeForeignKeys = [
+  new ForeignKey(
+    pilotEvent,
+    foreignKey({
+      name: "pilot_event_scope",
+      columns: [pilotEvent.pilotId, pilotEvent.businessId],
+      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
+    }),
+  ),
+  new ForeignKey(
+    pilotEffect,
+    foreignKey({
+      name: "pilot_effect_scope",
+      columns: [pilotEffect.pilotId, pilotEffect.businessId],
+      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
+    }),
+  ),
+];

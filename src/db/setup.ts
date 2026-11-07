@@ -1,13 +1,13 @@
-import {
-  preparePilotSecurity,
-  securePilots,
-  pilotScopeForeignKeys,
-} from "./pilot-security";
+import { preparePilotSecurity, securePilots } from "./pilot-security";
 import {
   prepareDiscoveryCapacity,
   secureDiscoveryCapacity,
 } from "./discovery-capacity-security";
-import { discoveryCapacityBinding, discoveryCapacityPolicy } from "./schema";
+import {
+  discoveryCapacityBinding,
+  discoveryCapacityPolicy,
+  pilotScopeForeignKeys,
+} from "./schema";
 import { prepareRecoverySecurity, secureRecovery } from "./recovery-security";
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import {
