@@ -1,3 +1,4 @@
+import { pilotCostOwnerRead } from "./pilot-owner-policies";
 import type { CapacityRoute } from "../models/discovery-capacity";
 import type { CapacityPolicy } from "../models/discovery-capacity";
 import type { MailAcceptance } from "../models/mail-dispatch";
@@ -843,6 +844,7 @@ export const subscriptionPaymentEvent = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("subscription_payment_event"),
     uniqueIndex("subscription_payment_event_identity").on(
       t.provider,
       t.account,
@@ -873,6 +875,7 @@ export const subscriptionPaymentHistory = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("subscription_payment_history"),
     ...paymentHistoryPolicies(
       "subscription_payment_history",
       sql`${t.actionId}`,
@@ -894,6 +897,7 @@ export const subscriptionPeriod = pgTable(
     charge: jsonb("charge").$type<PaymentObservation>(),
   },
   (t) => [
+    pilotCostOwnerRead("subscription_period"),
     uniqueIndex("subscription_period_window_once").on(
       t.actionId,
       t.start,
@@ -1509,6 +1513,7 @@ export const notificationNotice = pgTable(
     reason: text("reason").notNull().default("pending"),
   },
   (t) => [
+    pilotCostOwnerRead("notification_notice"),
     uniqueIndex("notification_source_identity").on(
       t.account,
       t.purpose,
@@ -1548,7 +1553,10 @@ export const notificationEvent = pgTable(
     lease: uuid("lease"),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
-  () => notificationPolicies("notification_event"),
+  () => [
+    ...notificationPolicies("notification_event"),
+    pilotCostOwnerRead("notification_event"),
+  ],
 ).enableRLS();
 export const notificationReceipt = pgTable(
   "notification_receipt",
@@ -1588,6 +1596,7 @@ export const costRecord = pgTable(
     retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("operator_cost_record"),
     uniqueIndex("operator_cost_source_version").on(t.sourceId, t.version),
     check(
       "operator_cost_bounds",
@@ -1679,6 +1688,7 @@ export const costBudgetRevision = pgTable(
     retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("operator_cost_budget"),
     uniqueIndex("operator_cost_budget_version").on(
       t.month,
       t.category,
@@ -2174,6 +2184,7 @@ export const aiExecution = pgTable(
     output: jsonb("output").$type<AiOutput>(),
   },
   (table) => [
+    pilotCostOwnerRead("ai_execution"),
     uniqueIndex("ai_execution_request").on(table.businessId, table.requestKey),
     uniqueIndex("ai_execution_scope").on(table.id, table.businessId),
     check(
@@ -2225,6 +2236,7 @@ export const aiAttempt = pgTable(
     fundingReference: text("funding_reference").notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("ai_attempt"),
     index("ai_attempt_execution").on(table.businessId, table.executionId),
     uniqueIndex("ai_attempt_number").on(table.executionId, table.number),
     check(
@@ -2428,6 +2440,7 @@ export const fileUsage = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("file_usage"),
     index("file_usage_business_idx").on(table.businessId, table.at),
     pgPolicy("file_usage_scope", {
       for: "all",
@@ -2534,6 +2547,7 @@ export const discoveryRun = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("discovery_run"),
     uniqueIndex("discovery_request_key").on(table.businessId, table.requestKey),
     uniqueIndex("discovery_schedule_occurrence").on(
       table.businessId,
@@ -2756,6 +2770,7 @@ export const discoveryUsage = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("discovery_usage"),
     uniqueIndex("discovery_usage_step_attempt").on(
       table.runId,
       table.stepKey,
@@ -3150,6 +3165,7 @@ export const mailboxPolicy = pgTable(
       .default(false),
   },
   (t) => [
+    pilotCostOwnerRead("mailbox_policy"),
     uniqueIndex("mailbox_policy_scope").on(t.id, t.businessId),
     uniqueIndex("mailbox_policy_connection").on(t.connectionId),
     check("mailbox_policy_version", sql`${t.version} > 0`),
@@ -3173,6 +3189,7 @@ export const mailboxJob = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("mailbox_job"),
     uniqueIndex("mailbox_job_scope").on(t.id, t.businessId, t.mailboxId),
     ...senderPolicies("mailbox_job", true),
   ],
@@ -3813,6 +3830,7 @@ export const opportunityDueAction = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("opportunity_due_action"),
     uniqueIndex("opportunity_due_action_scope").on(t.id, t.businessId),
     uniqueIndex("whatsapp_plan_action").on(
       t.whatsappPlanId,
@@ -4370,6 +4388,7 @@ export const whatsAppReceipt = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("whatsapp_receipt"),
     uniqueIndex("whatsapp_receipt_identity").on(
       t.connectionId,
       t.accountKey,
@@ -4613,6 +4632,7 @@ export const mailboxAppMessage = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("mailbox_app_message"),
     uniqueIndex("mailbox_app_message_ref").on(t.mailboxId, t.messageRef),
     uniqueIndex("mailbox_app_message_internet_ref").on(
       t.mailboxId,
@@ -5513,6 +5533,7 @@ export const emailSequenceAction = pgTable(
     queueRunId: text("queue_run_id"),
   },
   (t) => [
+    pilotCostOwnerRead("email_sequence_action"),
     uniqueIndex("email_sequence_action_step").on(
       t.runId,
       t.contactId,
@@ -5557,6 +5578,7 @@ export const emailSequenceEvent = pgTable(
     ).$type<MailAcceptance>(),
   },
   (t) => [
+    pilotCostOwnerRead("email_sequence_event"),
     uniqueIndex("email_sequence_reservation_once")
       .on(t.attemptId)
       .where(sql`${t.kind}='attempt_reserved'`),

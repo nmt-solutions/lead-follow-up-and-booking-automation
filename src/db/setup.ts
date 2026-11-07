@@ -1499,11 +1499,11 @@ export async function secureDatabase(
     `);
     await secureOperations(client);
     await secureRecovery(client);
-    await securePilots(client);
     await secureDataGovernance(client);
     await secureTaxPeriods(client);
     await secureDiscoveryCapacity(client);
     await secureTaxFilings(client);
+    await securePilots(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client, options);
     await client.query("COMMIT");

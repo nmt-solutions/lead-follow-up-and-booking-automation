@@ -6,6 +6,7 @@ import { pilotFixture } from "./support/pilot";
 import { verifyRuntimeRole } from "../src/db/runtime";
 import { prepareDatabaseRole } from "../src/db/setup";
 import { pilotFunctions, pilotTables } from "../src/db/pilot-security";
+import { pilotCostReadTables } from "../src/db/pilot-owner-policies";
 
 describe("Pilot restricted-role authorization and populated reapplication", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
@@ -13,7 +14,11 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
   beforeAll(async () => {
     h = await createHarness();
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
-    s = await pilotFixture(h);
+    s = await pilotFixture(h, {
+      cashLimitMinor: "1000",
+      spendLimitMinor: "1000",
+      timeLimitSeconds: 6000,
+    });
     await s.pilots.activate(s.f.owner, s.f.business.id, {
       pilotId: s.pilot.id,
       requestKey: randomUUID(),
@@ -147,6 +152,25 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
         }
       }
     }
+    for (const table of pilotCostReadTables) {
+      const policy = table + "_pilot_cost_owner_read",
+        original = (
+          await h.admin.query<{ qual: string }>(
+            "select qual from pg_policies where schemaname=$1 and tablename=$2 and policyname=$3",
+            ["public", table, policy],
+          )
+        ).rows[0];
+      await h.admin.query(
+        `alter policy ${policy} on public.${table} using(true)`,
+      );
+      try {
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
+      } finally {
+        await h.admin.query(
+          `alter policy ${policy} on public.${table} using(${original.qual})`,
+        );
+      }
+    }
     await verifyRuntimeRole(h.runtime);
   });
   it("keeps every populated pilot row, all constraints and unaffected helper bodies through prepare/schema/secure; preparation denies helpers and writes", async () => {
@@ -172,6 +196,11 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
       return rows;
     }
     const originalContent = await content();
+    const originalPolicies = (
+      await h.admin.query(
+        "select * from pg_policies where schemaname='public' order by tablename,policyname",
+      )
+    ).rows;
     const constraints = (
       await h.admin.query(
         "select conrelid::regclass::text table_name,conname,pg_get_constraintdef(oid) definition from pg_constraint where connamespace='public'::regnamespace order by 1,2",
@@ -222,6 +251,13 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
     await h.reapplySchema();
     await verifyRuntimeRole(h.runtime);
     expect(await content()).toEqual(originalContent);
+    expect(
+      (
+        await h.admin.query(
+          "select * from pg_policies where schemaname='public' order by tablename,policyname",
+        )
+      ).rows,
+    ).toEqual(originalPolicies);
     expect(await s.pilots.workspace(s.f.owner, s.f.business.id)).toEqual(
       before,
     );
@@ -282,6 +318,7 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
             contentPreserved: originalContent,
             constraintsPreserved: constraints,
             functionsPreserved: functions,
+            allPoliciesPreserved: originalPolicies,
             tables: catalog,
             columns,
             policies,
@@ -293,5 +330,106 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
         ),
       );
     }
+  });
+  it("enforces the private current global cap under a non-bypass schema owner without costs authority, including unseen foreign native expense", async () => {
+    const actor = await h.authenticate(s.f.owner),
+      role = "pilot_test_owner";
+    await h.admin.query(
+      `create role ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS;grant usage,create on schema public to ${role};grant select on all tables in schema public to ${role};grant execute on all functions in schema public to ${role};alter default privileges for role ${role} revoke execute on functions from PUBLIC;alter default privileges for role ${role} in schema public revoke execute on functions from PUBLIC`,
+    );
+    const tables = (
+      await h.admin.query<{ name: string }>(
+        "select tablename name from pg_tables where schemaname='public' order by tablename",
+      )
+    ).rows;
+    for (const t of tables)
+      await h.admin.query(
+        `alter table public."${t.name.replaceAll('"', '""')}" owner to ${role}`,
+      );
+    const functions = (
+      await h.admin.query<{ signature: string }>(
+        "select oid::regprocedure::text signature from pg_proc where pronamespace='public'::regnamespace and proname=any($1::text[])",
+        [pilotFunctions],
+      )
+    ).rows;
+    for (const f of functions)
+      await h.admin.query(`alter function ${f.signature} owner to ${role}`);
+    await h.admin.query(
+      "update platform_operator set costs=false where user_id=$1",
+      [actor.userId],
+    );
+    await verifyRuntimeRole(h.runtime);
+    expect(
+      (
+        await s.pilots.preflight(s.f.owner, s.f.business.id, {
+          pilotId: s.pilot.id,
+          requestKey: randomUUID(),
+        })
+      ).gates.find((g) => g.capability === "global_budget")?.ready,
+    ).toBe(true);
+    await expect(
+      s.costs.workspace(s.f.owner, h.clock.now().toISOString().slice(0, 7)),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const stranger = await h.signIn("non-bypass-other-business@example.com"),
+      other = await h.application.createBusiness(stranger, {
+        name: "Private cost source",
+        offering: "Different private offering",
+        homeMarket: "",
+        website: "",
+      });
+    const file = await s.f.files.beginUpload(stranger, other.id, {
+      name: "foreign-private-expense.txt",
+      contentType: "text/plain",
+      size: 3,
+      purpose: "billing",
+    });
+    await s.f.files.completeUpload(
+      stranger,
+      other.id,
+      file.file.id,
+      file.token,
+      new TextEncoder().encode("abc"),
+    );
+    const preflight = await s.pilots.preflight(s.f.owner, s.f.business.id, {
+      pilotId: s.pilot.id,
+      requestKey: randomUUID(),
+    });
+    expect(
+      preflight.gates.find((g) => g.capability === "global_budget")?.ready,
+    ).toBe(false);
+    expect(JSON.stringify(preflight)).not.toContain(other.id);
+    expect(JSON.stringify(preflight)).not.toContain(file.file.id);
+    const client = await h.runtime.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true)",
+        [actor.userId, other.id],
+      );
+      expect(
+        (
+          await client.query("select * from file_usage where business_id=$1", [
+            other.id,
+          ])
+        ).rows,
+      ).toEqual([]);
+      expect(
+        (await client.query("select * from operator_cost_record")).rows,
+      ).toEqual([]);
+      expect(
+        (
+          await client.query(
+            "select pg_has_role(current_user,'pilot_test_owner','MEMBER') member",
+          )
+        ).rows[0].member,
+      ).toBe(false);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    const before = s.searches.length;
+    await s.discovery.start(s.f.owner, s.f.business.id, s.request());
+    await s.discovery.execute(s.queued.at(-1));
+    expect(s.searches).toHaveLength(before);
   });
 });

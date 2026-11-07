@@ -1,4 +1,5 @@
 import { nativeCostSourcesSql } from "./cost-security";
+import { pilotCostReadTables } from "./pilot-owner-policies";
 import type { Pool, PoolClient } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
@@ -30,6 +31,12 @@ export async function preparePilotSecurity(pool: Pool | PoolClient) {
 }
 export async function securePilots(pool: PoolClient) {
   const db = drizzle(pool);
+  // #56 adds its own maintenance role to operational policies. Keep these
+  // separate aggregate-read exceptions exact after that composition.
+  for (const name of pilotCostReadTables)
+    await pool.query(
+      `ALTER POLICY ${name}_pilot_cost_owner_read ON public.${name} TO PUBLIC USING(current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.${name}'::regclass))`,
+    );
   for (const table of [pilotRecord, pilotEvent, pilotEffect]) {
     const config = getTableConfig(table),
       name = config.name;
@@ -127,10 +134,12 @@ export async function securePilots(pool: PoolClient) {
 }
 export async function verifyPilots(pool: Pool | PoolClient) {
   const result = await pool.query<{ safe: boolean }>(`SELECT
+ (SELECT count(*)=${pilotCostReadTables.length} AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY(ARRAY[${pilotCostReadTables.map((n) => `'${n}'`).join(",")}]::name[])) AND
  (SELECT count(*)=3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE a.grantee=0)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('pilot_record','pilot_event','pilot_effect'))
  AND (SELECT count(*)=7 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE')=(p.proname<>'pilot_global_room') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname IN ('pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed'))
  AND (SELECT count(*)=2 AND bool_and(convalidated) FROM pg_constraint WHERE conname IN ('pilot_event_scope','pilot_effect_scope') AND contype='f')
  AND NOT has_column_privilege(current_user,'public.platform_operator','pilots','UPDATE')
- AND has_sequence_privilege(current_user,'public.pilot_event_position_seq','USAGE') AS safe`);
+ AND has_sequence_privilege(current_user,'public.pilot_event_position_seq','USAGE')
+ AND (SELECT count(*)=${pilotCostReadTables.length} AND bool_and(tablename=ANY(ARRAY[${pilotCostReadTables.map((n) => `'${n}'`).join(",")}]::name[]) AND roles::text[]=ARRAY['public'] AND cmd='SELECT' AND permissive='PERMISSIVE' AND with_check IS NULL AND regexp_replace(qual,'[[:space:]]','','g')=format('(CURRENT_USER=(SELECTpg_get_userbyid(c.relowner)ASpg_get_userbyidFROMpg_classcWHERE(c.oid=(%L::regclass)::oid)))',('public.'||tablename)::regclass::text)) FROM pg_policies WHERE schemaname='public' AND policyname=tablename||'_pilot_cost_owner_read') AS safe`);
   return result.rows[0]?.safe === true;
 }
