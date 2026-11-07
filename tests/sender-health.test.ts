@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { reporting } from "./support/reporting";
 import { createHarness } from "./support/harness";
 import { readySender } from "./support/senders";
 import { createInboxApplication } from "../src/application/inbox";
@@ -153,6 +154,11 @@ describe("Sender health at the public application seam", () => {
       { failures: ["bounces"], resolved: false },
     ]);
     expect((await app().alerts(f.operator)).alerts).toHaveLength(1);
+    const report = await reporting(h).read(f.owner, f.businessId, {});
+    expect(report.metrics.find((m) => m.id === "sender_pauses")?.value).toBe(1);
+    expect(
+      report.metrics.find((m) => m.id === `complaints_${identityId}`),
+    ).toMatchObject({ value: 0, denominator: 100, ratio: 0 });
     expect(
       (await f.sender.app.workspace(f.owner, f.businessId)).identities[0]
         .readiness,

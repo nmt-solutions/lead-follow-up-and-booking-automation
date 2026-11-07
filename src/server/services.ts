@@ -1,4 +1,7 @@
 import { createFinancialAdjustmentApplication } from "../application/financial-adjustments";
+import { createReportingApplication } from "../application/reporting";
+import { createReportingRepository } from "../db/reporting-repository";
+import { createReportingHttp } from "../http/reporting";
 import { createFinancialAdjustmentRepository } from "../db/financial-adjustment-repository";
 import { createFinancialAdjustmentHttp } from "../http/financial-adjustments";
 import { configuredFinancialAdjustments } from "../financial-adjustments/configuration";
@@ -630,7 +633,20 @@ async function composeServices() {
     },
     logs: configuredOperationLogs(process.env),
   });
+  const reporting = createReportingApplication({
+    authenticate: access.authenticateForWork,
+    repository: createReportingRepository(
+      runtimeDatabase(pool),
+      googleOptions.clock,
+    ),
+    clock: googleOptions.clock,
+  });
   return {
+    reporting,
+    reportingHttp: createReportingHttp({
+      application: reporting,
+      reportFailure,
+    }),
     dataGovernance,
     dataGovernanceHttp: createDataGovernanceHttp({
       application: dataGovernance,

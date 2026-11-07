@@ -6,6 +6,7 @@ import { createOperationsApplication } from "../src/application/operations";
 import { createOperationsRepository } from "../src/db/operations-repository";
 import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 import { createWhatsAppSendingHttp } from "../src/http/whatsapp-sending";
+import { reporting } from "./support/reporting";
 
 describe("WhatsApp sends through current public application commands", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -77,6 +78,20 @@ describe("WhatsApp sends through current public application commands", () => {
       providerMessageRef: "wamid.out-1",
       evidence: "accepted",
     });
+    const report = await reporting(h).read(f.credentials, f.businessId, {});
+    expect(
+      Object.fromEntries(report.metrics.map((m) => [m.id, m.value])),
+    ).toMatchObject({
+      native_accepted_actions: 1,
+      whatsapp_delivered: 0,
+      response_coverage: 1,
+      meta_observed_unpriced: 0,
+      meta_actual_charge: null,
+      confirmed_sale: 0,
+    });
+    expect(JSON.stringify(report)).not.toContain(
+      String(f.sent[0].biz_opaque_callback_data),
+    );
   });
   it("keeps ambiguous acceptance reserved across restart until an exact signed account, recipient and action status resolves it", async () => {
     const f = await metaSendingFixture(h, "ambiguous");
@@ -173,7 +188,57 @@ describe("WhatsApp sends through current public application commands", () => {
       minor: null,
       provenance: "authenticated_meta_status",
     });
+    const report = await reporting(h).read(f.credentials, f.businessId, {});
+    expect(
+      Object.fromEntries(report.metrics.map((m) => [m.id, m.value])),
+    ).toMatchObject({
+      whatsapp_delivered: 1,
+      meta_observed_unpriced: 1,
+      meta_actual_charge: null,
+      confirmed_sale: 0,
+    });
+    expect(JSON.stringify(report)).not.toContain(
+      String(f.sent[0].biz_opaque_callback_data),
+    );
     await f.control.dispatch(f.credentials, f.businessId, action.id);
+    expect(f.sent).toHaveLength(1);
+  });
+  it("does not count delayed reconciliation of an earlier Meta submission as a response to a later engagement cohort", async () => {
+    const f = await metaSendingFixture(h, "report-response-timing");
+    await f.permission();
+    const action = await f.groundedReply();
+    f.httpState.ambiguous = true;
+    await f.control.dispatch(f.credentials, f.businessId, action.id);
+    h.clock.set("2026-11-05T09:30:00Z");
+    await f.incoming(
+      "wamid.later-inquiry",
+      "Please quote more steel",
+      "wamid.inquiry",
+    );
+    await f.intake.drain();
+    h.clock.set("2026-11-05T10:00:00Z");
+    await f.deliver("messages", {
+      statuses: [
+        {
+          id: "wamid.out-1",
+          status: "delivered",
+          timestamp: String(Date.parse("2026-11-05T09:00:00Z") / 1000),
+          recipient_id: "919876543210",
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
+        },
+      ],
+    });
+    await f.intake.drain();
+    await f.app.reconcile(f.credentials, f.businessId, { actionId: action.id });
+    const report = await reporting(h).read(f.credentials, f.businessId, {
+      from: "2026-11-05T09:15:00Z",
+    });
+    expect(
+      report.metrics.find((m) => m.id === "direct_engagement")?.value,
+    ).toBe(1);
+    expect(
+      report.metrics.find((m) => m.id === "response_coverage")?.value,
+    ).toBe(0);
     expect(f.sent).toHaveLength(1);
   });
   it("requires an immutable Owner approval, sends its fixed recipient only and durably bounds follow-up timing and attempts", async () => {
@@ -287,6 +352,14 @@ describe("WhatsApp sends through current public application commands", () => {
       reason: "paid_automation_unavailable",
     });
     expect(f.sent).toHaveLength(0);
+    const report = await reporting(h).read(f.credentials, f.businessId, {});
+    expect(
+      Object.fromEntries(report.metrics.map((m) => [m.id, m.value])),
+    ).toMatchObject({
+      direct_engagement: 1,
+      confirmed_sale: 0,
+      native_accepted_actions: 0,
+    });
     expect(
       (await f.inbox.workspace(f.credentials, f.businessId)).conversations,
     ).toHaveLength(1);
@@ -586,6 +659,18 @@ describe("WhatsApp sends through current public application commands", () => {
       actions[0].opportunityId,
     );
     expect(state.state).toBe("human");
+    const report = await reporting(h).read(f.credentials, f.businessId, {});
+    expect(
+      Object.fromEntries(report.metrics.map((m) => [m.id, m.value])),
+    ).toMatchObject({
+      manual_replies: 0,
+      whatsapp_manual_activity: 2,
+      handoffs: 1,
+      direct_engagement: 1,
+      recorded_next_actions: 2,
+      human_hours: null,
+      confirmed_sale: 0,
+    });
     await f.control.change(f.credentials, f.businessId, state.id, {
       command: "handback",
       expectedVersion: state.version,
@@ -804,6 +889,15 @@ describe("WhatsApp sends through current public application commands", () => {
       permissionId: first.permissions[0].id,
       reason: "Recipient withdrew the consent evidenced by this artifact",
     });
+    await f.app.revokePermission(f.credentials, f.businessId, {
+      permissionId: first.permissions[0].id,
+      reason: "Recipient withdrew the consent evidenced by this artifact",
+    });
+    const report = await reporting(h).read(f.credentials, f.businessId, {});
+    expect(
+      report.metrics.find((m) => m.id === "whatsapp_permission_withdrawals")
+        ?.value,
+    ).toBe(1);
     expect(
       await f.control.dispatch(f.credentials, f.businessId, action.id),
     ).toMatchObject({
