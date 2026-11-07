@@ -349,6 +349,16 @@ export function createReachChangeRepository(database: Database) {
         row.snapshot.original.end <= at.toISOString()
       )
         throw new ApplicationError("PAID_ACCESS_REQUIRED");
+      const effective = await tx.execute<{
+        basis: { changeId: string } | null;
+      }>(
+        sql`select public.reach_effective_scope(${row.businessId}::uuid,${row.periodId}::uuid,${at.toISOString()}::timestamptz) as basis`,
+      );
+      if (
+        (effective.rows[0]?.basis?.changeId ?? null) !==
+        row.snapshot.priorChangeId
+      )
+        throw new ApplicationError("PAID_ACCESS_REQUIRED");
     }
   }
   async function authorized<T>(

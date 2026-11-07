@@ -9,9 +9,35 @@ export const reachFunctions = [
   "payment_reach_contract",
   "reach_configuration_matches",
   "payment_reach_stop_requested",
+  "reach_effective_scope",
+  "current_paid_contract",
 ];
 export async function prepareReachSecurity(pool: Pool | PoolClient) {
   await pool.query(`
+    CREATE OR REPLACE FUNCTION public.reach_effective_scope(tenant uuid,period uuid,at_time timestamptz)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
+      IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT EXISTS(SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=current_setting('app.actor_id',true)) AND NOT EXISTS(SELECT 1 FROM public.reach_change c WHERE c.business_id=tenant AND public.reach_worker_authorized(c.id,tenant)) THEN RETURN NULL; END IF;
+      RETURN (SELECT jsonb_build_object('changeId',c.id,'scope',c.snapshot->'scope','offerId',c.snapshot->'target'->'quote'->'selection'->'offerId','reservedCapacityId',c.snapshot->'target'->'quote'->'selection'->'reservedCapacityId','reservedCapacity',CASE WHEN c.snapshot->'target'->'quote'->'pricing'->'reservedCapacity' IS NULL OR c.snapshot->'target'->'quote'->'pricing'->'reservedCapacity'='null'::jsonb THEN NULL ELSE jsonb_build_object('id',c.snapshot->'target'->'quote'->'pricing'->'reservedCapacity'->'id','label',c.snapshot->'target'->'quote'->'pricing'->'reservedCapacity'->'label','capacity',c.snapshot->'target'->'quote'->'pricing'->'reservedCapacity'->'capacity') END)
+        FROM public.reach_change c JOIN public.subscription_period p ON p.id=c.period_id AND p.business_id=c.business_id
+        JOIN LATERAL(SELECT e.position FROM public.reach_change_event e WHERE e.change_id=c.id AND e.fact->>'kind'='applied' AND e.at<=at_time ORDER BY e.position DESC LIMIT 1) applied ON true
+        WHERE c.business_id=tenant AND c.period_id=period AND c.snapshot->>'direction'='expansion'
+        AND EXISTS(SELECT 1 FROM public.reach_change_event capture JOIN public.subscription_period delta ON delta.id=(capture.fact->>'periodId')::uuid AND delta.business_id=c.business_id AND delta.action_id=(c.snapshot->>'deltaActionId')::uuid WHERE capture.change_id=c.id AND capture.fact->>'kind'='capture')
+        AND NOT EXISTS(WITH RECURSIVE basis AS (
+          SELECT c.id,c.snapshot UNION SELECT prior.id,prior.snapshot FROM basis b JOIN public.reach_change prior ON prior.id=(b.snapshot->>'priorChangeId')::uuid AND prior.business_id=tenant AND prior.period_id=period
+        ) SELECT 1 FROM basis b JOIN public.subscription_period delta ON delta.action_id=(b.snapshot->>'deltaActionId')::uuid AND delta.business_id=tenant JOIN public.financial_case f ON f.period_id=delta.id AND f.business_id=tenant JOIN LATERAL(SELECT e.detail FROM public.financial_case_event e WHERE e.case_id=f.id AND e.kind='observation' ORDER BY e.position DESC LIMIT 1) effect ON true WHERE effect.detail->>'access'='block_period')
+        ORDER BY applied.position DESC LIMIT 1);
+    END $$;
+    CREATE OR REPLACE FUNCTION public.current_paid_contract(tenant uuid,at_time timestamptz)
+    RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE scope record; term record; reach jsonb; BEGIN
+      SELECT * INTO scope FROM public.current_paid_scope(tenant,at_time); IF NOT FOUND THEN RETURN NULL; END IF;
+      SELECT * INTO term FROM public.subscription_period p WHERE p.id=scope.id AND p.business_id=tenant;
+      reach:=public.reach_effective_scope(tenant,scope.id,at_time);
+      RETURN jsonb_build_object('periodId',scope.id,'actionId',term.action_id,'changeId',reach->'changeId','start',to_char(term.start AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'end',to_char(term."end" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'markets',scope.markets,'discovery',scope.discovery,'automation',scope.automation,
+        'offerId',coalesce(reach->'offerId',term.snapshot->'quote'->'selection'->'offerId'),'reservedCapacityId',coalesce(reach->'reservedCapacityId',term.snapshot->'quote'->'selection'->'reservedCapacityId'),'reservedCapacity',CASE WHEN reach IS NOT NULL THEN reach->'reservedCapacity' WHEN term.snapshot->'quote'->'pricing'->'reservedCapacity' IS NULL OR term.snapshot->'quote'->'pricing'->'reservedCapacity'='null'::jsonb THEN NULL ELSE jsonb_build_object('id',term.snapshot->'quote'->'pricing'->'reservedCapacity'->'id','label',term.snapshot->'quote'->'pricing'->'reservedCapacity'->'label','capacity',term.snapshot->'quote'->'pricing'->'reservedCapacity'->'capacity') END);
+    END $$;
+    REVOKE ALL ON FUNCTION public.reach_effective_scope(uuid,uuid,timestamptz),public.current_paid_contract(uuid,timestamptz) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.reach_effective_scope(uuid,uuid,timestamptz),public.current_paid_contract(uuid,timestamptz) TO app_runtime;
     CREATE OR REPLACE FUNCTION public.reach_configuration_matches(policy jsonb,review jsonb)
     RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
       PERFORM pg_advisory_xact_lock(hashtextextended('reach-policy:'||(policy->>'id')||':'||(policy->>'version'),0));

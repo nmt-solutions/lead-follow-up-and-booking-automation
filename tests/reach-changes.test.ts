@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID, createHmac } from "node:crypto";
 import { createHarness } from "./support/harness";
 import { subscriptionFixture } from "./support/subscription";
-import { razorpayFixture } from "./support/razorpay";
+import { financialNativeFixture } from "./support/financial-native";
+import { createFinancialAdjustmentApplication } from "../src/application/financial-adjustments";
+import { createFinancialAdjustmentRepository } from "../src/db/financial-adjustment-repository";
+import { configuredFinancialAdjustments } from "../src/financial-adjustments/configuration";
+import { createSellerDocumentApplication } from "../src/application/seller-documents";
+import { createSellerDocumentRepository } from "../src/db/seller-document-repository";
+import { createMemoryStorage } from "./support/storage";
+import { fixtureIssuer } from "./support/seller-issuer";
 import { configuredPayments } from "../src/subscription-payments/configuration";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";
 import { createSubscriptionPaymentRepository } from "../src/db/subscription-payment-repository";
@@ -51,6 +58,7 @@ describe("Approved reach changes at the public application seam", () => {
     country = "US",
     reduction = false,
     dates?: { start: string; end: string; at: string },
+    capacity = false,
   ) {
     const f = await subscriptionFixture(h, { country });
     await h.admin.query(
@@ -62,15 +70,26 @@ describe("Approved reach changes at the public application seam", () => {
       f.owner = await h.signIn("tax-owner@example.com");
       f.operator = await h.signIn("tax-operator@example.com");
     }
-    const native = razorpayFixture(h.clock);
+    const native = financialNativeFixture(h.clock);
+    native.afterPost = async () => {
+      if (native.refunds.at(-1))
+        native.refunds.at(-1)!.currency = country === "US" ? "USD" : "INR";
+    };
     Object.assign(native.review, {
       internationalUpdates: "native_proration_reviewed",
     });
     native.review.plans.push({
       offerId: "expanded",
-      reservedCapacityId: null,
+      reservedCapacityId: capacity ? "reserved" : null,
       currency: country === "US" ? "USD" : "INR",
       planId: country === "US" ? "plan_expandedUSD" : "plan_expandedINR",
+      totalCount: 12,
+    });
+    native.review.plans.push({
+      offerId: "further",
+      reservedCapacityId: null,
+      currency: "USD",
+      planId: "plan_expandedFurtherUSD",
       totalCount: 12,
     });
     native.configuration.env.RAZORPAY_ACCOUNT_REVIEW = JSON.stringify(
@@ -102,7 +121,15 @@ describe("Approved reach changes at the public application seam", () => {
           interval: 1,
           period: "monthly",
           item: {
-            amount: country === "US" ? (reduction ? 1375 : 5500) : 22011,
+            amount: url.pathname.endsWith("plan_expandedFurtherUSD")
+              ? 8250
+              : country === "US"
+                ? reduction
+                  ? 1375
+                  : capacity
+                    ? 6600
+                    : 5500
+                : 22011,
             currency: country === "US" ? "USD" : "INR",
           },
         });
@@ -216,6 +243,25 @@ describe("Approved reach changes at the public application seam", () => {
     const original = (await payments.workspace(f.owner, f.business.id))
       .periods[0];
     const offer = f.quote.pricing.offer;
+    if (capacity) {
+      const rules = await f.tax.saveRule(f.operator, {
+        key: "reserved-tax",
+        expectedVersion: 0,
+        note: "Synthetic capacity tax",
+        rule: {
+          ...f.rules.revisions[0].rule,
+          productCode: "reserved_capacity",
+        },
+      });
+      await f.tax.decideRule(f.operator, {
+        revisionId: rules.revisions.find(
+          (r) => r.rule.productCode === "reserved_capacity",
+        )!.id,
+        expectedDecisionVersion: 0,
+        outcome: "approved",
+        note: "Synthetic capacity review",
+      });
+    }
     await f.quotes.configure(f.operator, {
       expectedVersion: 1,
       effectiveFrom: null,
@@ -236,12 +282,25 @@ describe("Approved reach changes at the public application seam", () => {
             USD: { monthlyMinor: reduction ? 1250 : 5000, pilotMinor: null },
           },
           pilot: null,
+          reservedCapacity: capacity
+            ? [
+                {
+                  id: "reserved",
+                  label: "Reserved execution",
+                  capacity: { quantity: 2, unit: "concurrent runs" },
+                  prices: {
+                    USD: { monthlyMinor: 1000, pilotMinor: null },
+                    INR: null,
+                  },
+                },
+              ]
+            : [],
         },
       ],
     });
     const target = await f.quotes.createQuote(f.owner, f.business.id, {
       offerId: "expanded",
-      reservedCapacityId: null,
+      reservedCapacityId: capacity ? "reserved" : null,
       term: "monthly",
       expectedCatalogVersion: 2,
       expectedBillingVersion: 1,
@@ -268,14 +327,19 @@ describe("Approved reach changes at the public application seam", () => {
         order_id: "order_delta",
         status: "paid",
         currency: "USD",
-        amount: 1375,
-        amount_paid: 1375,
+        amount: capacity ? 1925 : 1375,
+        amount_paid: capacity ? 1925 : 1375,
         amount_due: 0,
         billing_start: 1795165200,
         billing_end: 1796461200,
         paid_at: Math.floor(h.clock.now().getTime() / 1000),
         line_items: [
-          { type: "plan", quantity: 1, amount: 1375, currency: "USD" },
+          {
+            type: "plan",
+            quantity: 1,
+            amount: capacity ? 1925 : 1375,
+            currency: "USD",
+          },
         ],
       });
       native.payments.set("pay_delta", {
@@ -287,7 +351,7 @@ describe("Approved reach changes at the public application seam", () => {
         captured: true,
         method: "card",
         international: true,
-        amount: 1375,
+        amount: capacity ? 1925 : 1375,
         currency: "USD",
         amount_refunded: 0,
         fee: 1,
@@ -448,6 +512,16 @@ describe("Approved reach changes at the public application seam", () => {
     );
     const workspace = await f.payments.workspace(f.owner, f.business.id);
     expect(workspace.allowances?.discovery.included).toBe(150);
+    expect(workspace.effectiveContract).toMatchObject({
+      periodId: f.original.id,
+      changeId: preview.id,
+      offerId: "expanded",
+      markets: ["Pune", "United States", "Canada"],
+      reservedCapacity: null,
+    });
+    expect(JSON.stringify(workspace.effectiveContract)).not.toMatch(
+      /invoiceContact|billingReview|prices|recovery/,
+    );
     expect(workspace.periods.find((p) => p.id === f.original.id)).toEqual(
       f.original,
     );
@@ -460,6 +534,238 @@ describe("Approved reach changes at the public application seam", () => {
     });
     expect(f.effects).toHaveLength(1);
   });
+  it.each(["US", "IN"])(
+    "invoices and refunds the immutable %s delta using its own original tax and cash basis, retracting only the expansion",
+    async (country) => {
+      const f = await setup(country);
+      const c = await f.changes.preview(f.owner, f.business.id, {
+        periodId: f.original.id,
+        quoteId: f.target.id,
+        requestKey: randomUUID(),
+      });
+      await f.changes.approve(f.owner, f.business.id, {
+        changeId: c.id,
+        requestKey: randomUUID(),
+        accept: true,
+        reviewHash: c.reviewHash,
+      });
+      await f.changes.execute(f.owner, f.business.id, {
+        changeId: c.id,
+        requestKey: randomUUID(),
+      });
+      if (country === "US") f.captureDelta();
+      else {
+        await f.authenticateReplacement();
+        await f.changes.execute(f.owner, f.business.id, {
+          changeId: c.id,
+          requestKey: randomUUID(),
+        });
+        Object.assign(f.orders.get("order_separate")!, {
+          status: "paid",
+          amount_paid: 5503,
+          amount_due: 0,
+        });
+        f.native.payments.set("pay_separate", {
+          id: "pay_separate",
+          customer_id: "cust_fixture",
+          invoice_id: null,
+          order_id: "order_separate",
+          status: "captured",
+          captured: true,
+          method: "card",
+          international: false,
+          amount: 5503,
+          currency: "INR",
+          amount_refunded: 0,
+          created_at: 1795165200,
+        });
+      }
+      await f.changes.refresh(f.owner, f.business.id, {
+        changeId: c.id,
+        requestKey: randomUUID(),
+      });
+      let before = await f.payments.workspace(f.owner, f.business.id);
+      const delta = before.periods.find((p) => p.snapshot.adjustment)!;
+      expect(before.allowances?.discovery.included).toBe(150);
+      if (country === "US") {
+        h.clock.set("2026-11-20T09:01:00.000Z");
+        await f.quotes.configure(f.operator, {
+          expectedVersion: 2,
+          effectiveFrom: null,
+          note: "Synthetic further reach",
+          offers: [
+            {
+              ...f.target.pricing.offer,
+              id: "further",
+              markets: ["Pune", "United States", "Canada", "Mexico"],
+              discovery: { quantity: 300, unit: "research units" },
+              automation: { quantity: 300, unit: "provider calls" },
+              prices: {
+                USD: { monthlyMinor: 7500, pilotMinor: null },
+                INR: null,
+              },
+            },
+          ],
+        });
+        const quote = await f.quotes.createQuote(f.owner, f.business.id, {
+          offerId: "further",
+          reservedCapacityId: null,
+          term: "monthly",
+          expectedCatalogVersion: 3,
+          expectedBillingVersion: 1,
+          expectedReviewVersion: 1,
+          requestKey: randomUUID(),
+        });
+        const further = await f.changes.preview(f.owner, f.business.id, {
+          periodId: f.original.id,
+          quoteId: quote.snapshot.id,
+          requestKey: randomUUID(),
+        });
+        await f.changes.approve(f.owner, f.business.id, {
+          changeId: further.id,
+          requestKey: randomUUID(),
+          accept: true,
+          reviewHash: further.reviewHash,
+        });
+        await f.changes.execute(f.owner, f.business.id, {
+          changeId: further.id,
+          requestKey: randomUUID(),
+        });
+        f.native.invoices.push({
+          ...f.native.invoices.find((i) => i.id === "inv_delta")!,
+          id: "inv_further",
+          payment_id: "pay_further",
+          order_id: "order_further",
+          billing_start: 1795165260,
+          paid_at: 1795165260,
+        });
+        f.native.payments.set("pay_further", {
+          ...f.native.payments.get("pay_delta")!,
+          id: "pay_further",
+          invoice_id: "inv_further",
+          order_id: "order_further",
+        });
+        await f.changes.refresh(f.owner, f.business.id, {
+          changeId: further.id,
+          requestKey: randomUUID(),
+        });
+        before = await f.payments.workspace(f.owner, f.business.id);
+        expect(before.allowances?.discovery.included).toBe(200);
+      }
+      const op = await h.signIn("delta-refunds@example.com"),
+        actor = await h.authenticate(op);
+      await h.admin.query(
+        "insert into platform_operator(user_id,refunds,documents) values($1,true,true)",
+        [actor.userId],
+      );
+      const documents = createSellerDocumentApplication({
+        authenticate: h.authenticate,
+        authenticatePlatform: h.access.authenticatePlatform,
+        repository: createSellerDocumentRepository(runtimeDatabase(h.runtime)),
+        clock: h.clock,
+        storage: createMemoryStorage(),
+        mode: "fixture",
+        policy: {
+          accountScope: "fixture",
+          maxBytes: 1000000,
+          accessTtlSeconds: 60,
+          recoveryLeaseSeconds: 60,
+        },
+      });
+      const configuration = {
+        ...fixtureIssuer,
+        currencies: [
+          {
+            ...fixtureIssuer.currencies[0],
+            currency: country === "US" ? "USD" : "INR",
+          },
+        ],
+      };
+      const issuer = await documents.saveIssuer(op, {
+        expectedVersion: 0,
+        configuration,
+        note: "Synthetic delta issuer",
+      });
+      await documents.decideIssuer(op, {
+        revisionId: issuer.revisions[0].id,
+        expectedVersion: 0,
+        outcome: "approved",
+        note: "Synthetic reviewed issuer",
+      });
+      const original = await documents.issue(f.owner, f.business.id, {
+        periodId: f.original.id,
+        requestKey: randomUUID(),
+      });
+      const invoice = await documents.issue(f.owner, f.business.id, {
+        periodId: delta.id,
+        requestKey: randomUUID(),
+      });
+      expect(invoice.snapshot.totals).toEqual(
+        country === "US"
+          ? { netMinor: "1250", taxMinor: "125", totalMinor: "1375" }
+          : { netMinor: "5003", taxMinor: "500", totalMinor: "5503" },
+      );
+      const app = createFinancialAdjustmentApplication({
+        authenticate: h.authenticate,
+        authenticatePlatform: h.access.authenticatePlatform,
+        repository: createFinancialAdjustmentRepository(
+          runtimeDatabase(h.runtime),
+        ),
+        clock: h.clock,
+        gateway: configuredFinancialAdjustments(f.native.configuration),
+        documents,
+      });
+      const reviewed = await app.review(op, f.business.id, {
+        kind: "refund",
+        invoiceId: invoice.id,
+        requestKey: randomUUID(),
+        lines: [
+          {
+            lineId: "subscription",
+            netMinor: country === "US" ? "1250" : "5003",
+          },
+        ],
+        reason: "Approved full delta refund",
+        evidence: ["fixture:delta-refund-review"],
+      });
+      await app.execute(op, f.business.id, { caseId: reviewed.id });
+      expect(f.native.refundPosts).toHaveLength(1);
+      f.native.refunds[0].status = "processed";
+      await app.recover();
+      const credited = await app.credit(op, f.business.id, {
+        caseId: reviewed.id,
+      });
+      expect(credited).toMatchObject({
+        state: "processed",
+        access: "block_period",
+        creditDocumentId: expect.any(String),
+      });
+      expect(await app.financialFeed(f.operator)).toMatchObject([
+        {
+          effect: {
+            actualMinor: country === "US" ? "1375" : "5503",
+            allocation: { totals: invoice.snapshot.totals },
+          },
+          approvedCredit: null,
+        },
+      ]);
+      const after = await f.payments.workspace(f.owner, f.business.id);
+      expect(after.access.active).toBe(true);
+      expect(after.allowances?.discovery.included).toBe(100);
+      expect(after.effectiveContract?.changeId).toBe(null);
+      expect(after.periods).toEqual(before.periods);
+      const history = await documents.workspace(f.owner, f.business.id);
+      expect(
+        history.documents.find((d) => d.id === original.id)?.snapshot,
+      ).toEqual(original.snapshot);
+      expect(
+        history.documents.find((d) => d.kind === "credit_note")?.snapshot
+          .totals,
+      ).toEqual(invoice.snapshot.totals);
+      await app.execute(op, f.business.id, { caseId: reviewed.id });
+      expect(f.native.refundPosts).toHaveLength(1);
+    },
+  );
   it("renews the approved native target using its full captured price without rewriting the original or counting the delta as another term", async () => {
     const f = await setup();
     const preview = await f.changes.preview(f.owner, f.business.id, {
@@ -509,6 +815,73 @@ describe("Approved reach changes at the public application seam", () => {
     );
     expect(workspace.access.period?.snapshot.tax.totals?.totalMinor).toBe(
       "5500",
+    );
+  });
+  it("renews an approved reserved-capacity target with its own tax product and canonical effective capacity", async () => {
+    const f = await setup("US", false, undefined, true);
+    const c = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    expect(c.snapshot.delta.tax.totals).toEqual({
+      netMinor: "1750",
+      taxMinor: "175",
+      totalMinor: "1925",
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: c.reviewHash,
+    });
+    await f.changes.execute(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+    });
+    f.captureDelta();
+    await f.changes.refresh(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+    });
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).effectiveContract
+        ?.reservedCapacity,
+    ).toEqual({
+      id: "reserved",
+      label: "Reserved execution",
+      capacity: { quantity: 2, unit: "concurrent runs" },
+    });
+    h.clock.set("2026-12-05T09:00:00.000Z");
+    const owner = await h.signIn("tax-owner@example.com");
+    f.native.charge(
+      "pay_capacityrenewal",
+      "2026-12-05T09:00:00.000Z",
+      "2027-01-05T09:00:00.000Z",
+      "USD",
+    );
+    Object.assign(f.native.invoices.at(-1)!, {
+      amount: 6600,
+      amount_paid: 6600,
+      line_items: [
+        { type: "plan", quantity: 1, amount: 6600, currency: "USD" },
+      ],
+    });
+    Object.assign(f.native.payments.get("pay_capacityrenewal")!, {
+      amount: 6600,
+    });
+    await f.payments.refresh(owner, f.business.id, { actionId: f.action.id });
+    await f.changes.recover();
+    const renewed = await f.payments.workspace(owner, f.business.id);
+    expect(renewed.access.period?.paymentId).toBe("pay_capacityrenewal");
+    expect(renewed.access.period?.snapshot.tax.totals).toEqual({
+      netMinor: "6000",
+      taxMinor: "600",
+      totalMinor: "6600",
+    });
+    expect(renewed.effectiveContract?.reservedCapacityId).toBe("reserved");
+    expect(renewed.periods.find((p) => p.id === f.original.id)).toEqual(
+      f.original,
     );
   });
   it("keeps reductions pending until the actual eligible captured renewal and preserves the original financial history", async () => {
@@ -1187,6 +1560,16 @@ describe("Approved reach changes at the public application seam", () => {
         await secureDatabase(h.admin);
         await verifyRuntimeRole(h.runtime);
       });
+  it("refuses implicit PUBLIC execution on a required reach helper and restores its private ACL", async () => {
+    await h.admin.query(
+      "update pg_proc set proacl=null where oid='public.current_paid_contract(uuid,timestamptz)'::regprocedure",
+    );
+    await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+      code: "SETUP_REQUIRED",
+    });
+    await secureDatabase(h.admin);
+    await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
+  });
   for (const name of reachFunctions)
     it(`requires restricted helper ${name}`, async () => {
       const functionName = (

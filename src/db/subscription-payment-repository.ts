@@ -48,7 +48,7 @@ import {
 } from "../models/subscription-payments";
 import { ApplicationError } from "../models/application-error";
 import type { Actor } from "../models/business";
-import { paidAllowance } from "./paid-access";
+import { paidAllowance, readPaidContract } from "./paid-access";
 import { z } from "zod";
 import {
   billingState,
@@ -518,6 +518,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
                   automation: automation.allowance,
                 }
               : null,
+          effectiveContract: await readPaidContract(tx, businessId, at),
           ...(await paymentAccess(tx, businessId, at)),
           allowances:
             discovery && automation

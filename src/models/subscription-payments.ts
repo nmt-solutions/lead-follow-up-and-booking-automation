@@ -11,6 +11,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import {
   subscriptionQuoteSchema,
   allowanceSchema,
+  reservedCapacitySchema,
 } from "./subscription-quotes";
 import { taxCalculationSchema } from "./tax";
 import {
@@ -312,7 +313,23 @@ export const paidAccessSchema = z.object({
   paidThrough: z.iso.datetime().nullable(),
   period: paidPeriodSchema.nullable(),
 });
+/** Current acquisition/capacity contract. It carries no billing evidence or sending authority. */
+export const paidContractSchema = z.object({
+  periodId: z.uuid(),
+  actionId: z.uuid(),
+  changeId: z.uuid().nullable(),
+  start: z.iso.datetime(),
+  end: z.iso.datetime(),
+  markets: z.array(z.string()),
+  discovery: allowanceSchema,
+  automation: allowanceSchema,
+  offerId: z.string(),
+  reservedCapacityId: z.string().nullable(),
+  reservedCapacity: reservedCapacitySchema.omit({ prices: true }).nullable(),
+});
+export type PaidContract = z.infer<typeof paidContractSchema>;
 export const paymentWorkspaceSchema = z.object({
+  effectiveContract: paidContractSchema.nullable().optional(),
   effectiveScope: z
     .object({
       periodId: z.uuid(),

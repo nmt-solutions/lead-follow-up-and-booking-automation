@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { databaseConnectionUrl } from "../db/connection";
 import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { createSubscriptionPaymentRepository } from "../db/subscription-payment-repository";
 import { createSubscriptionPaymentApplication } from "../application/subscription-payments";
@@ -10,7 +11,7 @@ import { ApplicationError } from "../models/application-error";
 export async function recoverSubscriptionPayments() {
   if (!process.env.DATABASE_URL) throw new ApplicationError("SETUP_REQUIRED");
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseConnectionUrl(process.env.DATABASE_URL),
     max: 2,
     connectionTimeoutMillis: 10000,
     statement_timeout: 10000,

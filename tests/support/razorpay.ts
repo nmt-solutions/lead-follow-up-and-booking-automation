@@ -1,4 +1,5 @@
 import type { Clock } from "../../src/models/business";
+import type { RazorpayAccountReview } from "../../src/models/razorpay-account";
 
 /** Synthetic account review and HTTP boundary; no native credentials or account calls. */
 export function razorpayFixture(clock: Clock) {
@@ -39,7 +40,7 @@ export function razorpayFixture(clock: Clock) {
       evidence: ["fixture:calendar-month-approved"],
     },
     internationalUpdates: "unknown",
-    plans: [
+    plans: Array.from<RazorpayAccountReview["plans"][number]>([
       {
         offerId: "fixture",
         reservedCapacityId: null,
@@ -54,7 +55,7 @@ export function razorpayFixture(clock: Clock) {
         planId: "plan_fixtureUSD",
         totalCount: 12,
       },
-    ],
+    ]),
   };
   const creations: unknown[] = [];
   const subscriptions = new Map<string, Record<string, unknown>>();
