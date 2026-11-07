@@ -120,6 +120,8 @@ export function createTeamApplication<Credentials>(dependencies: {
     let delivery: "sent" | "unconfirmed" = "sent";
     try {
       await dependencies.mailer.send({
+        businessId: id,
+        actorId: claim.invitation.createdBy,
         invitationId,
         email: claim.invitation.email,
         businessName: claim.businessName,

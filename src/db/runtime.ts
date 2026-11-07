@@ -2,6 +2,10 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool, PoolClient } from "pg";
 import { ApplicationError } from "../models/application-error";
 import * as schema from "./schema";
+import {
+  notificationFunctions,
+  notificationTables,
+} from "./notification-security";
 
 export function runtimeDatabase(pool: Pool) {
   return drizzle(pool, { schema });
@@ -14,6 +18,10 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*)=${notificationTables.length} AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN (${notificationTables.map((n) => `'${n}'`).join(",")}))
+      AND NOT has_column_privilege(current_user,'public.platform_operator','notifications','UPDATE')
+      AND (SELECT count(*)=${notificationTables.length * 2} AND bool_and('app_runtime'=ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual='false' ELSE with_check='false' END) FROM pg_policies WHERE schemaname='public' AND tablename IN (${notificationTables.map((n) => `'${n}'`).join(",")}))
+      AND (SELECT count(*)=${notificationFunctions.length} AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN (${notificationFunctions.map((n) => `'${n}'`).join(",")}))
       AND (SELECT count(*)=6 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('operator_cost_record','operator_cost_planning','operator_cost_scan','operator_cost_budget','operator_cost_alert','operator_cost_notification_event'))
       AND (SELECT count(*)=12 AND bool_and('app_runtime'=ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL ELSE with_check IS NOT NULL END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('operator_cost_record','operator_cost_planning','operator_cost_scan','operator_cost_budget','operator_cost_alert','operator_cost_notification_event'))
       AND NOT has_column_privilege(current_user,'public.platform_operator','costs','UPDATE')

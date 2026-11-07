@@ -7,6 +7,12 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "notification_terms",
+    "notification_setup",
+    "notification_notice",
+    "notification_payload",
+    "notification_event",
+    "notification_receipt",
     "operator_cost_record",
     "operator_cost_planning",
     "operator_cost_scan",
