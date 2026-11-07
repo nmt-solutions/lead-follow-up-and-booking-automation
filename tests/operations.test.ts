@@ -157,30 +157,49 @@ describe("Operations at the public application seam", () => {
       { code: "FORBIDDEN" },
     );
   });
-  it("requires each ledger read/append and narrow helper grant independently and survives managed reapplication", async () => {
-    for (const table of ["operation_event", "operation_retention"])
-      for (const grant of ["SELECT", "INSERT"]) {
-        await h.admin.query(`revoke ${grant} on ${table} from app_runtime`);
-        await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
-        await secureDatabase(h.admin);
-        await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
-      }
-    for (const signature of [
-      "operations_operator_authorized()",
-      "operation_mailbox_work(uuid,uuid)",
-      "record_operation_detail(uuid,text,uuid,text)",
-      "prune_operation_details()",
-      "maintain_operation_retention()",
-    ]) {
-      await h.admin.query(
-        `revoke execute on function public.${signature} from app_runtime`,
-      );
-      await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
+  it.each(
+    ["operation_event", "operation_retention"].flatMap((table) =>
+      ["SELECT", "INSERT"].map((grant) => ({ table, grant })),
+    ),
+  )("requires $grant on $table independently", async ({ table, grant }) => {
+    await h.admin.query(`revoke ${grant} on ${table} from app_runtime`);
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
       await secureDatabase(h.admin);
     }
+    await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
+  });
+  it.each([
+    "operations_operator_authorized()",
+    "operation_mailbox_work(uuid,uuid)",
+    "record_operation_detail(uuid,text,uuid,text)",
+    "prune_operation_details()",
+    "maintain_operation_retention()",
+  ])("requires the restricted %s helper", async (signature) => {
+    await h.admin.query(
+      `revoke execute on function public.${signature} from app_runtime`,
+    );
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
+      await secureDatabase(h.admin);
+    }
+    await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
+  });
+  it("requires source capture and restores restricted security on managed reapplication", async () => {
     await h.admin.query("drop trigger capture_operation on mailbox_job");
-    await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
-    await secureDatabase(h.admin);
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+    } finally {
+      await secureDatabase(h.admin);
+    }
     await h.reapplySchema();
     await expect(verifyRuntimeRole(h.runtime)).resolves.toBeUndefined();
   });
