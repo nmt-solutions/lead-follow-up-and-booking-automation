@@ -18,7 +18,7 @@ import {
   type CapacityDeployment,
 } from "../models/discovery-capacity";
 import type { Actor } from "../models/business";
-import type { DiscoveryWork } from "../models/discovery";
+import type { DiscoveryWork, DiscoveryRun } from "../models/discovery";
 import { requireCapability } from "./scope";
 import {
   checkCurrent,
@@ -74,6 +74,8 @@ export async function bindDiscoveryCapacity(
 ) {
   const route = await routeFor(tx, work.businessId);
   if (!route) return;
+  await requireCapability(tx, work, work.businessId, "profile.manage");
+  await requireWorkSession(tx, work, await capacityTime(tx));
   await tx
     .insert(discoveryCapacityBinding)
     .values({
@@ -88,9 +90,10 @@ export async function bindDiscoveryCapacity(
 }
 export async function requireCapacityBindingCurrent(
   tx: Transaction,
-  run: Pick<typeof discoveryRun.$inferSelect, "businessId"> & {
-    executionId: string | null;
-  },
+  run: Pick<
+    DiscoveryRun,
+    "businessId" | "executionId" | "executionUserId" | "createdBy" | "sessionId"
+  >,
 ) {
   if (!run.executionId) return;
   const [binding] = await tx
@@ -103,6 +106,12 @@ export async function requireCapacityBindingCurrent(
       ),
     );
   if (!binding) return;
+  const actor = {
+    userId: run.executionUserId ?? run.createdBy,
+    sessionId: run.sessionId,
+  };
+  await requireCapability(tx, actor, run.businessId, "profile.manage");
+  await requireWorkSession(tx, actor, await capacityTime(tx));
   const current = await routeFor(tx, run.businessId);
   if (!current || !isDeepStrictEqual(binding.route, current))
     throw new ApplicationError("DISCOVERY_SCOPE_INVALID");

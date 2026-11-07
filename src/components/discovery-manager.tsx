@@ -333,8 +333,8 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
       {run.executionCapacity && (
         <p className="text-sm text-muted-foreground">
           Execution allowance:{" "}
-          {run.executionCapacity.mode === "reserved" ? "Reserved" : "Pooled"} ?{" "}
-          {run.executionCapacity.slots} concurrent discovery runs ? approval
+          {run.executionCapacity.mode === "reserved" ? "Reserved" : "Pooled"} ·{" "}
+          {run.executionCapacity.slots} concurrent discovery runs · approval
           revision {run.executionCapacity.policyVersion}.
         </p>
       )}
@@ -720,15 +720,15 @@ export function DiscoveryManager({
               {
                 {
                   available: "Available",
-                  busy: "Busy ? queued work waits for capacity",
+                  busy: "Busy — queued work waits for capacity",
                   setup_required:
                     "Current paid entitlement, approved allocation and worker deployment are required",
                   unavailable:
-                    "Provider capacity could not be verified ? queued work waits",
+                    "Provider capacity could not be verified — queued work waits",
                   stale:
-                    "Provider observation is stale ? refresh to check again",
+                    "Provider observation is stale — refresh to check again",
                   entitlement_changed:
-                    "Entitlement changed ? review configuration before resuming",
+                    "Entitlement changed — review configuration before resuming",
                 }[state.capacity.status]
               }
             </p>
@@ -736,7 +736,7 @@ export function DiscoveryManager({
               <p className="text-sm">
                 {state.capacity.slots} concurrent discovery runs allocated.{" "}
                 {state.capacity.running !== null
-                  ? `${state.capacity.running} running ? ${state.capacity.queued} queued in this lane.`
+                  ? `${state.capacity.running} running · ${state.capacity.queued} queued in this lane.`
                   : "Current running and queued counts are unknown."}
               </p>
             )}

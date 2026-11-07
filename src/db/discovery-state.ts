@@ -92,13 +92,14 @@ export async function settings(tx: Transaction, businessId: string, at: Date) {
   };
 }
 
-export async function checkCurrent(
+// Explicit budget approval/resume validates current scope without treating an
+// obsolete execution's actor or capacity binding as authority for new work.
+export async function checkCurrentScope(
   tx: Transaction,
   run: DiscoveryRun,
   at: Date,
 ) {
   await requireDiscoveryAvailable(tx, run.businessId);
-  await requireCapacityBindingCurrent(tx, run);
   const { profile, policy } = await settings(tx, run.businessId, at);
   if (
     !policy ||
@@ -112,6 +113,15 @@ export async function checkCurrent(
     )
   )
     throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+}
+
+export async function checkCurrent(
+  tx: Transaction,
+  run: DiscoveryRun,
+  at: Date,
+) {
+  await checkCurrentScope(tx, run, at);
+  await requireCapacityBindingCurrent(tx, run);
 }
 
 export async function requireDiscoveryAvailable(

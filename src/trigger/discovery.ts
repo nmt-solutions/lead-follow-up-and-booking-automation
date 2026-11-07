@@ -28,11 +28,13 @@ export const boundedDiscovery = task({
     const parsed = workSchema.safeParse(payload);
     if (!parsed.success) throw new AbortTaskRunError("Invalid discovery work");
     try {
-      return await withDiscoveryWorker((application) =>
-        application.execute(parsed.data, {
-          signal,
-          durable: { runId: ctx.run.id, number: ctx.attempt.number },
-        }),
+      return await withDiscoveryWorker(
+        (application) =>
+          application.execute(parsed.data, {
+            signal,
+            durable: { runId: ctx.run.id, number: ctx.attempt.number },
+          }),
+        ctx,
       );
     } catch {
       throw new Error(

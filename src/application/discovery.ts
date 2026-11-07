@@ -195,6 +195,9 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
         queued: null,
         observedAt: null,
       };
+    const current = await dependencies.authenticate(credentials);
+    if (current.userId !== actor.userId)
+      throw new ApplicationError("FORBIDDEN");
     return state;
   }
   return {

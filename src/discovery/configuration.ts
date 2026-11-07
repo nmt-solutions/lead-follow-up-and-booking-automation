@@ -5,6 +5,7 @@ import {
   idempotencyKeys,
   concurrencyLimits,
   queues,
+  deployments,
 } from "@trigger.dev/sdk";
 import type { DiscoveryProvider } from "../models/discovery";
 import type { createAiApplication } from "../application/ai";
@@ -40,6 +41,7 @@ export function configuredDiscoveryProvider(
 export function configuredDiscoveryQueue(
   environment: NodeJS.ProcessEnv,
   repository: ReturnType<typeof createDiscoveryCapacityRepository>,
+  execution?: Parameters<typeof createCapacityDiscoveryQueue>[0]["execution"],
 ) {
   const deployment = capacityDeployment(environment);
   if (
@@ -53,8 +55,11 @@ export function configuredDiscoveryQueue(
   return createCapacityDiscoveryQueue({
     deployment,
     repository,
+    execution,
     native: {
       key: (value) => idempotencyKeys.create(value, { scope: "global" }),
+      deployment: () =>
+        deployments.retrieveCurrent({ retry: { maxAttempts: 1 } }),
       queue: () =>
         queues.retrieve(
           { type: "task", name: "bounded-prospect-discovery" },

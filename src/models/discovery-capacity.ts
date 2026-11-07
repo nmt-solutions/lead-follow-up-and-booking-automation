@@ -2,10 +2,14 @@ import { paidContractSchema } from "./subscription-payments";
 import { z } from "zod";
 
 const slots = z.number().int().min(1).max(100000);
-export const capacityPolicySchema = z
+// The declaration can be deployed before its resulting native ID/version exist.
+// Only the later MFA-backed policy approval grants execution authority.
+export const capacityDeclarationSchema = z
   .strictObject({
+    allocationKey: z.uuid(),
     projectRef: z.string().trim().min(1).max(256),
-    deploymentRef: z.string().trim().min(1).max(256),
+    environmentId: z.string().trim().min(1).max(256),
+    deploymentRef: z.string().trim().min(1).max(128),
     providerEvidence: z.string().trim().min(1).max(2000),
     validUntil: z.iso.datetime(),
     total: slots,
@@ -45,6 +49,10 @@ export const capacityPolicySchema = z
         message: "Each Business has one allocation",
       });
   });
+export const capacityPolicySchema = capacityDeclarationSchema.safeExtend({
+  deploymentId: z.string().trim().min(1).max(256),
+  deploymentVersion: z.string().trim().min(1).max(256),
+});
 export type CapacityPolicy = z.infer<typeof capacityPolicySchema>;
 export const configureCapacitySchema = z.strictObject({
   requestKey: z.uuid(),
@@ -54,8 +62,12 @@ export const configureCapacitySchema = z.strictObject({
 export const capacityRouteSchema = z.object({
   policyId: z.uuid(),
   version: z.number().int().positive(),
+  allocationKey: z.uuid(),
   projectRef: z.string(),
+  environmentId: z.string(),
   deploymentRef: z.string(),
+  deploymentId: z.string(),
+  deploymentVersion: z.string(),
   mode: z.enum(["pooled", "reserved"]),
   total: slots,
   slots,
@@ -94,9 +106,7 @@ export const capacityConfigurationSchema = z.object({
   revisions: z.array(capacityRevisionSchema),
 });
 
-export const capacityDeploymentSchema = capacityRevisionSchema.pick({
-  id: true,
-  version: true,
-  policy: true,
+export const capacityDeploymentSchema = z.strictObject({
+  policy: capacityDeclarationSchema,
 });
 export type CapacityDeployment = z.infer<typeof capacityDeploymentSchema>;

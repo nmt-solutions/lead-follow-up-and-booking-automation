@@ -14,15 +14,15 @@ import { ApplicationError } from "../models/application-error";
 export function capacityLimits(deployment: CapacityDeployment) {
   return [
     {
-      name: `discovery-provider-${deployment.id}`,
+      name: `discovery-provider-${deployment.policy.allocationKey}`,
       total: deployment.policy.total,
     },
     {
-      name: `discovery-pooled-${deployment.id}`,
+      name: `discovery-pooled-${deployment.policy.allocationKey}`,
       total: deployment.policy.pooled,
     },
     ...deployment.policy.allocations.map((a) => ({
-      name: `discovery-reserved-${deployment.id}-${a.businessId}`,
+      name: `discovery-reserved-${deployment.policy.allocationKey}-${a.businessId}`,
       total: a.concurrentRuns,
     })),
   ];
@@ -57,10 +57,16 @@ const observedLimit = z.object({
 export function createCapacityDiscoveryQueue(options: {
   deployment: CapacityDeployment;
   repository: ReturnType<typeof createDiscoveryCapacityRepository>;
+  execution?: {
+    project: { ref: string };
+    environment: { id: string };
+    deployment?: { id: string; version: string; externalId?: string };
+  };
   native: {
     key(value: string): Promise<string>;
     retrieve(name: string): Promise<unknown>;
     queue(): Promise<unknown>;
+    deployment(): Promise<unknown>;
     trigger(
       task: string,
       payload: unknown,
@@ -69,6 +75,7 @@ export function createCapacityDiscoveryQueue(options: {
         idempotencyKey: string;
         idempotencyKeyTTL?: string;
         delay?: Date;
+        version?: string;
       },
     ): Promise<unknown>;
   };
@@ -76,12 +83,21 @@ export function createCapacityDiscoveryQueue(options: {
   const { repository, native, deployment } = options;
   async function observe(route: CapacityRoute) {
     if (
-      route.policyId !== deployment.id ||
-      route.version !== deployment.version ||
+      route.allocationKey !== deployment.policy.allocationKey ||
       route.projectRef !== deployment.policy.projectRef ||
+      route.environmentId !== deployment.policy.environmentId ||
       route.deploymentRef !== deployment.policy.deploymentRef
     )
       throw new Error("Discovery capacity deployment is unavailable");
+    if (
+      options.execution &&
+      (options.execution.project.ref !== route.projectRef ||
+        options.execution.environment.id !== route.environmentId ||
+        options.execution.deployment?.id !== route.deploymentId ||
+        options.execution.deployment.version !== route.deploymentVersion ||
+        options.execution.deployment.externalId !== route.deploymentRef)
+    )
+      throw new Error("Discovery worker identity is unavailable");
     const limits = [
       ...capacityLimits(deployment),
       {
@@ -93,6 +109,7 @@ export function createCapacityDiscoveryQueue(options: {
     // only this lane cannot establish that pooled jobs leave reserved capacity.
     const results = await Promise.allSettled([
       native.queue(),
+      native.deployment(),
       ...limits.map((expected) => native.retrieve(expected.name)),
     ]);
     const queueResult = results[0];
@@ -105,8 +122,17 @@ export function createCapacityDiscoveryQueue(options: {
       concurrencyLimit: z.null(),
       paused: z.literal(false),
     }).parse(queueResult.value);
+    const deploymentResult = results[1];
+    if (deploymentResult.status !== "fulfilled")
+      throw new Error("Discovery deployment is unavailable");
+    z.object({
+      id: z.literal(route.deploymentId),
+      version: z.literal(route.deploymentVersion),
+      externalId: z.literal(route.deploymentRef),
+      status: z.literal("DEPLOYED"),
+    }).parse(deploymentResult.value);
     const observations = limits.map((expected, index) => {
-      const result = results[index + 1];
+      const result = results[index + 2];
       if (result.status !== "fulfilled")
         throw new Error("Discovery capacity is unavailable");
       const observed = observedLimit.parse(result.value);
@@ -225,6 +251,7 @@ export function createCapacityDiscoveryQueue(options: {
           concurrency: [route.globalLimit, route.laneLimit],
           idempotencyKey,
           idempotencyKeyTTL: "30d",
+          version: route.deploymentVersion,
         },
       );
     },

@@ -8,7 +8,7 @@ The existing pricing/quote/payment flow quotes an optional capacity option with 
 
 At `/platform/discovery-capacity`, an operator with the existing `discovery` capability and current 15-minute MFA approves:
 
-- The provider project, reviewed deployment, evidence of purchased provider capacity, approval expiry and maximum native-observation age.
+- The exact provider project/environment, build external ID, native deployment ID/version, evidence of purchased provider capacity, approval expiry and maximum native-observation age.
 - A finite total, pooled allocation and Business-specific reserved allocations. Their sum cannot exceed the total; unallocated headroom is unused.
 - The supported fallback policy: **wait**. A busy native lane queues work. Unknown, stale, paused or mismatched provider capacity leaves dispatch pending or stops unsafe running work with retained progress. Reserved work never silently borrows pooled capacity.
 
@@ -16,13 +16,15 @@ No provider quota, capacity purchase, customer price, configuration row or live 
 
 ## Deployment and runtime gates
 
-After approval, copy the revision's deployment manifest to `DISCOVERY_CAPACITY_DEPLOYMENT_JSON` in both the web and Trigger deployment. The manifest contains `{ id, version, policy }`. Use the approved project's actual `TRIGGER_PROJECT_REF` and matching environment credentials. The deployment reference and evidence must identify the actual reviewed Cloud environment and its paid capacity. Keep the policy's expiry and observation age explicit. Existing worker/provider/recovery-cron activation requirements still apply.
+Deployment and approval are separate steps because the native deployment ID/version do not exist before the build. In the operator form, generate a new allocation UUID, enter the exact project/environment, a build external ID and complete finite declaration, then choose **Prepare deployment declaration**. This creates no database approval. Copy that `{ policy }` declaration to `DISCOVERY_CAPACITY_DEPLOYMENT_JSON` in web and Trigger; it excludes the as-yet-unknown `deploymentId` and `deploymentVersion`. Deploy the task under that exact build external ID using the pinned CLI's `deploy --external-id` option. Enter the resulting actual native deployment ID and version in the original form, review the evidence, and approve it with current MFA. Approval stores the entire declaration plus that exact native identity. No redeployment is needed to record approval. Any declaration change requires its own matching deployment and approval; generate a new allocation UUID for it.
+
+Use the approved project's actual `TRIGGER_PROJECT_REF` and matching environment credentials. Authenticated `deployments.retrieveCurrent()` must return the exact approved native ID, version, external ID and DEPLOYED state, even when all queue names and bounds already match. The environment-scoped key cannot substitute a deployment from another environment. The executing task independently compares native `ctx.project.ref`, `ctx.environment.id` and `ctx.deployment` to the approval; payload JSON supplies none of that authority. Every discovery enqueue explicitly pins `version` to the approved version. A forced rebuild under the same external ID still changes the native ID/version and requires fresh approval. Keep expiry and observation age explicit. Existing worker/provider/recovery-cron activation requirements still apply.
 
 Deploy `src/trigger/discovery.ts` with the installed SDK **4.8.3**. It registers these finite named limits:
 
-- `discovery-provider-<policyId>`: total discovery bound.
-- `discovery-pooled-<policyId>`: pooled partition.
-- `discovery-reserved-<policyId>-<businessId>`: each reserved allocation.
+- `discovery-provider-<allocationKey>`: total discovery bound.
+- `discovery-pooled-<allocationKey>`: pooled partition.
+- `discovery-reserved-<allocationKey>-<businessId>`: each reserved allocation.
 
 The task additionally declares an inline **total** bound. Every actual discovery enqueue supplies both the provider limit and selected lane. This preserves the aggregate bound when Trigger's trigger-time named limits replace task-declared named limits. No per-key-only ceiling or dynamically created queue is used. A missing manifest disables configured execution; the inactive task's defensive inline bound is not a commercial activation default.
 
@@ -52,4 +54,5 @@ UI acceptance, actual provider account capacity and deployment verification are 
 - [Trigger concurrency](https://trigger.dev/docs/concurrency): inline totals, shared named limits, trigger-time replacement, current native observations and pause/override semantics.
 - [Trigger 4.7 release](https://trigger.dev/changelog/v4-7-0): server-enforced Cloud concurrency and 4.7+ SDK contract; the installed 4.8.3 SDK definitions/registration implementation were checked directly.
 - [Trigger task queue retrieval](https://trigger.dev/docs/management/queues/retrieve): task queue identity, V2 metadata and native queue pause state.
+- [Trigger current deployment](https://trigger.dev/docs/management/deployments/get-latest), [versioning](https://trigger.dev/docs/versioning) and [external-ID deployment semantics](https://trigger.dev/docs/deployment/atomic-deployment): authenticated promoted deployment, explicit version pinning and forced-rebuild identity. Pinned 4.8.3 SDK response schemas and actual HTTP serialization are also tested.
 - [Trigger Cloud pricing and managed compute](https://trigger.dev/pricing): capacity is provider-plan/environment dependent and compute is usage-priced. No published commercial amount or quota is copied into application defaults.

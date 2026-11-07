@@ -98,6 +98,7 @@ export function createDiscoveryScheduleRepository(
           .select()
           .from(discoveryDispatch)
           .where(eq(discoveryDispatch.businessId, businessId));
+        await requireCapability(tx, actor, businessId, "sales.work");
         return rows.map((row) => {
           const outgoing = dispatches.filter(
             (d) =>

@@ -4,6 +4,14 @@ export async function prepareDiscoveryCapacity(pool: Pool | PoolClient) {
   await pool.query(
     `ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC; ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC; ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM PUBLIC; ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC; DO $$ BEGIN IF to_regclass('public.discovery_capacity_policy') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.discovery_capacity_policy FROM app_runtime; END IF; IF to_regclass('public.discovery_capacity_binding') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.discovery_capacity_binding FROM app_runtime; END IF; END $$`,
   );
+  await pool.query(`DO $$ BEGIN
+    IF to_regprocedure('public.discovery_capacity_route(uuid,jsonb)') IS NOT NULL THEN
+      REVOKE ALL ON FUNCTION public.discovery_capacity_route(uuid,jsonb) FROM PUBLIC,app_runtime;
+    END IF;
+    IF to_regprocedure('public.protect_discovery_capacity()') IS NOT NULL THEN
+      REVOKE ALL ON FUNCTION public.protect_discovery_capacity() FROM PUBLIC,app_runtime;
+    END IF;
+  END $$`);
 }
 export async function secureDiscoveryCapacity(pool: Pool | PoolClient) {
   await pool.query(`
@@ -13,15 +21,15 @@ export async function secureDiscoveryCapacity(pool: Pool | PoolClient) {
       IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL OR public.business_data_stopped(tenant) THEN RETURN NULL; END IF;
       SELECT * INTO c FROM public.discovery_capacity_policy ORDER BY version DESC LIMIT 1;
       IF c.id IS NULL OR (c.policy->>'validUntil')::timestamptz<=clock_timestamp() OR NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=c.actor_id AND o.discovery) THEN RETURN NULL; END IF;
-      IF deployed IS NOT NULL AND (deployed->>'id' IS DISTINCT FROM c.id::text OR deployed->>'version' IS DISTINCT FROM c.version::text OR deployed->'policy' IS DISTINCT FROM c.policy) THEN RETURN NULL; END IF;
+      IF deployed IS NOT NULL AND deployed->'policy' IS DISTINCT FROM (c.policy-ARRAY['deploymentId','deploymentVersion']) THEN RETURN NULL; END IF;
       p:=public.current_paid_contract(tenant,clock_timestamp()); IF p IS NULL THEN RETURN NULL; END IF;
-      mode:='pooled'; slots:=(c.policy->>'pooled')::integer; lane:='discovery-pooled-'||c.id;
+      mode:='pooled'; slots:=(c.policy->>'pooled')::integer; lane:='discovery-pooled-'||(c.policy->>'allocationKey');
       IF p->>'reservedCapacityId' IS NOT NULL THEN
         SELECT x INTO a FROM jsonb_array_elements(c.policy->'allocations') x WHERE x->>'businessId'=tenant::text AND x->>'offerId'=p->>'offerId' AND x->>'reservedCapacityId'=p->>'reservedCapacityId';
         IF a IS NULL OR a->>'unit' IS DISTINCT FROM p->'reservedCapacity'->'capacity'->>'unit' OR (a->>'quantity')::integer IS DISTINCT FROM (p->'reservedCapacity'->'capacity'->>'quantity')::integer THEN RETURN NULL; END IF;
-        mode:='reserved'; slots:=(a->>'concurrentRuns')::integer; lane:='discovery-reserved-'||c.id||'-'||tenant;
+        mode:='reserved'; slots:=(a->>'concurrentRuns')::integer; lane:='discovery-reserved-'||(c.policy->>'allocationKey')||'-'||tenant;
       END IF;
-      RETURN jsonb_build_object('policyId',c.id,'version',c.version,'projectRef',c.policy->>'projectRef','deploymentRef',c.policy->>'deploymentRef','mode',mode,'total',(c.policy->>'total')::integer,'slots',slots,'globalLimit','discovery-provider-'||c.id,'laneLimit',lane,'contract',p,'maxObservationAgeMs',(c.policy->>'maxObservationAgeMs')::integer);
+      RETURN jsonb_build_object('policyId',c.id,'version',c.version,'allocationKey',c.policy->>'allocationKey','projectRef',c.policy->>'projectRef','environmentId',c.policy->>'environmentId','deploymentRef',c.policy->>'deploymentRef','deploymentId',c.policy->>'deploymentId','deploymentVersion',c.policy->>'deploymentVersion','mode',mode,'total',(c.policy->>'total')::integer,'slots',slots,'globalLimit','discovery-provider-'||(c.policy->>'allocationKey'),'laneLimit',lane,'contract',p,'maxObservationAgeMs',(c.policy->>'maxObservationAgeMs')::integer);
     END $$;
     REVOKE ALL ON FUNCTION public.discovery_capacity_route(uuid,jsonb) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.discovery_capacity_route(uuid,jsonb) TO app_runtime;
@@ -34,6 +42,7 @@ export async function secureDiscoveryCapacity(pool: Pool | PoolClient) {
         IF NOT EXISTS(SELECT 1 FROM public.session s JOIN public."user" u ON u.id=s.user_id JOIN public.two_factor f ON f.user_id=u.id WHERE s.id=NEW.session_id AND s.user_id=NEW.actor_id AND s.expires_at>clock_timestamp() AND u.two_factor_enabled AND f.verified AND s.mfa_verified_at<=clock_timestamp() AND s.mfa_verified_at>clock_timestamp()-interval '15 minutes' AND s.mfa_factor_id=f.id AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex')) THEN RAISE EXCEPTION 'capacity MFA required'; END IF;
         IF NEW.version<>(SELECT coalesce(max(version),0)+1 FROM public.discovery_capacity_policy) OR NEW.policy->>'validUntil' IS NULL OR (NEW.policy->>'validUntil')::timestamptz<=clock_timestamp() OR NEW.policy->>'fallback' IS DISTINCT FROM 'wait' THEN RAISE EXCEPTION 'invalid capacity approval'; END IF;
         cap:=(NEW.policy->>'total')::integer;
+        IF coalesce(NEW.policy->>'allocationKey','')!~'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR coalesce(length(NEW.policy->>'environmentId'),0)=0 OR coalesce(length(NEW.policy->>'deploymentId'),0)=0 OR coalesce(length(NEW.policy->>'deploymentVersion'),0)=0 THEN RAISE EXCEPTION 'invalid capacity deployment'; END IF;
         IF cap IS NULL OR cap<1 OR coalesce((NEW.policy->>'pooled')::integer,0)<1 OR coalesce(length(NEW.policy->>'projectRef'),0)=0 OR coalesce(length(NEW.policy->>'deploymentRef'),0)=0 OR coalesce(length(NEW.policy->>'providerEvidence'),0)=0 OR coalesce((NEW.policy->>'maxObservationAgeMs')::integer,0) NOT BETWEEN 100 AND 30000 OR (NEW.policy->>'pooled')::integer+coalesce((SELECT sum((x->>'concurrentRuns')::integer) FROM jsonb_array_elements(NEW.policy->'allocations') x),0)>cap OR EXISTS(SELECT 1 FROM jsonb_array_elements(NEW.policy->'allocations') x WHERE coalesce(length(x->>'unit'),0)=0 OR coalesce(length(x->>'mappingEvidence'),0)=0 OR coalesce((x->>'quantity')::integer,0)<1 OR coalesce((x->>'concurrentRuns')::integer,0)<1 OR NOT EXISTS(SELECT 1 FROM public.business b WHERE b.id=(x->>'businessId')::uuid)) OR (SELECT count(*)<>count(DISTINCT x->>'businessId') FROM jsonb_array_elements(NEW.policy->'allocations') x) THEN RAISE EXCEPTION 'invalid finite capacity'; END IF;
       ELSE
         SELECT * INTO r FROM public.discovery_run WHERE id=NEW.run_id AND business_id=NEW.business_id;

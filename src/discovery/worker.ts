@@ -19,6 +19,7 @@ export async function withDiscoveryWorker<T>(
   operation: (
     application: ReturnType<typeof createDiscoveryApplication<void>>,
   ) => Promise<T>,
+  execution?: Parameters<typeof configuredDiscoveryQueue>[2],
 ) {
   if (!process.env.DATABASE_URL)
     throw new Error("Discovery database configuration is missing");
@@ -67,6 +68,7 @@ export async function withDiscoveryWorker<T>(
         queue: configuredDiscoveryQueue(
           process.env,
           createDiscoveryCapacityRepository(runtimeDatabase(pool)),
+          execution,
         ),
         requireCapacity: true,
         reportFailure: (diagnostic) =>

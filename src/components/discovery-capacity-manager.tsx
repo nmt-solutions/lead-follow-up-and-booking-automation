@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   capacityConfigurationSchema,
   capacityPolicySchema,
+  capacityDeclarationSchema,
   capacityRevisionSchema,
 } from "@/models/discovery-capacity";
 import { Button } from "./ui/button";
@@ -36,8 +37,12 @@ export function DiscoveryCapacityManager({
   const latest = configuration.revisions[0];
   const prior = initial.revisions[0]?.policy;
   const [draft, setDraft] = useState({
+    allocationKey: "",
     projectRef: prior?.projectRef ?? "",
+    environmentId: prior?.environmentId ?? "",
     deploymentRef: prior?.deploymentRef ?? "",
+    deploymentId: "",
+    deploymentVersion: "",
     providerEvidence: prior?.providerEvidence ?? "",
     validUntil: prior?.validUntil ?? "",
     total: prior ? String(prior.total) : "",
@@ -56,11 +61,13 @@ export function DiscoveryCapacityManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [manifest, setManifest] = useState("");
   const request = useRef<{ fingerprint: string; key: string } | null>(null);
   function edit(key: keyof typeof draft, value: string) {
     setDraft((d) => ({ ...d, [key]: value }));
     setApproved(false);
     setMessage("");
+    setManifest("");
   }
   function editAllocation(
     key: string,
@@ -72,6 +79,25 @@ export function DiscoveryCapacityManager({
     );
     setApproved(false);
     setMessage("");
+    setManifest("");
+  }
+  function draftPolicy() {
+    return {
+      ...draft,
+      total: Number(draft.total),
+      pooled: Number(draft.pooled),
+      maxObservationAgeMs: Number(draft.maxObservationAgeMs),
+      fallback: "wait",
+      allocations: allocations.map((row) => ({
+        businessId: row.businessId,
+        offerId: row.offerId,
+        reservedCapacityId: row.reservedCapacityId,
+        unit: row.unit,
+        mappingEvidence: row.mappingEvidence,
+        quantity: Number(row.quantity),
+        concurrentRuns: Number(row.concurrentRuns),
+      })),
+    };
   }
   return (
     <div className="space-y-8">
@@ -95,32 +121,7 @@ export function DiscoveryCapacityManager({
               void (async () => {
                 setError("");
                 setMessage("");
-                const parsed = capacityPolicySchema.safeParse({
-                  ...draft,
-                  total: Number(draft.total),
-                  pooled: Number(draft.pooled),
-                  maxObservationAgeMs: Number(draft.maxObservationAgeMs),
-                  fallback: "wait",
-                  allocations: allocations.map(
-                    ({
-                      businessId,
-                      offerId,
-                      reservedCapacityId,
-                      quantity,
-                      unit,
-                      concurrentRuns,
-                      mappingEvidence,
-                    }) => ({
-                      businessId,
-                      offerId,
-                      reservedCapacityId,
-                      quantity: Number(quantity),
-                      unit,
-                      concurrentRuns: Number(concurrentRuns),
-                      mappingEvidence,
-                    }),
-                  ),
-                });
+                const parsed = capacityPolicySchema.safeParse(draftPolicy());
                 if (!parsed.success || !approved) {
                   setError(
                     "Check the policy fields and finite allocations, then confirm approval.",
@@ -179,7 +180,7 @@ export function DiscoveryCapacityManager({
                   setApproved(false);
                   request.current = null;
                   setMessage(
-                    "Approval recorded. Deploy the manifest and verify native limits before execution. Existing runs do not automatically move to the new allocation.",
+                    "Approval recorded for the exact deployed version. Existing runs do not automatically move to this allocation.",
                   );
                 } catch {
                   setError(
@@ -195,7 +196,27 @@ export function DiscoveryCapacityManager({
               {(
                 [
                   ["projectRef", "Trigger project reference", "text"],
-                  ["deploymentRef", "Reviewed deployment reference", "text"],
+                  ["environmentId", "Trigger environment ID", "text"],
+                  [
+                    "allocationKey",
+                    "Allocation UUID (new for each deployment)",
+                    "text",
+                  ],
+                  [
+                    "deploymentRef",
+                    "Build external ID (deploy --external-id)",
+                    "text",
+                  ],
+                  [
+                    "deploymentId",
+                    "Native deployment ID (after deployment)",
+                    "text",
+                  ],
+                  [
+                    "deploymentVersion",
+                    "Native deployed version (after deployment)",
+                    "text",
+                  ],
                   [
                     "validUntil",
                     "Approval expires at (UTC ISO date and time)",
@@ -240,6 +261,46 @@ export function DiscoveryCapacityManager({
                 />
               </div>
             </fieldset>
+            <div className="space-y-3 rounded-xl border border-border p-4">
+              <p className="text-sm">
+                Prepare the declaration, deploy it under the build external ID,
+                then enter the resulting native deployment ID and version above.
+                Preparing a declaration grants no execution authority.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => edit("allocationKey", crypto.randomUUID())}
+              >
+                Generate new allocation UUID
+              </Button>{" "}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  const parsed = capacityDeclarationSchema
+                    .strip()
+                    .safeParse(draftPolicy());
+                  if (!parsed.success) {
+                    setError(
+                      "Complete the allocation fields before preparing its declaration. Native deployment ID and version are supplied after deployment.",
+                    );
+                    return;
+                  }
+                  setError("");
+                  setManifest(JSON.stringify({ policy: parsed.data }, null, 2));
+                }}
+              >
+                Prepare deployment declaration
+              </Button>
+              {manifest && (
+                <pre className="overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-4 text-xs">
+                  {manifest}
+                </pre>
+              )}
+            </div>
             <fieldset className="space-y-4" disabled={busy}>
               <legend className="mb-3 font-semibold">
                 Reserved allocations
@@ -310,6 +371,7 @@ export function DiscoveryCapacityManager({
                         rows.filter((r) => r.key !== row.key),
                       );
                       setApproved(false);
+                      setManifest("");
                     }}
                   >
                     Remove allocation {index + 1}
@@ -334,6 +396,7 @@ export function DiscoveryCapacityManager({
                     },
                   ]);
                   setApproved(false);
+                  setManifest("");
                 }}
               >
                 Add reserved allocation
@@ -415,6 +478,11 @@ export function DiscoveryCapacityManager({
               Approved by {revision.actorId} at {revision.at}. Expires{" "}
               {revision.policy.validUntil}.
             </p>
+            <p className="break-all text-sm text-muted-foreground">
+              Native deployment {revision.policy.deploymentId}, version{" "}
+              {revision.policy.deploymentVersion}; environment{" "}
+              {revision.policy.environmentId}.
+            </p>
             <details>
               <summary className="min-h-11 cursor-pointer py-3">
                 Deployment manifest for revision {revision.version}
@@ -427,9 +495,9 @@ export function DiscoveryCapacityManager({
               <pre className="overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-4 text-xs">
                 {JSON.stringify(
                   {
-                    id: revision.id,
-                    version: revision.version,
-                    policy: revision.policy,
+                    policy: capacityDeclarationSchema
+                      .strip()
+                      .parse(revision.policy),
                   },
                   null,
                   2,
