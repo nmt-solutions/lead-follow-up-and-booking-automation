@@ -1,3 +1,4 @@
+import { verifyRecoverySecurity } from "./recovery-security";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { verifyTaxPeriods } from "./tax-period-security";
 import type { Pool, PoolClient } from "pg";
@@ -20,7 +21,17 @@ export type Database = ReturnType<typeof runtimeDatabase>;
 // Fail closed on an accidentally supplied Neon schema-owner connection.
 export async function verifyRuntimeRole(
   pool: Pool | PoolClient,
+  options: { allowQuarantined?: boolean } = {},
 ): Promise<void> {
+  if (!options.allowQuarantined) {
+    const quarantine = await pool.query<{ blocked: boolean }>(
+      "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='recovery_quarantine') AS blocked",
+    );
+    if (quarantine.rows[0]?.blocked)
+      throw new ApplicationError("SETUP_REQUIRED");
+  }
+  if (!(await verifyRecoverySecurity(pool)))
+    throw new ApplicationError("SETUP_REQUIRED");
   await verifyReconciliationRuntime(pool);
   await verifyDataGovernance(pool);
   await verifyTaxPeriods(pool);
