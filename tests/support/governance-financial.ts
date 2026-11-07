@@ -12,14 +12,36 @@ import { createSubscriptionPaymentRepository } from "../../src/db/subscription-p
 import { createSellerDocumentApplication } from "../../src/application/seller-documents";
 import { createSellerDocumentRepository } from "../../src/db/seller-document-repository";
 import { runtimeDatabase } from "../../src/db/runtime";
+import { razorpayAccountReviewSchema } from "../../src/models/razorpay-account";
 export async function financialExportFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
   storage: PrivateStorage,
   scope: string,
   nativeCredit = false,
+  merchantReview?: {
+    feeTerms: string;
+    evidence: string;
+    otherOfferId: string;
+    otherPlanId: string;
+  },
 ) {
   const f = await subscriptionFixture(h),
     native = financialNativeFixture(h.clock);
+  if (merchantReview) {
+    const review = razorpayAccountReviewSchema.parse(
+      JSON.parse(native.configuration.env.RAZORPAY_ACCOUNT_REVIEW),
+    );
+    review.terms.fees = merchantReview.feeTerms;
+    review.evidence.push(merchantReview.evidence);
+    review.plans.push({
+      offerId: merchantReview.otherOfferId,
+      reservedCapacityId: null,
+      currency: "INR",
+      planId: merchantReview.otherPlanId,
+      totalCount: 12,
+    });
+    native.configuration.env.RAZORPAY_ACCOUNT_REVIEW = JSON.stringify(review);
+  }
   const gateway = configuredPayments({
     ...native.configuration,
     env: {

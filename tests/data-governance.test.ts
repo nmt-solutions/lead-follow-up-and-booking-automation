@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import { createHarness } from "./support/harness";
 import { createMemoryStorage } from "./support/storage";
@@ -1527,6 +1527,127 @@ describe("Business data export and offboarding at the public application seam", 
     expect(bundle.records.discovery_source[0].rights.adapterId).toBe(
       "campaign-research-fixture",
     );
+  });
+  it("omits deployment-wide merchant reviews from every export snapshot while preserving customer financial facts and original document bytes", async () => {
+    const markers = {
+      feeTerms: "OPERATOR_ONLY_MERCHANT_FEES_56",
+      evidence: "OPERATOR_ONLY_MERCHANT_EVIDENCE_56",
+      otherOfferId: "operator-only-other-offer-56",
+      otherPlanId: "plan_OperatorOtherPlan56",
+    };
+    const f = await financialExportFixture(
+      h,
+      storage,
+      policy.storageScope,
+      true,
+      markers,
+    );
+    documents = f.documents;
+    policy.businessIds = [f.business.id];
+    const exported = await app().export(f.owner, f.business.id, {
+      requestKey: randomUUID(),
+    });
+    const grant = await app().access(f.owner, f.business.id, exported.id);
+    const bundle = JSON.parse(
+      new TextDecoder().decode(
+        (await app().download(f.owner, f.business.id, exported.id, grant.token))
+          .bytes,
+      ),
+    );
+    for (const marker of Object.values(markers))
+      expect(JSON.stringify(bundle)).not.toContain(marker);
+    const provider = {
+      key: f.period.snapshot.provider.key,
+      account: f.period.snapshot.provider.account,
+      mode: f.period.snapshot.provider.mode,
+    };
+    const period = bundle.records.subscription_period[0];
+    expect(period).toMatchObject({
+      id: f.period.id,
+      payment_id: "pay_export",
+      snapshot: {
+        provider,
+        term: f.period.snapshot.term,
+        quote: {
+          initial: f.quote.initial,
+          renewal: f.quote.renewal,
+          billingReview: {
+            id: f.quote.billingReview.id,
+            outcome: f.quote.billingReview.outcome,
+            profileId: f.quote.billingReview.profileId,
+          },
+        },
+        tax: {
+          id: f.period.snapshot.tax.id,
+          totals: { netMinor: "10005", taxMinor: "1001", totalMinor: "11006" },
+        },
+      },
+    });
+    expect(period.snapshot.provider).toEqual(provider);
+    for (const doc of [f.invoice, f.credit]) {
+      const record = bundle.records.seller_document.find(
+        (r: { id: string }) => r.id === doc.id,
+      );
+      expect(record.snapshot.financial.provider).toEqual(provider);
+      expect(record.snapshot.totals).toEqual(doc.snapshot.totals);
+      const attachment = bundle.attachments.find(
+        (a: { documentId: string }) => a.documentId === doc.id,
+      );
+      const bytes = Buffer.from(attachment.base64, "base64");
+      expect(bytes).toEqual(
+        Buffer.from(
+          storage.objects.get(`seller-documents/${f.business.id}/${doc.id}`)!
+            .bytes,
+        ),
+      );
+      for (const marker of Object.values(markers))
+        expect(bytes.toString("utf8")).not.toContain(marker);
+    }
+    expect(bundle.records.financial_case_event).toMatchObject([
+      {
+        effect: {
+          actualMinor: "1100",
+          nativeId: "rfnd_fixture1",
+          invoiceId: f.invoice.id,
+          originalTax: {
+            id: f.period.snapshot.tax.id,
+            totals: f.invoice.snapshot.totals,
+          },
+        },
+        approvedCredit: {
+          allocation: { totals: { totalMinor: "1099" } },
+          uncreditedDifferenceMinor: "1",
+        },
+        creditDocumentId: f.credit.id,
+      },
+    ]);
+    for (const source of [
+      "subscription_period",
+      "seller_document",
+      "financial_case_event",
+    ]) {
+      expect(
+        bundle.manifest.sources.find(
+          (s: { source: string }) => s.source === source,
+        ).sha256,
+      ).toBe(
+        createHash("sha256")
+          .update(JSON.stringify(bundle.records[source]))
+          .digest("hex"),
+      );
+    }
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).periods[0].snapshot,
+    ).toEqual(f.period.snapshot);
+    expect(
+      (await f.documents.workspace(f.owner, f.business.id)).documents.find(
+        (d) => d.id === f.invoice.id,
+      )?.snapshot,
+    ).toEqual(f.invoice.snapshot);
+    expect(f.period.snapshot.provider.review?.terms.fees).toBe(
+      markers.feeTerms,
+    );
+    expect(f.native.refundPosts).toHaveLength(1);
   });
   it("exports canonical native refund and original-tax credit facts with residual, pagination and Business isolation", async () => {
     const f = await financialExportFixture(
