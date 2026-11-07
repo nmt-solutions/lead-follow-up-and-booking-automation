@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { createHarness } from "./harness";
-import { subscriptionFixture } from "./subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./native-subscription";
 import { financialNativeFixture } from "./financial-native";
 import { configuredPayments } from "../../src/subscription-payments/configuration";
 import { createSubscriptionPaymentApplication } from "../../src/application/subscription-payments";

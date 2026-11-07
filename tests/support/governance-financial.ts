@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { createHarness } from "./harness";
 import type { PrivateStorage } from "../../src/models/files";
-import { subscriptionFixture } from "./subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./native-subscription";
 import { financialNativeFixture } from "./financial-native";
 import { createFinancialAdjustmentApplication } from "../../src/application/financial-adjustments";
 import { createFinancialAdjustmentRepository } from "../../src/db/financial-adjustment-repository";

@@ -4,7 +4,8 @@ import { createOperationsRepository } from "../src/db/operations-repository";
 import { createHmac, randomUUID } from "node:crypto";
 import { readOperatorCosts } from "./support/costs";
 import { createHarness } from "./support/harness";
-import { subscriptionFixture } from "./support/subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./support/native-subscription";
+import { subscriptionFixture as shortRetentionSubscriptionFixture } from "./support/subscription";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";
 import { createSubscriptionPaymentRepository } from "../src/db/subscription-payment-repository";
 import { runtimeDatabase } from "../src/db/runtime";
@@ -24,6 +25,27 @@ describe("Native recurring cards at the public application seam", () => {
     h = await createHarness();
   });
   afterEach(async () => h?.close());
+  it("blocks native creation with expired billing evidence at trusted DB time despite a historical application clock", async () => {
+    const f = await shortRetentionSubscriptionFixture(h);
+    const native = razorpayFixture(h.clock),
+      app = compose(native);
+    const action = await app.prepare(f.owner, f.business.id, {
+      quoteId: f.quote.id,
+      requestKey: randomUUID(),
+    });
+    expect(action.state).toBe("reviewed");
+    const started = await app.start(f.owner, f.business.id, {
+      actionId: action.id,
+    });
+    expect(started).toMatchObject({
+      state: "failed",
+      reason: "native_preflight_rejected",
+    });
+    expect(native.creations).toHaveLength(0);
+    expect(native.requests.filter((r) => r.method !== "GET")).toEqual([]);
+    await app.recover();
+    expect(native.creations).toHaveLength(0);
+  });
   it("consumes the original agreed monthly allowances after a provider-agnostic paid pilot, freezing a separate renewal basis", async () => {
     const f = await subscriptionFixture(h, { term: "paid_pilot" });
     let observation: unknown;

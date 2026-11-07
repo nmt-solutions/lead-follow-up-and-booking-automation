@@ -7,7 +7,7 @@ import { runtimeDatabase } from "../src/db/runtime";
 import { createSellerDocumentApplication } from "../src/application/seller-documents";
 import { createSellerDocumentRepository } from "../src/db/seller-document-repository";
 import { createMemoryStorage } from "./support/storage";
-import { subscriptionFixture } from "./support/subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./support/native-subscription";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";
 import { createSubscriptionPaymentRepository } from "../src/db/subscription-payment-repository";
 import { deterministicPayments } from "./support/payment-gateway";

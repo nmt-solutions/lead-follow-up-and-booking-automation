@@ -4,7 +4,7 @@ import { randomUUID, createHmac } from "node:crypto";
 import { createHarness } from "./support/harness";
 import { createTaxPeriodApplication } from "../src/application/tax-periods";
 import { createTaxPeriodRepository } from "../src/db/tax-period-repository";
-import { subscriptionFixture } from "./support/subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./support/native-subscription";
 import { financialNativeFixture } from "./support/financial-native";
 import { createFinancialAdjustmentApplication } from "../src/application/financial-adjustments";
 import { createFinancialAdjustmentRepository } from "../src/db/financial-adjustment-repository";

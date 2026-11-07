@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHarness } from "./support/harness";
 import { randomUUID, createHmac } from "node:crypto";
-import { subscriptionFixture } from "./support/subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./support/native-subscription";
 import { razorpayFixture } from "./support/razorpay";
 import { configuredPayments } from "../src/subscription-payments/configuration";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";

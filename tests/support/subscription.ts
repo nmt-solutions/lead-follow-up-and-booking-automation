@@ -31,6 +31,7 @@ export async function subscriptionFixture(
     mode?: "fixture" | "live";
     catalogVersion?: number;
     ruleKey?: string;
+    billingEvidenceRetentionSeconds?: number;
   } = {},
 ) {
   const database = runtimeDatabase(h.runtime);
@@ -68,7 +69,7 @@ export async function subscriptionFixture(
         allowedTypes: ["text/plain"],
         uploadTtlSeconds: 60,
         accessTtlSeconds: 30,
-        retentionSeconds: 3600,
+        retentionSeconds: options.billingEvidenceRetentionSeconds ?? 3600,
         operationTimeoutSeconds: 5,
         cleanupGraceSeconds: 60,
         recordRetentionSeconds: 3600,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID, createHash } from "node:crypto";
 import { createHarness } from "./support/harness";
-import { subscriptionFixture } from "./support/subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./support/native-subscription";
 import { financialNativeFixture } from "./support/financial-native";
 import { runtimeDatabase } from "../src/db/runtime";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";

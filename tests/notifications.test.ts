@@ -34,7 +34,7 @@ import { createMailboxRepository } from "../src/db/mailbox-repository";
 import { mailboxFixture } from "./support/mailboxes";
 import type { NotificationConfiguration } from "../src/models/notifications";
 import { createNotificationHttp } from "../src/http/notifications";
-import { subscriptionFixture } from "./support/subscription";
+import { nativeSubscriptionFixture as subscriptionFixture } from "./support/native-subscription";
 import { razorpayFixture } from "./support/razorpay";
 import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";
 import { createSubscriptionPaymentRepository } from "../src/db/subscription-payment-repository";
