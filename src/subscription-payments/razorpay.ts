@@ -206,8 +206,21 @@ export function createRazorpayGateway(d: {
       throw new ApplicationError("SETUP_REQUIRED");
     return mapping;
   }
-  function checkout(sub: z.infer<typeof subscriptionSchema>) {
+  function checkout(
+    sub: z.infer<typeof subscriptionSchema>,
+    snapshot?: PaymentSnapshot,
+  ) {
     return {
+      ...(snapshot?.pilotContinuation
+        ? {
+            mandate: {
+              script: "https://checkout.razorpay.com/v1/checkout.js" as const,
+              key: d.keyId,
+              customer_id: snapshot.pilotContinuation.customerId,
+              subscription_id: sub.id,
+            },
+          }
+        : {}),
       customerId: sub.customer_id ?? null,
       checkoutId: sub.id,
       subscriptionId: sub.id,
@@ -349,7 +362,7 @@ export function createRazorpayGateway(d: {
       if (sub.id !== recovery.candidateId || !bound(sub, action))
         throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
     }
-    const hosted = checkout(sub);
+    const hosted = checkout(sub, action.snapshot);
     const page = z
       .object({ items: z.array(invoiceSchema).max(20), count: money })
       .parse(
@@ -669,7 +682,7 @@ export function createRazorpayGateway(d: {
         Object.entries(notes).some(([key, value]) => sub.notes[key] !== value)
       )
         throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
-      return checkout(sub);
+      return checkout(sub, input.snapshot);
     },
     async authenticateEvent(input) {
       const signature = input.headers.get("x-razorpay-signature") ?? "";

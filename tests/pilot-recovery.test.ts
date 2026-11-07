@@ -33,7 +33,7 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
         requestKey: randomUUID(),
         startAt: period.end,
         approvalExpiresAt: new Date(
-          h.clock.now().getTime() + 600000,
+          Math.floor(h.clock.now().getTime() / 1000) * 1000 + 600000,
         ).toISOString(),
         agreeSeparateMandate: true,
       },

@@ -29,8 +29,18 @@ export const pilotRenewalSchema = z.strictObject({
   originalActionId: z.uuid(),
   originalPeriodId: z.uuid(),
   requestKey: z.uuid(),
-  startAt: z.iso.datetime(),
-  approvalExpiresAt: z.iso.datetime(),
+  startAt: z.iso
+    .datetime()
+    .refine(
+      (v) => Date.parse(v) % 1000 === 0,
+      "Native schedules require whole seconds.",
+    ),
+  approvalExpiresAt: z.iso
+    .datetime()
+    .refine(
+      (v) => Date.parse(v) % 1000 === 0,
+      "Native schedules require whole seconds.",
+    ),
   agreeSeparateMandate: z.literal(true),
 });
 export const paymentTermSchema = z.discriminatedUnion("kind", [
@@ -169,6 +179,14 @@ export const paymentSnapshotSchema = z.object({
 });
 export type PaymentSnapshot = z.infer<typeof paymentSnapshotSchema>;
 export const checkoutReferenceSchema = z.strictObject({
+  mandate: z
+    .strictObject({
+      script: z.literal("https://checkout.razorpay.com/v1/checkout.js"),
+      key: ref,
+      customer_id: ref,
+      subscription_id: ref,
+    })
+    .optional(),
   standard: z
     .strictObject({
       script: z.literal("https://checkout.razorpay.com/v1/checkout.js"),

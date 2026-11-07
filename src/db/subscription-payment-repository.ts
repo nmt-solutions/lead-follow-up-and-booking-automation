@@ -449,7 +449,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           existing.some(
             (a) =>
               a.snapshot.pilotContinuation?.originalActionId === original.id &&
-              a.state !== "failed",
+              (a.started || a.state !== "failed"),
           )
         )
           throw new ApplicationError("CONFLICT");

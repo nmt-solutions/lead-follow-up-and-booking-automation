@@ -1,5 +1,6 @@
 "use client";
 import { openPilotCheckout } from "./razorpay-pilot-checkout";
+import { openReachCheckout } from "./razorpay-reach-checkout";
 import { Input } from "./ui/input";
 import Link from "next/link";
 import { SubscriptionLifecyclePanel } from "./subscription-lifecycle-panel";
@@ -331,6 +332,24 @@ export function SubscriptionPaymentManager({
     await refresh();
     setMessage(
       "Separate monthly mandate terms saved for review. Create its checkout only after reviewing the exact monthly tax total and schedule.",
+    );
+  }
+  async function monthlyCheckout(a: PaymentAction) {
+    if (!a.checkout?.mandate) return;
+    await openReachCheckout(
+      { ...a.checkout.mandate, kind: "mandate" },
+      () => {
+        void run(async () => {
+          await command("refresh", a.id);
+          setMessage(
+            "Monthly authorization checked against native records. Only an exact captured monthly payment validates paid renewal.",
+          );
+        });
+      },
+      () =>
+        setMessage(
+          "Monthly authorization closed. Refresh payment status to reconcile any result; authorization is not paid renewal.",
+        ),
     );
   }
   async function lifecycleCommand(
@@ -742,13 +761,24 @@ export function SubscriptionPaymentManager({
                   Pay the one-time pilot
                 </Button>
               )}
-              {a.checkout && !a.checkout.standard && a.state === "checkout" && (
-                <Button asChild>
-                  <a href={a.checkout.url} rel="noreferrer">
-                    Continue to secure checkout
-                  </a>
+              {a.checkout?.mandate && a.state === "checkout" && (
+                <Button
+                  disabled={busy}
+                  onClick={() => run(() => monthlyCheckout(a))}
+                >
+                  Authorize the separate monthly mandate
                 </Button>
               )}
+              {a.checkout &&
+                !a.checkout.standard &&
+                !a.checkout.mandate &&
+                a.state === "checkout" && (
+                  <Button asChild>
+                    <a href={a.checkout.url} rel="noreferrer">
+                      Continue to secure checkout
+                    </a>
+                  </Button>
+                )}
               {a.started &&
                 [
                   "pending",

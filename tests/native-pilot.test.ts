@@ -107,6 +107,16 @@ describe("Native paid pilots through public application commands", () => {
       },
     });
     await s.app.start(s.f.owner, s.f.business.id, { actionId: renewal.id });
+    expect(
+      (await s.app.workspace(s.f.owner, s.f.business.id)).actions.find(
+        (a) => a.id === renewal.id,
+      )?.checkout?.mandate,
+    ).toEqual({
+      script: "https://checkout.razorpay.com/v1/checkout.js",
+      key: "rzp_test_fixture",
+      customer_id: "cust_pilot",
+      subscription_id: "sub_fixture1",
+    });
     expect(s.mutations).toHaveLength(2);
     expect(s.mutations[1]).toMatchObject({
       path: "/v1/subscriptions",
@@ -287,6 +297,84 @@ describe("Native paid pilots through public application commands", () => {
     expect((await s.app.workspace(s.f.owner, s.f.business.id)).periods).toEqual(
       [],
     );
+    expect(s.mutations).toHaveLength(1);
+  });
+  it("reconciles the original uncertain monthly mandate into the same exact customer-bound Checkout without a second subscription POST", async () => {
+    const s = await nativePilotFixture(h),
+      b = s.f.business.id,
+      c = s.f.owner;
+    await s.app.start(c, b, { actionId: s.action.id });
+    s.capture();
+    await s.app.refresh(c, b, { actionId: s.action.id });
+    const initial = (await s.app.workspace(c, b)).periods[0];
+    const renewal = await s.app.preparePilotRenewal(c, b, {
+      originalActionId: s.action.id,
+      originalPeriodId: initial.id,
+      requestKey: randomUUID(),
+      startAt: initial.end,
+      approvalExpiresAt: new Date(
+        h.clock.now().getTime() + 600000,
+      ).toISOString(),
+      agreeSeparateMandate: true,
+    });
+    s.native.loseCreation = true;
+    await s.app.start(c, b, { actionId: renewal.id });
+    expect(s.mutations).toHaveLength(2);
+    await expect(
+      s.app.preparePilotRenewal(c, b, {
+        originalActionId: s.action.id,
+        originalPeriodId: initial.id,
+        requestKey: randomUUID(),
+        startAt: initial.end,
+        approvalExpiresAt: new Date(
+          h.clock.now().getTime() + 600000,
+        ).toISOString(),
+        agreeSeparateMandate: true,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await s.app.start(c, b, { actionId: renewal.id });
+    expect(s.mutations).toHaveLength(2);
+    await s.app.refresh(c, b, { actionId: renewal.id });
+    const workspace = await s.app.workspace(c, b);
+    expect(
+      workspace.actions.find((a) => a.id === renewal.id)?.checkout?.mandate,
+    ).toMatchObject({
+      subscription_id: "sub_fixture1",
+      customer_id: "cust_pilot",
+    });
+    expect(workspace.periods).toEqual([initial]);
+    expect(s.mutations).toHaveLength(2);
+  });
+  it("rejects monthly approval timestamps that native Unix-second fields cannot represent exactly instead of silently shifting the schedule", async () => {
+    const s = await nativePilotFixture(h),
+      b = s.f.business.id,
+      c = s.f.owner;
+    await s.app.start(c, b, { actionId: s.action.id });
+    s.capture();
+    await s.app.refresh(c, b, { actionId: s.action.id });
+    const period = (await s.app.workspace(c, b)).periods[0],
+      expiry = new Date(h.clock.now().getTime() + 600000).toISOString();
+    const input = {
+      originalActionId: s.action.id,
+      originalPeriodId: period.id,
+      requestKey: randomUUID(),
+      startAt: period.end,
+      approvalExpiresAt: expiry,
+      agreeSeparateMandate: true,
+    };
+    await expect(
+      s.app.preparePilotRenewal(c, b, {
+        ...input,
+        startAt: new Date(Date.parse(period.end) + 1).toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(
+      s.app.preparePilotRenewal(c, b, {
+        ...input,
+        approvalExpiresAt: new Date(Date.parse(expiry) + 1).toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    expect((await s.app.workspace(c, b)).actions).toHaveLength(1);
     expect(s.mutations).toHaveLength(1);
   });
   it("retains a captured pilot's original financial period after a native refund while current paid scope becomes unavailable", async () => {

@@ -19,7 +19,7 @@ export async function historicalPilot(
     }),
     actor = await h.authenticate(s.f.owner);
   s.addRetentionBusiness(b.id);
-  const now = h.clock.now().getTime(),
+  const now = Math.floor(h.clock.now().getTime() / 1000) * 1000,
     start = new Date(now - 15 * 86400000).toISOString(),
     end = new Date(now - 86400000).toISOString(),
     monthlyEnd = periodEnd(end, { kind: "calendar_month", timeZone: "UTC" });
