@@ -105,7 +105,7 @@ const sources = [
 
 // Free-form evidence can itself contain an authorization link. Exclude bearer values
 // and strip URL capabilities in every string, including message bodies and notes.
-function customerText(value: unknown): unknown {
+export function customerText(value: unknown): unknown {
   if (typeof value === "string")
     return value
       .replace(/https?:\/\/[^\s<>"']+/g, (raw) => {
@@ -468,7 +468,7 @@ export function createDataGovernanceRepository(database: Database) {
               { run_id: o.run_id, rights: sourcePolicySchema.parse(o.policy) },
             ]),
           ).values(),
-        ];
+        ].map(customerText);
         const runTotal = await tx.execute<{ count: string }>(
           sql`select count(*)::text count from public.discovery_run`,
         );
@@ -543,9 +543,9 @@ export function createDataGovernanceRepository(database: Database) {
             infrastructureBackup: false,
             coverage: "partial",
             policy: {
-              id: policy.id,
+              id: customerText(policy.id),
               version: policy.version,
-              evidence: policy.evidence,
+              evidence: customerText(policy.evidence),
             },
             sources: coverage,
             relations: [

@@ -128,7 +128,7 @@ DECLARE s public.business_data_step;
 BEGIN
  SELECT * INTO s FROM public.business_data_step WHERE id=step;
  IF s.id IS NULL OR s.business_id IS DISTINCT FROM nullif(current_setting('app.business_id',true),'')::uuid OR coalesce(public.current_business_role(),'') NOT IN ('owner','admin') OR nullif(current_setting('app.actor_id',true),'') IS NULL THEN RAISE EXCEPTION 'Evidence authority denied' USING ERRCODE='42501'; END IF;
- IF fact NOT IN ('external_consent_removal_reported','number_transfer_reported','number_control_reviewed') OR length(reference) NOT BETWEEN 1 AND 500 OR (fact IN ('number_transfer_reported','number_control_reviewed') AND s.kind<>'meta') THEN RAISE EXCEPTION 'Evidence fact denied'; END IF;
+ IF fact IS NULL OR reference IS NULL OR fact NOT IN ('external_consent_removal_reported','number_transfer_reported','number_control_reviewed') OR length(reference) NOT BETWEEN 1 AND 500 OR reference ~ '[[:cntrl:]?&#=<>]' OR reference ~* '(https?://|Bearer[[:space:]]|(password|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|execution[_ -]?key|dispatch[_ -]?key|recovery[_ -]?key)[[:space:]]*:)' OR (fact IN ('number_transfer_reported','number_control_reviewed') AND s.kind<>'meta') THEN RAISE EXCEPTION 'Evidence fact denied'; END IF;
  INSERT INTO public.business_data_event(id,business_id,step_id,attempt,outcome,actor_id,evidence) VALUES(gen_random_uuid(),s.business_id,s.id,s.attempts,fact,current_setting('app.actor_id',true),reference);
  -- A customer's report does not turn an unsupported API into provider confirmation.
 END $$;

@@ -104,7 +104,13 @@ export const recordDataEvidenceSchema = z.strictObject({
     .trim()
     .min(1)
     .max(500)
-    .regex(/^[\p{L}\p{N} .:_/-]+$/u),
+    .regex(/^[\p{L}\p{N} .:_/-]+$/u)
+    .refine(
+      (value) =>
+        !/https?:\/\/|\bBearer\s|\b(?:password|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|execution[_ -]?key|dispatch[_ -]?key|recovery[_ -]?key)\s*:/i.test(
+          value,
+        ),
+    ),
 });
 export type NativeCleanup = {
   id: string;

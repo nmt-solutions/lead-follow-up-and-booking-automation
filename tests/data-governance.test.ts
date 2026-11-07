@@ -186,6 +186,10 @@ describe("Business data export and offboarding at the public application seam", 
       website: "",
     });
     policy.businessIds = [a.id];
+    policy.evidence.push(
+      "https://identity.example/sign-in/private-policy-capability?token=private-policy-token",
+      "password=private-policy-password",
+    );
     const created = await app().export(owner, a.id, {
       requestKey: randomUUID(),
     });
@@ -210,6 +214,10 @@ describe("Business data export and offboarding at the public application seam", 
       name: "Retained steel",
     });
     expect(text).not.toContain("Private offering");
+    expect(text).not.toMatch(/private-policy-(?:capability|token|password)/);
+    expect(
+      JSON.stringify((await app().workspace(owner, a.id)).policy),
+    ).not.toMatch(/private-policy-(?:capability|token|password)/);
     expect(text).not.toMatch(
       /upload_hash|session_id|credentials|state_hash|execution_key|dispatch_key/,
     );
@@ -1024,6 +1032,18 @@ describe("Business data export and offboarding at the public application seam", 
     );
     expect(f.meta.registrations).toHaveLength(0);
     const step = state.offboarding[0].steps.find((s) => s.kind === "meta")!;
+    for (const reference of [
+      "https://identity.example/auth/private-path",
+      "Bearer private-manual-token",
+      "secret:private-manual-token",
+    ])
+      await expect(
+        app().recordEvidence(f.credentials, f.businessId, {
+          stepId: step.id,
+          fact: "number_control_reviewed",
+          reference,
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
     await app().recordEvidence(f.credentials, f.businessId, {
       stepId: step.id,
       fact: "number_control_reviewed",

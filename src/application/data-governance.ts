@@ -18,6 +18,7 @@ import type { PrivateStorage } from "../models/files";
 import {
   dataHash,
   dataExportKey,
+  customerText,
   type DataGovernanceRepository,
 } from "../db/data-governance-repository";
 
@@ -98,15 +99,17 @@ export function createDataGovernanceApplication<Credentials>(d: {
       }
       return {
         policy: policy
-          ? dataPolicyViewSchema.parse({
-              ...policy,
-              deletion: policy.deletion
-                ? {
-                    ...policy.deletion,
-                    holdCount: policy.deletion.holds.length,
-                  }
-                : null,
-            })
+          ? dataPolicyViewSchema.parse(
+              customerText({
+                ...policy,
+                deletion: policy.deletion
+                  ? {
+                      ...policy.deletion,
+                      holdCount: policy.deletion.holds.length,
+                    }
+                  : null,
+              }),
+            )
           : null,
         stopped: r.requests[0]?.kind === "offboard",
         exports: r.exports.map((e) => ({
