@@ -430,10 +430,22 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
       throw new ApplicationError("UNAUTHENTICATED");
     if (!(await hasMfa(tx, s.token, clock.now(), operatorMfaLifetime)))
       throw new ApplicationError("MFA_REQUIRED");
+    const checkTime = () => {
+      const now = clock.now();
+      if (s.expiresAt <= now) throw new ApplicationError("UNAUTHENTICATED");
+      const age = s.mfaVerifiedAt
+        ? now.getTime() - s.mfaVerifiedAt.getTime()
+        : -1;
+      if (age < 0 || age >= operatorMfaLifetime)
+        throw new ApplicationError("MFA_REQUIRED");
+    };
+    checkTime();
+    return checkTime;
   }
   async function locked<T>(
     actor: Actor,
     operation: (tx: Transaction) => Promise<T>,
+    afterAuthorization?: (tx: Transaction, result: T) => Promise<T>,
   ) {
     // Authentication rechecks use this same transaction connection, including after lock waits.
     // A callback using the pool here could deadlock concurrent callers with a bounded pool.
@@ -452,11 +464,29 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
       await tx.execute(
         sql`select set_config('app.tax_at',${clock.now().toISOString()},true)`,
       );
-      const result = await operation(tx);
-      await currentSession(tx, actor);
+      let result = await operation(tx);
+      const checkTime = await currentSession(tx, actor);
       await access(tx);
+      if (afterAuthorization) {
+        await tx.execute(
+          sql`select set_config('app.tax_at',${clock.now().toISOString()},true)`,
+        );
+        result = await afterAuthorization(tx, result);
+      }
+      // No authorization query follows the final protected read; expiry is checked again without another wait.
+      checkTime();
       return result;
     });
+  }
+  async function originalBytes(
+    tx: Transaction,
+    grant: { id: string; hash: string },
+  ) {
+    const result = await tx.execute<{ body: string | null }>(
+      sql`select public.tax_filing_artifact_read(${grant.id}::uuid,${grant.hash}) as body`,
+    );
+    if (!result.rows[0]?.body) throw new ApplicationError("FORBIDDEN");
+    return Buffer.from(result.rows[0].body, "base64");
   }
   return {
     recordExpense: (actor: Actor, input: FilingExpense) =>
@@ -1224,13 +1254,15 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
         return { id: grant.id, hash, evidence: evidenceView(artifact) };
       }),
     readEvidence: (actor: Actor, grant: { id: string; hash: string }) =>
-      locked(actor, async (tx) => {
-        const result = await tx.execute<{ body: string | null }>(
-          sql`select public.tax_filing_artifact_read(${grant.id}::uuid,${grant.hash}) as body`,
-        );
-        if (!result.rows[0]?.body) throw new ApplicationError("FORBIDDEN");
-        return Buffer.from(result.rows[0].body, "base64");
-      }),
+      locked(
+        actor,
+        (tx) => originalBytes(tx, grant),
+        async (tx, prior) => {
+          const current = await originalBytes(tx, grant);
+          if (!current.equals(prior)) throw new ApplicationError("CONFLICT");
+          return current;
+        },
+      ),
     workspace: (actor: Actor) =>
       locked(actor, async (tx) => {
         const ps = await tx

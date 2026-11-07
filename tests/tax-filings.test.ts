@@ -1818,6 +1818,62 @@ describe("Tax filing confirmations at the public application seam", () => {
     });
     expect(f.native.refunds).toHaveLength(1);
   });
+  it("denies original bytes when their grant expires during the last authorization wait", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f),
+      fact = await confirmed(f, policy, "submission", "901"),
+      blocker = await h.admin.connect();
+    let ready: () => void = () => {};
+    const finalAuthorization = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    let calls = 0;
+    const guarded = createTaxFilingApplication({
+      periods,
+      clock: h.clock,
+      repository: createTaxFilingRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      authenticatePlatform: async (credentials: Headers) => {
+        const actor = await h.access.authenticatePlatformForWork(credentials);
+        if (++calls === 3) {
+          await blocker.query("begin");
+          await blocker.query(
+            "select pg_advisory_xact_lock(hashtextextended('tax-reporting',0))",
+          );
+          ready();
+        }
+        return actor;
+      },
+    });
+    const pending = guarded.downloadEvidence(f.reviewer, {
+      evidenceId: fact.artifact.id,
+    });
+    const result = expect(pending).rejects.toMatchObject({ code: "FORBIDDEN" });
+    try {
+      await finalAuthorization;
+      let waiting = false;
+      for (let attempt = 0; attempt < 200 && !waiting; attempt++) {
+        waiting = (
+          await h.admin.query<{ waiting: boolean }>(
+            "select exists(select 1 from pg_stat_activity where usename='app_runtime' and wait_event_type='Lock' and query like '%tax-reporting%') waiting",
+          )
+        ).rows[0].waiting;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(waiting).toBe(true);
+      await h.admin.query(
+        "WITH stamp AS(SELECT clock_timestamp() observed) UPDATE tax_filing_access SET at=stamp.observed-interval '60 seconds',expires_at=stamp.observed-interval '30 seconds' FROM stamp WHERE evidence_id=$1",
+        [fact.artifact.id],
+      );
+      await blocker.query("commit");
+      await result;
+    } finally {
+      await blocker.query("rollback");
+      blocker.release();
+    }
+  });
   it("rechecks fresh central MFA after the final serialized evidence wait", async () => {
     const f = await approvedPeriod(),
       policy = await manualPolicy(f),
