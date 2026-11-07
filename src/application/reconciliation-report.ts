@@ -64,7 +64,9 @@ export function reconciliationReport(
   snapshot: Snapshot,
   period: ReconciliationPeriod,
 ) {
-  const inPeriod = (at: string) => at >= period.from && at < period.until;
+  const inPeriod = (at: string) =>
+    Date.parse(at) >= Date.parse(period.from) &&
+    Date.parse(at) < Date.parse(period.until);
   const superseded = new Set(
     snapshot.records.flatMap((r) => [
       ...(r.supersedes ? [r.supersedes] : []),
@@ -268,10 +270,9 @@ export function reconciliationReport(
         b.money.currency === data.money.currency &&
         b.money.precision === data.money.precision &&
         !!data.transferAt &&
-        b.valueAt >=
-          (b.valueAt.length === 10
-            ? data.transferAt.slice(0, 10)
-            : data.transferAt);
+        (b.valueAt.length === 10
+          ? b.valueAt >= data.transferAt.slice(0, 10)
+          : Date.parse(b.valueAt) >= Date.parse(data.transferAt));
       if (!bound)
         reasons.push(
           duplicates.has(r.id)
@@ -304,13 +305,23 @@ export function reconciliationReport(
       feeTotalMinor: fee?.total ?? null,
       bankObservedMinor,
       bankDifferenceMinor,
-      receipts: receipts.map((r) => ({
-        id: r.id,
-        actorId: r.actorId,
-        at: r.at,
-        data: r.data,
-        matched: matching.some((m) => m.id === r.id),
-      })),
+      receipts: receipts.map((r) => {
+        if (r.data.kind !== "bank_receipt")
+          throw Error("Invalid bank receipt projection");
+        const dateOnly = r.data.valueAt.length === 10;
+        return {
+          id: r.id,
+          actorId: r.actorId,
+          at: r.at,
+          data: r.data,
+          valueTimePrecision: dateOnly ? "date_only" : "instant",
+          valueTimeZone: dateOnly ? null : "UTC",
+          matchingBasis: dateOnly
+            ? "calendar_date_compatibility_only"
+            : "utc_instant_compatibility",
+          matched: matching.some((m) => m.id === r.id),
+        };
+      }),
       reasons: [...new Set(reasons)].sort(),
     };
     const reportHash = createHash("sha256")

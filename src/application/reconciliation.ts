@@ -70,14 +70,19 @@ export function createReconciliationApplication<Credentials>(dependencies: {
         new Date(data.observedAt) > clock.now() ||
         (data.kind === "settlement" &&
           data.transferAt &&
-          data.transferAt > data.observedAt) ||
-        (data.kind === "bank_receipt" && data.valueAt > data.observedAt)
+          Date.parse(data.transferAt) > Date.parse(data.observedAt)) ||
+        (data.kind === "bank_receipt" &&
+          (data.valueAt.length === 10
+            ? data.valueAt > data.observedAt.slice(0, 10)
+            : Date.parse(data.valueAt) > Date.parse(data.observedAt)))
       )
         throw new ApplicationError("INVALID_INPUT");
       if (
         data.kind === "settlement" &&
         data.lines.some(
-          (l) => l.conversion && l.conversion.effectiveAt > data.observedAt,
+          (l) =>
+            l.conversion &&
+            Date.parse(l.conversion.effectiveAt) > Date.parse(data.observedAt),
         )
       )
         throw new ApplicationError("INVALID_INPUT");
@@ -138,6 +143,7 @@ export function createReconciliationApplication<Credentials>(dependencies: {
         throw new ApplicationError("CONFLICT");
       await current(credentials, actor);
       await repository.checkAccess(actor, data.evidenceId, data.token);
+      await current(credentials, actor);
       return {
         name: evidence.name,
         contentType: evidence.contentType,

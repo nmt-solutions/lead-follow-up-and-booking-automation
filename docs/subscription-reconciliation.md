@@ -35,7 +35,9 @@ it does not authenticate statement contents or claim native bank verification.
    partial credits may match one settlement. Equal amounts alone never match.
    Provider/account/mode, currency/precision, masked account, UTR and a compatible
    value date/time must also support the link. A date-only statement retains its
-   date precision; the app does not invent a bank timestamp. Wrong/missing/duplicate
+   date precision and supplies only calendar-date compatibility. Its bank time and
+   timezone remain unknown in the report/export; the app does not invent a bank
+   timestamp. Wrong/missing/duplicate
    evidence remains visible.
 5. Acknowledge a discrepancy with a reason and supporting evidence. This retains
    its original expected/observed/difference snapshot. A balanced review is accepted

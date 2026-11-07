@@ -1552,6 +1552,32 @@ function SettlementReview({
           <li key={reason}>{reason.replaceAll("_", " ")}</li>
         ))}
       </ul>
+      <details>
+        <summary className="min-h-11 cursor-pointer py-3">
+          Independent bank observations ({s.receipts.length})
+        </summary>
+        <ul className="space-y-3">
+          {s.receipts.map((r) => (
+            <li key={r.id} className="space-y-1 rounded-xl border p-4">
+              <p>
+                {r.data.reference} ·{" "}
+                {amount(r.data.money.minor, r.data.money.currency)} ·{" "}
+                {r.matched
+                  ? "Matched operator assertion"
+                  : "Unmatched operator assertion"}
+              </p>
+              {r.data.kind === "bank_receipt" && (
+                <p>Supplied bank value: {r.data.valueAt}</p>
+              )}
+              <p className="text-sm text-muted-foreground">
+                {r.valueTimePrecision === "date_only"
+                  ? "Calendar date only. Bank time and timezone are unknown; matching establishes calendar-date compatibility."
+                  : "Supplied UTC time. Matching remains an operator assertion."}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </details>
       <Button variant="outline" disabled={busy} onClick={correct}>
         Prepare settlement correction
       </Button>

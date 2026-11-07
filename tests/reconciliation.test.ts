@@ -193,6 +193,62 @@ describe("Subscription money reconciliation through the public application", () 
       reason: "settlement_unavailable",
     });
   });
+  it("compares equivalent ISO instants chronologically for transfers, bank receipts and report boundaries", async () => {
+    const f = await purchase(),
+      app = compose(),
+      e = await evidence(app, f.operator),
+      input = settlement(f, e.id);
+    const saved = await app.record(f.operator, {
+      ...input,
+      transferAt: "2026-11-05T09:00:00Z",
+    });
+    const bank = await app.recordEvidence(f.operator, {
+      requestKey: randomUUID(),
+      source: "bank_statement",
+      reference: "bank-time-precision",
+      name: "bank.txt",
+      contentType: "text/plain",
+      contentBase64: Buffer.from("Synthetic bank credit at 09:00 UTC").toString(
+        "base64",
+      ),
+      note: "Independent bank statement with millisecond timestamp",
+    });
+    await app.record(f.operator, {
+      requestKey: randomUUID(),
+      supersedes: null,
+      kind: "bank_receipt",
+      evidenceId: bank.id,
+      provider: input.provider,
+      account: input.account,
+      mode: input.mode,
+      observedAt: input.observedAt,
+      reference: "bank-time-precision",
+      note: "Independent receipt at the transfer instant",
+      settlementId: input.settlementId,
+      bankAccountRef: input.bankAccountRef,
+      transferReference: input.transferReference,
+      money: input.money,
+      bankTransactionId: "bank-time-precision",
+      valueAt: "2026-11-05T09:00:00.000Z",
+    });
+    const view = await app.workspace(f.operator, {
+      from: "2026-11-05T09:00:00Z",
+      until: "2026-11-05T09:00:01Z",
+    });
+    expect(view.sources.map((s) => s.periodId)).toEqual([f.period.id]);
+    expect(view.settlements).toHaveLength(1);
+    expect(view.settlements[0]).toMatchObject({
+      id: saved.id,
+      bankObservedMinor: "10981",
+      bankDifferenceMinor: "0",
+    });
+    const excluded = await app.workspace(f.operator, {
+      from: "2026-11-05T08:59:59Z",
+      until: "2026-11-05T09:00:00Z",
+    });
+    expect(excluded.sources).toEqual([]);
+    expect(excluded.settlements).toEqual([]);
+  });
   it.each(["IN", "US"])(
     "keeps actual native %s refund cash, original-tax permanent credit and residual distinct, requiring its own actual FX",
     async (country) => {
@@ -454,6 +510,12 @@ describe("Subscription money reconciliation through the public application", () 
       bankObservedMinor: "5000",
       bankDifferenceMinor: "-5981",
       status: "review_required",
+    });
+    expect(row.receipts[0]).toMatchObject({
+      data: { valueAt: "2026-11-05" },
+      valueTimePrecision: "date_only",
+      valueTimeZone: null,
+      matchingBasis: "calendar_date_compatibility_only",
     });
     const review = {
       requestKey: randomUUID(),
@@ -784,6 +846,59 @@ describe("Subscription money reconciliation through the public application", () 
       }),
     ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
   });
+  it("rechecks the current session after the final evidence grant serialization wait", async () => {
+    const f = await purchase(),
+      app = compose(),
+      e = await evidence(app, f.operator),
+      grant = await app.evidenceAccess(f.operator, { evidenceId: e.id }),
+      blocker = await h.admin.connect();
+    let reads = 0,
+      locked: (() => void) | undefined;
+    const lockReady = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const guarded = createReconciliationApplication({
+      repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      authenticatePlatform: async (headers: Headers) => {
+        const actor = await h.access.authenticatePlatform(headers);
+        if (++reads === 2) {
+          await blocker.query("begin");
+          await blocker.query(
+            "select pg_advisory_xact_lock(hashtextextended('reconciliation',0))",
+          );
+          locked?.();
+        }
+        return actor;
+      },
+    });
+    try {
+      const outcome = guarded
+        .evidenceContent(f.operator, {
+          evidenceId: e.id,
+          token: grant.token,
+        })
+        .then(
+          () => "private evidence returned",
+          (error: unknown) => error,
+        );
+      await lockReady;
+      let waiting = false;
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        const state = await h.admin.query(
+          "select exists(select 1 from pg_stat_activity where datname=current_database() and wait_event='advisory' and query like '%pg_advisory_xact_lock%') as waiting",
+        );
+        waiting = state.rows[0].waiting;
+      }
+      expect(waiting).toBe(true);
+      h.clock.set("2026-11-05T09:16:00.000Z");
+      await blocker.query("commit");
+      expect(await outcome).toMatchObject({ code: "MFA_REQUIRED" });
+    } finally {
+      await blocker.query("rollback");
+      blocker.release();
+    }
+  });
   it("validates bounded same-origin HTTP commands and returns role-bound original evidence and complete private exports", async () => {
     const f = await purchase(),
       app = compose(),
@@ -831,6 +946,76 @@ describe("Subscription money reconciliation through the public application", () 
       "complete",
     );
     expect(JSON.stringify(h.diagnostics)).not.toContain(grant.data.token);
+  });
+  it("retains the exact advertised 256 KiB evidence through HTTP and refuses oversized or unsafe attachments", async () => {
+    const f = await purchase(),
+      http = createReconciliationHttp({
+        application: compose(),
+        origin: "http://localhost:3000",
+        reportFailure: (d) => h.diagnostics.push(d),
+      }),
+      original = Buffer.alloc(262144, 97);
+    const request = (input: unknown) => {
+      const headers = new Headers(f.operator);
+      headers.set("origin", "http://localhost:3000");
+      headers.set("content-type", "application/json");
+      return new Request(
+        "http://localhost:3000/api/platform/reconciliation/evidence",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(input),
+        },
+      );
+    };
+    const input = {
+      requestKey: randomUUID(),
+      source: "provider_statement",
+      reference: "maximum-supported-original",
+      name: "statement.txt",
+      contentType: "text/plain",
+      contentBase64: original.toString("base64"),
+      note: "Synthetic exact maximum-size original",
+    };
+    const saved = await http.command(request(input), "evidence");
+    expect(saved.status).toBe(200);
+    const metadata = (await saved.json()).data;
+    expect(metadata).toMatchObject({
+      bytes: 262144,
+      name: "statement.txt",
+      contentType: "text/plain",
+    });
+    expect(metadata).not.toHaveProperty("contentBase64");
+    const access = await http.command(
+      request({ evidenceId: metadata.id }),
+      "access",
+    );
+    const grant = (await access.json()).data;
+    const content = await http.command(
+      request({ evidenceId: metadata.id, token: grant.token }),
+      "content",
+    );
+    expect(content.headers.get("content-type")).toBe("text/plain");
+    expect(content.headers.get("content-disposition")).toBe(
+      'attachment; filename="statement.txt"',
+    );
+    expect(content.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(Buffer.from(await content.arrayBuffer()).equals(original)).toBe(
+      true,
+    );
+    for (const override of [
+      { contentBase64: Buffer.alloc(262145, 97).toString("base64") },
+      { contentType: "text/html" },
+      { name: 'statement.txt"\r\nx-injected: true' },
+    ]) {
+      const rejected = await http.command(
+        request({ ...input, requestKey: randomUUID(), ...override }),
+        "evidence",
+      );
+      expect(rejected.status).toBe(400);
+    }
+    expect(JSON.stringify(h.diagnostics)).not.toContain(grant.token);
+    expect(JSON.stringify(h.diagnostics)).not.toContain(input.contentBase64);
   });
   it("requires every ledger SELECT and INSERT grant separately and every public or private helper ACL", async () => {
     for (const table of [

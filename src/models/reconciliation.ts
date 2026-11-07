@@ -277,6 +277,21 @@ export const reconciliationWorkspaceSchema = z.object({
       feeTaxMinor: z.string().nullable(),
       bankObservedMinor: z.string().nullable(),
       bankDifferenceMinor: z.string().nullable(),
+      receipts: z.array(
+        z.object({
+          id: z.uuid(),
+          actorId: z.string(),
+          at: z.iso.datetime(),
+          data: reconciliationEntrySchema,
+          valueTimePrecision: z.enum(["date_only", "instant"]),
+          valueTimeZone: z.literal("UTC").nullable(),
+          matchingBasis: z.enum([
+            "calendar_date_compatibility_only",
+            "utc_instant_compatibility",
+          ]),
+          matched: z.boolean(),
+        }),
+      ),
       reasons: z.array(z.string()),
       status: z.string(),
       reportHash: z.string(),
