@@ -325,6 +325,10 @@ export function ReconciliationManager({
       document
         .getElementById("settlement-entry")
         ?.scrollIntoView({ block: "start" });
+      document
+        .getElementById("settlement-entry")
+        ?.querySelector<HTMLInputElement>("input")
+        ?.focus({ preventScroll: true });
     } else {
       setBankDuplicates([]);
       const selected = view.settlements.find(
@@ -348,6 +352,10 @@ export function ReconciliationManager({
         supersedes: id,
       });
       document.getElementById("bank-entry")?.scrollIntoView({ block: "start" });
+      document
+        .getElementById("bank-entry")
+        ?.querySelector<HTMLSelectElement>("select")
+        ?.focus({ preventScroll: true });
     }
   }
   function duplicateOptions(primary: string | null) {
@@ -580,101 +588,105 @@ export function ReconciliationManager({
           retained with its original hash. Use a masked bank account reference
           elsewhere.
         </p>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run(async () => {
-              if (!file || file.size > 262144)
-                throw Error("Choose an original file up to 256 KiB.");
-              const bytes = new Uint8Array(await file.arrayBuffer());
-              let raw = "";
-              for (const b of bytes) raw += String.fromCharCode(b);
-              const contentType = file.name.toLowerCase().endsWith(".pdf")
-                ? "application/pdf"
-                : file.name.toLowerCase().endsWith(".csv")
-                  ? "text/csv"
-                  : "text/plain";
-              const payload = {
-                source: evidenceSource,
-                reference: evidenceReference,
-                note: evidenceNote,
-                name: file.name,
-                contentType,
-                contentBase64: btoa(raw),
-              };
-              const serialized = JSON.stringify(payload);
-              const key =
-                requests.current.get(serialized) ?? crypto.randomUUID();
-              requests.current.set(serialized, key);
-              const saved = await response(
-                await post("evidence", {
-                  ...payload,
-                  requestKey: key,
-                }),
-                reconciliationEvidenceViewSchema,
-              );
-              setExtraEvidence((old) => [
-                ...old.filter((x) => x.id !== saved.id),
-                saved,
-              ]);
-            }, "Original evidence retained. Select it in the corresponding entry.");
-          }}
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field title="Evidence source">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  value={evidenceSource}
-                  onChange={(e) => setEvidenceSource(e.target.value)}
-                >
-                  <option value="provider_statement">Provider statement</option>
-                  <option value="bank_statement">
-                    Independently observed bank statement
-                  </option>
-                  <option value="conversion_confirmation">
-                    Authoritative conversion confirmation
-                  </option>
-                </NativeSelect>
-              )}
-            </Field>
-            <Field title="Original source / statement reference">
-              {(id) => (
-                <Input
-                  id={id}
-                  required
-                  maxLength={200}
-                  value={evidenceReference}
-                  onChange={(e) => setEvidenceReference(e.target.value)}
-                />
-              )}
-            </Field>
-            <Field title="Original file">
-              {(id) => (
-                <Input
-                  id={id}
-                  type="file"
-                  accept=".pdf,.txt,.csv"
-                  required
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-              )}
-            </Field>
-            <Field title="Attributable evidence note">
-              {(id) => (
-                <Textarea
-                  id={id}
-                  required
-                  maxLength={2000}
-                  value={evidenceNote}
-                  onChange={(e) => setEvidenceNote(e.target.value)}
-                />
-              )}
-            </Field>
-          </div>
-          <Button disabled={busy}>Retain original evidence</Button>
-        </form>
+        <fieldset disabled={busy} className="contents">
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(async () => {
+                if (!file || file.size > 262144)
+                  throw Error("Choose an original file up to 256 KiB.");
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                let raw = "";
+                for (const b of bytes) raw += String.fromCharCode(b);
+                const contentType = file.name.toLowerCase().endsWith(".pdf")
+                  ? "application/pdf"
+                  : file.name.toLowerCase().endsWith(".csv")
+                    ? "text/csv"
+                    : "text/plain";
+                const payload = {
+                  source: evidenceSource,
+                  reference: evidenceReference,
+                  note: evidenceNote,
+                  name: file.name,
+                  contentType,
+                  contentBase64: btoa(raw),
+                };
+                const serialized = JSON.stringify(payload);
+                const key =
+                  requests.current.get(serialized) ?? crypto.randomUUID();
+                requests.current.set(serialized, key);
+                const saved = await response(
+                  await post("evidence", {
+                    ...payload,
+                    requestKey: key,
+                  }),
+                  reconciliationEvidenceViewSchema,
+                );
+                setExtraEvidence((old) => [
+                  ...old.filter((x) => x.id !== saved.id),
+                  saved,
+                ]);
+              }, "Original evidence retained. Select it in the corresponding entry.");
+            }}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field title="Evidence source">
+                {(id) => (
+                  <NativeSelect
+                    id={id}
+                    value={evidenceSource}
+                    onChange={(e) => setEvidenceSource(e.target.value)}
+                  >
+                    <option value="provider_statement">
+                      Provider statement
+                    </option>
+                    <option value="bank_statement">
+                      Independently observed bank statement
+                    </option>
+                    <option value="conversion_confirmation">
+                      Authoritative conversion confirmation
+                    </option>
+                  </NativeSelect>
+                )}
+              </Field>
+              <Field title="Original source / statement reference">
+                {(id) => (
+                  <Input
+                    id={id}
+                    required
+                    maxLength={200}
+                    value={evidenceReference}
+                    onChange={(e) => setEvidenceReference(e.target.value)}
+                  />
+                )}
+              </Field>
+              <Field title="Original file">
+                {(id) => (
+                  <Input
+                    id={id}
+                    type="file"
+                    accept=".pdf,.txt,.csv"
+                    required
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  />
+                )}
+              </Field>
+              <Field title="Attributable evidence note">
+                {(id) => (
+                  <Textarea
+                    id={id}
+                    required
+                    maxLength={2000}
+                    value={evidenceNote}
+                    onChange={(e) => setEvidenceNote(e.target.value)}
+                  />
+                )}
+              </Field>
+            </div>
+            <Button disabled={busy}>Retain original evidence</Button>
+          </form>
+        </fieldset>
         <ul className="space-y-3">
           {evidence.map((e) => (
             <li
@@ -735,344 +747,305 @@ export function ReconciliationManager({
           tax. Select aggregate or line coverage once; included lines are never
           charged again. Empty evidence fields mean unavailable.
         </p>
-        <form
-          className="space-y-5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run(async () => {
-              const payload = {
-                kind: "settlement",
-                supersedes: header.supersedes,
-                supersedesAlso: header.supersedes ? settlementDuplicates : [],
-                evidenceId: header.evidenceId,
-                provider: "razorpay",
-                account: header.account,
-                mode: header.mode,
-                observedAt: header.observedAt,
-                reference: header.reference,
-                note: header.note,
-                settlementId: header.settlementId,
-                bankAccountRef: header.bankAccountRef,
-                transferReference: optional(header.transferReference),
-                transferAt: optional(header.transferAt),
-                status: header.status,
-                period: view.period,
-                money: {
-                  currency: header.currency,
-                  precision: 2,
-                  minor: header.amount,
-                },
-                creditMinor: optional(header.credit),
-                debitMinor: optional(header.debit),
-                fees: {
-                  coverage: header.coverage,
-                  amountMinor: optional(header.fee),
-                  taxMinor: optional(header.tax),
-                  presentation: header.presentation,
-                },
-                lines: lines.map((l) => {
-                  const selected = sourceChoice(sources, l.sourceId);
-                  return {
-                    kind: selected?.kind ?? "unclassified",
-                    sourceId: selected ? l.sourceId : null,
-                    businessId: selected?.source.businessId ?? null,
-                    paymentId: selected?.source.paymentId ?? null,
-                    nativeId: selected?.nativeId ?? l.nativeId,
-                    nativeInvoiceId: selected?.source.nativeInvoiceId ?? null,
-                    orderId: selected?.source.orderId ?? null,
-                    original: selected
-                      ? {
-                          currency: selected.source.currency,
-                          precision: 2,
-                          minor: selected.minor,
-                        }
-                      : null,
-                    convertedMinor: optional(l.converted),
-                    conversion:
-                      l.fxNumerator || l.fxDenominator
+        <fieldset disabled={busy} className="contents">
+          <form
+            className="space-y-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(async () => {
+                const payload = {
+                  kind: "settlement",
+                  supersedes: header.supersedes,
+                  supersedesAlso: header.supersedes ? settlementDuplicates : [],
+                  evidenceId: header.evidenceId,
+                  provider: "razorpay",
+                  account: header.account,
+                  mode: header.mode,
+                  observedAt: header.observedAt,
+                  reference: header.reference,
+                  note: header.note,
+                  settlementId: header.settlementId,
+                  bankAccountRef: header.bankAccountRef,
+                  transferReference: optional(header.transferReference),
+                  transferAt: optional(header.transferAt),
+                  status: header.status,
+                  period: view.period,
+                  money: {
+                    currency: header.currency,
+                    precision: 2,
+                    minor: header.amount,
+                  },
+                  creditMinor: optional(header.credit),
+                  debitMinor: optional(header.debit),
+                  fees: {
+                    coverage: header.coverage,
+                    amountMinor: optional(header.fee),
+                    taxMinor: optional(header.tax),
+                    presentation: header.presentation,
+                  },
+                  lines: lines.map((l) => {
+                    const selected = sourceChoice(sources, l.sourceId);
+                    return {
+                      kind: selected?.kind ?? "unclassified",
+                      sourceId: selected ? l.sourceId : null,
+                      businessId: selected?.source.businessId ?? null,
+                      paymentId: selected?.source.paymentId ?? null,
+                      nativeId: selected?.nativeId ?? l.nativeId,
+                      nativeInvoiceId: selected?.source.nativeInvoiceId ?? null,
+                      orderId: selected?.source.orderId ?? null,
+                      original: selected
                         ? {
-                            numerator: l.fxNumerator,
-                            denominator: l.fxDenominator,
-                            units: "target_minor_per_source_minor",
-                            effectiveAt: l.fxAt,
-                            rounding: l.rounding,
-                            evidenceId: l.fxEvidence,
-                            reference: l.fxReference,
+                            currency: selected.source.currency,
+                            precision: 2,
+                            minor: selected.minor,
                           }
                         : null,
-                    creditMinor: l.credit,
-                    debitMinor: l.debit,
-                    feeMinor: optional(l.fee),
-                    feeTaxMinor: optional(l.tax),
-                    feePresentation: l.presentation,
-                  };
-                }),
-              };
-              await command("record", payload);
-              await refresh();
-              setHeader(emptyHeader());
-              setLines([emptyLine()]);
-            }, "Settlement assertion retained. Review differences against the independent bank statement.");
-          }}
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            {(
-              [
-                ["settlementId", "Native settlement ID"],
-                ["account", "Original provider account identity"],
-                ["bankAccountRef", "Masked bank account reference"],
+                      convertedMinor: optional(l.converted),
+                      conversion:
+                        l.fxNumerator || l.fxDenominator
+                          ? {
+                              numerator: l.fxNumerator,
+                              denominator: l.fxDenominator,
+                              units: "target_minor_per_source_minor",
+                              effectiveAt: l.fxAt,
+                              rounding: l.rounding,
+                              evidenceId: l.fxEvidence,
+                              reference: l.fxReference,
+                            }
+                          : null,
+                      creditMinor: l.credit,
+                      debitMinor: l.debit,
+                      feeMinor: optional(l.fee),
+                      feeTaxMinor: optional(l.tax),
+                      feePresentation: l.presentation,
+                    };
+                  }),
+                };
+                await command("record", payload);
+                await refresh();
+                setHeader(emptyHeader());
+                setLines([emptyLine()]);
+              }, "Settlement assertion retained. Review differences against the independent bank statement.");
+            }}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              {(
                 [
-                  "transferReference",
-                  "UTR / transfer reference (if available)",
-                ],
-                [
-                  "transferAt",
-                  "Transfer initiation time (UTC ISO, if available)",
-                ],
-                ["observedAt", "Statement observation time (UTC ISO)"],
-                ["reference", "Original statement row reference"],
-                ["amount", "Transfer amount in minor units"],
-                [
-                  "credit",
-                  "Authoritative total credits in minor units (if available)",
-                ],
-                [
-                  "debit",
-                  "Authoritative total debits in minor units (if available)",
-                ],
-              ] satisfies [keyof Header, string][]
-            ).map(([key, title]) => (
-              <Field key={key} title={title}>
+                  ["settlementId", "Native settlement ID"],
+                  ["account", "Original provider account identity"],
+                  ["bankAccountRef", "Masked bank account reference"],
+                  [
+                    "transferReference",
+                    "UTR / transfer reference (if available)",
+                  ],
+                  [
+                    "transferAt",
+                    "Transfer initiation time (UTC ISO, if available)",
+                  ],
+                  ["observedAt", "Statement observation time (UTC ISO)"],
+                  ["reference", "Original statement row reference"],
+                  ["amount", "Transfer amount in minor units"],
+                  [
+                    "credit",
+                    "Authoritative total credits in minor units (if available)",
+                  ],
+                  [
+                    "debit",
+                    "Authoritative total debits in minor units (if available)",
+                  ],
+                ] satisfies [keyof Header, string][]
+              ).map(([key, title]) => (
+                <Field key={key} title={title}>
+                  {(id) => (
+                    <Input
+                      id={id}
+                      value={header[key] ?? ""}
+                      onChange={(e) => change(key, e.target.value)}
+                      required={[
+                        "settlementId",
+                        "account",
+                        "bankAccountRef",
+                        "observedAt",
+                        "reference",
+                        "amount",
+                      ].includes(key)}
+                    />
+                  )}
+                </Field>
+              ))}
+              <Field title="Provider mode">
                 {(id) => (
-                  <Input
+                  <NativeSelect
                     id={id}
-                    value={header[key] ?? ""}
-                    onChange={(e) => change(key, e.target.value)}
-                    required={[
-                      "settlementId",
-                      "account",
-                      "bankAccountRef",
-                      "observedAt",
-                      "reference",
-                      "amount",
-                    ].includes(key)}
-                  />
+                    value={header.mode}
+                    onChange={(e) => change("mode", e.target.value)}
+                  >
+                    {["test", "live", "fixture"].map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </NativeSelect>
                 )}
               </Field>
-            ))}
-            <Field title="Provider mode">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  value={header.mode}
-                  onChange={(e) => change("mode", e.target.value)}
-                >
-                  {["test", "live", "fixture"].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </NativeSelect>
-              )}
-            </Field>
-            <Field title="Settlement currency">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  value={header.currency}
-                  onChange={(e) => change("currency", e.target.value)}
-                >
-                  <option>INR</option>
-                  <option>USD</option>
-                </NativeSelect>
-              )}
-            </Field>
-            <Field title="Native settlement status">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  value={header.status}
-                  onChange={(e) => change("status", e.target.value)}
-                >
-                  {["created", "processed", "failed"].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </NativeSelect>
-              )}
-            </Field>
-            <Field title="Retained provider statement">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  required
-                  value={header.evidenceId}
-                  onChange={(e) => change("evidenceId", e.target.value)}
-                >
-                  {evidenceOptions("provider_statement")}
-                </NativeSelect>
-              )}
-            </Field>
-            <Field title="Fee coverage used once">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  value={header.coverage}
-                  onChange={(e) => change("coverage", e.target.value)}
-                >
-                  <option value="unavailable">Unavailable</option>
-                  <option value="lines">Transaction lines</option>
-                  <option value="aggregate">
-                    Settlement aggregate (included lines are context)
-                  </option>
-                </NativeSelect>
-              )}
-            </Field>
-            {header.coverage === "aggregate" && (
-              <>
-                <Field title="Aggregate reported fee minor units">
-                  {(id) => (
-                    <Input
-                      id={id}
-                      value={header.fee}
-                      onChange={(e) => change("fee", e.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field title="Aggregate fee tax minor units">
-                  {(id) => (
-                    <Input
-                      id={id}
-                      value={header.tax}
-                      onChange={(e) => change("tax", e.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field title="Aggregate fee presentation">
-                  {(id) => (
-                    <NativeSelect
-                      id={id}
-                      value={header.presentation}
-                      onChange={(e) => change("presentation", e.target.value)}
-                    >
-                      <option value="inclusive">
-                        Reported fee includes fee tax
-                      </option>
-                      <option value="exclusive">
-                        Reported fee excludes fee tax
-                      </option>
-                      <option value="unavailable">Unavailable</option>
-                    </NativeSelect>
-                  )}
-                </Field>
-              </>
-            )}
-          </div>
-          {lines.map((l, index) => (
-            <fieldset key={index} className="space-y-4 rounded-xl border p-4">
-              <legend className="px-2 font-medium">
-                Transaction {index + 1}
-              </legend>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field title="Canonical original charge or actual deduction">
-                  {(id) => (
-                    <NativeSelect
-                      id={id}
-                      value={l.sourceId}
-                      onChange={(e) => {
-                        changeLine(index, "sourceId", e.target.value);
-                        const selected = sourceChoice(sources, e.target.value);
-                        if (selected) {
-                          change("account", selected.source.account);
-                          change("mode", selected.source.mode);
-                        }
-                      }}
-                    >
-                      <option value="">
-                        Unclassified provider movement (requires review)
-                      </option>
-                      {sources.flatMap((s) => [
-                        <option key={s.periodId} value={s.periodId}>
-                          {s.businessName} · {s.paymentId} · {s.currency}{" "}
-                          {s.totals.totalMinor} minor
-                        </option>,
-                        ...s.effects.map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {s.businessName} · {e.source} {e.nativeId} ·{" "}
-                            {e.currency} {e.actualMinor} minor
-                          </option>
-                        )),
-                      ])}
-                    </NativeSelect>
-                  )}
-                </Field>
-                {!l.sourceId && (
-                  <Field title="Unclassified native row reference">
-                    {(id) => (
-                      <Input
-                        id={id}
-                        required
-                        value={l.nativeId}
-                        onChange={(e) =>
-                          changeLine(index, "nativeId", e.target.value)
-                        }
-                      />
-                    )}
-                  </Field>
+              <Field title="Settlement currency">
+                {(id) => (
+                  <NativeSelect
+                    id={id}
+                    value={header.currency}
+                    onChange={(e) => change("currency", e.target.value)}
+                  >
+                    <option>INR</option>
+                    <option>USD</option>
+                  </NativeSelect>
                 )}
-                {(
-                  [
-                    [
-                      "converted",
-                      "Observed gross in settlement minor units (if available)",
-                    ],
-                    ["credit", "Observed row credit minor units"],
-                    ["debit", "Observed row debit minor units"],
-                    ["fee", "Reported row fee minor units (if available)"],
-                    ["tax", "Reported row fee tax minor units (if available)"],
-                  ] satisfies [keyof LineForm, string][]
-                ).map(([key, title]) => (
-                  <Field key={key} title={title}>
+              </Field>
+              <Field title="Native settlement status">
+                {(id) => (
+                  <NativeSelect
+                    id={id}
+                    value={header.status}
+                    onChange={(e) => change("status", e.target.value)}
+                  >
+                    {["created", "processed", "failed"].map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </NativeSelect>
+                )}
+              </Field>
+              <Field title="Retained provider statement">
+                {(id) => (
+                  <NativeSelect
+                    id={id}
+                    required
+                    value={header.evidenceId}
+                    onChange={(e) => change("evidenceId", e.target.value)}
+                  >
+                    {evidenceOptions("provider_statement")}
+                  </NativeSelect>
+                )}
+              </Field>
+              <Field title="Fee coverage used once">
+                {(id) => (
+                  <NativeSelect
+                    id={id}
+                    value={header.coverage}
+                    onChange={(e) => change("coverage", e.target.value)}
+                  >
+                    <option value="unavailable">Unavailable</option>
+                    <option value="lines">Transaction lines</option>
+                    <option value="aggregate">
+                      Settlement aggregate (included lines are context)
+                    </option>
+                  </NativeSelect>
+                )}
+              </Field>
+              {header.coverage === "aggregate" && (
+                <>
+                  <Field title="Aggregate reported fee minor units">
                     {(id) => (
                       <Input
                         id={id}
-                        value={l[key]}
-                        required={key === "credit" || key === "debit"}
-                        onChange={(e) => changeLine(index, key, e.target.value)}
+                        value={header.fee}
+                        onChange={(e) => change("fee", e.target.value)}
                       />
                     )}
                   </Field>
-                ))}
-                <Field title="Row fee presentation">
-                  {(id) => (
-                    <NativeSelect
-                      id={id}
-                      value={l.presentation}
-                      onChange={(e) =>
-                        changeLine(index, "presentation", e.target.value)
-                      }
-                    >
-                      <option value="unavailable">Unavailable</option>
-                      <option value="inclusive">Fee includes its tax</option>
-                      <option value="exclusive">Fee excludes its tax</option>
-                    </NativeSelect>
-                  )}
-                </Field>
-              </div>
-              <details>
-                <summary className="min-h-11 cursor-pointer py-3">
-                  Explicit actual FX evidence
-                </summary>
-                <p className="mb-4 text-sm text-muted-foreground">
-                  Native captured base amounts may establish capture conversion.
-                  Refund conversion needs its own evidence. Planning rates never
-                  qualify. Enter target minor units per source minor unit as an
-                  exact rational rate.
-                </p>
+                  <Field title="Aggregate fee tax minor units">
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={header.tax}
+                        onChange={(e) => change("tax", e.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field title="Aggregate fee presentation">
+                    {(id) => (
+                      <NativeSelect
+                        id={id}
+                        value={header.presentation}
+                        onChange={(e) => change("presentation", e.target.value)}
+                      >
+                        <option value="inclusive">
+                          Reported fee includes fee tax
+                        </option>
+                        <option value="exclusive">
+                          Reported fee excludes fee tax
+                        </option>
+                        <option value="unavailable">Unavailable</option>
+                      </NativeSelect>
+                    )}
+                  </Field>
+                </>
+              )}
+            </div>
+            {lines.map((l, index) => (
+              <fieldset key={index} className="space-y-4 rounded-xl border p-4">
+                <legend className="px-2 font-medium">
+                  Transaction {index + 1}
+                </legend>
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <Field title="Canonical original charge or actual deduction">
+                    {(id) => (
+                      <NativeSelect
+                        id={id}
+                        value={l.sourceId}
+                        onChange={(e) => {
+                          changeLine(index, "sourceId", e.target.value);
+                          const selected = sourceChoice(
+                            sources,
+                            e.target.value,
+                          );
+                          if (selected) {
+                            change("account", selected.source.account);
+                            change("mode", selected.source.mode);
+                          }
+                        }}
+                      >
+                        <option value="">
+                          Unclassified provider movement (requires review)
+                        </option>
+                        {sources.flatMap((s) => [
+                          <option key={s.periodId} value={s.periodId}>
+                            {s.businessName} · {s.paymentId} · {s.currency}{" "}
+                            {s.totals.totalMinor} minor
+                          </option>,
+                          ...s.effects.map((e) => (
+                            <option key={e.id} value={e.id}>
+                              {s.businessName} · {e.source} {e.nativeId} ·{" "}
+                              {e.currency} {e.actualMinor} minor
+                            </option>
+                          )),
+                        ])}
+                      </NativeSelect>
+                    )}
+                  </Field>
+                  {!l.sourceId && (
+                    <Field title="Unclassified native row reference">
+                      {(id) => (
+                        <Input
+                          id={id}
+                          required
+                          value={l.nativeId}
+                          onChange={(e) =>
+                            changeLine(index, "nativeId", e.target.value)
+                          }
+                        />
+                      )}
+                    </Field>
+                  )}
                   {(
                     [
-                      ["fxNumerator", "Target minor-unit numerator"],
-                      ["fxDenominator", "Source minor-unit denominator"],
-                      ["fxAt", "Conversion effective time (UTC ISO)"],
-                      ["fxReference", "Conversion source reference"],
+                      [
+                        "converted",
+                        "Observed gross in settlement minor units (if available)",
+                      ],
+                      ["credit", "Observed row credit minor units"],
+                      ["debit", "Observed row debit minor units"],
+                      ["fee", "Reported row fee minor units (if available)"],
+                      [
+                        "tax",
+                        "Reported row fee tax minor units (if available)",
+                      ],
                     ] satisfies [keyof LineForm, string][]
                   ).map(([key, title]) => (
                     <Field key={key} title={title}>
@@ -1080,6 +1053,7 @@ export function ReconciliationManager({
                         <Input
                           id={id}
                           value={l[key]}
+                          required={key === "credit" || key === "debit"}
                           onChange={(e) =>
                             changeLine(index, key, e.target.value)
                           }
@@ -1087,109 +1061,157 @@ export function ReconciliationManager({
                       )}
                     </Field>
                   ))}
-                  <Field title="Retained authoritative conversion evidence">
+                  <Field title="Row fee presentation">
                     {(id) => (
                       <NativeSelect
                         id={id}
-                        value={l.fxEvidence}
+                        value={l.presentation}
                         onChange={(e) =>
-                          changeLine(index, "fxEvidence", e.target.value)
+                          changeLine(index, "presentation", e.target.value)
                         }
                       >
-                        {evidenceOptions("conversion_confirmation")}
-                      </NativeSelect>
-                    )}
-                  </Field>
-                  <Field title="Original conversion rounding">
-                    {(id) => (
-                      <NativeSelect
-                        id={id}
-                        value={l.rounding}
-                        onChange={(e) =>
-                          changeLine(index, "rounding", e.target.value)
-                        }
-                      >
-                        <option value="">
-                          Select the original conversion rounding
-                        </option>
-                        <option value="half_up">Half up</option>
-                        <option value="floor">Floor</option>
+                        <option value="unavailable">Unavailable</option>
+                        <option value="inclusive">Fee includes its tax</option>
+                        <option value="exclusive">Fee excludes its tax</option>
                       </NativeSelect>
                     )}
                   </Field>
                 </div>
-              </details>
-              {lines.length > 1 && (
+                <details>
+                  <summary className="min-h-11 cursor-pointer py-3">
+                    Explicit actual FX evidence
+                  </summary>
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    Native captured base amounts may establish capture
+                    conversion. Refund conversion needs its own evidence.
+                    Planning rates never qualify. Enter target minor units per
+                    source minor unit as an exact rational rate.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {(
+                      [
+                        ["fxNumerator", "Target minor-unit numerator"],
+                        ["fxDenominator", "Source minor-unit denominator"],
+                        ["fxAt", "Conversion effective time (UTC ISO)"],
+                        ["fxReference", "Conversion source reference"],
+                      ] satisfies [keyof LineForm, string][]
+                    ).map(([key, title]) => (
+                      <Field key={key} title={title}>
+                        {(id) => (
+                          <Input
+                            id={id}
+                            value={l[key]}
+                            onChange={(e) =>
+                              changeLine(index, key, e.target.value)
+                            }
+                          />
+                        )}
+                      </Field>
+                    ))}
+                    <Field title="Retained authoritative conversion evidence">
+                      {(id) => (
+                        <NativeSelect
+                          id={id}
+                          value={l.fxEvidence}
+                          onChange={(e) =>
+                            changeLine(index, "fxEvidence", e.target.value)
+                          }
+                        >
+                          {evidenceOptions("conversion_confirmation")}
+                        </NativeSelect>
+                      )}
+                    </Field>
+                    <Field title="Original conversion rounding">
+                      {(id) => (
+                        <NativeSelect
+                          id={id}
+                          value={l.rounding}
+                          onChange={(e) =>
+                            changeLine(index, "rounding", e.target.value)
+                          }
+                        >
+                          <option value="">
+                            Select the original conversion rounding
+                          </option>
+                          <option value="half_up">Half up</option>
+                          <option value="floor">Floor</option>
+                        </NativeSelect>
+                      )}
+                    </Field>
+                  </div>
+                </details>
+                {lines.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setLines((old) => old.filter((_, i) => i !== index))
+                    }
+                  >
+                    Remove transaction {index + 1}
+                  </Button>
+                )}
+              </fieldset>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || lines.length >= 1000}
+              onClick={() => setLines((old) => [...old, emptyLine()])}
+            >
+              Add transaction
+            </Button>
+            {header.supersedes &&
+              duplicateOptions(header.supersedes).length > 0 && (
+                <Field title="Additional retained duplicate copies replaced by this complete correction (optional)">
+                  {(id) => (
+                    <NativeSelect
+                      id={id}
+                      multiple
+                      value={settlementDuplicates}
+                      onChange={(e) =>
+                        setSettlementDuplicates(
+                          [...e.target.selectedOptions].map((o) => o.value),
+                        )
+                      }
+                    >
+                      {duplicateOptions(header.supersedes).map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.data.reference} · {r.id}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  )}
+                </Field>
+              )}
+            <Field title="Assertion / correction explanation">
+              {(id) => (
+                <Textarea
+                  id={id}
+                  required
+                  maxLength={2000}
+                  value={header.note}
+                  onChange={(e) => change("note", e.target.value)}
+                />
+              )}
+            </Field>
+            <div className="flex flex-wrap gap-3">
+              <Button disabled={busy}>Retain settlement assertion</Button>
+              {header.supersedes && (
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() =>
-                    setLines((old) => old.filter((_, i) => i !== index))
-                  }
+                  onClick={() => {
+                    setHeader(emptyHeader());
+                    setLines([emptyLine()]);
+                  }}
                 >
-                  Remove transaction {index + 1}
+                  Cancel correction
                 </Button>
               )}
-            </fieldset>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy || lines.length >= 1000}
-            onClick={() => setLines((old) => [...old, emptyLine()])}
-          >
-            Add transaction
-          </Button>
-          {header.supersedes &&
-            duplicateOptions(header.supersedes).length > 0 && (
-              <Field title="Additional retained duplicate copies replaced by this complete correction (optional)">
-                {(id) => (
-                  <NativeSelect
-                    id={id}
-                    multiple
-                    value={settlementDuplicates}
-                    onChange={(e) =>
-                      setSettlementDuplicates(
-                        [...e.target.selectedOptions].map((o) => o.value),
-                      )
-                    }
-                  >
-                    {duplicateOptions(header.supersedes).map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.data.reference} · {r.id}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                )}
-              </Field>
-            )}
-          <Field title="Assertion / correction explanation">
-            {(id) => (
-              <Textarea
-                id={id}
-                required
-                maxLength={2000}
-                value={header.note}
-                onChange={(e) => change("note", e.target.value)}
-              />
-            )}
-          </Field>
-          <div className="flex flex-wrap gap-3">
-            <Button disabled={busy}>Retain settlement assertion</Button>
-            {header.supersedes && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setHeader(emptyHeader());
-                  setLines([emptyLine()]);
-                }}
-              >
-                Cancel correction
-              </Button>
-            )}
-          </div>
-        </form>
+            </div>
+          </form>
+        </fieldset>
       </section>
       <section
         id="bank-entry"
@@ -1206,178 +1228,183 @@ export function ReconciliationManager({
           reference and value date support the link. Equal amounts alone never
           establish a match.
         </p>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run(async () => {
-              const selected = view.settlements.find(
-                (s) => s.id === receipt.settlementRecordId,
-              );
-              if (!selected) throw Error("Select the original settlement.");
-              await command("record", {
-                kind: "bank_receipt",
-                provider: "razorpay",
-                account: selected.data.account,
-                mode: selected.data.mode,
-                settlementId: selected.data.settlementId,
-                supersedes: receipt.supersedes,
-                supersedesAlso: receipt.supersedes ? bankDuplicates : [],
-                evidenceId: receipt.evidenceId,
-                observedAt: receipt.observedAt,
-                reference: receipt.reference,
-                note: receipt.note,
-                bankTransactionId: receipt.bankTransactionId,
-                bankAccountRef: receipt.bankAccountRef,
-                transferReference: optional(receipt.transferReference),
-                valueAt: receipt.valueAt,
-                money: {
-                  currency: receipt.currency,
-                  precision: 2,
-                  minor: receipt.amount,
-                },
-              });
-              await refresh();
-              setReceipt((old) => ({
-                ...old,
-                bankTransactionId: "",
-                reference: "",
-                amount: "",
-                supersedes: null,
-              }));
-            }, "Bank observation retained; differences remain visible.");
-          }}
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field title="Original provider settlement">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  required
-                  value={receipt.settlementRecordId}
-                  onChange={(e) =>
-                    setReceipt((old) => ({
-                      ...old,
-                      settlementRecordId: e.target.value,
-                    }))
-                  }
-                >
-                  <option value="">Select settlement</option>
-                  {view.settlements.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.data.settlementId} · {s.data.account} · {s.data.mode}
-                    </option>
-                  ))}
-                </NativeSelect>
-              )}
-            </Field>
-            <Field title="Retained independent bank statement">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  required
-                  value={receipt.evidenceId}
-                  onChange={(e) =>
-                    setReceipt((old) => ({
-                      ...old,
-                      evidenceId: e.target.value,
-                    }))
-                  }
-                >
-                  {evidenceOptions("bank_statement")}
-                </NativeSelect>
-              )}
-            </Field>
-            {(
-              [
-                ["bankTransactionId", "Unique bank transaction ID"],
-                ["reference", "Original bank statement row reference"],
-                ["bankAccountRef", "Observed masked bank account reference"],
-                ["transferReference", "Observed UTR / transfer reference"],
-                ["valueAt", "Bank value date (YYYY-MM-DD) or UTC ISO time"],
-                ["observedAt", "Observation time (UTC ISO)"],
-                ["amount", "Observed credit in minor units"],
-              ] satisfies [keyof typeof receipt, string][]
-            ).map(([key, title]) => (
-              <Field key={key} title={title}>
-                {(id) => (
-                  <Input
-                    id={id}
-                    required
-                    value={receipt[key] ?? ""}
-                    onChange={(e) =>
-                      setReceipt((old) => ({ ...old, [key]: e.target.value }))
-                    }
-                  />
-                )}
-              </Field>
-            ))}
-            <Field title="Observed bank currency">
-              {(id) => (
-                <NativeSelect
-                  id={id}
-                  value={receipt.currency}
-                  onChange={(e) =>
-                    setReceipt((old) => ({ ...old, currency: e.target.value }))
-                  }
-                >
-                  <option>INR</option>
-                  <option>USD</option>
-                </NativeSelect>
-              )}
-            </Field>
-          </div>
-          {receipt.supersedes &&
-            duplicateOptions(receipt.supersedes).length > 0 && (
-              <Field title="Additional retained duplicate bank copies replaced by this complete correction (optional)">
+        <fieldset disabled={busy} className="contents">
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(async () => {
+                const selected = view.settlements.find(
+                  (s) => s.id === receipt.settlementRecordId,
+                );
+                if (!selected) throw Error("Select the original settlement.");
+                await command("record", {
+                  kind: "bank_receipt",
+                  provider: "razorpay",
+                  account: selected.data.account,
+                  mode: selected.data.mode,
+                  settlementId: selected.data.settlementId,
+                  supersedes: receipt.supersedes,
+                  supersedesAlso: receipt.supersedes ? bankDuplicates : [],
+                  evidenceId: receipt.evidenceId,
+                  observedAt: receipt.observedAt,
+                  reference: receipt.reference,
+                  note: receipt.note,
+                  bankTransactionId: receipt.bankTransactionId,
+                  bankAccountRef: receipt.bankAccountRef,
+                  transferReference: optional(receipt.transferReference),
+                  valueAt: receipt.valueAt,
+                  money: {
+                    currency: receipt.currency,
+                    precision: 2,
+                    minor: receipt.amount,
+                  },
+                });
+                await refresh();
+                setReceipt((old) => ({
+                  ...old,
+                  bankTransactionId: "",
+                  reference: "",
+                  amount: "",
+                  supersedes: null,
+                }));
+              }, "Bank observation retained; differences remain visible.");
+            }}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field title="Original provider settlement">
                 {(id) => (
                   <NativeSelect
                     id={id}
-                    multiple
-                    value={bankDuplicates}
+                    required
+                    value={receipt.settlementRecordId}
                     onChange={(e) =>
-                      setBankDuplicates(
-                        [...e.target.selectedOptions].map((o) => o.value),
-                      )
+                      setReceipt((old) => ({
+                        ...old,
+                        settlementRecordId: e.target.value,
+                      }))
                     }
                   >
-                    {duplicateOptions(receipt.supersedes).map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.data.reference} · {r.id}
+                    <option value="">Select settlement</option>
+                    {view.settlements.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.data.settlementId} · {s.data.account} · {s.data.mode}
                       </option>
                     ))}
                   </NativeSelect>
                 )}
               </Field>
-            )}
-          <Field title="Bank observation / correction explanation">
-            {(id) => (
-              <Textarea
-                id={id}
-                required
-                maxLength={2000}
-                value={receipt.note}
-                onChange={(e) =>
-                  setReceipt((old) => ({ ...old, note: e.target.value }))
-                }
-              />
-            )}
-          </Field>
-          <div className="flex flex-wrap gap-3">
-            <Button disabled={busy}>Retain bank receipt assertion</Button>
-            {receipt.supersedes && (
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() =>
-                  setReceipt((old) => ({ ...old, supersedes: null }))
-                }
-              >
-                Cancel correction
-              </Button>
-            )}
-          </div>
-        </form>
+              <Field title="Retained independent bank statement">
+                {(id) => (
+                  <NativeSelect
+                    id={id}
+                    required
+                    value={receipt.evidenceId}
+                    onChange={(e) =>
+                      setReceipt((old) => ({
+                        ...old,
+                        evidenceId: e.target.value,
+                      }))
+                    }
+                  >
+                    {evidenceOptions("bank_statement")}
+                  </NativeSelect>
+                )}
+              </Field>
+              {(
+                [
+                  ["bankTransactionId", "Unique bank transaction ID"],
+                  ["reference", "Original bank statement row reference"],
+                  ["bankAccountRef", "Observed masked bank account reference"],
+                  ["transferReference", "Observed UTR / transfer reference"],
+                  ["valueAt", "Bank value date (YYYY-MM-DD) or UTC ISO time"],
+                  ["observedAt", "Observation time (UTC ISO)"],
+                  ["amount", "Observed credit in minor units"],
+                ] satisfies [keyof typeof receipt, string][]
+              ).map(([key, title]) => (
+                <Field key={key} title={title}>
+                  {(id) => (
+                    <Input
+                      id={id}
+                      required
+                      value={receipt[key] ?? ""}
+                      onChange={(e) =>
+                        setReceipt((old) => ({ ...old, [key]: e.target.value }))
+                      }
+                    />
+                  )}
+                </Field>
+              ))}
+              <Field title="Observed bank currency">
+                {(id) => (
+                  <NativeSelect
+                    id={id}
+                    value={receipt.currency}
+                    onChange={(e) =>
+                      setReceipt((old) => ({
+                        ...old,
+                        currency: e.target.value,
+                      }))
+                    }
+                  >
+                    <option>INR</option>
+                    <option>USD</option>
+                  </NativeSelect>
+                )}
+              </Field>
+            </div>
+            {receipt.supersedes &&
+              duplicateOptions(receipt.supersedes).length > 0 && (
+                <Field title="Additional retained duplicate bank copies replaced by this complete correction (optional)">
+                  {(id) => (
+                    <NativeSelect
+                      id={id}
+                      multiple
+                      value={bankDuplicates}
+                      onChange={(e) =>
+                        setBankDuplicates(
+                          [...e.target.selectedOptions].map((o) => o.value),
+                        )
+                      }
+                    >
+                      {duplicateOptions(receipt.supersedes).map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.data.reference} · {r.id}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  )}
+                </Field>
+              )}
+            <Field title="Bank observation / correction explanation">
+              {(id) => (
+                <Textarea
+                  id={id}
+                  required
+                  maxLength={2000}
+                  value={receipt.note}
+                  onChange={(e) =>
+                    setReceipt((old) => ({ ...old, note: e.target.value }))
+                  }
+                />
+              )}
+            </Field>
+            <div className="flex flex-wrap gap-3">
+              <Button disabled={busy}>Retain bank receipt assertion</Button>
+              {receipt.supersedes && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() =>
+                    setReceipt((old) => ({ ...old, supersedes: null }))
+                  }
+                >
+                  Cancel correction
+                </Button>
+              )}
+            </div>
+          </form>
+        </fieldset>
       </section>
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">
@@ -1528,62 +1555,64 @@ function SettlementReview({
       <Button variant="outline" disabled={busy} onClick={correct}>
         Prepare settlement correction
       </Button>
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          run(
-            () => review("acknowledged", note, evidenceId),
-            "Review acknowledgement retained with the original discrepancy.",
-          );
-        }}
-      >
-        <Field title="Review explanation">
-          {(id) => (
-            <Textarea
-              id={id}
-              required
-              maxLength={2000}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          )}
-        </Field>
-        <Field title="Supporting retained evidence">
-          {(id) => (
-            <NativeSelect
-              id={id}
-              required
-              value={evidenceId}
-              onChange={(e) => setEvidenceId(e.target.value)}
+      <fieldset disabled={busy} className="contents">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(
+              () => review("acknowledged", note, evidenceId),
+              "Review acknowledgement retained with the original discrepancy.",
+            );
+          }}
+        >
+          <Field title="Review explanation">
+            {(id) => (
+              <Textarea
+                id={id}
+                required
+                maxLength={2000}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            )}
+          </Field>
+          <Field title="Supporting retained evidence">
+            {(id) => (
+              <NativeSelect
+                id={id}
+                required
+                value={evidenceId}
+                onChange={(e) => setEvidenceId(e.target.value)}
+              >
+                <option value="">Select evidence</option>
+                {evidence.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.reference}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" disabled={busy}>
+              Acknowledge discrepancy
+            </Button>
+            <Button
+              type="button"
+              disabled={busy || s.reasons.length > 0 || !note || !evidenceId}
+              onClick={() =>
+                run(
+                  () => review("resolved", note, evidenceId),
+                  "Balanced evidence review recorded as an operator assertion.",
+                )
+              }
             >
-              <option value="">Select evidence</option>
-              {evidence.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.reference}
-                </option>
-              ))}
-            </NativeSelect>
-          )}
-        </Field>
-        <div className="flex flex-wrap gap-3">
-          <Button variant="outline" disabled={busy}>
-            Acknowledge discrepancy
-          </Button>
-          <Button
-            type="button"
-            disabled={busy || s.reasons.length > 0 || !note || !evidenceId}
-            onClick={() =>
-              run(
-                () => review("resolved", note, evidenceId),
-                "Balanced evidence review recorded as an operator assertion.",
-              )
-            }
-          >
-            Record balanced review
-          </Button>
-        </div>
-      </form>
+              Record balanced review
+            </Button>
+          </div>
+        </form>
+      </fieldset>
       <details>
         <summary className="min-h-11 cursor-pointer py-3">
           Review history ({s.reviews.length})
