@@ -1973,55 +1973,91 @@ describe("Business data export and offboarding at the public application seam", 
       await verifyRuntimeRole(h.runtime);
     },
   );
-  it("requires every runtime ledger privilege, denies unscoped cleanup authority and preserves approved scope through replaceable-UNIQUE reapplication", async () => {
-    const owner = await h.signIn("data-security@example.com"),
-      b = await h.application.createBusiness(owner, {
-        name: "Security",
-        offering: "Steel",
-        homeMarket: "US",
-        website: "",
-      });
-    policy.businessIds = [b.id];
-    const request = await app().offboard(owner, b.id, {
-      requestKey: randomUUID(),
-      policyId: policy.id,
-      policyVersion: 1,
-      confirmStop: true,
-      deleteGeneralFiles: false,
-      cancellation: null,
-    });
-    const exported = await app().export(owner, b.id, {
+  describe("full configured schema reapplication with approved Business records", () => {
+    let fixture: {
+      owner: Headers;
+      businessId: string;
+      requestId: string;
+      exportId: string;
+      token: string;
+    };
+    beforeEach(async () => {
+      const owner = await h.signIn("data-security@example.com"),
+        b = await h.application.createBusiness(owner, {
+          name: "Security",
+          offering: "Steel",
+          homeMarket: "US",
+          website: "",
+        });
+      policy.businessIds = [b.id];
+      const request = await app().offboard(owner, b.id, {
         requestKey: randomUUID(),
-      }),
-      grant = await app().access(owner, b.id, exported.id);
-    await expect(
-      h.runtime.query("select public.start_business_offboarding($1)", [
-        request.id,
-      ]),
-    ).rejects.toMatchObject({ code: "42501" });
-    await expect(
-      h.runtime.query("select secret from business_data_step"),
-    ).rejects.toMatchObject({ code: "42501" });
-    expect(
-      (
-        await h.runtime.query(
-          "select count(*)::int n from business_data_export",
-        )
-      ).rows[0].n,
-    ).toBe(0);
-    await h.admin.query(
-      "alter table public.business_data_export add constraint business_data_export_scope unique using index business_data_export_scope",
-    );
-    await h.reapplySchema();
-    await verifyRuntimeRole(h.runtime);
-    const bytes = (await app().download(owner, b.id, exported.id, grant.token))
-      .bytes;
-    expect(
-      JSON.parse(new TextDecoder().decode(bytes)).records.business[0].id,
-    ).toBe(b.id);
-    expect((await app().workspace(owner, b.id)).offboarding[0].id).toBe(
-      request.id,
-    );
+        policyId: policy.id,
+        policyVersion: 1,
+        confirmStop: true,
+        deleteGeneralFiles: false,
+        cancellation: null,
+      });
+      const exported = await app().export(owner, b.id, {
+          requestKey: randomUUID(),
+        }),
+        grant = await app().access(owner, b.id, exported.id);
+      await h.admin.query(
+        "alter table public.business_data_export add constraint business_data_export_scope unique using index business_data_export_scope",
+      );
+      fixture = {
+        owner,
+        businessId: b.id,
+        requestId: request.id,
+        exportId: exported.id,
+        token: grant.token,
+      };
+    });
+    it("denies unscoped authority and preserves all managed scopes, private downloads and history through the full configured reapplication", async () => {
+      const { owner, businessId, requestId, exportId, token } = fixture;
+      await expect(
+        h.runtime.query("select public.start_business_offboarding($1)", [
+          requestId,
+        ]),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        h.runtime.query("select secret from business_data_step"),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await h.runtime.query(
+            "select count(*)::int n from business_data_export",
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      await h.reapplySchema();
+      await verifyRuntimeRole(h.runtime);
+      const scopes = await h.runtime.query(
+        "select conname,convalidated from pg_constraint where conname=any($1) and contype='f' order by conname",
+        [
+          [
+            "business_data_grant_export_scope",
+            "business_data_step_request_scope",
+            "business_data_event_step_scope",
+          ],
+        ],
+      );
+      expect(scopes.rows).toEqual(
+        [
+          "business_data_event_step_scope",
+          "business_data_grant_export_scope",
+          "business_data_step_request_scope",
+        ].map((conname) => ({ conname, convalidated: true })),
+      );
+      const bytes = (await app().download(owner, businessId, exportId, token))
+        .bytes;
+      expect(
+        JSON.parse(new TextDecoder().decode(bytes)).records.business[0].id,
+      ).toBe(businessId);
+      expect((await app().workspace(owner, businessId)).offboarding[0].id).toBe(
+        requestId,
+      );
+    });
   });
   it("requires each export ledger read and append privilege independently of schema preservation", async () => {
     for (const privilege of ["SELECT", "INSERT"]) {
