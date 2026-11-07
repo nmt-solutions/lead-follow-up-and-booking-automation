@@ -43,6 +43,7 @@ export const capabilities: Record<BusinessRole, readonly BusinessCapability[]> =
   };
 export const platformCapabilitySchema = z.enum([
   "refunds.manage",
+  "notifications.manage",
   "operations.manage",
   "costs.manage",
   "documents.manage",
@@ -86,6 +87,8 @@ export type AuditEntry = {
   at: Date;
 };
 export type InvitationMail = {
+  businessId: string;
+  actorId: string;
   invitationId: string;
   email: string;
   businessName: string;

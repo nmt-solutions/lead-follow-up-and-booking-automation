@@ -4,6 +4,11 @@ import { secureOperations, prepareOperations } from "./operations-security";
 import { preparePaymentSecurity } from "./payment-security";
 import { prepareSellerDocumentSecurity } from "./seller-document-security";
 import { prepareCostSecurity } from "./cost-security";
+import {
+  prepareNotificationSecurity,
+  notificationTables,
+  notificationFunctions,
+} from "./notification-security";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -60,6 +65,13 @@ import {
   operationRetention,
   operationDetail,
   costRecord,
+  notificationTerms,
+  notificationPreference,
+  notificationSetup,
+  notificationNotice,
+  notificationPayload,
+  notificationEvent,
+  notificationReceipt,
   costPlanningRevision,
   costScan,
   costBudgetRevision,
@@ -222,6 +234,15 @@ export async function prepareDatabaseRole(pool: Pool) {
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
   await prepareCostSecurity(pool);
+  await prepareNotificationSecurity(pool);
+  for (const name of notificationTables) {
+    await pool.query(
+      `DO $$ BEGIN IF to_regclass('public.${name}') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.${name} FROM app_runtime; END IF; END $$;`,
+    );
+  }
+  await pool.query(
+    `DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY(${"ARRAY[" + notificationFunctions.map((n) => `'${n}'`).join(",") + "]"}) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP; END $$;`,
+  );
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
     RETURNS TABLE(payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -741,6 +762,7 @@ export async function secureDatabase(pool: Pool) {
     for (const table of [
       membership,
       opportunityDueAction,
+      notificationNotice,
       inboxOpportunity,
       senderHealthRecord,
       whatsAppIntake,
@@ -829,6 +851,13 @@ export async function secureDatabase(pool: Pool) {
       operationRetention,
       operationDetail,
       costRecord,
+      notificationTerms,
+      notificationPreference,
+      notificationSetup,
+      notificationNotice,
+      notificationPayload,
+      notificationEvent,
+      notificationReceipt,
       costPlanningRevision,
       costScan,
       costBudgetRevision,
@@ -1319,6 +1348,12 @@ export async function secureDatabase(pool: Pool) {
     await preparePaymentSecurity(client);
     await prepareFinancialSecurity(client);
     await prepareCostSecurity(client);
+    await prepareNotificationSecurity(client);
+    for (const name of notificationTables) {
+      await client.query(
+        `REVOKE ALL PRIVILEGES ON public.${name} FROM app_runtime; GRANT SELECT,INSERT ON public.${name} TO app_runtime; ALTER TABLE public.${name} FORCE ROW LEVEL SECURITY;`,
+      );
+    }
     await client.query(`
       CREATE OR REPLACE FUNCTION public.pending_meta_outbound()
       RETURNS TABLE(business_id uuid,action_id uuid,actor_id text,session_id text)

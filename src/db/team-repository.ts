@@ -386,7 +386,9 @@ export function createTeamRepository(database: Database): TeamRepository {
         if (
           !operator ||
           !(capability === "refunds.manage"
-            ? operator?.refunds
+            ? operator.refunds
+            : capability === "notifications.manage"
+              ? operator.notifications
             : capability === "operations.manage"
               ? operator.operations
               : capability === "costs.manage"

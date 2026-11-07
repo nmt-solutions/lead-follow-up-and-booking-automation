@@ -230,7 +230,12 @@ export type CostAlert = {
   at: string;
   acknowledged: boolean;
 };
-export type CostMail = { key: string; email: string; text: string };
+export type CostMail = {
+  key: string;
+  email: string;
+  text: string;
+  authority: { alertId: string; lease: string; actorId: string };
+};
 export type CostMailer = { send(message: CostMail): Promise<{ id: string }> };
 export type CostProjection = CostRecord & {
   valuedAmount: z.infer<typeof costMoneySchema> | null;

@@ -27,7 +27,7 @@ function parse<T>(schema: z.ZodType<T>, value: unknown) {
   if (!p.success) throw new ApplicationError("INVALID_INPUT");
   return p.data;
 }
-function needsAttention(row: {
+export function needsAttention(row: {
   source: string;
   status: string;
   reason: string | null;

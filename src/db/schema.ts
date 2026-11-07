@@ -1139,6 +1139,7 @@ export const platformOperator = pgTable(
     documents: boolean("documents").notNull().default(false),
     operations: boolean("operations").notNull().default(false),
     costs: boolean("costs").notNull().default(false),
+    notifications: boolean("notifications").notNull().default(false),
   },
   (table) => [
     pgPolicy("operator_read", {
@@ -1273,6 +1274,166 @@ export const operationDetail = pgTable(
 ).enableRLS();
 
 const documentOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.documents)`;
+// All access goes through bounded definer commands. Runtime cannot read private
+// payloads or author acceptance/status facts by inserting into these ledgers.
+const notificationPolicies = (prefix: string) => [
+  pgPolicy(`${prefix}_read`, {
+    for: "select",
+    to: appRuntime,
+    using: sql`false`,
+  }),
+  pgPolicy(`${prefix}_insert`, {
+    for: "insert",
+    to: appRuntime,
+    withCheck: sql`false`,
+  }),
+];
+export const notificationPreference = pgTable(
+  "notification_preference",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    businessId: uuid("business_id").references(() => business.id),
+    purpose: text("purpose").notNull(),
+    enabled: boolean("enabled").notNull(),
+    version: integer("version").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_preference"),
+).enableRLS();
+export const notificationTerms = pgTable(
+  "notification_terms",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    terms: jsonb("terms")
+      .$type<import("../models/notifications").NotificationTerms>()
+      .notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    authBootstrap: boolean("auth_bootstrap").notNull().default(false),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_terms"),
+).enableRLS();
+export const notificationSetup = pgTable(
+  "notification_setup",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    binding: jsonb("binding").notNull(),
+    setup:
+      jsonb("setup").$type<
+        import("../models/notifications").NotificationSetup
+      >(),
+    capability: uuid("capability").notNull().defaultRandom(),
+    actorId: text("actor_id").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_setup"),
+).enableRLS();
+export const notificationNotice = pgTable(
+  "notification_notice",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    purpose: text("purpose")
+      .$type<import("../models/notifications").NoticePurpose>()
+      .notNull(),
+    sourceId: text("source_id").notNull(),
+    sourceStage: text("source_stage").notNull(),
+    businessId: uuid("business_id").references(() => business.id),
+    actorId: text("actor_id"),
+    authority: text("authority").notNull(),
+    authUserId: text("auth_user_id"),
+    recipientDigest: text("recipient_digest"),
+    capability: uuid("capability").notNull(),
+    key: text("key").notNull(),
+    keyRef: text("key_ref").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    state: text("state").notNull().default("pending"),
+    uncertain: boolean("uncertain").notNull().default(false),
+    priorUncertain: boolean("prior_uncertain").notNull().default(false),
+    providerId: text("provider_id"),
+    firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
+    retryUntil: timestamp("retry_until", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lease: uuid("lease"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    binding: jsonb("binding").notNull(),
+    terms: jsonb("terms"),
+    reason: text("reason").notNull().default("pending"),
+  },
+  (t) => [
+    uniqueIndex("notification_source_identity").on(
+      t.account,
+      t.purpose,
+      t.sourceId,
+    ),
+    uniqueIndex("notification_provider_identity").on(t.account, t.providerId),
+    check(
+      "notification_purpose",
+      sql`${t.purpose} in ('authentication','invitation','cost_alert','sender_health','handoff','operations','subscription')`,
+    ),
+    check(
+      "notification_state",
+      sql`${t.state} in ('pending','sending','accepted','uncertain','rate_limited','rejected','held','expired')`,
+    ),
+    ...notificationPolicies("notification_notice"),
+  ],
+).enableRLS();
+export const notificationPayload = pgTable(
+  "notification_payload",
+  {
+    noticeId: uuid("notice_id")
+      .primaryKey()
+      .references(() => notificationNotice.id),
+    sealed: text("sealed").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  () => notificationPolicies("notification_payload"),
+).enableRLS();
+export const notificationEvent = pgTable(
+  "notification_event",
+  {
+    id: uuid("id").primaryKey(),
+    noticeId: uuid("notice_id")
+      .notNull()
+      .references(() => notificationNotice.id),
+    kind: text("kind").notNull(),
+    lease: uuid("lease"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_event"),
+).enableRLS();
+export const notificationReceipt = pgTable(
+  "notification_receipt",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    eventId: text("event_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    stage: text("stage").notNull(),
+    rawHash: text("raw_hash").notNull(),
+    recipientDigest: text("recipient_digest").notNull(),
+    senderDigest: text("sender_digest").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("notification_receipt_identity").on(t.account, t.eventId),
+    ...notificationPolicies("notification_receipt"),
+  ],
+).enableRLS();
 const costOperator = sql`nullif(current_setting('app.business_id',true),'') is null and nullif(current_setting('app.cost_budget',true),'') is null and exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.costs)`;
 const costRead = sql`(${costOperator}) or public.cost_worker_authorized(month)`;
 export const costRecord = pgTable(

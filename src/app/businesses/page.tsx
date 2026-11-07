@@ -179,6 +179,23 @@ export default async function BusinessesPage() {
       return null;
     }
   })();
+  const notificationsLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "notifications.manage");
+      return (
+        <Link
+          href="/platform/notifications"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Review transactional notification delivery
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   if (!businesses.length)
     return (
       <div className="mx-auto max-w-2xl space-y-8">
@@ -188,6 +205,7 @@ export default async function BusinessesPage() {
         {paymentsLink}
         {documentsLink}
         {costsLink}
+        {notificationsLink}
         {whatsAppReviewLink}
         {senderHealthLink}
         <div>
@@ -215,6 +233,7 @@ export default async function BusinessesPage() {
       {paymentsLink}
       {documentsLink}
       {costsLink}
+      {notificationsLink}
       {senderHealthLink}
       {whatsAppReviewLink}
       <div className="flex flex-wrap items-center justify-between gap-4">
