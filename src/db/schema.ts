@@ -6691,7 +6691,7 @@ export const pilotEvent = pgTable(
     pgPolicy("pilot_event_insert", {
       for: "insert",
       to: appRuntime,
-      withCheck: sql`${pilotScope} and actor_id=current_setting('app.actor_id',true) and (kind='approved' or public.pilot_operator()) and exists(select 1 from public.pilot_record p where p.id=pilot_event.pilot_id and p.business_id=pilot_event.business_id) and (kind<>'reuse' or exists(select 1 from public.membership m where m.business_id::text=pilot_event.data->>'secondBusinessId' and m.user_id=current_setting('app.actor_id',true) and m.role in ('owner','admin')))`,
+      withCheck: sql`${pilotScope} and actor_id=current_setting('app.actor_id',true) and (kind in ('approved','stopped') or public.pilot_operator()) and exists(select 1 from public.pilot_record p where p.id=pilot_event.pilot_id and p.business_id=pilot_event.business_id) and (kind<>'reuse' or exists(select 1 from public.membership m where m.business_id::text=pilot_event.data->>'secondBusinessId' and m.user_id=current_setting('app.actor_id',true) and m.role in ('owner','admin')))`,
     }),
   ],
 ).enableRLS();

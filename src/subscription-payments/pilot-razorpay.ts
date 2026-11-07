@@ -20,6 +20,7 @@ const orderSchema = z.object({
   amount_paid: money,
   amount_due: money,
   currency: z.enum(["INR", "USD"]),
+  partial_payment: z.literal(false).optional(),
   receipt: z.string(),
   notes: z.record(z.string(), z.string()),
   status: z.string(),

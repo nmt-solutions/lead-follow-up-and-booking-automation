@@ -1,6 +1,9 @@
 import type { createGoogleCalendarApplication } from "../../src/application/google-calendar";
 import type { createMicrosoftCalendarApplication } from "../../src/application/microsoft-calendar";
 import type { createMailboxApplication } from "../../src/application/mailboxes";
+import type { createSenderApplication } from "../../src/application/senders";
+import type { createEmailEligibilityApplication } from "../../src/application/email-eligibility";
+import type { createCommercialAuthorityApplication } from "../../src/application/commercial-authority";
 import { randomUUID } from "node:crypto";
 import type { createHarness } from "./harness";
 import { nativePilotFixture } from "./native-pilot";
@@ -23,10 +26,13 @@ export async function pilotFixture(
   limits: Partial<
     Pick<PilotPlan, "cashLimitMinor" | "spendLimitMinor" | "timeLimitSeconds">
   > = {},
-  bootstrap?: (
-    s: Awaited<ReturnType<typeof nativePilotFixture>>,
-  ) => Promise<{
+  bootstrap?: (s: Awaited<ReturnType<typeof nativePilotFixture>>) => Promise<{
     mailboxes?: ReturnType<typeof createMailboxApplication<Headers>>;
+    senders?: ReturnType<typeof createSenderApplication<Headers>>;
+    email?: ReturnType<typeof createEmailEligibilityApplication<Headers>>;
+    authority?: ReturnType<
+      typeof createCommercialAuthorityApplication<Headers>
+    >;
     googleCalendar?: ReturnType<typeof createGoogleCalendarApplication>;
     microsoftCalendar?: ReturnType<typeof createMicrosoftCalendarApplication>;
     plan: Partial<PilotPlan>;
@@ -273,6 +279,9 @@ export async function pilotFixture(
       discovery,
       data,
       mailboxes: priorSetup?.mailboxes,
+      senders: priorSetup?.senders,
+      email: priorSetup?.email,
+      authority: priorSetup?.authority,
       googleCalendar: priorSetup?.googleCalendar,
       microsoftCalendar: priorSetup?.microsoftCalendar,
     }),

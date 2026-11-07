@@ -16,8 +16,8 @@ export const pilotFunctions = [
 ];
 export async function preparePilotSecurity(pool: Pool | PoolClient) {
   await pool.query(`DO $$ DECLARE t text; f record; BEGIN
- FOREACH t IN ARRAY ARRAY['pilot_record','pilot_event','pilot_effect'] LOOP IF to_regclass('public.'||t) IS NOT NULL THEN EXECUTE format('REVOKE ALL ON public.%I FROM app_runtime',t); END IF; END LOOP;
- FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname=ANY(ARRAY['pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed']) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP;
+ FOREACH t IN ARRAY ARRAY['pilot_record','pilot_event','pilot_effect'] LOOP IF to_regclass('public.'||t) IS NOT NULL THEN EXECUTE format('REVOKE ALL ON public.%I FROM app_runtime,PUBLIC',t); END IF; END LOOP;
+ FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname=ANY(ARRAY['pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed']) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime,PUBLIC',f.signature); END LOOP;
  END $$;
  CREATE OR REPLACE FUNCTION public.pilot_authorized() RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
  RETURN EXISTS(SELECT 1 FROM public.membership m JOIN public.session s ON s.user_id=m.user_id JOIN public."user" u ON u.id=m.user_id JOIN public.two_factor f ON f.user_id=u.id
@@ -43,7 +43,7 @@ export async function securePilots(pool: PoolClient) {
       );
     }
     await pool.query(
-      `DROP POLICY IF EXISTS ${name}_owner ON public.${name}; CREATE POLICY ${name}_owner ON public.${name} FOR ALL TO PUBLIC USING(current_user=(SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid='public.${name}'::regclass)) WITH CHECK(current_user=(SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid='public.${name}'::regclass)); REVOKE ALL ON public.${name} FROM app_runtime; GRANT SELECT,INSERT ON public.${name} TO app_runtime;`,
+      `DROP POLICY IF EXISTS ${name}_owner ON public.${name}; CREATE POLICY ${name}_owner ON public.${name} FOR ALL TO PUBLIC USING(current_user=(SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid='public.${name}'::regclass)) WITH CHECK(current_user=(SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid='public.${name}'::regclass)); REVOKE ALL ON public.${name} FROM app_runtime,PUBLIC; GRANT SELECT,INSERT ON public.${name} TO app_runtime;`,
     );
   }
   await pool.query(`
@@ -127,7 +127,7 @@ export async function securePilots(pool: PoolClient) {
 }
 export async function verifyPilots(pool: Pool | PoolClient) {
   const result = await pool.query<{ safe: boolean }>(`SELECT
- (SELECT count(*)=3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('pilot_record','pilot_event','pilot_effect'))
+ (SELECT count(*)=3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE a.grantee=0)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('pilot_record','pilot_event','pilot_effect'))
  AND (SELECT count(*)=7 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE')=(p.proname<>'pilot_global_room') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname IN ('pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed'))
  AND (SELECT count(*)=2 AND bool_and(convalidated) FROM pg_constraint WHERE conname IN ('pilot_event_scope','pilot_effect_scope') AND contype='f')
  AND NOT has_column_privilege(current_user,'public.platform_operator','pilots','UPDATE')

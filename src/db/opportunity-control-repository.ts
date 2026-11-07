@@ -1058,6 +1058,21 @@ export function createOpportunityRepository(
             );
             if (!provider.channels.includes(ctx.connection.channel))
               throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+            // Legacy transports also obey exact pilot scope before any budget
+            // reservation. Full current authorization still repeats at I/O.
+            if (
+              !(await pilotPathAllowed(
+                tx,
+                businessId,
+                ctx.connection.channel === "email"
+                  ? "inquiry_email"
+                  : "whatsapp",
+                {},
+              ))
+            ) {
+              const allowed = await authorize(tx, row, role, true);
+              if (!allowed.dispatch) return { ...allowed, acquired: false };
+            }
           }
           try {
             await reservePaidUsage(

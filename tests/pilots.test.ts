@@ -632,4 +632,26 @@ describe("Bounded paid pilot application", () => {
       await execution.catch(() => {});
     }
   });
+  it("lets the current owner withdraw an approved operating plan after the pilot recorder capability is revoked, fencing queued work", async () => {
+    const s = await pilotFixture(h),
+      b = s.f.business.id,
+      actor = await h.authenticate(s.f.owner);
+    await s.pilots.activate(s.f.owner, b, {
+      pilotId: s.pilot.id,
+      requestKey: randomUUID(),
+    });
+    await s.discovery.start(s.f.owner, b, s.request());
+    await h.admin.query(
+      "update platform_operator set pilots=false where user_id=$1",
+      [actor.userId],
+    );
+    expect((await s.pilots.workspace(s.f.owner, b)).canRecord).toBe(false);
+    const stopped = await s.pilots.stop(s.f.owner, b, {
+      pilotId: s.pilot.id,
+      requestKey: randomUUID(),
+    });
+    expect(stopped.status).toBe("stopped");
+    await s.discovery.execute(s.queued.at(-1));
+    expect(s.searches).toHaveLength(0);
+  });
 });

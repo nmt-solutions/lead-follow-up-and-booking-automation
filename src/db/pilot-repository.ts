@@ -648,7 +648,7 @@ export function createPilotRepository(database: Database, clock: Clock) {
           );
           return pilotId;
         },
-        kind !== "approved",
+        kind !== "approved" && kind !== "stopped",
       );
     },
     financial: (actor: WorkIdentity, businessId: string, pilotId: string) =>

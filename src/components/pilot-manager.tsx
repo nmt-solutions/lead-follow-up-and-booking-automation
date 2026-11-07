@@ -154,8 +154,8 @@ export function PilotManager({
       }),
       pilotViewSchema,
     );
-    commandKeys.current.delete(fingerprint);
     await refresh();
+    commandKeys.current.delete(fingerprint);
   }
   function ref(p: PilotView) {
     return { pilotId: p.id, requestKey: crypto.randomUUID() };
@@ -665,7 +665,7 @@ export function PilotManager({
               </Button>
               <Button
                 variant="outline"
-                disabled={busy || !p.canRecord}
+                disabled={busy}
                 onClick={() => run(() => command("stop", ref(p)))}
               >
                 Stop further pilot work

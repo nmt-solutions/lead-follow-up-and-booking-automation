@@ -78,6 +78,9 @@ export async function nativePilotFixture(
         status: "created",
         created_at: Math.floor(h.clock.now().getTime() / 1000),
       };
+      // Official create/fetch success examples omit this response field.
+      // The request still explicitly forbids partial payment.
+      delete order.partial_payment;
       orders.set(order.id, order);
       if (lostOrder)
         throw new Error("fixture lost acknowledgement after creation");

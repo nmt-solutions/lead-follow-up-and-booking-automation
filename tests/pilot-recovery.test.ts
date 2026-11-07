@@ -92,38 +92,42 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
     });
     expect(s.mutations).toHaveLength(2);
   });
-  it("runs the full managed schema against that restored database, preserves all pilot facts and rejects ordinary worker startup", async () => {
-    r.controls.schemaRunner = () =>
-      r.target.reapplySchema({ allowQuarantined: true });
-    await r.advance(operationId, 2);
-    await verifyRuntimeRole(r.target.runtime, { allowQuarantined: true });
-    for (const [table, rows] of ledgerRows)
+  describe("reviewed full schema repair", () => {
+    beforeAll(async () => {
+      r.controls.schemaRunner = () =>
+        r.target.reapplySchema({ allowQuarantined: true });
+      await r.advance(operationId, 2);
+    });
+    it("runs the full managed schema against that restored database, preserves all pilot facts and rejects ordinary worker startup", async () => {
+      await verifyRuntimeRole(r.target.runtime, { allowQuarantined: true });
+      for (const [table, rows] of ledgerRows)
+        expect(
+          (
+            await r.target.admin.query(
+              `select to_jsonb(t) value from public.${table} t order by id`,
+            )
+          ).rows,
+          table,
+        ).toEqual(rows);
       expect(
         (
           await r.target.admin.query(
-            `select to_jsonb(t) value from public.${table} t order by id`,
+            "select convalidated from pg_constraint where conname='business_name_length' and conrelid='business'::regclass",
           )
         ).rows,
-        table,
-      ).toEqual(rows);
-    expect(
-      (
-        await r.target.admin.query(
-          "select convalidated from pg_constraint where conname='business_name_length' and conrelid='business'::regclass",
-        )
-      ).rows,
-    ).toEqual([{ convalidated: true }]);
-    const selected = await r
-      .application()
-      .inspect(s.f.owner, { businessId: s.f.business.id, operationId });
-    expect(selected.business.id).toBe(s.f.business.id);
-    expect(JSON.stringify(selected)).not.toContain("pilotOrders");
-    expect(JSON.stringify(selected)).not.toContain(
-      "fixture:approved-worst-case-provider-and-staff-bound",
-    );
-    await expect(verifyRuntimeRole(r.target.runtime)).rejects.toMatchObject({
-      code: "SETUP_REQUIRED",
+      ).toEqual([{ convalidated: true }]);
+      const selected = await r
+        .application()
+        .inspect(s.f.owner, { businessId: s.f.business.id, operationId });
+      expect(selected.business.id).toBe(s.f.business.id);
+      expect(JSON.stringify(selected)).not.toContain("pilotOrders");
+      expect(JSON.stringify(selected)).not.toContain(
+        "fixture:approved-worst-case-provider-and-staff-bound",
+      );
+      await expect(verifyRuntimeRole(r.target.runtime)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+      expect(s.mutations).toHaveLength(2);
     });
-    expect(s.mutations).toHaveLength(2);
   });
 });

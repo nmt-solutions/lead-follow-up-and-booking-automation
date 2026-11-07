@@ -243,6 +243,52 @@ describe("Native paid pilots through public application commands", () => {
     ).toHaveLength(1);
     expect(s.mutations).toHaveLength(1);
   });
+  it("requires exhaustive bounded receipt pagination before accepting one exact original order and never retries an uncertain POST on partial lookup", async () => {
+    const s = await nativePilotFixture(h);
+    s.loseOrder();
+    await s.app.start(s.f.owner, s.f.business.id, { actionId: s.action.id });
+    const original = s.orders.get("order_pilot")!;
+    const noise = (n: number) => ({
+      ...original,
+      id: `order_noise${n}`,
+      receipt: `prefix-${s.action.operationKey}`,
+    });
+    s.orderPage((skip) => ({
+      count: 100,
+      items: Array.from({ length: 100 }, (_, i) =>
+        skip === 0 && i === 0 ? original : noise(skip + i + 1),
+      ),
+    }));
+    await s.app.refresh(s.f.owner, s.f.business.id, { actionId: s.action.id });
+    expect(
+      (await s.app.workspace(s.f.owner, s.f.business.id)).actions[0].checkout,
+    ).toBeNull();
+    expect(s.mutations).toHaveLength(1);
+    s.orderPage((skip) =>
+      skip === 0
+        ? { count: 100, items: Array.from({ length: 100 }, (_, i) => noise(i)) }
+        : { count: 1, items: [original] },
+    );
+    s.capture();
+    await s.app.refresh(s.f.owner, s.f.business.id, { actionId: s.action.id });
+    expect(
+      (await s.app.workspace(s.f.owner, s.f.business.id)).periods.map(
+        (p) => p.paymentId,
+      ),
+    ).toEqual(["pay_pilot"]);
+    expect(s.mutations).toHaveLength(1);
+  });
+  it("holds a native order whose partial-payment configuration no longer matches the original one-time approval", async () => {
+    const s = await nativePilotFixture(h);
+    await s.app.start(s.f.owner, s.f.business.id, { actionId: s.action.id });
+    s.orders.get("order_pilot")!.partial_payment = true;
+    s.capture();
+    await s.app.refresh(s.f.owner, s.f.business.id, { actionId: s.action.id });
+    expect((await s.app.workspace(s.f.owner, s.f.business.id)).periods).toEqual(
+      [],
+    );
+    expect(s.mutations).toHaveLength(1);
+  });
   it("retains a captured pilot's original financial period after a native refund while current paid scope becomes unavailable", async () => {
     const s = await nativePilotFixture(h);
     await s.app.start(s.f.owner, s.f.business.id, { actionId: s.action.id });

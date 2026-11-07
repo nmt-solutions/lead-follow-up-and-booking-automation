@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { createHarness } from "./support/harness";
 import { pilotFixture } from "./support/pilot";
 import { verifyRuntimeRole } from "../src/db/runtime";
@@ -132,22 +133,45 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
     ]);
   });
   it("checks SELECT and INSERT grants independently at startup", async () => {
-    for (const privilege of ["SELECT", "INSERT"]) {
-      await h.admin.query(
-        `REVOKE ${privilege} ON public.pilot_event FROM app_runtime`,
-      );
-      try {
-        await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
-      } finally {
+    for (const table of pilotTables) {
+      for (const privilege of ["SELECT", "INSERT"]) {
         await h.admin.query(
-          `GRANT ${privilege} ON public.pilot_event TO app_runtime`,
+          `REVOKE ${privilege} ON public.${table} FROM app_runtime`,
         );
+        try {
+          await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
+        } finally {
+          await h.admin.query(
+            `GRANT ${privilege} ON public.${table} TO app_runtime`,
+          );
+        }
       }
     }
     await verifyRuntimeRole(h.runtime);
   });
   it("keeps every populated pilot row, all constraints and unaffected helper bodies through prepare/schema/secure; preparation denies helpers and writes", async () => {
     const before = await s.pilots.workspace(s.f.owner, s.f.business.id);
+    async function content() {
+      const tables = (
+        await h.admin.query<{ name: string }>(
+          "select tablename name from pg_tables where schemaname='public' order by tablename",
+        )
+      ).rows;
+      const rows = [];
+      for (const table of tables) {
+        const identifier = '"' + table.name.replaceAll('"', '""') + '"';
+        rows.push({
+          table: table.name,
+          ...(
+            await h.admin.query(
+              `select count(*)::text count,md5(coalesce(string_agg(to_jsonb(t)::text,E'\\n' order by to_jsonb(t)::text),'')) fingerprint from public.${identifier} t`,
+            )
+          ).rows[0],
+        });
+      }
+      return rows;
+    }
+    const originalContent = await content();
     const constraints = (
       await h.admin.query(
         "select conrelid::regclass::text table_name,conname,pg_get_constraintdef(oid) definition from pg_constraint where connamespace='public'::regnamespace order by 1,2",
@@ -158,6 +182,10 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
         "select oid::regprocedure::text signature,md5(pg_get_functiondef(oid)) fingerprint from pg_proc where pronamespace='public'::regnamespace order by 1",
       )
     ).rows;
+    await h.admin.query(
+      "grant select on public.pilot_record to PUBLIC; grant execute on function public.pilot_global_room(text,numeric,jsonb) to PUBLIC",
+    );
+    await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
     await prepareDatabaseRole(h.admin);
     const client = await h.runtime.connect();
     try {
@@ -193,6 +221,7 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
     }
     await h.reapplySchema();
     await verifyRuntimeRole(h.runtime);
+    expect(await content()).toEqual(originalContent);
     expect(await s.pilots.workspace(s.f.owner, s.f.business.id)).toEqual(
       before,
     );
@@ -211,5 +240,58 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
       ).rows,
     ).toEqual(bodies);
     console.info("Pilot inventory", constraints.length, bodies.length);
+    if (process.env.PILOT_TEST_EVIDENCE_FILE) {
+      const catalog = (
+        await h.admin.query(
+          "select c.relname table_name,c.relrowsecurity,c.relforcerowsecurity,c.relacl,pg_get_userbyid(c.relowner) owner from pg_class c where c.relnamespace='public'::regnamespace and c.relname in ('pilot_record','pilot_event','pilot_effect') order by 1",
+        )
+      ).rows;
+      const columns = (
+        await h.admin.query(
+          "select table_name,column_name,data_type,is_nullable,column_default from information_schema.columns where table_schema='public' and (table_name in ('pilot_record','pilot_event','pilot_effect') or table_name='platform_operator' and column_name='pilots') order by table_name,ordinal_position",
+        )
+      ).rows;
+      const policies = (
+        await h.admin.query(
+          "select * from pg_policies where schemaname='public' and tablename in ('pilot_record','pilot_event','pilot_effect') order by tablename,policyname",
+        )
+      ).rows;
+      const functions = (
+        await h.admin.query(
+          "select oid::regprocedure::text signature,prosecdef,proconfig,proacl,pg_get_userbyid(proowner) owner,md5(pg_get_functiondef(oid)) fingerprint from pg_proc where pronamespace='public'::regnamespace order by 1",
+        )
+      ).rows;
+      const indexes = (
+        await h.admin.query(
+          "select tablename,indexname,indexdef from pg_indexes where schemaname='public' and tablename in ('pilot_record','pilot_event','pilot_effect') order by 1,2",
+        )
+      ).rows;
+      const defaults = (
+        await h.admin.query(
+          "select defaclrole::regrole::text owner,defaclnamespace::regnamespace::text schema,defaclobjtype,defaclacl from pg_default_acl order by 1,2,3",
+        )
+      ).rows;
+      await writeFile(
+        process.env.PILOT_TEST_EVIDENCE_FILE,
+        JSON.stringify(
+          {
+            isolated: true,
+            actualTargetAccessed: false,
+            postgresVersion: (await h.admin.query("show server_version"))
+              .rows[0],
+            contentPreserved: originalContent,
+            constraintsPreserved: constraints,
+            functionsPreserved: functions,
+            tables: catalog,
+            columns,
+            policies,
+            indexes,
+            defaultACL: defaults,
+          },
+          null,
+          2,
+        ),
+      );
+    }
   });
 });

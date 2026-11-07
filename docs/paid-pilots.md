@@ -4,7 +4,7 @@ This flow records an actual agreed Business evaluation. Software records do not 
 
 ## Agree and prepare
 
-An owner/admin with current MFA approves the exact frozen pilot. A centrally classified `pilots.manage` operator with fresh operator MFA prepares and records operations. Deployment provisioning grants that capability; browser commands cannot grant it.
+An owner/admin with current MFA approves the exact frozen pilot and can stop its further work even if the recorder's operator grant is withdrawn. A centrally classified `pilots.manage` operator with fresh operator MFA prepares and records operations. Deployment provisioning grants that capability; browser commands cannot grant it.
 
 Choose the actual configured-days quote. Enter the actual offering/goal, evidenced baseline, numeric criteria, selected scope/window, cash and spend ceilings and time ceiling. The upfront pilot and original monthly quote, tax, days and allowances stay frozen. Software supplies no commercial price, budget, labor rate or hours.
 
