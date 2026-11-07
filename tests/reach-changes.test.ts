@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { randomUUID, createHmac } from "node:crypto";
 import { createHarness } from "./support/harness";
+import { createTaxPeriodApplication } from "../src/application/tax-periods";
+import { createTaxPeriodRepository } from "../src/db/tax-period-repository";
 import { subscriptionFixture } from "./support/subscription";
 import { financialNativeFixture } from "./support/financial-native";
 import { createFinancialAdjustmentApplication } from "../src/application/financial-adjustments";
@@ -1326,6 +1328,90 @@ describe("Approved reach changes at the public application seam", () => {
       ).toEqual(invoice.snapshot.totals);
       await app.execute(op, f.business.id, { caseId: reviewed.id });
       expect(f.native.refundPosts).toHaveLength(1);
+      const tax = createTaxPeriodApplication({
+        authenticatePlatform: h.access.authenticatePlatform,
+        repository: createTaxPeriodRepository(runtimeDatabase(h.runtime)),
+        clock: h.clock,
+      });
+      const taxActor = (await h.authenticate(f.operator)).userId;
+      const obligation = await tax.saveObligation(f.operator, {
+        requestKey: randomUUID(),
+        key: "fixture-delta-return",
+        expectedVersion: 0,
+        note: "Explicit fixture reporting coverage",
+        definition: {
+          mode: "fixture",
+          name: "Canonical delta reporting",
+          jurisdiction: "fixture-domestic",
+          timeZone: "UTC",
+          currency: country === "US" ? "USD" : "INR",
+          effectiveFrom: "2026-01-01T00:00:00.000Z",
+          effectiveUntil: null,
+          registration: {
+            key: "fixture-registration",
+            identifier: "TEST-ONLY",
+            status: "registered",
+            effectiveFrom: "2026-01-01T00:00:00.000Z",
+            effectiveUntil: null,
+            evidence: ["fixture:registration"],
+          },
+          basis: "document_issue_date",
+          unissuedCharges: "require_invoice",
+          preparerIds: [taxActor],
+          reviewerIds: [taxActor],
+          distinctReviewer: false,
+          evidence: ["fixture:original-document-reporting-policy"],
+        },
+      });
+      await tax.decideObligation(f.operator, {
+        requestKey: randomUUID(),
+        revisionId: obligation.id,
+        expectedVersion: 0,
+        outcome: "approved",
+        note: "Exact synthetic coverage approval",
+      });
+      const taxPeriod = await tax.openPeriod(f.operator, {
+        requestKey: randomUUID(),
+        obligationId: obligation.id,
+        startDate: "2026-11-01",
+        endDate: "2026-12-01",
+        dueAt: "2026-12-12T00:00:00.000Z",
+        evidence: ["fixture:explicit-due-date"],
+        reminders: [],
+        note: "No universal legal interval",
+      });
+      const report = await tax.prepare(f.operator, {
+        requestKey: randomUUID(),
+        periodId: taxPeriod.id,
+        expectedRevision: 0,
+        cutoff: h.clock.now().toISOString(),
+        note: "Include canonical initial and delta documents exactly once",
+      });
+      expect(
+        report.snapshot.sources.filter((s) => s.included).map((s) => s.id),
+      ).toEqual(
+        expect.arrayContaining([
+          original.id,
+          invoice.id,
+          credited.creditDocumentId,
+        ]),
+      );
+      expect(report.snapshot.totals).toEqual(
+        country === "US"
+          ? { netMinor: "2500", taxMinor: "250", totalMinor: "2750" }
+          : { netMinor: "10005", taxMinor: "1001", totalMinor: "11006" },
+      );
+      expect(report.snapshot.adjustments[0]).toMatchObject({
+        actualMinor: country === "US" ? "1375" : "5503",
+        originalTax: { id: invoice.snapshot.financial.tax.id },
+        creditDocumentId: credited.creditDocumentId,
+        taxEffect: "linked_credit_only",
+      });
+      if (country === "US")
+        expect(report.unresolved.map((i) => i.code)).toContain(
+          "captured_charge_without_invoice",
+        );
+      else expect(report.snapshot.totalsKnown).toBe(true);
     },
   );
   it("renews the approved native target using its full captured price without rewriting the original or counting the delta as another term", async () => {

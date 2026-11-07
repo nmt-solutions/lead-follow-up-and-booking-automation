@@ -1,5 +1,9 @@
 import { prepareRecoverySecurity, secureRecovery } from "./recovery-security";
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
+import {
+  prepareTaxPeriodSecurity,
+  secureTaxPeriods,
+} from "./tax-period-security";
 import type { Pool } from "pg";
 import { prepareReachSecurity, reachFunctions } from "./reach-change-security";
 import {
@@ -92,6 +96,12 @@ import {
   taxRuleRevision,
   taxRuleDecision,
   taxCalculation,
+  taxObligationRevision,
+  taxObligationDecision,
+  taxReportingPeriod,
+  taxLiabilityReport,
+  taxReportAction,
+  taxPeriodReminder,
   taxScopeForeignKeys,
   subscriptionPricingRevision,
   subscriptionQuote,
@@ -250,6 +260,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     `DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY(ARRAY[${reachFunctions.map((n) => `'${n}'`).join(",")}]) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP; END $$;`,
   );
   await prepareFinancialSecurity(pool);
+  await prepareTaxPeriodSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
   await prepareRecoverySecurity(pool);
@@ -899,6 +910,12 @@ export async function secureDatabase(
       taxRuleRevision,
       taxRuleDecision,
       taxCalculation,
+      taxObligationRevision,
+      taxObligationDecision,
+      taxReportingPeriod,
+      taxLiabilityReport,
+      taxReportAction,
+      taxPeriodReminder,
       subscriptionPricingRevision,
       subscriptionQuote,
       subscriptionPayment,
@@ -1405,6 +1422,7 @@ export async function secureDatabase(
     await secureOperations(client);
     await secureRecovery(client);
     await secureDataGovernance(client);
+    await secureTaxPeriods(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client, options);
     await client.query("COMMIT");

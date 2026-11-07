@@ -60,7 +60,9 @@ const claimSchema = workSchema.extend({
 });
 const stateSchema = z.object({
   bootstrapAuthOnly: z.boolean(),
-  allowedPreferences: z.array(z.enum(["operations", "subscription"])),
+  allowedPreferences: z.array(
+    z.enum(["operations", "subscription", "tax_period"]),
+  ),
   setup: notificationSetupSchema.nullable(),
   setupCheckedAt: z.string().nullable(),
   setupFresh: z.boolean(),
@@ -103,7 +105,7 @@ export function createNotificationRepository(database: Database) {
         z
           .object({
             id: z.uuid(),
-            purpose: z.enum(["operations", "subscription"]),
+            purpose: z.enum(["operations", "subscription", "tax_period"]),
             sourceId: z.string(),
             businessId: z.uuid().nullable(),
             actorId: z.string(),
@@ -285,7 +287,9 @@ export function createNotificationRepository(database: Database) {
         return z
           .object({
             notices: z.array(noticeViewSchema),
-            allowedPreferences: z.array(z.enum(["operations", "subscription"])),
+            allowedPreferences: z.array(
+              z.enum(["operations", "subscription", "tax_period"]),
+            ),
             sendingReady: z.boolean(),
           })
           .parse(r.rows[0].value);
