@@ -314,12 +314,26 @@ export function createDiscoveryScheduleRepository(
             return { outcome: "stale" };
           if (row.nextDueAt > at) return { outcome: "not_due" };
           await requireWorkSession(tx, work, clock.now());
-          const current = await validateSearch(
-            tx,
-            work.businessId,
-            row.input,
-            clock.now(),
-          );
+          const current = await (async () => {
+            try {
+              return await validateSearch(
+                tx,
+                work.businessId,
+                row.input,
+                clock.now(),
+              );
+            } catch (error: unknown) {
+              if (
+                error instanceof ApplicationError &&
+                error.code === "DISCOVERY_SETUP_REQUIRED"
+              ) {
+                const now = await settings(tx, work.businessId, clock.now());
+                if (now.configuredPolicy && !now.policy)
+                  throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+              }
+              throw error;
+            }
+          })();
           if (
             current.policy.adapterId !== adapterId ||
             !isDeepStrictEqual(current.policy, row.policy) ||

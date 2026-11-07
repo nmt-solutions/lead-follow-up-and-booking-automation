@@ -1,6 +1,7 @@
 import { prepareRecoverySecurity, secureRecovery } from "./recovery-security";
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import type { Pool } from "pg";
+import { prepareReachSecurity, reachFunctions } from "./reach-change-security";
 import {
   secureDataGovernance,
   prepareDataGovernance,
@@ -100,6 +101,9 @@ import {
   subscriptionPaymentHistory,
   subscriptionPeriod,
   subscriptionUsage,
+  reachChange,
+  reachChangeEvent,
+  reachChangeScopeForeignKeys,
   subscriptionPaymentScopeForeignKeys,
   issuerRevision,
   issuerDecision,
@@ -241,6 +245,10 @@ export async function prepareDatabaseRole(pool: Pool) {
   );
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
+  await prepareReachSecurity(pool);
+  await pool.query(
+    `DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY(ARRAY[${reachFunctions.map((n) => `'${n}'`).join(",")}]) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP; END $$;`,
+  );
   await prepareFinancialSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
@@ -447,6 +455,7 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.subscription_quote FROM app_runtime;
       END IF;
       IF to_regclass('public.subscription_payment') IS NOT NULL THEN
+        IF to_regclass('public.reach_change') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.reach_change,public.reach_change_event FROM app_runtime; END IF;
         REVOKE ALL PRIVILEGES ON public.subscription_payment, public.subscription_payment_event, public.subscription_payment_history, public.subscription_period, public.subscription_usage FROM app_runtime;
         REVOKE UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON public.subscription_payment FROM app_runtime;
         IF to_regclass('public.subscription_lifecycle_event') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.subscription_lifecycle_event FROM app_runtime; REVOKE UPDATE(lifecycle) ON public.subscription_payment FROM app_runtime; END IF;
@@ -674,6 +683,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     ...sellerDocumentScopeForeignKeys,
     ...financialCaseScopeForeignKeys,
     ...subscriptionPaymentScopeForeignKeys,
+    ...reachChangeScopeForeignKeys,
     ...taxScopeForeignKeys,
     ...emailSequenceScopeForeignKeys,
     ...mailboxScopeForeignKeys,
@@ -738,6 +748,7 @@ export async function secureDatabase(
       ...sellerDocumentScopeForeignKeys,
       ...financialCaseScopeForeignKeys,
       ...subscriptionPaymentScopeForeignKeys,
+      ...reachChangeScopeForeignKeys,
       ...taxScopeForeignKeys,
       ...emailSequenceScopeForeignKeys,
       ...mailboxScopeForeignKeys,
@@ -896,6 +907,8 @@ export async function secureDatabase(
       subscriptionPaymentHistory,
       subscriptionPeriod,
       subscriptionUsage,
+      reachChange,
+      reachChangeEvent,
       issuerRevision,
       issuerDecision,
       financialCase,
@@ -1261,6 +1274,11 @@ export async function secureDatabase(
       ALTER TABLE subscription_payment_history FORCE ROW LEVEL SECURITY;
       ALTER TABLE subscription_period FORCE ROW LEVEL SECURITY;
       ALTER TABLE subscription_usage FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON reach_change,reach_change_event FROM app_runtime;
+      GRANT SELECT,INSERT ON reach_change,reach_change_event TO app_runtime;
+      GRANT USAGE ON SEQUENCE reach_change_event_position_seq TO app_runtime;
+      ALTER TABLE reach_change FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reach_change_event FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON subscription_quote TO app_runtime;
       ALTER TABLE subscription_quote FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON billing_profile_revision TO app_runtime;
@@ -1362,6 +1380,7 @@ export async function secureDatabase(
       GRANT EXECUTE ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) TO app_runtime;
     `);
     await preparePaymentSecurity(client);
+    await prepareReachSecurity(client);
     await prepareFinancialSecurity(client);
     await prepareCostSecurity(client);
     await prepareNotificationSecurity(client);

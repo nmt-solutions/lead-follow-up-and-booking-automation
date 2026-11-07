@@ -72,8 +72,8 @@ const representative = [
   "notification_notice",
   "notification_event",
   "business_data_request",
-  "subscription_reach_change",
-  "subscription_reach_renewal",
+  "reach_change",
+  "reach_change_event",
 ];
 const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`;
 async function nativeSchemaHash(client: Pool | PoolClient) {

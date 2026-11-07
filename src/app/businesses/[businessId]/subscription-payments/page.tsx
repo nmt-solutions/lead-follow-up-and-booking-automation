@@ -38,6 +38,12 @@ export default async function SubscriptionPaymentsPage({
         </p>
         <h1 className="page-title">Subscription payments</h1>
         <Link
+          href={`/businesses/${businessId}/reach-changes`}
+          className="mt-3 mr-5 inline-flex min-h-11 items-center text-primary underline"
+        >
+          Change geographic reach
+        </Link>
+        <Link
           href={`/businesses/${businessId}/seller-documents`}
           className="mt-3 inline-flex min-h-11 items-center text-primary underline"
         >
