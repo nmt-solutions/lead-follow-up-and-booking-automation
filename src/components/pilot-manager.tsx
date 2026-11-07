@@ -449,10 +449,11 @@ export function PilotManager({
                 actual costs or hours. An unpriced or unknown-duration path
                 stays unavailable. Customer-paid Meta consumption is separate.
                 Discovery uses the selected source policy unit. Automation uses
-                one dispatch. Mailbox work reserves each native request,
-                including inspection and message reads. Calendar work reserves
-                one bounded operation, including its native reads and existing
-                request timeouts.
+                one dispatch. Mailbox work reserves each provider phase:
+                inspection, listing, each message read and grant recheck. Its
+                ceiling must cover every native request and credential refresh
+                within that phase. Calendar work reserves one bounded operation,
+                including its native reads and existing request timeouts.
               </p>
               {["discovery", "automation", "mailbox", "calendar"].map((c) => (
                 <fieldset key={c} className="my-5 grid gap-4 sm:grid-cols-2">
