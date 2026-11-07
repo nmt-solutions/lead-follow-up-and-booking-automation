@@ -631,7 +631,46 @@ describe("Business data export and offboarding at the public application seam", 
     expect(
       f.google.calls.filter((c) => c.url.pathname === "/revoke"),
     ).toHaveLength(2);
+  });
+  it("preserves completed native Gmail cleanup and its original step history through managed schema reapplication", async () => {
+    const owner = await h.signIn("native-offboard-reapply@example.com");
+    const b = await h.application.createBusiness(owner, {
+      name: "Native reapplication",
+      offering: "Steel",
+      homeMarket: "US",
+      website: "",
+    });
+    policy.businessIds = [b.id];
+    const f = await nativeMailbox(owner, b.id);
+    const revoker = createDataRevoker({
+      fetch: f.google.fetch,
+      gmail: f.google.configuration,
+      google: null,
+      meta: null,
+    });
+    await app(revoker).offboard(owner, b.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    await app(revoker).cleanup();
+    const original = (await app().workspace(owner, b.id)).offboarding[0];
+    expect(original.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "gmail",
+          state: "complete",
+          tokenWiped: true,
+        }),
+      ]),
+    );
     await h.reapplySchema();
+    expect((await app().workspace(owner, b.id)).offboarding[0]).toEqual(
+      original,
+    );
     expect((await app().workspace(owner, b.id)).offboarding[0].steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1970,17 +2009,6 @@ describe("Business data export and offboarding at the public application seam", 
         )
       ).rows[0].n,
     ).toBe(0);
-    for (const privilege of ["SELECT", "INSERT"]) {
-      await h.admin.query(
-        `revoke ${privilege} on public.business_data_export from app_runtime`,
-      );
-      await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
-        "Business data security is incomplete",
-      );
-      await h.admin.query(
-        `grant ${privilege} on public.business_data_export to app_runtime`,
-      );
-    }
     await h.admin.query(
       "alter table public.business_data_export add constraint business_data_export_scope unique using index business_data_export_scope",
     );
@@ -1994,6 +2022,20 @@ describe("Business data export and offboarding at the public application seam", 
     expect((await app().workspace(owner, b.id)).offboarding[0].id).toBe(
       request.id,
     );
+  });
+  it("requires each export ledger read and append privilege independently of schema preservation", async () => {
+    for (const privilege of ["SELECT", "INSERT"]) {
+      await h.admin.query(
+        `revoke ${privilege} on public.business_data_export from app_runtime`,
+      );
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
+        "Business data security is incomplete",
+      );
+      await h.admin.query(
+        `grant ${privilege} on public.business_data_export to app_runtime`,
+      );
+    }
+    await verifyRuntimeRole(h.runtime);
   });
   it("rejects a missing cleanup lease, keeps lost Google revocation acknowledgement incomplete after bounded retries and wipes the retained token copy", async () => {
     const owner = await h.signIn("lost-google@example.com"),
