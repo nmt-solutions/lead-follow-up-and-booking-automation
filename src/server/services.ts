@@ -1,4 +1,8 @@
 import { routeOpportunityMail } from "../email-sequences/opportunity-provider";
+import { createDataGovernanceApplication } from "../application/data-governance";
+import { createDataGovernanceRepository } from "../db/data-governance-repository";
+import { createDataGovernanceHttp } from "../http/data-governance";
+import { configuredDataGovernance } from "./data-governance-configuration";
 import { createOperationsApplication } from "../application/operations";
 import { createOperationsRepository } from "../db/operations-repository";
 import { createOperationsHttp } from "../http/operations";
@@ -348,6 +352,17 @@ async function composeServices() {
     mode: paymentGateway.mode === "test" ? "fixture" : "live",
     ...configuredSellerDocumentStorage(process.env),
   });
+  const dataGovernance = createDataGovernanceApplication({
+    authenticate: authenticatePrivileged,
+    repository: createDataGovernanceRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+    ...configuredDataGovernance(
+      process.env,
+      paymentGateway.mode === "test" ? "test" : "live",
+    ),
+    cancel: subscriptionPayments.cancel,
+    documents: sellerDocuments,
+  });
   const billingReviewFiles = createFileApplication({
     authenticate: authenticatePlatform,
     repository: createFileRepository(runtimeDatabase(pool), {
@@ -589,6 +604,12 @@ async function composeServices() {
     logs: configuredOperationLogs(process.env),
   });
   return {
+    dataGovernance,
+    dataGovernanceHttp: createDataGovernanceHttp({
+      application: dataGovernance,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     operations,
     operationsHttp: createOperationsHttp({
       application: operations,
