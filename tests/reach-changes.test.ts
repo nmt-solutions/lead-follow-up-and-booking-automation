@@ -805,11 +805,16 @@ describe("Approved reach changes at the public application seam", () => {
       {
         caseId: refund.id,
         effect: {
+          nativeId: String(f.native.refunds[0].id),
           paymentId: "pay_delta",
           invoiceId: invoice.id,
           periodId: delta.id,
           currency: "USD",
           actualMinor: "1100",
+          originalTax: {
+            id: invoice.snapshot.financial.tax.id,
+            totals: { netMinor: "1250", taxMinor: "125", totalMinor: "1375" },
+          },
           allocation: {
             totals: { netMinor: "1000", taxMinor: "100", totalMinor: "1100" },
           },
