@@ -12,7 +12,15 @@ export const recoveryFunctions = [
 ];
 export async function prepareRecoverySecurity(pool: Pool | PoolClient) {
   await pool.query(
-    `DO $$ BEGIN IF to_regclass('public.infrastructure_recovery_event') IS NOT NULL THEN ALTER TABLE public.infrastructure_recovery_event DROP CONSTRAINT IF EXISTS recovery_event_scope; END IF; END $$;`,
+    `DO $$ DECLARE t text; f record; BEGIN
+      FOREACH t IN ARRAY ARRAY['infrastructure_recovery','infrastructure_recovery_event'] LOOP
+        IF to_regclass(format('public.%I',t)) IS NOT NULL THEN EXECUTE format('REVOKE ALL PRIVILEGES ON public.%I FROM app_runtime',t); END IF;
+      END LOOP;
+      FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname=ANY(ARRAY['recovery_operator_authorized','claim_infrastructure_recovery','finish_infrastructure_recovery','delegate_infrastructure_recovery','pending_infrastructure_recovery']) LOOP
+        EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature);
+      END LOOP;
+      IF to_regclass('public.infrastructure_recovery_event') IS NOT NULL THEN ALTER TABLE public.infrastructure_recovery_event DROP CONSTRAINT IF EXISTS recovery_event_scope; END IF;
+    END $$;`,
   );
 }
 export async function secureRecovery(pool: Pool | PoolClient) {

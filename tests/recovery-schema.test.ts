@@ -40,7 +40,37 @@ describe("Populated managed recovery schema reapplication", () => {
     const before = (await f.application().workspace(owner)).operations.find(
       (o) => o.id === operationId,
     )!;
+    const actor = await h.access.authenticateForWork(owner);
     await prepareDatabaseRole(h.admin);
+    const paused = await h.runtime.connect();
+    try {
+      await paused.query("BEGIN");
+      await paused.query(
+        "SELECT set_config('app.actor_id',$1,true),set_config('app.recovery_session',$2,true),set_config('app.business_id',$3,true)",
+        [actor.userId, actor.sessionId, f.plan.businessId],
+      );
+      const denied = [
+        "SELECT public.recovery_operator_authorized()",
+        "SELECT public.claim_infrastructure_recovery($1::uuid)",
+        "SELECT public.finish_infrastructure_recovery($1::uuid,gen_random_uuid(),'target_verified','completed','{}'::jsonb)",
+        "SELECT public.delegate_infrastructure_recovery($1::uuid)",
+        "SELECT * FROM public.pending_infrastructure_recovery()",
+        "SELECT * FROM public.infrastructure_recovery",
+        "SELECT * FROM public.infrastructure_recovery_event",
+        "INSERT INTO public.infrastructure_recovery SELECT * FROM public.infrastructure_recovery WHERE id=$1::uuid",
+        "INSERT INTO public.infrastructure_recovery_event(id,business_id,operation_id,stage,outcome,evidence) VALUES(gen_random_uuid(),current_setting('app.business_id')::uuid,$1::uuid,'requested','started','{}')",
+      ];
+      for (const query of denied) {
+        await paused.query("SAVEPOINT denied_recovery");
+        await expect(
+          paused.query(query, query.includes("$1") ? [operationId] : []),
+        ).rejects.toMatchObject({ code: "42501" });
+        await paused.query("ROLLBACK TO SAVEPOINT denied_recovery");
+      }
+    } finally {
+      await paused.query("ROLLBACK");
+      paused.release();
+    }
     await h.admin.query(
       "ALTER TABLE public.infrastructure_recovery DROP CONSTRAINT recovery_business_scope",
     );

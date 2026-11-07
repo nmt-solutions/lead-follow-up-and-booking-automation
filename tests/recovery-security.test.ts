@@ -4,7 +4,12 @@ import { createHarness } from "./support/harness";
 import { recoveryFixture, pgTool } from "./support/recovery";
 import { runtimeDatabase, verifyRuntimeRole } from "../src/db/runtime";
 import { secureDatabase } from "../src/db/setup";
-import { recoveryFunctions, recoveryTables } from "../src/db/recovery-security";
+import {
+  recoveryFunctions,
+  recoveryTables,
+  prepareRecoverySecurity,
+  secureRecovery,
+} from "../src/db/recovery-security";
 import { createRecoveryApplication } from "../src/application/infrastructure-recovery";
 import { createRecoveryRepository } from "../src/db/recovery-repository";
 import { createRecoveryHttp } from "../src/http/infrastructure-recovery";
@@ -268,6 +273,33 @@ describe("Recovery authority, replay and database security", () => {
       }
     },
   );
+  it("stops an already claimed worker before native effects when source preparation pauses recovery", async () => {
+    const { r } = await fixture();
+    try {
+      const op = await r.request();
+      r.controls.onObserve = () => prepareRecoverySecurity(h.admin);
+      await expect(r.advance(op.id, 1)).rejects.toBeDefined();
+      expect(r.controls.restoreCalls).toBe(0);
+      expect(
+        (
+          await r.target.admin.query(
+            "SELECT operation_id FROM recovery_quarantine.target WHERE singleton",
+          )
+        ).rows[0].operation_id,
+      ).toBeNull();
+      expect(
+        (
+          await h.admin.query(
+            "SELECT stage FROM public.infrastructure_recovery WHERE id=$1",
+            [op.id],
+          )
+        ).rows[0].stage,
+      ).toBe("requested");
+    } finally {
+      await secureRecovery(h.admin);
+      await r.close();
+    }
+  });
   it("refuses native restore when the lease is reclaimed during the final target identity read", async () => {
     const { r } = await fixture();
     try {

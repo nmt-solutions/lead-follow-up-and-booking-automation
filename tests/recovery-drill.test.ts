@@ -25,6 +25,7 @@ import { createRecoveryReconciler } from "../src/recovery/reconciliation";
 import { configuredFinancialAdjustments } from "../src/financial-adjustments/configuration";
 import { createFileApplication } from "../src/application/files";
 import { createFileRepository } from "../src/db/file-repository";
+import { recoveryReconciliationFixture } from "./support/recovery-reconciliation";
 
 describe("Populated native PostgreSQL infrastructure drill", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
@@ -32,7 +33,8 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
     r: Awaited<ReturnType<typeof recoveryFixture>>,
     pending: { id: string },
     owner: Headers,
-    unretainedId: string;
+    unretainedId: string,
+    reconciliation: Awaited<ReturnType<typeof recoveryReconciliationFixture>>;
   beforeAll(async () => {
     h = await createHarness();
   });
@@ -149,6 +151,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       retained: object.metadata.fileId !== unretainedId,
     }));
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
+    reconciliation = await recoveryReconciliationFixture(h, f);
     owner = await h.signIn(`recovery-${randomUUID()}@example.com`);
     r = await recoveryFixture(h, owner, f.business.id, copies);
   });
@@ -238,6 +241,61 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
     );
     const ws = await r.application().workspace(owner),
       saved = ws.operations.find((s) => s.id === op.id)!;
+    for (const [table, count] of [
+      ["reconciliation_evidence", "1"],
+      ["reconciliation_record", "2"],
+      ["reconciliation_review", "1"],
+      ["reconciliation_access", "1"],
+    ])
+      expect(
+        r.archive.manifest.tables.find((row) => row.table === table)?.count,
+      ).toBe(count);
+    const targetReconciliation = reconciliation.application(
+      runtimeDatabase(r.target.runtime),
+    );
+    const retainedOriginal = await targetReconciliation.evidenceContent(
+      reconciliation.operator,
+      {
+        evidenceId: reconciliation.evidence.id,
+        token: reconciliation.grant.token,
+      },
+    );
+    expect(Buffer.from(retainedOriginal.bytes)).toEqual(reconciliation.bytes);
+    expect(retainedOriginal.sha256).toBe(reconciliation.evidence.sha256);
+    const accounting = await targetReconciliation.workspace(
+      reconciliation.operator,
+      reconciliation.period,
+    );
+    expect(accounting.history.map((row) => row.id)).toEqual(
+      expect.arrayContaining([
+        reconciliation.original.id,
+        reconciliation.corrected.id,
+      ]),
+    );
+    expect(accounting.reviews.map((row) => row.id)).toContain(
+      reconciliation.review.id,
+    );
+    expect(
+      accounting.evidence.find((row) => row.id === reconciliation.evidence.id)
+        ?.storageIdentity,
+    ).toBe(reconciliation.evidence.storageIdentity);
+    expect(JSON.stringify(recovered)).not.toContain(
+      reconciliation.bytes.toString(),
+    );
+    await h.admin.query(
+      "UPDATE platform_operator SET reconciliation=false WHERE user_id=$1",
+      [reconciliation.actor.userId],
+    );
+    await expect(
+      targetReconciliation.evidenceContent(reconciliation.operator, {
+        evidenceId: reconciliation.evidence.id,
+        token: reconciliation.grant.token,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await h.admin.query(
+      "UPDATE platform_operator SET reconciliation=true WHERE user_id=$1",
+      [reconciliation.actor.userId],
+    );
     expect(
       saved.events.find(
         (e) => e.stage === "quarantined" && e.outcome === "completed",
@@ -309,6 +367,15 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
               (e) => e.stage === "reconciled" && e.outcome === "completed",
             )?.evidence.native,
             nativeRefundPostsBeforeAndAfterRestoredExecution: 2,
+            reconciliation: {
+              evidenceId: reconciliation.evidence.id,
+              sha256: retainedOriginal.sha256,
+              bytes: retainedOriginal.bytes.length,
+              originalRecordId: reconciliation.original.id,
+              correctionId: reconciliation.corrected.id,
+              reviewId: reconciliation.review.id,
+              currentSourceRevocationDenied: true,
+            },
             productionVerified: false,
           },
           null,
