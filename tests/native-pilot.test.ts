@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHmac, randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
 import { nativePilotFixture } from "./support/native-pilot";
+import { createSubscriptionPaymentApplication } from "../src/application/subscription-payments";
+import { createSubscriptionPaymentRepository } from "../src/db/subscription-payment-repository";
+import { configuredPayments } from "../src/subscription-payments/configuration";
+import { razorpayAccountReviewSchema } from "../src/models/razorpay-account";
 
 describe("Native paid pilots through public application commands", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -15,6 +19,130 @@ describe("Native paid pilots through public application commands", () => {
     );
   });
   afterEach(async () => h?.close());
+
+  it.each(["account", "plan"] as const)(
+    "refuses a separate monthly approval that silently changes the original native %s",
+    async (change) => {
+      const s = await nativePilotFixture(h),
+        b = s.f.business.id,
+        c = s.f.owner;
+      await s.app.start(c, b, { actionId: s.action.id });
+      s.capture();
+      await s.app.refresh(c, b, { actionId: s.action.id });
+      const period = (await s.app.workspace(c, b)).periods[0];
+      const retained = (
+        await h.admin.query(
+          "select snapshot from subscription_payment where id=$1",
+          [s.action.id],
+        )
+      ).rows[0].snapshot;
+      const review = razorpayAccountReviewSchema.parse(
+        retained.provider.review,
+      );
+      if (change === "account") review.account = "acc_other";
+      else
+        review.plans = review.plans.map((p) => ({
+          ...p,
+          planId: "plan_changed",
+          totalCount: p.totalCount + 1,
+        }));
+      const app = createSubscriptionPaymentApplication({
+        authenticate: h.access.authenticateForWork,
+        authenticateForWork: h.access.authenticateForWork,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
+        repository: createSubscriptionPaymentRepository(
+          runtimeDatabase(h.runtime),
+        ),
+        clock: h.clock,
+        gateway: configuredPayments({
+          ...s.native.configuration,
+          env: {
+            ...s.native.configuration.env,
+            RAZORPAY_ACCOUNT_REVIEW: JSON.stringify(review),
+          },
+        }),
+      });
+      await expect(
+        app.preparePilotRenewal(c, b, {
+          originalActionId: s.action.id,
+          originalPeriodId: period.id,
+          requestKey: randomUUID(),
+          startAt: period.end,
+          approvalExpiresAt: new Date(
+            h.clock.now().getTime() + 600000,
+          ).toISOString(),
+          agreeSeparateMandate: true,
+        }),
+      ).rejects.toMatchObject({ code: "SETUP_REQUIRED" });
+      expect(s.mutations).toHaveLength(1);
+      expect(
+        (
+          await h.admin.query(
+            "select count(*)::int count from subscription_payment where business_id=$1",
+            [b],
+          )
+        ).rows,
+      ).toEqual([{ count: 1 }]);
+    },
+  );
+
+  it("permits a new explicit frozen-price monthly approval only after server-proven preflight rejection without a native mutation", async () => {
+    const s = await nativePilotFixture(h),
+      b = s.f.business.id,
+      c = s.f.owner;
+    await s.app.start(c, b, { actionId: s.action.id });
+    s.capture();
+    await s.app.refresh(c, b, { actionId: s.action.id });
+    const period = (await s.app.workspace(c, b)).periods[0];
+    const input = {
+      originalActionId: s.action.id,
+      originalPeriodId: period.id,
+      requestKey: randomUUID(),
+      startAt: period.end,
+      approvalExpiresAt: new Date(
+        h.clock.now().getTime() + 600000,
+      ).toISOString(),
+      agreeSeparateMandate: true,
+    };
+    const first = await s.app.preparePilotRenewal(c, b, input);
+    const originalFetch = s.native.configuration.fetch;
+    s.native.configuration.fetch = async (input, init) => {
+      if (String(input).includes("/plans/"))
+        throw Error("Controlled native plan preflight outage");
+      return originalFetch(input, init);
+    };
+    expect(await s.app.start(c, b, { actionId: first.id })).toMatchObject({
+      state: "failed",
+      reason: "native_preflight_rejected",
+    });
+    expect(s.mutations).toHaveLength(1);
+    s.native.configuration.fetch = originalFetch;
+    const nextStart = new Date(
+      new Date(period.end).getTime() + 86400000,
+    ).toISOString();
+    const next = await s.app.preparePilotRenewal(c, b, {
+      ...input,
+      requestKey: randomUUID(),
+      startAt: nextStart,
+    });
+    expect(next.id).not.toBe(first.id);
+    expect(next.snapshot.pilotContinuation?.startAt).toBe(nextStart);
+    expect(next.snapshot.quote).toEqual(first.snapshot.quote);
+    expect(
+      (await s.app.workspace(c, b)).actions.find((a) => a.id === first.id)
+        ?.snapshot.pilotContinuation?.startAt,
+    ).toBe(period.end);
+    await s.app.start(c, b, { actionId: next.id });
+    expect(s.mutations).toHaveLength(2);
+    expect(s.mutations[1]).toMatchObject({
+      path: "/v1/subscriptions",
+      body: {
+        start_at: Date.parse(nextStart) / 1000,
+        plan_id: "plan_fixtureINR",
+        total_count: 12,
+      },
+    });
+  });
 
   it("collects an exact native pilot order into the original fourteen-day canonical paid period", async () => {
     const s = await nativePilotFixture(h);

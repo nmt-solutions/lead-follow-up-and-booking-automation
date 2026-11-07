@@ -496,15 +496,63 @@ export function createSubscriptionPaymentRepository(database: Database) {
           new Date(input.approvalExpiresAt) >= new Date(input.startAt)
         )
           throw new ApplicationError("INVALID_INPUT");
+        const source = original.snapshot.provider;
+        const customerId = original.checkout.customerId;
+        const selectedPlans = (review: PaymentSnapshot["provider"]["review"]) =>
+          review?.plans.filter(
+            (p) =>
+              p.offerId === original.snapshot.quote.selection.offerId &&
+              p.reservedCapacityId ===
+                original.snapshot.quote.selection.reservedCapacityId &&
+              p.currency === original.snapshot.quote.currency,
+          );
+        const originalPlans = selectedPlans(source.review),
+          currentPlans = selectedPlans(gateway.review);
+        if (
+          source.key !== gateway.key ||
+          source.account !== gateway.account ||
+          source.mode !== gateway.mode ||
+          !gateway.review?.methods.card ||
+          gateway.review.methods.upi ||
+          gateway.review.methods.emandate ||
+          gateway.review.upiPath ||
+          originalPlans?.length !== 1 ||
+          currentPlans?.length !== 1 ||
+          !isDeepStrictEqual(originalPlans[0], currentPlans[0]) ||
+          !gateway.review.pilotOrders?.customers.some(
+            (c) => c.businessId === businessId && c.customerId === customerId,
+          )
+        )
+          throw new ApplicationError("SETUP_REQUIRED");
         const existing = await tx
           .select()
           .from(subscriptionPayment)
           .where(eq(subscriptionPayment.businessId, businessId));
+        const unsent = new Set(
+          (
+            await tx
+              .select({ actionId: subscriptionPaymentHistory.actionId })
+              .from(subscriptionPaymentHistory)
+              .where(
+                and(
+                  eq(subscriptionPaymentHistory.businessId, businessId),
+                  eq(subscriptionPaymentHistory.kind, "creation_not_attempted"),
+                ),
+              )
+          ).map((h) => h.actionId),
+        );
         if (
           existing.some(
             (a) =>
               a.snapshot.pilotContinuation?.originalActionId === original.id &&
-              (a.started || a.state !== "failed"),
+              !(
+                a.state === "failed" &&
+                a.reason === "native_preflight_rejected" &&
+                !a.checkout &&
+                !a.observation &&
+                !a.reconciliationPending &&
+                unsent.has(a.id)
+              ),
           )
         )
           throw new ApplicationError("CONFLICT");
@@ -529,11 +577,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
             note: `Explicit separate monthly continuation of ${original.id}`,
           },
           at,
-          gateway.mode === "test"
-            ? "fixture"
-            : gateway.mode === "unconfigured"
-              ? "fixture"
-              : gateway.mode,
+          gateway.mode === "test" ? "fixture" : gateway.mode,
         );
         if (tax.status !== "calculated")
           throw new ApplicationError("SETUP_REQUIRED");
@@ -549,13 +593,13 @@ export function createSubscriptionPaymentRepository(database: Database) {
           provider: {
             key: gateway.key,
             account: gateway.account,
-            mode: gateway.mode === "unconfigured" ? "fixture" : gateway.mode,
+            mode: gateway.mode,
             ...(gateway.review ? { review: gateway.review } : {}),
           },
           pilotContinuation: {
             originalActionId: original.id,
             originalPeriodId: period.id,
-            customerId: original.checkout.customerId,
+            customerId,
             originalEnd: period.end.toISOString(),
             startAt: input.startAt,
             approvalExpiresAt: input.approvalExpiresAt,
@@ -563,10 +607,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
               "The pilot is a separate one-time card payment. This approval creates a separate monthly mandate for the original agreed monthly price and allowances. A mandate authorization is not paid renewal. Access follows verified captured monthly payment only; a later selected start leaves a service gap.",
           },
         };
-        if (
-          gateway.mode === "unconfigured" ||
-          gateway.reviewSnapshot?.(snapshot).length
-        )
+        if (gateway.reviewSnapshot?.(snapshot).length)
           throw new ApplicationError("SETUP_REQUIRED");
         const [row] = await tx
           .insert(subscriptionPayment)
