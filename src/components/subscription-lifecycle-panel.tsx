@@ -50,6 +50,7 @@ export function SubscriptionLifecyclePanel({
   const native = action.snapshot.provider.key === "razorpay";
   const canUpdate =
     native &&
+    !action.snapshot.upi &&
     ["active", "pending", "halted"].includes(l.provider?.status ?? "");
   const canCancel =
     native &&
@@ -73,6 +74,15 @@ export function SubscriptionLifecyclePanel({
               : "Access inactive"}
         </Badge>
       </div>
+      {action.snapshot.upi && (
+        <p role="status" className="rounded-lg bg-muted p-3">
+          UPI mandate: {l.provider?.status ?? "not established"}. Pause, resume
+          or cancel through the supported UPI app, or request cancellation here.
+          A customer pause can only be resumed by that customer. Mandate status
+          and UPI PIN authentication do not establish captured payment or a paid
+          period.
+        </p>
+      )}
       <dl className="grid gap-3 sm:grid-cols-2">
         <div>
           <dt className="font-medium">Paid through</dt>
@@ -124,13 +134,15 @@ export function SubscriptionLifecyclePanel({
       )}
       {onUpdate && action.started && !c && l.state !== "cancelled" && (
         <div className="flex flex-wrap gap-3">
-          <Button
-            variant="outline"
-            disabled={busy || !canUpdate}
-            onClick={onUpdate}
-          >
-            Update card or recover payment
-          </Button>
+          {!action.snapshot.upi && (
+            <Button
+              variant="outline"
+              disabled={busy || !canUpdate}
+              onClick={onUpdate}
+            >
+              Update card or recover payment
+            </Button>
+          )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" disabled={busy || !canCancel}>
@@ -162,7 +174,7 @@ export function SubscriptionLifecyclePanel({
           </AlertDialog>
         </div>
       )}
-      {onUpdate && !c && (!canUpdate || !canCancel) && (
+      {onUpdate && !action.snapshot.upi && !c && (!canUpdate || !canCancel) && (
         <p className="text-sm text-muted-foreground">
           Reconcile provider status to check available actions. Card updates
           require an active, pending or halted native subscription. Cycle-end
@@ -171,7 +183,7 @@ export function SubscriptionLifecyclePanel({
         </p>
       )}
       <p className="text-sm text-muted-foreground">
-        Card authorization, secure-checkout completion and active provider
+        Mandate authorization, secure-checkout completion and active provider
         status do not grant a paid period. Only independently reconciled
         captures can do so.
       </p>
@@ -186,7 +198,13 @@ export function SubscriptionLifecyclePanel({
               .toReversed()
               .map((e) => (
                 <li key={e.id} className="rounded-lg bg-muted p-3">
-                  <p>{e.notice ? notices[e.notice.kind] : ""}</p>
+                  <p>
+                    {e.notice?.kind === "payment_failed" && action.snapshot.upi
+                      ? "A UPI renewal is unpaid. Review the mandate in the supported UPI app and reconcile the saved payment. Access requires an eligible captured payment."
+                      : e.notice
+                        ? notices[e.notice.kind]
+                        : ""}
+                  </p>
                   <p className="text-sm text-muted-foreground">
                     Available in app · {time(e.at)} ·{" "}
                     {e.actorId ? "Customer action" : "Payment reconciliation"}.

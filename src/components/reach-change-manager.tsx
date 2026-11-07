@@ -53,6 +53,7 @@ export function ReachChangeManager({
 }) {
   const [state, setState] = useState(initial),
     [quoteId, setQuoteId] = useState(""),
+    [paymentMethod, setPaymentMethod] = useState("card"),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
@@ -98,7 +99,7 @@ export function ReachChangeManager({
   }
   async function command(
     change: ReachChange,
-    action: "approve" | "execute" | "refresh" | "withdraw",
+    action: "approve" | "execute" | "refresh" | "withdraw" | "validate-method",
   ) {
     const url = operator
       ? `${root}/${change.businessId}/${action}`
@@ -109,7 +110,9 @@ export function ReachChangeManager({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           changeId: change.id,
-          requestKey: key(`${change.id}:${action}`),
+          requestKey: key(
+            `${change.id}:${action}${action === "approve" && change.snapshot.target.upi ? `:${change.reviewHash}` : ""}`,
+          ),
           ...(action === "approve"
             ? { accept: true, reviewHash: change.reviewHash }
             : {}),
@@ -117,14 +120,18 @@ export function ReachChangeManager({
       }),
       reachChangeSchema,
     );
+    if (action === "validate-method")
+      keys.current.delete(`${change.id}:${action}`);
     if (action === "approve") await command(result, "execute");
     await reload();
     setMessage(
       action === "withdraw"
         ? "The unused approval was withdrawn. Create a fresh exact preview; the old request remains in history."
-        : action === "refresh"
-          ? "Saved native evidence refreshed. Access still requires the matching captured payment."
-          : "The approved change is saved. Review its payment and mandate status below.",
+        : action === "validate-method"
+          ? "The exact UPI agreement was validated. The customer must approve these frozen terms before continuing."
+          : action === "refresh"
+            ? "Saved native evidence refreshed. Access still requires the matching captured payment."
+            : "The approved change is saved. Review its payment and mandate status below.",
     );
   }
   async function checkout(change: ReachChange, purpose: "mandate" | "delta") {
@@ -142,8 +149,46 @@ export function ReachChangeManager({
     );
     await openReachCheckout(
       result,
-      () => {
-        void act(() => command(change, "refresh"));
+      (proof) => {
+        void act(async () => {
+          if (
+            result.paymentMethod === "upi" &&
+            result.kind === "mandate" &&
+            result.actionId
+          ) {
+            const parsed = z
+              .object({
+                razorpay_payment_id: z.string(),
+                razorpay_subscription_id: z.string(),
+                razorpay_signature: z.string(),
+              })
+              .safeParse(proof);
+            if (!parsed.success)
+              throw new Error(
+                "Checkout proof is incomplete. Reconcile the saved mandate or ask the operator to inspect it.",
+              );
+            await readCommercialResponse(
+              await fetch(
+                `/api/businesses/${businessId}/subscription-payments/confirm-mandate`,
+                {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    actionId: result.actionId,
+                    requestKey: key(
+                      `${change.id}:proof:${parsed.data.razorpay_payment_id}`,
+                    ),
+                    paymentId: parsed.data.razorpay_payment_id,
+                    subscriptionId: parsed.data.razorpay_subscription_id,
+                    signature: parsed.data.razorpay_signature,
+                  }),
+                },
+              ),
+              z.unknown(),
+            );
+          }
+          await command(change, "refresh");
+        });
       },
       () =>
         setMessage(
@@ -236,9 +281,31 @@ export function ReachChangeManager({
                     </option>
                   ))}
               </NativeSelect>
+              <Label htmlFor="reach-payment-method">
+                Payment method for the new agreement
+              </Label>
+              <NativeSelect
+                id="reach-payment-method"
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              >
+                <option value="card">Card</option>
+                <option value="upi" disabled={!state.upi?.available}>
+                  UPI AutoPay — separate mandate
+                </option>
+              </NativeSelect>
+              <p className="text-sm text-muted-foreground" role="status">
+                {state.upi?.available
+                  ? "UPI configuration is available for review. Each exact agreement still requires operator validation and customer approval."
+                  : "UPI AutoPay is disabled. An operator must validate a supported separate account and method path before it can be used."}
+              </p>
               <Button
                 disabled={
-                  busy || !quoteId || state.configuration?.ready === false
+                  busy ||
+                  !quoteId ||
+                  (paymentMethod === "upi"
+                    ? !state.upi?.available || stopped
+                    : state.configuration?.ready === false)
                 }
                 onClick={() =>
                   void act(async () => {
@@ -249,14 +316,17 @@ export function ReachChangeManager({
                         body: JSON.stringify({
                           periodId: currentPeriod,
                           quoteId,
+                          paymentMethod,
                           requestKey: key(
-                            `preview:${currentPeriod}:${quoteId}`,
+                            `preview:${currentPeriod}:${quoteId}:${paymentMethod}`,
                           ),
                         }),
                       }),
                       reachChangeSchema,
                     );
-                    keys.current.delete(`preview:${currentPeriod}:${quoteId}`);
+                    keys.current.delete(
+                      `preview:${currentPeriod}:${quoteId}:${paymentMethod}`,
+                    );
                     await reload();
                     setMessage(
                       "Preview saved. Review its exact scope, charge and renewal terms before approving.",
@@ -279,9 +349,15 @@ export function ReachChangeManager({
         const s = c.snapshot,
           t = s.delta.tax.totals!,
           native = c.events.filter((e) => e.fact.native).at(-1)?.fact.native,
+          methodReview = c.events
+            .filter((e) => e.fact.kind === "method_review")
+            .at(-1),
+          approval = c.events.filter((e) => e.fact.kind === "approved").at(-1),
           approved =
             c.state !== "withdrawn" &&
-            c.events.some((e) => e.fact.kind === "approved"),
+            !!approval &&
+            (!s.target.upi ||
+              approval.fact.body?.methodReviewId === methodReview?.id),
           captured = c.events.some((e) => e.fact.kind === "capture");
         return (
           <section
@@ -295,6 +371,61 @@ export function ReachChangeManager({
               <Badge>{status[c.state]}</Badge>
             </div>
             {operator && <p>Business {c.businessId}</p>}
+            {s.target.upi && (
+              <div className="space-y-2 rounded-lg bg-muted p-4">
+                <p className="font-medium">
+                  UPI AutoPay · separate payment and new mandate
+                </p>
+                <p>{s.target.upi.terms}</p>
+                <p className="text-sm">
+                  Supported apps: {s.target.upi.supportedApps.join(", ")}.
+                  Supported UPI handles:{" "}
+                  {s.target.upi.supportedHandles.map((h) => `@${h}`).join(", ")}
+                  . These are the options reviewed for this agreement.
+                </p>
+                <p>
+                  Choose UPI for both the new mandate and separate payment. A
+                  different payment method requires operator review and does not
+                  activate this agreement.
+                </p>
+                <p className="text-sm">
+                  Operator validation:{" "}
+                  {c.events.some((e) => e.fact.kind === "method_review")
+                    ? "recorded; current authority is checked before continuing"
+                    : "required before approval"}
+                  . UPI PIN or mandate authentication alone does not pay for a
+                  period. Pause or cancel the mandate in the supported UPI app;
+                  reconcile here to see the current native state.
+                </p>
+                <details className="text-sm">
+                  <summary className="cursor-pointer py-2">
+                    Review payment identities
+                  </summary>
+                  <dl className="space-y-2 wrap-anywhere">
+                    <div>
+                      <dt>Original merchant and customer</dt>
+                      <dd>
+                        {s.target.upi.originalAccount} ·{" "}
+                        {s.target.upi.originalCustomerId}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>New merchant and UPI customer</dt>
+                      <dd>
+                        {s.target.upi.account} · {s.target.upi.customerId}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Identity mapping and path</dt>
+                      <dd>
+                        {s.target.upi.mappingId} · {s.target.upi.pathId} ·{" "}
+                        {s.target.upi.mode} mode
+                      </dd>
+                    </div>
+                  </dl>
+                </details>
+              </div>
+            )}
             <dl className="grid gap-4 sm:grid-cols-3">
               <div>
                 <dt className="text-sm text-muted-foreground">
@@ -361,10 +492,23 @@ export function ReachChangeManager({
                 ? `Captured delta: ${captured ? "Confirmed" : "Not confirmed"}.`
                 : `Eligible target renewal: ${c.state === "applied" ? "Confirmed" : "Not confirmed"}.`}{" "}
               {s.path === "replacement_mandate"
-                ? `Old renewal stopped: ${native?.oldStopped ? "confirmed" : "not confirmed"}. New mandate: ${native?.mandateReady ? "authenticated" : "not authenticated"}.`
+                ? `Old renewal stop at ${time(s.renewalAt)}: ${native?.oldStopped ? "confirmed" : "not confirmed"}. New mandate: ${native?.mandateReady ? "authenticated" : "not authenticated"}.`
                 : `Native target: ${native?.updated ? "acknowledged; payment is checked separately" : "not yet acknowledged"}.`}
             </p>
             <div className="flex flex-wrap gap-3">
+              {operator &&
+                s.target.upi &&
+                !["applied", "withdrawn"].includes(c.state) && (
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void act(() => command(c, "validate-method"))
+                    }
+                  >
+                    Validate exact UPI agreement
+                  </Button>
+                )}
               {!operator && approved && reachUnsent(c) && (
                 <Button
                   variant="outline"
@@ -377,7 +521,17 @@ export function ReachChangeManager({
               {!operator && !approved && c.state !== "withdrawn" && (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button disabled={busy || stopped || !c.reviewHash}>
+                    <Button
+                      disabled={
+                        busy ||
+                        stopped ||
+                        !c.reviewHash ||
+                        (!!s.target.upi &&
+                          !c.events.some(
+                            (e) => e.fact.kind === "method_review",
+                          ))
+                      }
+                    >
                       Review approval
                     </Button>
                   </AlertDialogTrigger>
@@ -442,7 +596,8 @@ export function ReachChangeManager({
                     disabled={busy || stopped}
                     onClick={() => void act(() => checkout(c, "mandate"))}
                   >
-                    Authorize replacement card mandate
+                    Authorize replacement {s.target.upi ? "UPI" : "card"}{" "}
+                    mandate
                   </Button>
                 )}
               {!operator && approved && native?.orderId && !captured && (

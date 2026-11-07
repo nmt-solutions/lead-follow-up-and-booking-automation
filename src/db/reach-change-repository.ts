@@ -47,6 +47,14 @@ import {
 import { pricingRevisionSchema } from "../models/subscription-quotes";
 import { taxCatalogSchema } from "../models/tax";
 import { paidAllowance } from "./paid-access";
+import { paymentAccount } from "../subscription-payments/accounts";
+import type { Clock } from "../models/business";
+import {
+  hasMfa,
+  operatorMfaLifetime,
+  businessMfaLifetime,
+} from "../auth/access";
+import { session } from "./schema";
 
 type Row = typeof reachChange.$inferSelect;
 function canonical(value: unknown): string {
@@ -74,7 +82,19 @@ async function view(tx: Transaction, row: Row) {
   const native = events.filter((e) => e.fact.native).at(-1)?.fact.native;
   const reviewHash = native
     ? createHash("sha256")
-        .update(canonical({ snapshot: row.snapshot, native }))
+        .update(
+          canonical({
+            snapshot: row.snapshot,
+            native,
+            ...(row.snapshot.target.upi
+              ? {
+                  methodReviewId:
+                    events.filter((e) => e.fact.kind === "method_review").at(-1)
+                      ?.id ?? null,
+                }
+              : {}),
+          }),
+        )
         .digest("hex")
     : null;
   return reachChangeSchema.parse({
@@ -154,7 +174,76 @@ async function targetQuote(
 }
 const round = (value: bigint, numerator: bigint, denominator: bigint) =>
   (value * numerator * 2n + denominator) / (denominator * 2n);
-export function createReachChangeRepository(database: Database) {
+export function createReachChangeRepository(database: Database, clock?: Clock) {
+  async function methodReviewCurrent(
+    tx: Transaction,
+    row: Row,
+    at: Date,
+    bindApproval = true,
+  ) {
+    if (!row.snapshot.target.upi) return;
+    const observed = clock?.now() ?? at;
+    await tx.execute(
+      sql`select set_config('app.upi_at',${observed.toISOString()},true)`,
+    );
+    const result = await tx.execute<{ allowed: boolean }>(
+      sql`select public.upi_review_current(${row.id}::uuid,${row.businessId}::uuid,${observed.toISOString()}::timestamptz) allowed`,
+    );
+    if (!result.rows[0]?.allowed) throw new ApplicationError("SETUP_REQUIRED");
+    const change = await view(tx, row),
+      review = change.events
+        .filter((e) => e.fact.kind === "method_review")
+        .at(-1),
+      approval = change.events.filter((e) => e.fact.kind === "approved").at(-1);
+    if (
+      bindApproval &&
+      approval &&
+      approval.fact.body?.methodReviewId !== review?.id
+    )
+      throw new ApplicationError("CONFLICT");
+  }
+  async function currentActor(
+    tx: Transaction,
+    actor: Actor,
+    at: Date,
+    operator: boolean,
+  ) {
+    if (!("sessionId" in actor) || typeof actor.sessionId !== "string")
+      throw new ApplicationError("UNAUTHENTICATED");
+    const [s] = await tx
+      .select()
+      .from(session)
+      .where(eq(session.id, actor.sessionId));
+    const now = clock?.now() ?? at;
+    if (!s || s.userId !== actor.userId || s.expiresAt <= now)
+      throw new ApplicationError("UNAUTHENTICATED");
+    if (
+      !(await hasMfa(
+        tx,
+        s.token,
+        now,
+        operator ? operatorMfaLifetime : businessMfaLifetime,
+      ))
+    )
+      throw new ApplicationError("MFA_REQUIRED");
+    await tx.execute(
+      sql`select set_config('app.upi_actor_session',${actor.sessionId},true),set_config('app.upi_at',${now.toISOString()},true)`,
+    );
+    const trusted = await tx.execute<{ valid: boolean }>(
+      sql`select exists(select 1 from public.session where id=${actor.sessionId} and user_id=${actor.userId} and expires_at>clock_timestamp()) valid`,
+    );
+    if (!trusted.rows[0]?.valid) throw new ApplicationError("UNAUTHENTICATED");
+    return () => {
+      if (s.expiresAt <= (clock?.now() ?? at))
+        throw new ApplicationError("UNAUTHENTICATED");
+      if (
+        !s.mfaVerifiedAt ||
+        (clock?.now() ?? at).getTime() - s.mfaVerifiedAt.getTime() >=
+          (operator ? operatorMfaLifetime : businessMfaLifetime)
+      )
+        throw new ApplicationError("MFA_REQUIRED");
+    };
+  }
   async function stopped(tx: Transaction, businessId: string) {
     const result = await tx.execute<{ stopped: boolean }>(
       sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
@@ -226,6 +315,7 @@ export function createReachChangeRepository(database: Database) {
     policy?: ReachPolicy,
     renewal = false,
   ) {
+    at = clock?.now() ?? at;
     await requireRunning(tx, row.businessId);
     if (
       !isDeepStrictEqual(
@@ -405,7 +495,17 @@ export function createReachChangeRepository(database: Database) {
         } else await requireCapability(tx, actor, businessId, "billing.manage");
         const row = await find(tx, businessId, id);
         await bind(tx, row);
-        return operation(tx, row);
+        if (!row.snapshot.target.upi) return operation(tx, row);
+        await currentActor(tx, actor, new Date(), operator);
+        const result = await operation(tx, row);
+        if (operator) {
+          const grant = await tx.execute<{ allowed: boolean }>(
+            sql`select exists(select 1 from public.platform_operator where user_id=${actor.userId} and reconciliation) allowed`,
+          );
+          if (!grant.rows[0]?.allowed) throw new ApplicationError("FORBIDDEN");
+        } else await requireCapability(tx, actor, businessId, "billing.manage");
+        (await currentActor(tx, actor, new Date(), operator))();
+        return result;
       },
       { lock: true },
     );
@@ -430,6 +530,64 @@ export function createReachChangeRepository(database: Database) {
     recovery_key: row.recoveryKey,
   });
   return {
+    validateMethod(
+      actor: Actor,
+      businessId: string,
+      input: { changeId: string; requestKey: string },
+      at: Date,
+      gateway: PaymentGateway,
+      policy?: ReachPolicy,
+    ) {
+      return authorized(
+        actor,
+        businessId,
+        input.changeId,
+        async (tx, row) => {
+          if (
+            !row.snapshot.target.upi ||
+            !("sessionId" in actor) ||
+            typeof actor.sessionId !== "string"
+          )
+            throw new ApplicationError("SETUP_REQUIRED");
+          const now = clock?.now() ?? at;
+          const [s] = await tx
+            .select()
+            .from(session)
+            .where(eq(session.id, actor.sessionId));
+          if (
+            !s ||
+            s.userId !== actor.userId ||
+            !(await hasMfa(tx, s.token, now, operatorMfaLifetime))
+          )
+            throw new ApplicationError("MFA_REQUIRED");
+          await current(tx, row, now, gateway, policy);
+          await tx.execute(
+            sql`select set_config('app.upi_session',${actor.sessionId},true),set_config('app.upi_at',${now.toISOString()},true)`,
+          );
+          const change = await view(tx, row),
+            key = `request:${input.requestKey}`,
+            previous = change.events.find((e) => e.key === key);
+          if (previous) {
+            if (
+              previous.actorId !== actor.userId ||
+              previous.fact.kind !== "method_review"
+            )
+              throw new ApplicationError("CONFLICT");
+            return change;
+          }
+          await append(
+            tx,
+            row,
+            key,
+            { kind: "method_review" },
+            now,
+            actor.userId,
+          );
+          return view(tx, row);
+        },
+        true,
+      );
+    },
     withdraw(
       actor: Actor,
       businessId: string,
@@ -452,6 +610,9 @@ export function createReachChangeRepository(database: Database) {
     },
     workspace(actor: Actor, businessId: string, at: Date) {
       return scoped(database, actor, businessId, async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${businessId},0))`,
+        );
         await requireCapability(tx, actor, businessId, "billing.read");
         const rows = await tx
           .select()
@@ -463,11 +624,15 @@ export function createReachChangeRepository(database: Database) {
         const current = await tx.execute<{ id: string }>(
           sql`select id from public.current_paid_scope(${businessId}::uuid,${at.toISOString()}::timestamptz)`,
         );
-        return {
+        const result = {
           changes,
           currentPeriodId: current.rows[0]?.id ?? null,
           stopped: await stopped(tx, businessId),
         };
+        await requireCapability(tx, actor, businessId, "billing.read");
+        if (rows.some((r) => r.snapshot.target.upi))
+          (await currentActor(tx, actor, clock?.now() ?? at, false))();
+        return result;
       });
     },
     queue(actor: Actor) {
@@ -482,6 +647,14 @@ export function createReachChangeRepository(database: Database) {
           .from(reachChange)
           .orderBy(asc(reachChange.at)))
           changes.push(await view(tx, row));
+        if (changes.some((c) => c.snapshot.target.upi)) {
+          const finalGrant = await tx.execute<{ allowed: boolean }>(
+            sql`select exists(select 1 from public.platform_operator where user_id=${actor.userId} and reconciliation) allowed`,
+          );
+          if (!finalGrant.rows[0]?.allowed)
+            throw new ApplicationError("FORBIDDEN");
+          (await currentActor(tx, actor, clock?.now() ?? new Date(), true))();
+        }
         return { changes };
       });
     },
@@ -520,13 +693,17 @@ export function createReachChangeRepository(database: Database) {
           throw new ApplicationError("CONFLICT");
         if (change.state === "withdrawn")
           throw new ApplicationError("CONFLICT");
-        if (change.events.some((e) => e.fact.kind === "approved"))
+        if (
+          change.events.some((e) => e.fact.kind === "approved") &&
+          !row.snapshot.target.upi
+        )
           throw new ApplicationError("CONFLICT");
         const expiry = await tx.execute<{ valid: boolean }>(
           sql`select ${row.expiresAt.toISOString()}::timestamptz>statement_timestamp() as valid`,
         );
         if (!expiry.rows[0]?.valid) throw new ApplicationError("CONFLICT");
         await current(tx, row, at, gateway, policy);
+        await methodReviewCurrent(tx, row, at, false);
         const others = await tx
           .select()
           .from(reachChange)
@@ -573,6 +750,15 @@ export function createReachChangeRepository(database: Database) {
           key,
           {
             kind: "approved",
+            ...(row.snapshot.target.upi
+              ? {
+                  body: {
+                    methodReviewId: change.events
+                      .filter((e) => e.fact.kind === "method_review")
+                      .at(-1)!.id,
+                  },
+                }
+              : {}),
             reviewHash: input.reviewHash,
             native: change.events.filter((e) => e.fact.native).at(-1)!.fact
               .native,
@@ -580,6 +766,8 @@ export function createReachChangeRepository(database: Database) {
           at,
           actor.userId,
         );
+        if (row.snapshot.target.upi)
+          await methodReviewCurrent(tx, row, clock?.now() ?? at);
         return view(tx, row);
       });
     },
@@ -657,6 +845,7 @@ export function createReachChangeRepository(database: Database) {
         id,
         async (tx, row) => {
           await current(tx, row, at, gateway, policy);
+          await methodReviewCurrent(tx, row, at);
           const change = await view(tx, row);
           if (change.state === "withdrawn")
             throw new ApplicationError("CONFLICT");
@@ -684,6 +873,7 @@ export function createReachChangeRepository(database: Database) {
             at,
             actor.userId,
           );
+          await methodReviewCurrent(tx, row, clock?.now() ?? at);
           return true;
         },
         operator,
@@ -704,6 +894,10 @@ export function createReachChangeRepository(database: Database) {
         id,
         async (tx, row) => {
           await current(tx, row, at, gateway, policy);
+          if (
+            (await view(tx, row)).events.some((e) => e.fact.kind === "approved")
+          )
+            await methodReviewCurrent(tx, row, at);
           const events = (await view(tx, row)).events,
             native = events.filter((e) => e.fact.native).at(-1)?.fact.native;
           if (
@@ -720,6 +914,11 @@ export function createReachChangeRepository(database: Database) {
             ).rows[0]?.valid;
             if (!valid) throw new ApplicationError("CONFLICT");
           }
+          if (
+            row.snapshot.target.upi &&
+            events.some((e) => e.fact.kind === "approved")
+          )
+            await methodReviewCurrent(tx, row, clock?.now() ?? at);
         },
         operator,
       );
@@ -759,6 +958,30 @@ export function createReachChangeRepository(database: Database) {
     },
     observe(work: ReachWork, fact: ReachFact, at: Date) {
       return worker(work, async (tx, row) => {
+        if (fact.incurred) {
+          const i = fact.incurred;
+          if (
+            !row.snapshot.target.upi ||
+            i.account !== row.snapshot.target.provider.account ||
+            i.mode !== row.snapshot.target.provider.mode ||
+            new Date(i.observedAt) > at
+          )
+            throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+          const stable = { ...i, observedAt: "" };
+          const key = `incurred:${createHash("sha256").update(canonical(stable)).digest("hex")}`;
+          if (!(await view(tx, row)).events.some((e) => e.key === key))
+            await append(
+              tx,
+              row,
+              key,
+              {
+                kind: "review",
+                reason: "captured_order_binding_mismatch",
+                incurred: i,
+              },
+              at,
+            );
+        }
         if (fact.native) {
           const previous = (await view(tx, row)).events
             .filter((e) => e.fact.native)
@@ -801,7 +1024,8 @@ export function createReachChangeRepository(database: Database) {
             c.provider !== s.delta.provider.key ||
             c.account !== s.delta.provider.account ||
             c.operationKey !== s.deltaOperationKey ||
-            c.customerId !== s.original.charge?.customerId ||
+            c.customerId !==
+              (s.target.upi?.customerId ?? s.original.charge?.customerId) ||
             c.status !== "confirmed" ||
             c.amountMinor !== s.delta.tax.totals?.totalMinor ||
             c.currency !== s.delta.quote.currency ||
@@ -1007,7 +1231,12 @@ export function createReachChangeRepository(database: Database) {
     preview(
       actor: Actor,
       businessId: string,
-      input: { periodId: string; quoteId: string; requestKey: string },
+      input: {
+        periodId: string;
+        quoteId: string;
+        requestKey: string;
+        paymentMethod?: "card" | "upi";
+      },
       at: Date,
       gateway: PaymentGateway,
       configuredPolicy?: ReachPolicy,
@@ -1032,7 +1261,9 @@ export function createReachChangeRepository(database: Database) {
             if (
               previous.actorId !== actor.userId ||
               previous.periodId !== input.periodId ||
-              previous.quoteId !== input.quoteId
+              previous.quoteId !== input.quoteId ||
+              (previous.snapshot.target.upi ? "upi" : "card") !==
+                (input.paymentMethod ?? "card")
             )
               throw new ApplicationError("CONFLICT");
             return view(tx, previous);
@@ -1081,11 +1312,10 @@ export function createReachChangeRepository(database: Database) {
             a.lifecycle?.cancellation ||
             a.lifecycle?.state === "cancelled" ||
             !p.charge?.charge ||
-            p.charge.charge.method !== "card" ||
+            (p.charge.charge.method !== "card" && gateway.method !== "upi") ||
             !p.charge.customerId ||
             a.snapshot.term.kind !== "calendar_month" ||
-            p.snapshot.provider.account !== gateway.account ||
-            p.snapshot.provider.mode !== gateway.mode ||
+            !paymentAccount(gateway, p.snapshot.provider) ||
             gateway.readiness?.().length
           )
             throw new ApplicationError("SETUP_REQUIRED");
@@ -1181,6 +1411,31 @@ export function createReachChangeRepository(database: Database) {
               review: gateway.review,
             },
           };
+          if (gateway.method === "upi") {
+            const upi = gateway.review?.upiPath;
+            const mappings = upi?.mappings.filter(
+              (m) =>
+                m.businessId === businessId &&
+                m.originalAccount === p.snapshot.provider.account &&
+                m.originalCustomerId === p.charge!.customerId,
+            );
+            if (!upi || mappings?.length !== 1 || quote.currency !== "INR")
+              throw new ApplicationError("SETUP_REQUIRED");
+            target.upi = {
+              pathId: upi.id,
+              mappingId: mappings[0].id,
+              supportedApps: upi.supportedApps,
+              supportedHandles: upi.supportedHandles,
+              businessId,
+              originalAccount: p.snapshot.provider.account,
+              originalCustomerId: p.charge.customerId,
+              account: gateway.account,
+              mode: gateway.mode === "live" ? "live" : "test",
+              method: "upi",
+              customerId: mappings[0].customerId,
+              terms: upi.terms,
+            };
+          }
           if (
             fullTax.status !== "calculated" ||
             gateway.reviewSnapshot?.(target).length
@@ -1252,7 +1507,17 @@ export function createReachChangeRepository(database: Database) {
           );
           if (tax.status !== "calculated")
             throw new ApplicationError("SETUP_REQUIRED");
+          if (
+            target.upi &&
+            expansion &&
+            (BigInt(tax.totals!.totalMinor) <
+              BigInt(gateway.review!.upiPath!.minimumMinor) ||
+              BigInt(tax.totals!.totalMinor) >
+                BigInt(gateway.review!.upiPath!.maximumMinor))
+          )
+            throw new ApplicationError("SETUP_REQUIRED");
           const path =
+            !target.upi &&
             p.charge.charge.international &&
             gateway.review?.internationalUpdates ===
               "native_proration_reviewed" &&
@@ -1267,7 +1532,7 @@ export function createReachChangeRepository(database: Database) {
               changeId: id,
               originalActionId: a.id,
               start: p.end.toISOString(),
-              customerId: p.charge.customerId,
+              customerId: target.upi?.customerId ?? p.charge.customerId,
             };
           const delta: PaymentSnapshot = {
             ...target,

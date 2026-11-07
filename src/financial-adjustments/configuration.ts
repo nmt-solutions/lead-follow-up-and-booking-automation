@@ -8,7 +8,7 @@ import { createRazorpayAdjustments } from "./razorpay";
 import type { Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 
-export function configuredFinancialAdjustments(
+function configuredSingleAdjustments(
   options: {
     env?: Record<string, string | undefined>;
     fetch?: typeof fetch;
@@ -65,4 +65,30 @@ export function configuredFinancialAdjustments(
     confirmDispute: unavailable,
     authenticateEvent: unavailable,
   };
+}
+
+export function configuredFinancialAdjustments(
+  options: {
+    env?: Record<string, string | undefined>;
+    fetch?: typeof fetch;
+    clock?: Clock;
+  } = {},
+): FinancialGateway {
+  const env = options.env ?? process.env,
+    card = configuredSingleAdjustments(options);
+  if (!env.RAZORPAY_UPI_ACCOUNT_REVIEW) return card;
+  const upi = configuredSingleAdjustments({
+    ...options,
+    env: {
+      ...env,
+      RAZORPAY_ACCOUNT_REVIEW: env.RAZORPAY_UPI_ACCOUNT_REVIEW,
+      RAZORPAY_KEY_ID: env.RAZORPAY_UPI_KEY_ID,
+      RAZORPAY_KEY_SECRET: env.RAZORPAY_UPI_KEY_SECRET,
+      RAZORPAY_WEBHOOK_SECRETS: env.RAZORPAY_UPI_WEBHOOK_SECRETS,
+      FINANCIAL_ADJUSTMENT_POLICY: env.FINANCIAL_UPI_ADJUSTMENT_POLICY,
+    },
+  });
+  if (upi.mode !== "unconfigured" && upi.account !== card.account)
+    card.accounts = [upi];
+  return card;
 }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { upiAgreementSchema } from "./upi-autopay";
 import type { ReachGateway } from "./reach-changes";
 import {
   lifecycleSchema,
@@ -25,6 +26,13 @@ export const preparePaymentSchema = z.strictObject({
   requestKey: z.uuid(),
 });
 export const paymentCommandSchema = z.strictObject({ actionId: z.uuid() });
+export const mandateProofSchema = z.strictObject({
+  actionId: z.uuid(),
+  requestKey: z.uuid(),
+  paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/),
+  subscriptionId: z.string().regex(/^sub_[A-Za-z0-9]+$/),
+  signature: z.string().regex(/^[a-f0-9]{64}$/),
+});
 export const paymentTermSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("calendar_month"),
@@ -83,6 +91,14 @@ export function monthlyPeriodMatches(
   );
 }
 export const paymentSnapshotSchema = z.object({
+  collection: z
+    .object({
+      method: z.enum(["card", "upi"]),
+      planId: z.string(),
+      totalCount: z.number().int().positive(),
+    })
+    .optional(),
+  upi: upiAgreementSchema.optional(),
   /** A separate immutable captured adjustment; never an ordinary renewable paid term. */
   adjustment: z
     .object({
@@ -200,7 +216,7 @@ export const paymentObservationSchema = z.strictObject({
       invoiceId: ref.nullable(),
       orderId: ref,
       planId: ref,
-      method: z.literal("card"),
+      method: z.enum(["card", "upi"]),
       international: z.boolean(),
       subscriptionStart: z.iso.datetime(),
       feeMinor: z.string().regex(/^\d+$/).nullable(),
@@ -378,6 +394,19 @@ export class PaymentCreationNotAttempted extends Error {
  * Creation must use this exact persisted operation key. A timeout must NEVER be retried as a new charge.
  * #45 implements this contract with native Razorpay, without browser/session authority. */
 export type PaymentGateway = {
+  authenticateCheckout?(input: {
+    action: PaymentAction;
+    paymentId: string;
+    subscriptionId: string;
+    signature: string;
+  }): Promise<AuthenticatedPaymentEvent>;
+  method?: "card" | "upi";
+  accounts?: PaymentGateway[];
+  nativeRequest?(
+    path: string,
+    body?: unknown,
+    method?: "POST" | "PATCH",
+  ): Promise<unknown>;
   reach?: ReachGateway;
   lifecyclePolicy?: LifecyclePolicy;
   updatePayment?(

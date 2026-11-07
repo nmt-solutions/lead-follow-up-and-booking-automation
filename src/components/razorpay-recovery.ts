@@ -9,7 +9,7 @@ declare global {
       options: (
         Omit<Recovery, "script"> | Omit<ReachCheckout, "script" | "kind">
       ) & {
-        handler(): void;
+        handler(proof?: unknown): void;
         modal: { ondismiss(): void };
       },
     ) => { open(): void };

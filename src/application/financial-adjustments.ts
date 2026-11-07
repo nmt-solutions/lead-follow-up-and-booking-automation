@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  financialAccount,
+  financialAccounts,
+} from "../financial-adjustments/accounts";
+import type { PaymentSnapshot } from "../models/subscription-payments";
 import type { Actor, Clock } from "../models/business";
 import type { createFinancialAdjustmentRepository } from "../db/financial-adjustment-repository";
 import { ApplicationError } from "../models/application-error";
@@ -50,12 +55,20 @@ export function createFinancialAdjustmentApplication<
     await dependencies.repository.authorize(actor, parsed.data, operator);
     return { actor, businessId: parsed.data };
   }
-  function policy(intent?: AdjustmentIntent) {
+  function policy(
+    intent?: AdjustmentIntent,
+    source?: PaymentSnapshot["provider"],
+  ) {
+    const native = intent
+      ? financialAccount(gateway, intent.period.snapshot.provider)
+      : source
+        ? financialAccount(gateway, source)
+        : gateway;
     const selected = currentAdjustmentPolicy(
-      gateway.policy,
+      native.policy,
       clock.now(),
-      gateway.account,
-      gateway.mode,
+      native.account,
+      native.mode,
     );
     if (intent && !isDeepStrictEqual(selected, intent.policy))
       throw new ApplicationError("SETUP_REQUIRED");
@@ -64,9 +77,13 @@ export function createFinancialAdjustmentApplication<
   const worker = (work: FinancialWork) => ({ userId: "", work });
   async function reconcile(work: FinancialWork, allowReopen = false) {
     const read = await repository.read(worker(work), work.business_id, work.id);
+    const native = financialAccount(
+      gateway,
+      read.row.intent.period.snapshot.provider,
+    );
     const skip =
       read.events.filter((e) => e.kind === "scan").at(-1)?.detail.skip ?? 0;
-    const result = await gateway
+    const result = await native
       .poll(read.row.intent, read.view.observation, skip)
       .catch(async (error: unknown) => {
         await repository.recordIssue(
@@ -97,7 +114,7 @@ export function createFinancialAdjustmentApplication<
         )
       )
         continue;
-      const confirmation = await gateway.confirmDispute(
+      const confirmation = await native.confirmDispute(
         read.row.intent,
         command,
       );
@@ -234,7 +251,12 @@ export function createFinancialAdjustmentApplication<
     ) {
       const ctx = await context(credentials, businessId),
         data = parse(reviewAdjustmentSchema, input),
-        p = policy();
+        source = await repository.sourceForInvoice(
+          ctx.actor,
+          ctx.businessId,
+          data.invoiceId,
+        ),
+        p = policy(undefined, source);
       if (data.kind === "refund" && !p.normalRefunds)
         throw new ApplicationError("SETUP_REQUIRED");
       return repository.review(ctx.actor, ctx.businessId, data, p, clock.now());
@@ -269,7 +291,10 @@ export function createFinancialAdjustmentApplication<
       if (saved.view.started) return saved.view;
       if (!policy(intent).normalRefunds)
         throw new ApplicationError("SETUP_REQUIRED");
-      const payment = await gateway
+      const payment = await financialAccount(
+        gateway,
+        intent.period.snapshot.provider,
+      )
         .validate(intent)
         .catch(async (error: unknown) => {
           await context(credentials, businessId);
@@ -300,7 +325,10 @@ export function createFinancialAdjustmentApplication<
       };
       let observation = null;
       try {
-        observation = await gateway.refund(intent, async () => {
+        observation = await financialAccount(
+          gateway,
+          intent.period.snapshot.provider,
+        ).refund(intent, async () => {
           await context(credentials, businessId);
           policy(intent);
         });
@@ -362,7 +390,10 @@ export function createFinancialAdjustmentApplication<
       const p = policy(intent);
       if (data.action === "accept" ? !p.acceptDisputes : !p.contestDisputes)
         throw new ApplicationError("SETUP_REQUIRED");
-      const command = await gateway
+      const command = await financialAccount(
+          gateway,
+          intent.period.snapshot.provider,
+        )
           .prepareDispute(intent, data)
           .catch(async (error: unknown) => {
             await context(credentials, businessId);
@@ -386,7 +417,10 @@ export function createFinancialAdjustmentApplication<
         recovery_key: saved.row.recoveryKey,
       };
       try {
-        const result = await gateway.dispute(intent, command, async () => {
+        const result = await financialAccount(
+          gateway,
+          intent.period.snapshot.provider,
+        ).dispute(intent, command, async () => {
           await context(credentials, businessId);
           policy(intent);
         });
@@ -417,8 +451,14 @@ export function createFinancialAdjustmentApplication<
       ),
     receipts: async (credentials: Credentials) =>
       repository.receipts(await dependencies.authenticatePlatform(credentials)),
-    event: async (input: { body: Uint8Array; headers: Headers }) =>
-      repository.capture(await gateway.authenticateEvent(input)),
+    event: async (
+      input: { body: Uint8Array; headers: Headers },
+      path: "card" | "upi" = "card",
+    ) => {
+      const native = path === "upi" ? gateway.accounts?.[0] : gateway;
+      if (!native) throw new ApplicationError("SETUP_REQUIRED");
+      return repository.capture(await native.authenticateEvent(input));
+    },
     async credit(
       credentials: Credentials,
       businessId: unknown,
@@ -480,10 +520,13 @@ export function createFinancialAdjustmentApplication<
       );
     },
     async recover() {
-      const receipts = await repository.receiptWork(
-        gateway.account,
-        gateway.mode,
-      );
+      const receipts = (
+        await Promise.all(
+          financialAccounts(gateway).map((g) =>
+            repository.receiptWork(g.account, g.mode),
+          ),
+        )
+      ).flat();
       let failed = 0;
       for (const work of receipts) {
         try {
@@ -496,7 +539,13 @@ export function createFinancialAdjustmentApplication<
           failed++;
         }
       }
-      const pending = await repository.pending(gateway.account, gateway.mode);
+      const pending = (
+        await Promise.all(
+          financialAccounts(gateway).map((g) =>
+            repository.pending(g.account, g.mode),
+          ),
+        )
+      ).flat();
       for (const work of pending) {
         try {
           await reconcile(work);

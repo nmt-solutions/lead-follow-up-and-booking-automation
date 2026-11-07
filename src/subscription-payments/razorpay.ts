@@ -13,6 +13,7 @@ import type { Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import { PaymentCreationNotAttempted } from "../models/subscription-payments";
 import { lifecycleObservationSchema } from "../models/subscription-lifecycle";
+import { effectiveLifecyclePolicy } from "../models/subscription-lifecycle";
 import { createRazorpayReachGateway } from "./reach-razorpay";
 
 const id = (prefix: string) =>
@@ -56,6 +57,7 @@ const invoiceSchema = z.object({
   ),
 });
 const paymentSchema = z.object({
+  vpa: z.string().nullable().optional(),
   id: id("pay"),
   customer_id: id("cust").nullable(),
   invoice_id: id("inv").nullable(),
@@ -79,9 +81,30 @@ export function createRazorpayGateway(d: {
   webhookSecrets: string[];
   fetch: typeof fetch;
   clock: Clock;
+  sourceRequest?(
+    source: PaymentSnapshot["provider"],
+    path: string,
+    body?: unknown,
+    method?: "POST" | "PATCH",
+  ): Promise<unknown>;
+  verifySandbox?(): Promise<void>;
 }): PaymentGateway {
   const review = d.review;
   const account = `${review.account}:${review.mode}`;
+  const method = review.upiPath ? "upi" : "card";
+  function upiMethod(
+    p: z.infer<typeof paymentSchema>,
+    snapshot: PaymentSnapshot,
+  ) {
+    return (
+      !snapshot.upi ||
+      (p.method === "upi" &&
+        p.customer_id === snapshot.upi.customerId &&
+        snapshot.provider.review?.upiPath?.supportedHandles.includes(
+          p.vpa?.split("@").at(-1)?.toLowerCase() ?? "",
+        ))
+    );
+  }
   function readiness() {
     const at = d.clock.now();
     const reasons: string[] = [];
@@ -93,8 +116,31 @@ export function createRazorpayGateway(d: {
       reasons.push("account_review_expired_or_not_effective");
     if (!review.subscriptions)
       reasons.push("subscriptions_activation_required");
-    if (!review.methods.card || review.methods.upi || review.methods.emandate)
-      reasons.push("provider_card_only_settings_required");
+    if (method === "card") {
+      if (!review.methods.card || review.methods.upi || review.methods.emandate)
+        reasons.push("provider_card_only_settings_required");
+    } else {
+      const p = review.upiPath!;
+      if (
+        !p.enabled ||
+        review.methods.card ||
+        !review.methods.upi ||
+        review.methods.emandate
+      )
+        reasons.push("provider_upi_only_settings_required");
+      if (
+        p.sandbox.account !== review.account ||
+        new Date(p.sandbox.checkedAt) > at ||
+        (review.mode === "live" && p.sandbox.kind !== "native_sandbox") ||
+        BigInt(p.minimumMinor) > BigInt(p.maximumMinor)
+      )
+        reasons.push("matching_upi_support_and_sandbox_evidence_required");
+      if (
+        p.sandbox.kind === "native_sandbox" &&
+        (!p.sandbox.native || !d.verifySandbox)
+      )
+        reasons.push("native_upi_sandbox_evidence_read_configuration_required");
+    }
     if (review.settlement !== "INR")
       reasons.push("inr_settlement_review_required");
     if (!review.calendar.utcCalendarMonth)
@@ -104,7 +150,9 @@ export function createRazorpayGateway(d: {
   function supports(currency: "INR" | "USD") {
     return (
       !readiness().length &&
-      (currency === "INR" ? review.domestic : review.international).enabled
+      (method === "upi"
+        ? currency === "INR" && review.domestic.enabled
+        : (currency === "INR" ? review.domestic : review.international).enabled)
     );
   }
   const financialHash = (s: PaymentSnapshot) =>
@@ -124,15 +172,29 @@ export function createRazorpayGateway(d: {
     )
       throw new ApplicationError("SETUP_REQUIRED");
     const maximum = BigInt(
-      s.quote.currency === "INR"
-        ? review.domestic.maxChargeMinor
-        : review.international.maxChargeMinor,
+      method === "upi"
+        ? review.upiPath!.maximumMinor
+        : s.quote.currency === "INR"
+          ? review.domestic.maxChargeMinor
+          : review.international.maxChargeMinor,
     );
     if (
       !s.tax.totals ||
       s.quote.initial.subtotalMinor !== s.quote.renewal.subtotalMinor ||
       BigInt(s.tax.totals.totalMinor) > maximum ||
-      (s.quote.currency === "INR" && BigInt(s.tax.totals.totalMinor) > 1500000n)
+      (method === "card" &&
+        s.quote.currency === "INR" &&
+        BigInt(s.tax.totals.totalMinor) > 1500000n) ||
+      (method === "upi" &&
+        (!s.upi ||
+          s.upi.account !== account ||
+          s.upi.mode !== review.mode ||
+          BigInt(s.tax.totals.totalMinor) <
+            BigInt(review.upiPath!.minimumMinor))) ||
+      (method === "upi" &&
+        review.upiPath!.sandbox.kind === "native_sandbox" &&
+        BigInt(s.tax.totals!.totalMinor) >
+          BigInt(review.upiPath!.sandbox.native!.amountMinor))
     )
       throw new ApplicationError("SETUP_REQUIRED");
     return plans[0];
@@ -180,6 +242,8 @@ export function createRazorpayGateway(d: {
   }
   async function verifyPlan(s: PaymentSnapshot) {
     const mapping = planFor(s);
+    if (method === "upi" && review.upiPath?.sandbox.kind === "native_sandbox")
+      await d.verifySandbox?.();
     const plan = z
       .object({
         id: id("plan"),
@@ -198,10 +262,26 @@ export function createRazorpayGateway(d: {
     )
       throw new ApplicationError("SETUP_REQUIRED");
     const methods = z
-      .object({ card: z.record(z.string(), z.boolean()) })
+      .object({
+        card: z.record(z.string(), z.boolean()).optional(),
+        upi: z.boolean().optional(),
+      })
       .parse(await request("methods"));
-    if (!Object.values(methods.card).some(Boolean))
+    if (
+      method === "upi"
+        ? methods.upi !== true
+        : !Object.values(methods.card ?? {}).some(Boolean)
+    )
       throw new ApplicationError("SETUP_REQUIRED");
+    if (s.upi) {
+      const customer = z
+        .object({ id: id("cust"), entity: z.literal("customer") })
+        .parse(
+          await request(`customers/${id("cust").parse(s.upi.customerId)}`),
+        );
+      if (customer.id !== s.upi.customerId)
+        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+    }
     return mapping;
   }
   function checkout(sub: z.infer<typeof subscriptionSchema>) {
@@ -399,7 +479,8 @@ export function createRazorpayGateway(d: {
         invoice.subscription_id === sub.id &&
         p.status === "captured" &&
         p.captured &&
-        p.method === "card" &&
+        p.method === method &&
+        upiMethod(p, action.snapshot) &&
         sub.start_at != null &&
         p.amount_refunded === 0 &&
         p.amount === invoice.amount &&
@@ -438,7 +519,7 @@ export function createRazorpayGateway(d: {
                 invoiceId: invoice.id,
                 orderId: invoice.order_id!,
                 planId: sub.plan_id,
-                method: "card" as const,
+                method,
                 international: p.international,
                 subscriptionStart: new Date(sub.start_at! * 1000).toISOString(),
                 feeMinor: p.fee == null ? null : String(p.fee),
@@ -477,13 +558,16 @@ export function createRazorpayGateway(d: {
   const unavailable = async (): Promise<never> => {
     throw new ApplicationError("PROVIDER_UNAVAILABLE");
   };
-  return {
+  const gateway: PaymentGateway = {
+    method,
+    nativeRequest: request,
     reach: createRazorpayReachGateway({
       review,
       keyId: d.keyId,
       clock: d.clock,
       request,
       verifyPlan,
+      sourceRequest: d.sourceRequest,
     }),
     key: "razorpay",
     account,
@@ -503,6 +587,7 @@ export function createRazorpayGateway(d: {
     },
     poll,
     async updatePayment(action) {
+      if (method === "upi") throw new ApplicationError("SETUP_REQUIRED");
       if (readiness().length) throw new ApplicationError("SETUP_REQUIRED");
       const sub = await currentSubscription(action);
       if (!["active", "pending", "halted"].includes(sub.status))
@@ -515,7 +600,8 @@ export function createRazorpayGateway(d: {
       };
     },
     async cancel(action, timing, authorize) {
-      if (readiness().length) throw new ApplicationError("SETUP_REQUIRED");
+      if (method === "card" && readiness().length)
+        throw new ApplicationError("SETUP_REQUIRED");
       const sub = await currentSubscription(action);
       if (["cancelled", "completed", "expired"].includes(sub.status))
         return lifecycle(sub, action);
@@ -525,6 +611,18 @@ export function createRazorpayGateway(d: {
       )
         throw new ApplicationError("SETUP_REQUIRED");
       await authorize();
+      if (
+        method === "upi" &&
+        !isDeepStrictEqual(
+          effectiveLifecyclePolicy(
+            gateway.lifecyclePolicy,
+            review.mode,
+            d.clock.now(),
+          ),
+          action.lifecycle?.policy,
+        )
+      )
+        throw new ApplicationError("SETUP_REQUIRED");
       const cancelled = subscriptionSchema.parse(
         await request(`subscriptions/${sub.id}/cancel`, {
           cancel_at_cycle_end: timing === "cycle_end",
@@ -545,6 +643,73 @@ export function createRazorpayGateway(d: {
       return lifecycle(cancelled, action);
     },
     deferEvents: true,
+    async authenticateCheckout({
+      action,
+      paymentId,
+      subscriptionId,
+      signature,
+    }) {
+      const savedId = action.checkout?.subscriptionId;
+      if (
+        method !== "upi" ||
+        !savedId ||
+        subscriptionId !== savedId ||
+        !/^[a-f0-9]{64}$/.test(signature) ||
+        !timingSafeEqual(
+          Buffer.from(signature, "hex"),
+          createHmac("sha256", d.secret)
+            .update(`${id("pay").parse(paymentId)}|${savedId}`)
+            .digest(),
+        )
+      )
+        throw new ApplicationError("FORBIDDEN");
+      const sub = await currentSubscription(action);
+      const p = paymentSchema.parse(await request(`payments/${paymentId}`));
+      if (
+        !["authenticated", "active"].includes(sub.status) ||
+        p.id !== paymentId ||
+        !upiMethod(p, action.snapshot) ||
+        p.international ||
+        p.currency !== "INR" ||
+        sub.customer_id !== p.customer_id ||
+        !["authorized", "captured", "refunded"].includes(p.status)
+      )
+        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      return {
+        eventId: `checkout:${action.id}:${paymentId}`,
+        payloadHash: createHash("sha256")
+          .update(
+            JSON.stringify({
+              actionId: action.id,
+              paymentId,
+              subscriptionId: savedId,
+              signature,
+            }),
+          )
+          .digest("hex"),
+        observation: {
+          provider: "razorpay",
+          account,
+          operationKey: action.operationKey,
+          status: "unknown",
+          customerId: null,
+          checkoutId: savedId,
+          subscriptionId: savedId,
+          paymentId,
+          currency: null,
+          amountMinor: null,
+          paidAt: null,
+          periodStart: null,
+          periodEnd: null,
+          checkout: null,
+          native: {
+            event: "subscription.authenticated",
+            status: null,
+            occurredAt: null,
+          },
+        },
+      };
+    },
     async create(input) {
       let mapping;
       try {
@@ -678,4 +843,5 @@ export function createRazorpayGateway(d: {
     },
     reconcile: unavailable,
   };
+  return gateway;
 }

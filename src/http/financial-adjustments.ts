@@ -70,7 +70,7 @@ export function createFinancialAdjustmentHttp(options: {
         }
         throw new ApplicationError("INVALID_INPUT");
       }),
-    event: (r: Request) =>
+    event: (r: Request, path: "card" | "upi" = "card") =>
       respond(async () => {
         const reader = r.body?.getReader();
         if (!reader) throw new ApplicationError("INVALID_INPUT");
@@ -91,7 +91,10 @@ export function createFinancialAdjustmentHttp(options: {
           reader.releaseLock();
         }
         return dataResponse(
-          await app.event({ body: Buffer.concat(chunks), headers: r.headers }),
+          await app.event(
+            { body: Buffer.concat(chunks), headers: r.headers },
+            path,
+          ),
         );
       }),
   };

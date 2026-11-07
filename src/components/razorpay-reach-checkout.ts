@@ -7,13 +7,13 @@ import { loadNativeCheckout } from "./razorpay-recovery";
 /** Server-bound native identifiers only; callback payloads never establish payment. */
 export async function openReachCheckout(
   input: ReachCheckout,
-  reconciled: () => void,
+  reconciled: (proof?: unknown) => void,
   dismissed: () => void,
 ) {
   const checkout = reachCheckoutSchema.parse(input);
   await loadNativeCheckout(checkout.script);
   if (!window.Razorpay)
-    throw new Error("Secure card checkout is unavailable. Try again.");
+    throw new Error("Secure payment checkout is unavailable. Try again.");
   const options =
     checkout.kind === "mandate"
       ? {
@@ -35,6 +35,6 @@ export async function openReachCheckout(
       modal: { ondismiss: dismissed },
     }).open();
   } catch {
-    throw new Error("Unable to open secure card checkout. Try again.");
+    throw new Error("Unable to open secure payment checkout. Try again.");
   }
 }

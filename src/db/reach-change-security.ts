@@ -11,9 +11,49 @@ export const reachFunctions = [
   "payment_reach_stop_requested",
   "reach_effective_scope",
   "current_paid_contract",
+  "upi_review_current",
 ];
-export async function prepareReachSecurity(pool: Pool | PoolClient) {
+export async function prepareReachSecurity(
+  pool: Pool | PoolClient,
+  paused = false,
+) {
   await pool.query(`
+    CREATE OR REPLACE FUNCTION public.upi_review_current(change uuid,tenant uuid,at_time timestamptz)
+    RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE r record; c record; BEGIN
+      IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT (public.reach_worker_authorized(change,tenant) OR EXISTS(SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=current_setting('app.actor_id',true) AND m.role IN ('owner','admin')) OR EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.reconciliation)) THEN RETURN false; END IF;
+      SELECT * INTO c FROM public.reach_change WHERE id=change AND business_id=tenant;
+      SELECT * INTO r FROM public.reach_change_event e WHERE e.change_id=change AND e.business_id=tenant AND e.fact->>'kind'='method_review' ORDER BY e.position DESC LIMIT 1;
+      RETURN coalesce(r.fact->'body'->>'snapshotHash'=encode(sha256(convert_to(c.snapshot::text,'UTF8')),'hex') AND (r.fact->'body'->>'dbUntil')::timestamptz>clock_timestamp() AND EXISTS(
+        SELECT 1 FROM public.session s JOIN public."user" u ON u.id=s.user_id JOIN public.two_factor f ON f.user_id=u.id JOIN public.platform_operator o ON o.user_id=u.id
+        WHERE s.id=r.fact->'body'->>'sessionId' AND s.user_id=r.actor_id AND o.reconciliation AND s.expires_at>clock_timestamp() AND s.expires_at>at_time AND u.two_factor_enabled AND f.verified
+        AND s.mfa_factor_id=f.id AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND s.mfa_factor_version=r.fact->'body'->>'factorVersion'
+        AND s.mfa_verified_at=(r.fact->'body'->>'verifiedAt')::timestamptz AND s.mfa_verified_at<=at_time AND s.mfa_verified_at>at_time-interval '15 minutes'),false);
+    END $$;
+    REVOKE ALL ON FUNCTION public.upi_review_current(uuid,uuid,timestamptz) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.upi_review_current(uuid,uuid,timestamptz) TO app_runtime;
+    CREATE OR REPLACE FUNCTION public.protect_upi_reach_event() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE c record; s record; observed timestamptz; BEGIN
+      SELECT * INTO c FROM public.reach_change WHERE id=NEW.change_id AND business_id=NEW.business_id;
+      IF c.snapshot->'target'->'upi' IS NULL THEN RETURN NEW; END IF;
+      PERFORM pg_advisory_xact_lock(hashtextextended(NEW.business_id::text,0));
+      observed:=nullif(current_setting('app.upi_at',true),'')::timestamptz;
+      IF NEW.fact->>'kind'='method_review' THEN
+        SELECT se.* INTO s FROM public.session se JOIN public."user" u ON u.id=se.user_id JOIN public.two_factor f ON f.user_id=u.id JOIN public.platform_operator o ON o.user_id=u.id
+          WHERE se.id=current_setting('app.upi_session',true) AND se.user_id=current_setting('app.actor_id',true) AND se.user_id=NEW.actor_id AND o.reconciliation AND se.expires_at>clock_timestamp() AND se.expires_at>observed AND u.two_factor_enabled AND f.verified
+          AND se.mfa_factor_id=f.id AND se.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND se.mfa_verified_at<=observed AND se.mfa_verified_at>observed-interval '15 minutes';
+        IF NOT FOUND THEN RAISE EXCEPTION 'UPI validation authority required' USING ERRCODE='42501'; END IF;
+        NEW.fact:=jsonb_build_object('kind','method_review','body',jsonb_build_object('sessionId',s.id,'factorVersion',s.mfa_factor_version,'verifiedAt',s.mfa_verified_at,'dbUntil',least(s.expires_at,clock_timestamp()+interval '15 minutes'),'snapshotHash',encode(sha256(convert_to(c.snapshot::text,'UTF8')),'hex')));
+      ELSIF NEW.fact->>'kind' IN ('approved','attempt') THEN
+        IF observed IS NULL OR NOT public.upi_review_current(c.id,c.business_id,observed) THEN RAISE EXCEPTION 'UPI validation required' USING ERRCODE='42501'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.session se JOIN public."user" u ON u.id=se.user_id JOIN public.two_factor f ON f.user_id=u.id WHERE se.id=current_setting('app.upi_actor_session',true) AND se.user_id=current_setting('app.actor_id',true) AND se.user_id=NEW.actor_id AND se.expires_at>clock_timestamp() AND se.expires_at>observed AND u.two_factor_enabled AND f.verified AND se.mfa_factor_id=f.id AND se.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND se.mfa_verified_at<=observed AND se.mfa_verified_at>observed-interval '12 hours') THEN RAISE EXCEPTION 'UPI current actor required' USING ERRCODE='42501'; END IF;
+        IF NEW.fact->>'kind'='approved' AND NEW.fact->'body'->>'methodReviewId' IS DISTINCT FROM (SELECT e.id::text FROM public.reach_change_event e WHERE e.change_id=c.id AND e.fact->>'kind'='method_review' ORDER BY e.position DESC LIMIT 1) THEN RAISE EXCEPTION 'UPI exact review required' USING ERRCODE='42501'; END IF;
+      END IF;
+      RETURN NEW;
+    END $$;
+    REVOKE ALL ON FUNCTION public.protect_upi_reach_event() FROM PUBLIC,app_runtime;
+    DO $$ BEGIN IF to_regclass('public.reach_change_event') IS NOT NULL THEN
+      DROP TRIGGER IF EXISTS upi_reach_event_guard ON public.reach_change_event;
+      CREATE TRIGGER upi_reach_event_guard BEFORE INSERT ON public.reach_change_event FOR EACH ROW EXECUTE FUNCTION public.protect_upi_reach_event();
+    END IF; END $$;
     CREATE OR REPLACE FUNCTION public.reach_effective_scope(tenant uuid,period uuid,at_time timestamptz)
     RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
       IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT EXISTS(SELECT 1 FROM public.membership m WHERE m.business_id=tenant AND m.user_id=current_setting('app.actor_id',true)) AND NOT EXISTS(SELECT 1 FROM public.reach_change c WHERE c.business_id=tenant AND public.reach_worker_authorized(c.id,tenant)) THEN RETURN NULL; END IF;
@@ -101,5 +141,13 @@ export async function prepareReachSecurity(pool: Pool | PoolClient) {
     GRANT EXECUTE ON FUNCTION public.reach_configuration_matches(jsonb,jsonb) TO app_runtime;
     REVOKE ALL ON FUNCTION public.payment_reach_stop_requested(uuid,uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.payment_reach_stop_requested(uuid,uuid) TO app_runtime;
+    ${
+      paused
+        ? `DO $$ DECLARE f record; BEGIN
+      IF to_regclass('public.reach_change') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.reach_change,public.reach_change_event FROM app_runtime; END IF;
+      FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname=ANY(ARRAY[${reachFunctions.map((n) => `'${n}'`).join(",")}]) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP;
+    END $$;`
+        : ""
+    }
   `);
 }

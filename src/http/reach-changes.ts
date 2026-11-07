@@ -11,6 +11,10 @@ export function createReachChangeHttp(d: {
     body = createJsonBodyReader(d.origin, 8192),
     app = d.application;
   return {
+    validateMethod: (r: Request, id: string) =>
+      respond(async () =>
+        dataResponse(await app.validateMethod(r.headers, id, await body(r))),
+      ),
     withdraw: (r: Request, id: string) =>
       respond(async () =>
         dataResponse(await app.withdraw(r.headers, id, await body(r))),

@@ -302,6 +302,7 @@ export const financialReceiptSchema = z.strictObject({
 });
 export type FinancialReceipt = z.infer<typeof financialReceiptSchema>;
 export type FinancialGateway = {
+  accounts?: FinancialGateway[];
   account: string;
   mode: "test" | "live" | "unconfigured";
   policy: AdjustmentPolicy | null;

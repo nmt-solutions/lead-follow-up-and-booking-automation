@@ -13,6 +13,10 @@ export function createSubscriptionPaymentHttp(options: {
     respond = createResponder(options.reportFailure),
     body = createJsonBodyReader(options.origin, 16 * 1024);
   return {
+    confirmMandate: (r: Request, id: string) =>
+      respond(async () =>
+        dataResponse(await app.confirmMandate(r.headers, id, await body(r))),
+      ),
     cancel: (r: Request, id: string) =>
       respond(async () =>
         dataResponse(await app.cancel(r.headers, id, await body(r))),
@@ -41,7 +45,7 @@ export function createSubscriptionPaymentHttp(options: {
       respond(async () =>
         dataResponse(await app.operatorRefresh(r.headers, id, await body(r))),
       ),
-    event: (r: Request) =>
+    event: (r: Request, path: "card" | "upi" = "card") =>
       respond(async () => {
         const reader = r.body?.getReader();
         if (!reader) throw new ApplicationError("INVALID_INPUT");
@@ -67,7 +71,9 @@ export function createSubscriptionPaymentHttp(options: {
           raw.set(chunk, offset);
           offset += chunk.length;
         }
-        return dataResponse(await app.event({ body: raw, headers: r.headers }));
+        return dataResponse(
+          await app.event({ body: raw, headers: r.headers }, path),
+        );
       }),
   };
 }

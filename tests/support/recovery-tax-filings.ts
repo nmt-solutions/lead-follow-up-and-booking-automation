@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { createHarness } from "./harness";
-import type { financialExportFixture } from "./governance-financial";
 import { runtimeDatabase, type Database } from "../../src/db/runtime";
 import { createTaxPeriodApplication } from "../../src/application/tax-periods";
 import { createTaxPeriodRepository } from "../../src/db/tax-period-repository";
@@ -12,7 +11,7 @@ import type { FilingIntent } from "../../src/models/tax-filings";
 /** Genuine public source commands populate every private filing ledger before native backup. */
 export async function recoveryTaxFilingFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
-  f: Awaited<ReturnType<typeof financialExportFixture>>,
+  f: { native: { effectRequests: { method: string; path: string }[] } },
 ) {
   const operator = await h.signIn("tax-operator@example.com"),
     reviewer = await h.signIn("recovery-tax-reviewer@example.com"),
@@ -231,9 +230,22 @@ export async function recoveryTaxFilingFixture(
     });
     return { intent: confirmed, ...retained };
   }
-  const filing = await confirm(await work(originalReport, "submission", "901"));
+  const originalLiability = originalReport.snapshot.totals.taxMinor;
+  if (BigInt(originalLiability) <= 400n)
+    throw Error(
+      "Recovery fixture requires positive retained remittance components",
+    );
+  const filing = await confirm(
+    await work(originalReport, "submission", originalLiability),
+  );
   await confirm(await work(originalReport, "remittance", "400"));
-  await confirm(await work(originalReport, "remittance", "501"));
+  await confirm(
+    await work(
+      originalReport,
+      "remittance",
+      String(BigInt(originalLiability) - 400n),
+    ),
+  );
   const unknown = await work(originalReport, "remittance", "100");
   const attempted = await filings.act(operator, {
     requestKey: randomUUID(),
@@ -273,7 +285,12 @@ export async function recoveryTaxFilingFixture(
   });
   const currentReport = await report(1);
   await confirm(
-    await work(currentReport, "submission", "901", filing.intent.id),
+    await work(
+      currentReport,
+      "submission",
+      currentReport.snapshot.totals.taxMinor,
+      filing.intent.id,
+    ),
   );
   for (const allocation of (await filings.workspace(operator)).allocations)
     await filings.reconcileRemittance(reviewer, {

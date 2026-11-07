@@ -112,7 +112,10 @@ export function createRazorpayAdjustments(d: {
       native.customer_id !== charge.customerId ||
       native.invoice_id !== charge.charge.invoiceId ||
       native.order_id !== charge.charge.orderId ||
-      native.method !== "card" ||
+      native.method !== charge.charge.method ||
+      (p.snapshot.upi &&
+        (native.method !== "upi" ||
+          native.customer_id !== p.snapshot.upi.customerId)) ||
       !native.captured ||
       !["captured", "refunded"].includes(native.status) ||
       String(native.amount) !== p.snapshot.tax.totals?.totalMinor ||

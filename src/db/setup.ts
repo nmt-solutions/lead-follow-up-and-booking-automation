@@ -277,7 +277,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   );
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
-  await prepareReachSecurity(pool);
+  await prepareReachSecurity(pool, true);
   await pool.query(
     `DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY(ARRAY[${reachFunctions.map((n) => `'${n}'`).join(",")}]) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP; END $$;`,
   );
