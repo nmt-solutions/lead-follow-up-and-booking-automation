@@ -51,7 +51,7 @@ export async function prepareReachSecurity(pool: Pool | PoolClient) {
     CREATE OR REPLACE FUNCTION public.payment_reach_stop_requested(action uuid,tenant uuid)
     RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
       IF NOT public.payment_worker_authorized(action,tenant) THEN RETURN false; END IF;
-      RETURN EXISTS(SELECT 1 FROM public.reach_change c JOIN public.reach_change_event e ON e.change_id=c.id AND e.business_id=c.business_id WHERE c.action_id=action AND c.business_id=tenant AND c.snapshot->>'path'='replacement_mandate' AND e.fact->>'kind'='attempt' AND e.fact->>'stage'='stop_old');
+      RETURN EXISTS(SELECT 1 FROM public.reach_change c JOIN public.reach_change_event e ON e.change_id=c.id AND e.business_id=c.business_id WHERE c.action_id=action AND c.business_id=tenant AND c.snapshot->>'path'='replacement_mandate' AND e.fact->>'kind'='attempt' AND e.fact->>'stage'='stop_old' AND NOT EXISTS(SELECT 1 FROM public.reach_change_event w WHERE w.change_id=c.id AND w.business_id=tenant AND w.fact->>'kind'='withdrawn'));
     END $$;
     CREATE OR REPLACE FUNCTION public.payment_reach_contract(action uuid,tenant uuid)
     RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN

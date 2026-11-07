@@ -1165,6 +1165,88 @@ describe("Approved reach changes at the public application seam", () => {
       (await f.changes.workspace(f.owner, f.business.id)).changes,
     ).toHaveLength(2);
   });
+  it("allows ordinary cancellation after withdrawing a domestic change whose old-stop effect was proven unsent", async () => {
+    const f = await setup("IN");
+    const c = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: c.reviewHash,
+    });
+    const actor = await h.authenticate(f.owner);
+    f.conditions.beforeEffect = async () => {
+      await h.admin.query(
+        "update membership set role='salesperson' where business_id=$1 and user_id=$2",
+        [f.business.id, actor.userId],
+      );
+    };
+    await expect(
+      f.changes.execute(f.owner, f.business.id, {
+        changeId: c.id,
+        requestKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await h.admin.query(
+      "update membership set role='owner' where business_id=$1 and user_id=$2",
+      [f.business.id, actor.userId],
+    );
+    const withdrawn = await f.changes.withdraw(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+    });
+    expect(withdrawn.state).toBe("withdrawn");
+    expect(
+      f.native.requests.filter((r) => r.path.endsWith("/cancel")),
+    ).toHaveLength(0);
+    const payments = createSubscriptionPaymentApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createSubscriptionPaymentRepository(
+        runtimeDatabase(h.runtime),
+      ),
+      clock: h.clock,
+      gateway: configuredPayments({
+        ...f.native.configuration,
+        env: {
+          ...f.native.configuration.env,
+          SUBSCRIPTION_LIFECYCLE_POLICY: JSON.stringify({
+            id: "fixture-cancellation-policy",
+            version: 1,
+            mode: "test",
+            reviewedBy: "deployment-operator",
+            checkedAt: "2026-11-01T00:00:00.000Z",
+            effectiveFrom: "2026-11-01T00:00:00.000Z",
+            effectiveUntil: "2027-11-01T00:00:00.000Z",
+            evidence: ["fixture:explicit-cancellation"],
+            graceSeconds: 0,
+            graceAccess: "none",
+            cancellationTiming: "cycle_end",
+            cancellationAccess: "paid_through",
+            preserveRecords: true,
+          }),
+        },
+      }),
+    });
+    const cancelled = await payments.cancel(f.owner, f.business.id, {
+      actionId: f.action.id,
+      requestKey: randomUUID(),
+    });
+    expect(cancelled.lifecycle?.cancellation?.status).toBe("confirmed");
+    expect(
+      f.native.requests.filter((r) => r.path.endsWith("/cancel")),
+    ).toHaveLength(1);
+    await expect(
+      f.changes.execute(f.owner, f.business.id, {
+        changeId: c.id,
+        requestKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
   it("binds every request UUID to its original actor while another current operator can execute using its own action", async () => {
     const f = await setup(),
       request = {
