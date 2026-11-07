@@ -137,7 +137,7 @@ export function customerText(value: unknown): unknown {
       Object.entries(value)
         .filter(
           ([k]) =>
-            !/secret|password|token|credentials|callback|checkout|recoveryKey|operationKey|requestKey|sessionId|executionKey|dispatchKey|accountScope|storageKey/i.test(
+            !/secret|password|token|credentials|callback|checkout|recoveryKey|operationKey|requestKey|sessionId|executionKey|dispatchKey|accountScope|storageKey|^(?:actor|user|owner|responsible|device)[_]?id$|assurance|authContext/i.test(
               k,
             ),
         )
@@ -365,6 +365,7 @@ export function createDataGovernanceRepository(database: Database) {
       businessId: string,
       policy: DataPolicy,
       part: number,
+      exportId: string,
     ) {
       return access(actor, businessId, async (tx) => {
         const offset = (part - 1) * policy.maxRows;
@@ -400,6 +401,32 @@ export function createDataGovernanceRepository(database: Database) {
             ids: r.rows.map((r) => r.record.id ?? r.record.message_id),
             sha256: dataHash(JSON.stringify(records[table])),
             omitted: Number(total.rows[0].count) - r.rows.length,
+          });
+        }
+        const financial = await tx.execute<{
+          data: {
+            financial_case: { id: string }[];
+            financial_case_event: { id: string }[];
+            caseTotal: number;
+            effectTotal: number;
+          };
+        }>(
+          sql`select public.business_financial_export(${exportId}::uuid) data`,
+        );
+        for (const [source, total] of [
+          ["financial_case", financial.rows[0].data.caseTotal],
+          ["financial_case_event", financial.rows[0].data.effectTotal],
+        ] as const) {
+          records[source] = financial.rows[0].data[source].map(customerText);
+          hasMore ||= total > offset + records[source].length;
+          coverage.push({
+            source,
+            offset,
+            total,
+            included: records[source].length,
+            ids: financial.rows[0].data[source].map((r) => r.id),
+            sha256: dataHash(JSON.stringify(records[source])),
+            omitted: total - records[source].length,
           });
         }
         const observations = await tx.execute<{
@@ -575,10 +602,13 @@ export function createDataGovernanceRepository(database: Database) {
               "call_revision.call_id -> call_activity.id",
               "seller_document.period_id -> subscription_period.id",
               "seller_document.original_id -> seller_document.id",
+              "financial_case.periodId/invoiceId -> subscription_period.id/seller_document.id",
+              "financial_case_event.caseId/creditDocumentId -> financial_case.id/seller_document.id",
             ],
             omissions: [
               "Credentials, authorization links, private callback/worker/recovery capabilities, raw provider events and unrelated/global operator/auth records are excluded.",
               "Authentication, invitation and transactional notification ledgers are outside this customer export; their independent global or Business history and payload-retention authority remain unchanged.",
+              "Financial cases use the authorized customer projection. Canonical cash effects, original tax and separately approved credit/residual are included; operator evidence, native receipts, commands, private leases and raw actor/device/auth references are excluded. A residual is not classified as a fee, tax or FX.",
               "Source rights and row/byte limits apply. Missing or unapproved source rights omit affected evidence, including after cancellation.",
               "URLs have no query/fragment; free text is redacted for authorization links. Canonical JSON preserves formula-like text without spreadsheet execution.",
               "Private file bytes use separate current authorized downloads. Issued attachments below are verified against immutable hashes; missing, unsafe or bounded-out attachments have explicit per-document omissions.",

@@ -323,7 +323,13 @@ export function createDataGovernanceApplication<Credentials>(d: {
       if (request.state === "ready") return { id: request.id };
       if (request.state !== "pending")
         throw new ApplicationError("FILE_UNAVAILABLE");
-      const bundle = await d.repository.collect(c.actor, c.id, p, v.part);
+      const bundle = await d.repository.collect(
+        c.actor,
+        c.id,
+        p,
+        v.part,
+        request.id,
+      );
       const attachments: {
         documentId: string;
         sha256: string;

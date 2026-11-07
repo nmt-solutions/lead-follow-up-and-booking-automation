@@ -1,5 +1,33 @@
 // Fixed SQL only: identifiers are application-owned, never supplied by a request.
 export const dataGovernanceSql = `
+CREATE OR REPLACE FUNCTION public.business_financial_export(target uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE r public.business_data_export; cases jsonb; page_size integer; page_offset bigint; stamp timestamptz:=statement_timestamp();
+BEGIN
+ SELECT * INTO r FROM public.business_data_export WHERE id=target;
+ IF NOT FOUND OR r.business_id::text IS DISTINCT FROM current_setting('app.business_id',true)
+ OR r.actor_id IS DISTINCT FROM current_setting('app.actor_id',true)
+ OR NOT coalesce(public.current_business_role() IN ('owner','admin'),false)
+ OR r.state<>'pending' OR r.expires_at<=stamp
+ OR NOT coalesce((r.policy->>'preserveFinancial')::boolean,false)
+ OR NOT (r.policy->'businessIds' ? r.business_id::text)
+ OR (r.policy->>'effectiveFrom')::timestamptz>stamp OR (r.policy->>'effectiveUntil')::timestamptz<=stamp
+ THEN RAISE EXCEPTION 'export unavailable' USING ERRCODE='42501'; END IF;
+ page_size:=(r.policy->>'maxRows')::integer; page_offset:=(r.part::bigint-1)*page_size;
+ IF page_size NOT BETWEEN 1 AND 1000 OR page_offset<0 THEN RAISE EXCEPTION 'export unavailable' USING ERRCODE='42501'; END IF;
+ cases:=public.financial_public(r.business_id);
+ RETURN jsonb_build_object(
+  'caseTotal',jsonb_array_length(cases),
+  'financial_case',coalesce((SELECT jsonb_agg(x.value ORDER BY x.ordinality) FROM (SELECT * FROM jsonb_array_elements(cases) WITH ORDINALITY LIMIT page_size OFFSET page_offset) x),'[]'::jsonb),
+  'effectTotal',(SELECT count(*) FROM public.financial_case_event e JOIN public.financial_case c ON c.id=e.case_id AND c.business_id=e.business_id WHERE e.business_id=r.business_id AND e.kind='financial_effect'),
+  'financial_case_event',coalesce((SELECT jsonb_agg(x.record ORDER BY x.position) FROM (
+    SELECT e.position,jsonb_build_object('id',e.id,'caseId',c.id,'at',e.at,
+     'effect',jsonb_build_object('source',e.detail->'source','nativeId',e.detail->'nativeId','paymentId',e.detail->'paymentId','invoiceId',e.detail->'invoiceId','periodId',e.detail->'periodId','currency',e.detail->'currency','actualMinor',e.detail->'actualMinor','originalTax',e.detail->'originalTax','allocation',e.detail->'allocation','creditApplicable',e.detail->'creditApplicable','bankSettlementConfirmed',e.detail->'bankSettlementConfirmed'),
+     'approvedCredit',(SELECT jsonb_build_object('reviewId',a.id,'allocation',a.detail->'review'->'allocation','actualMinor',a.detail->'review'->'actualMinor','uncreditedDifferenceMinor',a.detail->'review'->'uncreditedDifferenceMinor','at',a.at) FROM public.financial_case_event a WHERE a.business_id=r.business_id AND a.case_id=c.id AND a.kind='credit_review' ORDER BY a.position DESC LIMIT 1),
+     'creditDocumentId',(SELECT a.detail->>'documentId' FROM public.financial_case_event a WHERE a.business_id=r.business_id AND a.case_id=c.id AND a.kind='credit' LIMIT 1)) record
+    FROM public.financial_case_event e JOIN public.financial_case c ON c.id=e.case_id AND c.business_id=e.business_id WHERE e.business_id=r.business_id AND e.kind='financial_effect' ORDER BY e.position LIMIT page_size OFFSET page_offset
+   ) x),'[]'::jsonb));
+END $$;
 CREATE OR REPLACE FUNCTION public.business_data_stopped(b uuid) RETURNS boolean
 LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
  SELECT coalesce((SELECT r.kind='offboard' FROM public.business_data_request r WHERE r.business_id=b ORDER BY r.at DESC,r.id DESC LIMIT 1),false)

@@ -1489,6 +1489,141 @@ describe("Business data export and offboarding at the public application seam", 
       "campaign-research-fixture",
     );
   });
+  it("exports canonical native refund and original-tax credit facts with residual, pagination and Business isolation", async () => {
+    const f = await financialExportFixture(
+      h,
+      storage,
+      policy.storageScope,
+      true,
+    );
+    documents = f.documents;
+    const other = await h.signIn("foreign-financial-export@example.com");
+    const b = await h.application.createBusiness(other, {
+      name: "Foreign financial Business",
+      offering: "Private",
+      homeMarket: "",
+      website: "",
+    });
+    policy.businessIds = [f.business.id, b.id];
+    policy.maxRows = 1;
+    const download = async (part: number) => {
+      const exported = await app().export(f.owner, f.business.id, {
+        requestKey: randomUUID(),
+        part,
+      });
+      const grant = await app().access(f.owner, f.business.id, exported.id);
+      return JSON.parse(
+        new TextDecoder().decode(
+          (
+            await app().download(
+              f.owner,
+              f.business.id,
+              exported.id,
+              grant.token,
+            )
+          ).bytes,
+        ),
+      );
+    };
+    const first = await download(1);
+    expect(first.records.financial_case).toMatchObject([
+      {
+        id: f.refund!.id,
+        paymentId: "pay_export",
+        state: "processed",
+        creditDocumentId: f.credit.id,
+      },
+    ]);
+    expect(first.records.financial_case_event).toMatchObject([
+      {
+        caseId: f.refund!.id,
+        effect: {
+          source: "refund",
+          nativeId: "rfnd_fixture1",
+          paymentId: "pay_export",
+          invoiceId: f.invoice.id,
+          periodId: f.period.id,
+          actualMinor: "1100",
+          currency: "INR",
+          bankSettlementConfirmed: false,
+          originalTax: {
+            id: f.invoice.snapshot.financial.tax.id,
+            totals: f.invoice.snapshot.totals,
+          },
+          allocation: {
+            totals: { netMinor: "1000", taxMinor: "100", totalMinor: "1100" },
+          },
+        },
+        approvedCredit: {
+          allocation: {
+            totals: { netMinor: "999", taxMinor: "100", totalMinor: "1099" },
+          },
+          actualMinor: "1100",
+          uncreditedDifferenceMinor: "1",
+        },
+        creditDocumentId: f.credit.id,
+      },
+    ]);
+    expect(
+      first.records.financial_case_event[0].effect.originalTax.lines.map(
+        (line: {
+          input: { id: string };
+          netMinor: string;
+          taxMinor: string;
+          totalMinor: string;
+        }) => ({
+          lineId: line.input.id,
+          netMinor: line.netMinor,
+          taxMinor: line.taxMinor,
+          totalMinor: line.totalMinor,
+        }),
+      ),
+    ).toEqual(
+      f.invoice.snapshot.lines.map((line) => ({
+        lineId: line.input.id,
+        netMinor: line.netMinor,
+        taxMinor: line.taxMinor,
+        totalMinor: line.totalMinor,
+      })),
+    );
+    const text = JSON.stringify(first);
+    for (const forbidden of [
+      "private operator-only",
+      "actorId",
+      "recovery_key",
+      '"intent":',
+      "accountScope",
+      "requestKey",
+      (await h.authenticate(f.op)).userId,
+    ])
+      expect(text).not.toContain(forbidden);
+    const foreign = await app().export(other, b.id, {
+      requestKey: randomUUID(),
+    });
+    const grant = await app().access(other, b.id, foreign.id);
+    const foreignBundle = JSON.parse(
+      new TextDecoder().decode(
+        (await app().download(other, b.id, foreign.id, grant.token)).bytes,
+      ),
+    );
+    expect(foreignBundle.records.financial_case).toEqual([]);
+    expect(foreignBundle.records.financial_case_event).toEqual([]);
+    await expect(
+      app().export(other, f.business.id, { requestKey: randomUUID() }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const second = await download(2);
+    expect(second.records.financial_case).toEqual([]);
+    expect(second.records.financial_case_event).toEqual([]);
+    expect(
+      second.manifest.sources.find(
+        (s: { source: string }) => s.source === "financial_case_event",
+      ),
+    ).toMatchObject({ total: 1, included: 0, offset: 1 });
+    expect(f.native.refundPosts).toHaveLength(1);
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).periods[0].charge,
+    ).toEqual(f.period.charge);
+  });
   it("exports byte-exact private invoices and credits after confirmed cancellation and preserves financial history through cleanup and reapplication", async () => {
     const f = await financialExportFixture(h, storage, policy.storageScope);
     documents = f.documents;
@@ -1749,6 +1884,7 @@ describe("Business data export and offboarding at the public application seam", 
       "business_data_cleanup_current(uuid,uuid,jsonb)",
       "business_export_cleanup_current(uuid,uuid,text)",
       "business_file_cleanup_current(uuid,uuid,text)",
+      "business_financial_export(uuid)",
     ]) {
       await h.admin.query(
         `revoke execute on function public.${signature} from app_runtime`,
@@ -1780,20 +1916,24 @@ describe("Business data export and offboarding at the public application seam", 
     }
     await verifyRuntimeRole(h.runtime);
   });
-  it("rejects accidental default PUBLIC execution on a recreated cleanup helper and restores managed security", async () => {
-    await h.admin.query(
-      "drop function public.business_export_cleanup_current(uuid,uuid,text)",
-    );
-    await h.admin.query(dataGovernanceSql);
-    try {
-      await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
-        "Business data security is incomplete",
-      );
-    } finally {
-      await h.reapplySchema();
-    }
-    await verifyRuntimeRole(h.runtime);
-  });
+  it.each([
+    "business_export_cleanup_current(uuid,uuid,text)",
+    "business_financial_export(uuid)",
+  ])(
+    "rejects accidental default PUBLIC execution on recreated %s and restores managed security",
+    async (signature) => {
+      await h.admin.query(`drop function public.${signature}`);
+      await h.admin.query(dataGovernanceSql);
+      try {
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
+          "Business data security is incomplete",
+        );
+      } finally {
+        await h.reapplySchema();
+      }
+      await verifyRuntimeRole(h.runtime);
+    },
+  );
   it("requires every runtime ledger privilege, denies unscoped cleanup authority and preserves approved scope through replaceable-UNIQUE reapplication", async () => {
     const owner = await h.signIn("data-security@example.com"),
       b = await h.application.createBusiness(owner, {

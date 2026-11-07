@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { createHarness } from "./harness";
 import type { PrivateStorage } from "../../src/models/files";
 import { subscriptionFixture } from "./subscription";
-import { razorpayFixture } from "./razorpay";
+import { financialNativeFixture } from "./financial-native";
+import { createFinancialAdjustmentApplication } from "../../src/application/financial-adjustments";
+import { createFinancialAdjustmentRepository } from "../../src/db/financial-adjustment-repository";
+import { configuredFinancialAdjustments } from "../../src/financial-adjustments/configuration";
 import { configuredPayments } from "../../src/subscription-payments/configuration";
 import { createSubscriptionPaymentApplication } from "../../src/application/subscription-payments";
 import { createSubscriptionPaymentRepository } from "../../src/db/subscription-payment-repository";
@@ -13,9 +16,10 @@ export async function financialExportFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
   storage: PrivateStorage,
   scope: string,
+  nativeCredit = false,
 ) {
   const f = await subscriptionFixture(h),
-    native = razorpayFixture(h.clock);
+    native = financialNativeFixture(h.clock);
   const gateway = configuredPayments({
     ...native.configuration,
     env: {
@@ -54,7 +58,7 @@ export async function financialExportFixture(
   const period = (await payments.workspace(f.owner, f.business.id)).periods[0];
   const op = await h.signIn("export-documents@example.com");
   await h.admin.query(
-    "insert into platform_operator(user_id,documents) values($1,true)",
+    "insert into platform_operator(user_id,documents,refunds) values($1,true,true)",
     [(await h.authenticate(op)).userId],
   );
   const documents = createSellerDocumentApplication({
@@ -139,19 +143,65 @@ export async function financialExportFixture(
     periodId: period.id,
     requestKey: randomUUID(),
   });
-  const credit = await documents.adjust(op, f.business.id, {
-    invoiceId: invoice.id,
-    periodId: period.id,
-    paymentId: period.paymentId,
-    requestKey: randomUUID(),
-    adjustmentId: randomUUID(),
-    source: {
-      kind: "refund",
-      reference: "fixture reviewed external correction",
-    },
-    reason: "Fixture adjustment only; no native refund executed",
-    evidence: ["fixture confirmed adjustment evidence"],
-    lines: [{ lineId: "subscription", netMinor: "1000" }],
+  const adjustments = createFinancialAdjustmentApplication({
+    authenticate: h.authenticate,
+    authenticatePlatform: h.access.authenticatePlatform,
+    repository: createFinancialAdjustmentRepository(runtimeDatabase(h.runtime)),
+    clock: h.clock,
+    gateway: configuredFinancialAdjustments(native.configuration),
+    documents,
   });
-  return { ...f, native, payments, action, period, documents, invoice, credit };
+  let refund = null;
+  if (nativeCredit) {
+    refund = await adjustments.review(op, f.business.id, {
+      kind: "refund",
+      invoiceId: invoice.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "1000" }],
+      reason: "private operator-only refund reason",
+      evidence: ["private operator-only refund evidence"],
+    });
+    await adjustments.execute(op, f.business.id, { caseId: refund.id });
+    native.refunds[0].status = "processed";
+    await adjustments.refresh(op, f.business.id, { caseId: refund.id });
+    await adjustments.reviewCredit(op, f.business.id, {
+      caseId: refund.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "999" }],
+      reason: "private operator-only credit reason",
+      evidence: ["private operator-only credit evidence"],
+    });
+    await adjustments.credit(op, f.business.id, { caseId: refund.id });
+  }
+  const credit = nativeCredit
+    ? (await documents.workspace(f.owner, f.business.id)).documents.find(
+        (d) => d.kind === "credit_note",
+      )!
+    : await documents.adjust(op, f.business.id, {
+        invoiceId: invoice.id,
+        periodId: period.id,
+        paymentId: period.paymentId,
+        requestKey: randomUUID(),
+        adjustmentId: randomUUID(),
+        source: {
+          kind: "refund",
+          reference: "fixture reviewed external correction",
+        },
+        reason: "Fixture adjustment only; no native refund executed",
+        evidence: ["fixture confirmed adjustment evidence"],
+        lines: [{ lineId: "subscription", netMinor: "1000" }],
+      });
+  return {
+    ...f,
+    native,
+    payments,
+    action,
+    period,
+    documents,
+    invoice,
+    credit,
+    adjustments,
+    refund,
+    op,
+  };
 }
