@@ -396,17 +396,19 @@ async function composeServices() {
   });
   const paymentGateway = configuredPayments();
   const reachChanges = createReachChangeApplication({
-    authenticate,
-    authenticatePlatform,
-    repository: createReachChangeRepository(runtimeDatabase(pool)),
+    authenticate: access.authenticateForWork,
+    authenticatePlatform: access.authenticatePlatformForWork,
+    repository: createReachChangeRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
     gateway: paymentGateway,
     policy: configuredReachPolicy(),
     clock: { now: () => new Date() },
   });
   const subscriptionPayments = createSubscriptionPaymentApplication({
-    authenticate,
+    authenticate: access.authenticateForWork,
     authenticateForWork: access.authenticateForWork,
-    authenticatePlatform,
+    authenticatePlatform: access.authenticatePlatformForWork,
     repository: createSubscriptionPaymentRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
     gateway: paymentGateway,

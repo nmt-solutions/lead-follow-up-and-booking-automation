@@ -47,6 +47,7 @@ import type {
   CheckoutReference,
   PaymentObservation,
   PaymentAction,
+  MandateProof,
 } from "../models/subscription-payments";
 import type { MailboxAuthorizationStatus } from "../models/mailbox-authorization";
 import type { MailManual } from "../models/mail-native";
@@ -870,6 +871,7 @@ export const subscriptionPaymentHistory = pgTable(
         state: PaymentAction["state"];
         reason: string | null;
         observation: PaymentObservation | null;
+        checkoutProof?: MandateProof;
       }>()
       .notNull(),
     at: timestamp("at", { withTimezone: true }).notNull(),

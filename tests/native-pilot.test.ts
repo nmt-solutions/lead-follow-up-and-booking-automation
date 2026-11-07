@@ -28,6 +28,7 @@ describe("Native paid pilots through public application commands", () => {
       subscriptionId: null,
       standard: { order_id: "order_pilot", amount: 1100, currency: "INR" },
     });
+    expect(started.snapshot.collection).toBeUndefined();
     expect(s.mutations).toHaveLength(1);
     expect(s.mutations[0]).toMatchObject({
       path: "/v1/orders",
@@ -94,6 +95,7 @@ describe("Native paid pilots through public application commands", () => {
       },
     );
     expect(renewal.snapshot).toMatchObject({
+      collection: { method: "card", planId: "plan_fixtureINR", totalCount: 12 },
       basis: { kind: "renewal", discovery: { quantity: 100 } },
       quote: {
         initial: { subtotalMinor: 1000 },

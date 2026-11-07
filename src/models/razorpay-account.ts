@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { upiPathSchema } from "./upi-autopay";
 
 const text = z.string().trim().min(1).max(2000);
 const evidence = z.array(text).min(1).max(20);
@@ -10,6 +11,7 @@ const capability = z.strictObject({
 });
 /** Deployment-operator evidence, never a Business's self-authorizing declaration. No secrets. */
 export const razorpayAccountReviewSchema = z.strictObject({
+  upiPath: upiPathSchema.optional(),
   id: z.string().min(1).max(100),
   version: z.number().int().positive(),
   account: z.string().regex(/^acc_[A-Za-z0-9]+$/),

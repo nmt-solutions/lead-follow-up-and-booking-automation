@@ -1,5 +1,11 @@
 import { publicPaymentSnapshot } from "../subscription-payments/projection";
 import { z } from "zod";
+import { publicFinancialValue } from "../models/public-financial";
+import { paymentSnapshotSchema } from "../models/subscription-payments";
+import {
+  paymentAccount,
+  paymentAccounts,
+} from "../subscription-payments/accounts";
 import type { Actor, Clock } from "../models/business";
 import { businessIdSchema } from "../models/business";
 import { ApplicationError } from "../models/application-error";
@@ -28,13 +34,28 @@ function parse<T>(schema: z.ZodType<T>, input: unknown) {
   return result.data;
 }
 function publicFinancial(snapshot: PaymentSnapshot): PaymentSnapshot {
-  return publicPaymentSnapshot(snapshot);
+  return publicPaymentSnapshot(
+    paymentSnapshotSchema.parse(publicFinancialValue(snapshot)),
+  );
 }
 /** Public agreement copies omit deployment reviews; persisted work and its hash stay full. */
 function publicChange(change: ReachChange): ReachChange {
   const s = change.snapshot;
   return {
     ...change,
+    events: change.events.map((e) =>
+      e.fact.kind === "method_review"
+        ? { ...e, fact: { kind: "method_review" as const } }
+        : e.fact.incurred
+          ? {
+              ...e,
+              fact: {
+                ...e.fact,
+                incurred: { ...e.fact.incurred, customerId: null },
+              },
+            }
+          : e,
+    ),
     snapshot: {
       ...s,
       currentFinancial: publicFinancial(s.currentFinancial),
@@ -68,12 +89,13 @@ export function createReachChangeApplication<C>(d: {
   clock: Clock;
 }) {
   async function observe(work: ReachWork) {
-    if (!d.gateway.reach) throw new ApplicationError("SETUP_REQUIRED");
     const change = await d.repository.readWork(work);
+    const gateway = paymentAccount(d.gateway, change.snapshot.target.provider);
+    if (!gateway.reach) throw new ApplicationError("SETUP_REQUIRED");
     try {
       await d.repository.observe(
         work,
-        parse(reachFactSchema, await d.gateway.reach.inspect(change)),
+        parse(reachFactSchema, await gateway.reach.inspect(change)),
         d.clock.now(),
       );
     } catch (error: unknown) {
@@ -90,7 +112,7 @@ export function createReachChangeApplication<C>(d: {
     }
     await d.repository.linkReplacement(work, d.clock.now());
     await d.repository.checked(work, d.clock.now());
-    return d.repository.apply(work, d.clock.now(), d.gateway, d.policy);
+    return d.repository.apply(work, d.clock.now(), gateway, d.policy);
   }
   function stage(change: ReachChange): ReachStage | null {
     if (change.events.some((e) => e.fact.kind === "applied")) return null;
@@ -129,16 +151,20 @@ export function createReachChangeApplication<C>(d: {
     let change = await observe(work);
     if (execute)
       for (let count = 0; count < 3; count++) {
+        const gateway = paymentAccount(
+          d.gateway,
+          change.snapshot.target.provider,
+        );
         const next = stage(change);
         if (!next) break;
-        if (!d.gateway.reach) throw new ApplicationError("SETUP_REQUIRED");
+        if (!gateway.reach) throw new ApplicationError("SETUP_REQUIRED");
         const began = await d.repository.begin(
           await authenticate(credentials),
           id,
           input.changeId,
           next,
           d.clock.now(),
-          d.gateway,
+          gateway,
           d.policy,
           operator,
         );
@@ -149,13 +175,13 @@ export function createReachChangeApplication<C>(d: {
         try {
           const fact = parse(
             reachFactSchema,
-            await d.gateway.reach.effect(change, next, async () => {
+            await gateway.reach.effect(change, next, async () => {
               await d.repository.finalGate(
                 await authenticate(credentials),
                 id,
                 input.changeId,
                 d.clock.now(),
-                d.gateway,
+                gateway,
                 d.policy,
                 operator,
               );
@@ -185,6 +211,29 @@ export function createReachChangeApplication<C>(d: {
     );
   }
   return {
+    async validateMethod(credentials: C, businessId: unknown, value: unknown) {
+      const id = parse(businessIdSchema, businessId),
+        input = parse(reachCommandSchema, value);
+      const actor = await d.authenticatePlatform(credentials);
+      const change = await d.repository.read(actor, id, input.changeId, true);
+      const gateway = paymentAccount(
+        d.gateway,
+        change.snapshot.target.provider,
+      );
+      if (!change.snapshot.target.upi || !gateway.reach)
+        throw new ApplicationError("SETUP_REQUIRED");
+      await gateway.reach.inspect(change);
+      return publicChange(
+        await d.repository.validateMethod(
+          await d.authenticatePlatform(credentials),
+          id,
+          input,
+          d.clock.now(),
+          gateway,
+          d.policy,
+        ),
+      );
+    },
     async withdraw(credentials: C, businessId: unknown, value: unknown) {
       return publicChange(
         await d.repository.withdraw(
@@ -218,8 +267,15 @@ export function createReachChangeApplication<C>(d: {
           : []),
         ...(d.gateway.readiness?.() ?? []),
       ];
+      const upiAvailable = paymentAccounts(d.gateway).some(
+        (g) => g.method === "upi" && !g.readiness?.().length,
+      );
       return {
         ...state,
+        upi: {
+          available: upiAvailable,
+          reason: upiAvailable ? null : "reviewed_upi_path_required",
+        },
         changes: state.changes.map(publicChange),
         configuration: { ready: !reasons.length, reasons },
       };
@@ -240,19 +296,23 @@ export function createReachChangeApplication<C>(d: {
         id,
         input.changeId,
       );
+      const gateway = paymentAccount(
+        d.gateway,
+        change.snapshot.target.provider,
+      );
       await d.repository.finalGate(
         await d.authenticate(credentials),
         id,
         input.changeId,
         d.clock.now(),
-        d.gateway,
+        gateway,
         d.policy,
       );
-      if (!d.gateway.reach?.checkout)
+      if (!gateway.reach?.checkout)
         throw new ApplicationError("SETUP_REQUIRED");
       return parse(
         reachCheckoutSchema,
-        d.gateway.reach.checkout(change, input.purpose),
+        gateway.reach.checkout(change, input.purpose),
       );
     },
     async queue(credentials: C) {
@@ -262,13 +322,23 @@ export function createReachChangeApplication<C>(d: {
       return { ...state, changes: state.changes.map(publicChange) };
     },
     async approve(credentials: C, businessId: unknown, value: unknown) {
+      const input = parse(reachApprovalSchema, value);
+      const change = await d.repository.read(
+        await d.authenticate(credentials),
+        parse(businessIdSchema, businessId),
+        input.changeId,
+      );
+      const gateway = paymentAccount(
+        d.gateway,
+        change.snapshot.target.provider,
+      );
       return publicChange(
         await d.repository.approve(
           await d.authenticate(credentials),
           parse(businessIdSchema, businessId),
           parse(reachApprovalSchema, value),
           d.clock.now(),
-          d.gateway,
+          gateway,
           d.policy,
         ),
       );
@@ -282,23 +352,41 @@ export function createReachChangeApplication<C>(d: {
     operatorRefresh: (credentials: C, businessId: unknown, value: unknown) =>
       refresh(credentials, businessId, value, true),
     async recover() {
-      const work = await d.repository.pending(d.gateway);
+      const work = (
+        await Promise.all(
+          paymentAccounts(d.gateway).map((g) => d.repository.pending(g)),
+        )
+      ).flat();
       for (const item of work) await observe(item);
       return { reconciled: work.length };
     },
     async preview(credentials: C, businessId: unknown, value: unknown) {
+      const input = parse(previewReachSchema, value);
+      if (
+        input.paymentMethod === "upi" &&
+        !paymentAccounts(d.gateway).some(
+          (g) => g.method === "upi" && !g.readiness?.().length,
+        )
+      )
+        throw new ApplicationError("SETUP_REQUIRED");
       const id = parse(businessIdSchema, businessId),
         change = await d.repository.preview(
           await d.authenticate(credentials),
           id,
           parse(previewReachSchema, value),
           d.clock.now(),
-          d.gateway,
+          input.paymentMethod === "upi"
+            ? paymentAccounts(d.gateway).find((g) => g.method === "upi")!
+            : d.gateway,
           d.policy,
         );
       if (change.events.some((e) => e.fact.kind === "approved"))
         return publicChange(change);
-      if (!d.gateway.reach) throw new ApplicationError("SETUP_REQUIRED");
+      const gateway = paymentAccount(
+        d.gateway,
+        change.snapshot.target.provider,
+      );
+      if (!gateway.reach) throw new ApplicationError("SETUP_REQUIRED");
       const work = await d.repository.previewWork(
         await d.authenticate(credentials),
         id,
@@ -306,7 +394,7 @@ export function createReachChangeApplication<C>(d: {
       );
       await d.repository.observe(
         work,
-        parse(reachFactSchema, await d.gateway.reach.inspect(change)),
+        parse(reachFactSchema, await gateway.reach.inspect(change)),
         d.clock.now(),
       );
       await d.repository.finalGate(
@@ -314,7 +402,7 @@ export function createReachChangeApplication<C>(d: {
         id,
         change.id,
         d.clock.now(),
-        d.gateway,
+        gateway,
         d.policy,
       );
       return publicChange(

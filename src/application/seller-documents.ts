@@ -8,7 +8,10 @@ import {
   issueDocumentSchema,
   recoverDocumentSchema,
   adjustDocumentSchema,
+  sellerDocumentSchema,
+  documentWorkspaceSchema,
 } from "../models/seller-documents";
+import { publicFinancialValue } from "../models/public-financial";
 import { renderSellerDocument } from "./seller-document-artifact";
 import { createHash, randomBytes } from "node:crypto";
 import type { StorageObject } from "../models/files";
@@ -189,7 +192,7 @@ export function createSellerDocumentApplication<Credentials>(dependencies: {
       operator,
     );
   }
-  return {
+  const application = {
     queue: async (credentials: Credentials) =>
       repository.queue(await dependencies.authenticatePlatform(credentials)),
     async workspace(
@@ -399,6 +402,25 @@ export function createSellerDocumentApplication<Credentials>(dependencies: {
         await dependencies.authenticatePlatform(credentials),
         parse(decideIssuerSchema, input),
         clock.now(),
+      ),
+  };
+  return {
+    ...application,
+    workspace: async (...args: Parameters<typeof application.workspace>) =>
+      documentWorkspaceSchema.parse(
+        publicFinancialValue(await application.workspace(...args)),
+      ),
+    issue: async (...args: Parameters<typeof application.issue>) =>
+      sellerDocumentSchema.parse(
+        publicFinancialValue(await application.issue(...args)),
+      ),
+    adjust: async (...args: Parameters<typeof application.adjust>) =>
+      sellerDocumentSchema.parse(
+        publicFinancialValue(await application.adjust(...args)),
+      ),
+    recover: async (...args: Parameters<typeof application.recover>) =>
+      sellerDocumentSchema.parse(
+        publicFinancialValue(await application.recover(...args)),
       ),
   };
 }

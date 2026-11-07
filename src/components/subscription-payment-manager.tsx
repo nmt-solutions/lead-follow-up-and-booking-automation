@@ -73,14 +73,7 @@ function paymentTime(value: string | null | undefined) {
 function PaymentDetail({ action: a }: { action: PaymentAction }) {
   const q = a.snapshot.quote,
     t = a.snapshot.tax;
-  const nativePlan =
-    a.nativeTerms ??
-    a.snapshot.provider.review?.plans.find(
-      (p) =>
-        p.offerId === q.selection.offerId &&
-        p.reservedCapacityId === q.selection.reservedCapacityId &&
-        p.currency === q.currency,
-    );
+  const collection = a.snapshot.collection;
   return (
     <div className="space-y-4 wrap-anywhere">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -150,9 +143,16 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
         <p className="text-sm text-muted-foreground">
           Renewal terms: {q.renewal.terms} Monthly renewal before tax:{" "}
           {formatTaxMoney(String(q.renewal.subtotalMinor), q.currency)}.{" "}
-          {nativePlan && a.snapshot.term.kind === "calendar_month"
-            ? "Hosted checkout authorizes recurring card collection for the reviewed native plan. Each captured cycle requires independent payment and invoice reconciliation before access is extended."
+          {collection
+            ? `Hosted checkout authorizes recurring ${collection.method === "upi" ? "UPI AutoPay" : "card"} collection for this plan. Each captured cycle requires independent payment and invoice reconciliation before access is extended.`
             : "This purchase authorizes the initial period."}
+        </p>
+      )}
+      {collection && !a.snapshot.adjustment && (
+        <p className="text-sm">
+          Hosted mandate: up to {collection.totalCount} monthly collections on
+          plan {collection.planId}. Review the hosted mandate before
+          authorizing.
         </p>
       )}
       {a.snapshot.term.kind === "days" && (
@@ -162,14 +162,6 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
           authorize that mandate.
         </p>
       )}
-      {nativePlan &&
-        a.snapshot.term.kind === "calendar_month" &&
-        !a.snapshot.adjustment && (
-          <p className="text-sm">
-            Hosted mandate: up to {nativePlan.totalCount} monthly collections on
-            the reviewed plan. Review the hosted mandate before authorizing.
-          </p>
-        )}
       {a.reason && (
         <p className="rounded-xl bg-muted p-4">
           {reasons[a.reason] ??
@@ -464,8 +456,7 @@ export function SubscriptionPaymentManager({
           <h2 className="text-xl font-semibold">Recurring card readiness</h2>
           <p>
             Provider mode: {state.gateway.mode}. Card details and mandate
-            authorization stay on Razorpay. UPI AutoPay and eMandate are
-            unavailable.
+            authorization stay on Razorpay. eMandate is unavailable.
           </p>
           {state.gateway.reasons?.length ? (
             <ul className="list-disc pl-5">
@@ -477,73 +468,11 @@ export function SubscriptionPaymentManager({
               ))}
             </ul>
           ) : null}
-          {state.gateway.review && (
-            <>
-              <p>
-                India: INR domestic cards{" "}
-                {state.gateway.review.domestic.enabled
-                  ? "configured"
-                  : "unavailable"}
-                . International: USD international cards{" "}
-                {state.gateway.review.international.enabled
-                  ? "configured"
-                  : "unavailable"}
-                . Settlement path: {state.gateway.review.settlement}.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Monthly UTC terms require reviewed account evidence and matching
-                native invoice dates. Paid-pilot native collection is awaiting a
-                validated provider flow. Domestic plan changes require a new
-                approved payment or mandate; international changes remain
-                blocked until their account capability is reviewed.
-              </p>
-              <details>
-                <summary className="min-h-11 cursor-pointer py-3 text-primary">
-                  Reviewed account terms and limits
-                </summary>
-                <dl className="space-y-2 text-sm">
-                  <div>
-                    <dt className="font-medium">Account review</dt>
-                    <dd>
-                      {state.gateway.review.id}, version{" "}
-                      {state.gateway.review.version}; effective until{" "}
-                      {paymentTime(state.gateway.review.effectiveUntil)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium">Per-charge limits</dt>
-                    <dd>
-                      Domestic{" "}
-                      {formatTaxMoney(
-                        state.gateway.review.domestic.maxChargeMinor,
-                        "INR",
-                      )}
-                      ; international{" "}
-                      {formatTaxMoney(
-                        state.gateway.review.international.maxChargeMinor,
-                        "USD",
-                      )}
-                      . The provider&apos;s supported limits also apply.
-                    </dd>
-                  </div>
-                  {Object.entries(state.gateway.review.terms).map(
-                    ([key, value]) => (
-                      <div key={key}>
-                        <dt className="font-medium capitalize">
-                          {key.replace(/([A-Z])/g, " $1")}
-                        </dt>
-                        <dd>{value}</dd>
-                      </div>
-                    ),
-                  )}
-                  <div>
-                    <dt className="font-medium">Review evidence references</dt>
-                    <dd>{state.gateway.review.evidence.join(", ")}</dd>
-                  </div>
-                </dl>
-              </details>
-            </>
-          )}
+          <p className="text-sm text-muted-foreground">
+            This checkout uses cards. For an eligible UPI AutoPay replacement,
+            open Reach changes and request a separate reviewed agreement. A
+            captured payment and matching invoice establish each paid period.
+          </p>
         </section>
       )}
       <section className="space-y-4 rounded-2xl border border-border bg-card p-6">

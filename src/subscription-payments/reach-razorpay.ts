@@ -37,6 +37,7 @@ const subSchema = z.object({
   change_scheduled_at: money.nullable().optional(),
 });
 const paymentSchema = z.object({
+  vpa: z.string().nullable().optional(),
   id: id("pay"),
   customer_id: id("cust").nullable(),
   invoice_id: id("inv").nullable(),
@@ -97,6 +98,12 @@ export function createRazorpayReachGateway(d: {
   review: RazorpayAccountReview;
   keyId: string;
   clock: Clock;
+  sourceRequest?(
+    source: PaymentSnapshot["provider"],
+    path: string,
+    body?: unknown,
+    method?: "POST" | "PATCH",
+  ): Promise<unknown>;
   request(
     path: string,
     body?: unknown,
@@ -107,6 +114,18 @@ export function createRazorpayReachGateway(d: {
   ): Promise<{ planId: string; totalCount: number }>;
 }): ReachGateway {
   const account = `${d.review.account}:${d.review.mode}`;
+  function sourceRequest(
+    change: ReachChange,
+    path: string,
+    body?: unknown,
+    method?: "POST" | "PATCH",
+  ) {
+    const source = change.snapshot.action.snapshot.provider;
+    if (source.account === account && source.mode === d.review.mode)
+      return d.request(path, body, method);
+    if (!d.sourceRequest) throw new ApplicationError("SETUP_REQUIRED");
+    return d.sourceRequest(source, path, body, method);
+  }
   const lastNative = (change: ReachChange) =>
     change.events.filter((e) => e.fact.native).at(-1)?.fact.native;
   async function page<T>(path: string, schema: z.ZodType<T>): Promise<T[]> {
@@ -163,7 +182,7 @@ export function createRazorpayReachGateway(d: {
       notes: {
         reach_change: change.id,
         financial_hash: hash(s.delta),
-        customer_id: s.original.charge!.customerId!,
+        customer_id: s.target.upi?.customerId ?? s.original.charge!.customerId!,
       },
     };
   }
@@ -174,12 +193,12 @@ export function createRazorpayReachGateway(d: {
     if (!a.checkout?.subscriptionId || !old.paymentId || !old.charge)
       throw new ApplicationError("SETUP_REQUIRED");
     const payment = paymentSchema.parse(
-      await d.request(`payments/${id("pay").parse(old.paymentId)}`),
+      await sourceRequest(change, `payments/${id("pay").parse(old.paymentId)}`),
     );
     if (
       !["captured", "refunded"].includes(payment.status) ||
       !payment.captured ||
-      payment.method !== "card" ||
+      payment.method !== old.charge.method ||
       payment.customer_id !== old.customerId ||
       payment.order_id !== old.charge.orderId ||
       payment.invoice_id !== old.charge.invoiceId ||
@@ -191,7 +210,8 @@ export function createRazorpayReachGateway(d: {
     )
       throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
     const sub = subSchema.parse(
-      await d.request(
+      await sourceRequest(
+        change,
         `subscriptions/${id("sub").parse(a.checkout.subscriptionId)}`,
       ),
     );
@@ -233,9 +253,15 @@ export function createRazorpayReachGateway(d: {
     if (
       !["captured", "refunded"].includes(p.status) ||
       !p.captured ||
-      p.method !== "card" ||
-      p.customer_id !== s.original.charge!.customerId ||
-      p.international !== s.original.charge!.charge!.international ||
+      p.method !== (s.target.upi ? "upi" : "card") ||
+      (s.target.upi &&
+        !s.target.provider.review?.upiPath?.supportedHandles.includes(
+          p.vpa?.split("@").at(-1)?.toLowerCase() ?? "",
+        )) ||
+      p.customer_id !==
+        (s.target.upi?.customerId ?? s.original.charge!.customerId) ||
+      p.international !==
+        (s.target.upi ? false : s.original.charge!.charge!.international) ||
       p.amount_refunded > p.amount ||
       String(p.amount) !== s.delta.tax.totals!.totalMinor ||
       p.currency !== s.delta.quote.currency ||
@@ -299,7 +325,7 @@ export function createRazorpayReachGateway(d: {
         invoiceId: invoice?.id ?? null,
         orderId: p.order_id,
         planId: plan.planId,
-        method: "card",
+        method: s.target.upi ? "upi" : "card",
         international: p.international,
         subscriptionStart: s.original.charge!.charge!.subscriptionStart,
         feeMinor: p.fee == null ? null : String(p.fee),
@@ -312,6 +338,7 @@ export function createRazorpayReachGateway(d: {
   async function sourceTerms(change: ReachChange) {
     const s = change.snapshot,
       plan = mapping(change);
+    if (s.target.upi) await d.verifyPlan(s.target);
     const target = z
       .object({
         id: id("plan"),
@@ -385,9 +412,10 @@ export function createRazorpayReachGateway(d: {
         s.path === "replacement_mandate" ? plan.totalCount : sub.total_count,
       remainingCount: sub.remaining_count ?? 0,
       deltaRefundedMinor: "0",
-      customerId: s.original.charge!.customerId!,
+      customerId: s.target.upi?.customerId ?? s.original.charge!.customerId!,
     };
     let paid: PaymentObservation | undefined;
+    let incurred: ReachFact["incurred"];
     if (s.path === "international_native") {
       if (
         !s.original.charge!.charge!.international ||
@@ -492,8 +520,15 @@ export function createRazorpayReachGateway(d: {
             if (
               p.id !== proof.paymentId ||
               p.customer_id !== native.customerId ||
-              p.method !== "card" ||
-              p.international !== s.original.charge!.charge!.international ||
+              p.method !== (s.target.upi ? "upi" : "card") ||
+              (s.target.upi &&
+                !s.target.provider.review?.upiPath?.supportedHandles.includes(
+                  p.vpa?.split("@").at(-1)?.toLowerCase() ?? "",
+                )) ||
+              p.international !==
+                (s.target.upi
+                  ? false
+                  : s.original.charge!.charge!.international) ||
               p.currency !== s.target.quote.currency ||
               !["authorized", "captured", "refunded"].includes(p.status)
             )
@@ -545,12 +580,34 @@ export function createRazorpayReachGateway(d: {
         if (captured.length > 1)
           throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
         if (captured[0]) {
-          paid = capture(change, captured[0], null, order);
+          try {
+            paid = capture(change, captured[0], null, order);
+          } catch (error: unknown) {
+            if (!s.target.upi) throw error;
+            const p = captured[0];
+            incurred = {
+              account,
+              mode: d.review.mode,
+              paymentId: p.id,
+              orderId: order.id,
+              customerId: p.customer_id,
+              method: p.method,
+              amountMinor: String(p.amount),
+              currency: p.currency,
+              refundedMinor: String(p.amount_refunded),
+              observedAt: d.clock.now().toISOString(),
+            };
+          }
           native.deltaRefundedMinor = String(captured[0].amount_refunded);
         }
       }
     }
-    return { kind: "native", native, ...(paid ? { capture: paid } : {}) };
+    return {
+      kind: "native",
+      native,
+      ...(paid ? { capture: paid } : {}),
+      ...(incurred ? { incurred } : {}),
+    };
   }
   function intent(change: ReachChange, stage: ReachStage) {
     const s = change.snapshot,
@@ -606,6 +663,17 @@ export function createRazorpayReachGateway(d: {
         )
           throw new Error("Domestic update denied");
         await authorize();
+        if (
+          change.snapshot.target.upi &&
+          (!isDeepStrictEqual(
+            d.review,
+            change.snapshot.target.provider.review,
+          ) ||
+            new Date(d.review.effectiveUntil) <= d.clock.now() ||
+            new Date(d.review.effectiveFrom) > d.clock.now() ||
+            !d.review.upiPath?.enabled)
+        )
+          throw new Error("UPI review changed");
       } catch {
         throw new ReachEffectNotAttempted();
       }
@@ -624,7 +692,7 @@ export function createRazorpayReachGateway(d: {
       }
       if (stage === "stop_old") {
         const result = subSchema.parse(
-          await d.request(`subscriptions/${sub.id}/cancel`, body),
+          await sourceRequest(change, `subscriptions/${sub.id}/cancel`, body),
         );
         if (
           result.id !== sub.id ||
@@ -649,6 +717,12 @@ export function createRazorpayReachGateway(d: {
       if (!native?.oldStopped || change.snapshot.path !== "replacement_mandate")
         throw new ApplicationError("CONFLICT");
       const base = {
+        ...(change.snapshot.target.upi
+          ? {
+              paymentMethod: "upi",
+              actionId: change.snapshot.replacementActionId,
+            }
+          : {}),
         script: "https://checkout.razorpay.com/v1/checkout.js",
         key: d.keyId,
         customer_id: native.customerId,

@@ -41,6 +41,10 @@ export async function verifyRuntimeRole(
   await verifyDataGovernance(pool);
   await verifyTaxPeriods(pool);
   await verifyTaxFilings(pool);
+  const upi = await pool.query<{ safe: boolean }>(`SELECT
+    (SELECT count(*)=1 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND NOT has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p WHERE p.oid=to_regprocedure('public.protect_upi_reach_event()'))
+    AND (SELECT count(*)=1 AND bool_and(t.tgenabled='O') FROM pg_trigger t WHERE t.tgrelid='public.reach_change_event'::regclass AND t.tgname='upi_reach_event_guard' AND t.tgfoid='public.protect_upi_reach_event()'::regprocedure) AS safe`);
+  if (!upi.rows[0]?.safe) throw new ApplicationError("SETUP_REQUIRED");
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
       AND (SELECT count(*)=2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('reach_change','reach_change_event'))

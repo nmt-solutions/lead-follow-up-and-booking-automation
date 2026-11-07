@@ -1,5 +1,4 @@
-import { hasMfa, businessMfaLifetime } from "../auth/access";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import {
   reconcileLifecycle,
   appendLifecycleEvent,
@@ -31,7 +30,6 @@ import {
   subscriptionPaymentHistory,
   subscriptionLifecycleEvent,
   platformOperator,
-  session,
 } from "./schema";
 import {
   subscriptionQuoteSchema,
@@ -39,6 +37,8 @@ import {
 } from "../models/subscription-quotes";
 import {
   paymentActionSchema,
+  mandateProofSchema,
+  type MandateProof,
   periodEnd,
   monthlyPeriodMatches,
   type PaymentGateway,
@@ -60,6 +60,12 @@ import {
 } from "../models/billing";
 import { taxCatalogSchema } from "../models/tax";
 import { chargeTaxSchema } from "../models/subscription-payments";
+import {
+  hasMfa,
+  operatorMfaLifetime,
+  businessMfaLifetime,
+} from "../auth/access";
+import { session } from "./schema";
 
 type Row = typeof subscriptionPayment.$inferSelect;
 type Work = { id: string; business_id: string; recovery_key: string };
@@ -157,6 +163,50 @@ async function trustedQuote(
     throw new ApplicationError("PRICING_SETUP_REQUIRED");
   return quote;
 }
+async function assurePaymentActor(
+  tx: Transaction,
+  actor: Actor,
+  businessId: string,
+  operator: boolean,
+) {
+  if (!("sessionId" in actor) || typeof actor.sessionId !== "string")
+    throw new ApplicationError("UNAUTHENTICATED");
+  const [s] = await tx
+    .select()
+    .from(session)
+    .where(eq(session.id, actor.sessionId));
+  const now = new Date();
+  if (!s || s.userId !== actor.userId || s.expiresAt <= now)
+    throw new ApplicationError("UNAUTHENTICATED");
+  if (
+    !(await hasMfa(
+      tx,
+      s.token,
+      now,
+      operator ? operatorMfaLifetime : businessMfaLifetime,
+    ))
+  )
+    throw new ApplicationError("MFA_REQUIRED");
+  if (operator) {
+    const [grant] = await tx
+      .select()
+      .from(platformOperator)
+      .where(eq(platformOperator.userId, actor.userId));
+    if (!grant?.reconciliation) throw new ApplicationError("FORBIDDEN");
+  } else await requireCapability(tx, actor, businessId, "billing.manage");
+  const trusted = await tx.execute<{ valid: boolean }>(
+    sql`select exists(select 1 from public.session where id=${actor.sessionId} and user_id=${actor.userId} and expires_at>clock_timestamp()) valid`,
+  );
+  if (!trusted.rows[0]?.valid) throw new ApplicationError("UNAUTHENTICATED");
+  if (s.expiresAt <= new Date()) throw new ApplicationError("UNAUTHENTICATED");
+  if (
+    !s.mfaVerifiedAt ||
+    new Date().getTime() - s.mfaVerifiedAt.getTime() >=
+      (operator ? operatorMfaLifetime : businessMfaLifetime)
+  )
+    throw new ApplicationError("MFA_REQUIRED");
+}
+
 export function createSubscriptionPaymentRepository(database: Database) {
   async function renewalSnapshot(
     tx: Transaction,
@@ -355,6 +405,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
     operation: (tx: Transaction, row: Row) => Promise<T>,
   ) {
     return scoped(database, actor, businessId, async (tx) => {
+      await lockBusiness(tx, businessId);
       if (operator) {
         const [grant] = await tx
           .select()
@@ -372,7 +423,11 @@ export function createSubscriptionPaymentRepository(database: Database) {
           ),
         );
       if (!row || !row.started) throw new ApplicationError("NOT_FOUND");
-      return operation(tx, row);
+      if (!row.snapshot.upi) return operation(tx, row);
+      await assurePaymentActor(tx, actor, businessId, operator);
+      const result = await operation(tx, row);
+      await assurePaymentActor(tx, actor, businessId, operator);
+      return result;
     });
   }
   return {
@@ -686,6 +741,87 @@ export function createSubscriptionPaymentRepository(database: Database) {
         }
       });
     },
+    checkoutProofIntent(
+      actor: Actor,
+      businessId: string,
+      input: MandateProof & { payloadHash: string },
+      at: Date,
+    ) {
+      return authorizedAction(
+        actor,
+        businessId,
+        input.actionId,
+        false,
+        async (tx, row) => {
+          if (!row.snapshot.upi || !row.snapshot.replacement)
+            throw new ApplicationError("SETUP_REQUIRED");
+          const [previous] = await tx
+            .select()
+            .from(subscriptionPaymentHistory)
+            .where(eq(subscriptionPaymentHistory.id, input.requestKey));
+          const kind = `checkout_proof:${input.payloadHash}`;
+          if (previous) {
+            if (
+              previous.actionId !== row.id ||
+              previous.actorId !== actor.userId ||
+              previous.kind !== kind
+            )
+              throw new ApplicationError("CONFLICT");
+            return workFor(row);
+          }
+          await tx.execute(
+            sql`select set_config('app.payment_action',${row.id},true),set_config('app.payment_capability',${row.recoveryKey},true)`,
+          );
+          await tx.insert(subscriptionPaymentHistory).values({
+            id: input.requestKey,
+            businessId,
+            actionId: row.id,
+            actorId: actor.userId,
+            kind,
+            at,
+            detail: {
+              state: row.state,
+              reason: row.reason,
+              observation: row.observation,
+              checkoutProof: mandateProofSchema.strip().parse(input),
+            },
+          });
+          return workFor(row);
+        },
+      );
+    },
+    checkoutProofs(work: Work) {
+      return worker(work, async (tx, row) => {
+        if (!row.snapshot.upi) return [];
+        const rows = await tx
+          .select()
+          .from(subscriptionPaymentHistory)
+          .where(
+            and(
+              eq(subscriptionPaymentHistory.actionId, row.id),
+              sql`${subscriptionPaymentHistory.kind} like 'checkout_proof:%'`,
+              sql`not exists(select 1 from public.subscription_payment_event e where e.action_id=${row.id} and e.event_id='checkout:'||${row.id}::text||':'||(${subscriptionPaymentHistory.detail}->'checkoutProof'->>'paymentId'))`,
+            ),
+          )
+          .orderBy(
+            asc(subscriptionPaymentHistory.at),
+            asc(subscriptionPaymentHistory.id),
+          )
+          .limit(100);
+        return rows.flatMap((r) => {
+          const proof = mandateProofSchema.safeParse(r.detail.checkoutProof);
+          if (
+            !proof.success ||
+            proof.data.actionId !== row.id ||
+            proof.data.requestKey !== r.id ||
+            r.kind !==
+              `checkout_proof:${createHash("sha256").update(JSON.stringify(proof.data)).digest("hex")}`
+          )
+            return [];
+          return [proof.data];
+        });
+      });
+    },
     prepare(
       actor: Actor,
       businessId: string,
@@ -791,6 +927,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
       return scoped(database, actor, businessId, async (tx) => {
         await requireCapability(tx, actor, businessId, "billing.read");
         await lockBusiness(tx, businessId);
+        await requireCapability(tx, actor, businessId, "billing.read");
         const rows = await tx
           .select()
           .from(subscriptionPayment)
@@ -816,7 +953,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           reserved: item.allowance.quantity - item.remaining,
           remaining: item.remaining,
         });
-        return {
+        const result = {
           actions: await (async () => {
             const result: PaymentAction[] = [];
             for (const row of rows) result.push(await paymentAudit(tx, row));
@@ -849,6 +986,10 @@ export function createSubscriptionPaymentRepository(database: Database) {
             review: gateway.review,
           },
         };
+        await requireCapability(tx, actor, businessId, "billing.read");
+        if (rows.some((r) => r.snapshot.upi))
+          await assurePaymentActor(tx, actor, businessId, false);
+        return result;
       });
     },
     begin(
@@ -1087,6 +1228,10 @@ export function createSubscriptionPaymentRepository(database: Database) {
           );
         if (!row?.started || !row.checkout?.subscriptionId)
           throw new ApplicationError("NOT_FOUND");
+        if (row.snapshot.upi) {
+          await assurePaymentActor(tx, actor, businessId, false);
+          at = new Date();
+        }
         const policy = effectiveLifecyclePolicy(
           gateway.lifecyclePolicy,
           row.snapshot.provider.mode,
@@ -1140,6 +1285,8 @@ export function createSubscriptionPaymentRepository(database: Database) {
             status: "available",
           },
         );
+        if (row.snapshot.upi)
+          await assurePaymentActor(tx, actor, businessId, false);
         return { action: paymentView(row), work: workFor(row) };
       });
     },
@@ -1546,6 +1693,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
               !p.snapshot.adjustment &&
               !(
                 s.replacement &&
+                !s.upi &&
                 p.actionId === s.replacement.originalActionId &&
                 p.start >= new Date(s.replacement.start)
               ) &&

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { upiAgreementSchema } from "./upi-autopay";
 import type { ReachGateway } from "./reach-changes";
 import {
   lifecycleSchema,
@@ -43,6 +44,14 @@ export const pilotRenewalSchema = z.strictObject({
     ),
   agreeSeparateMandate: z.literal(true),
 });
+export const mandateProofSchema = z.strictObject({
+  actionId: z.uuid(),
+  requestKey: z.uuid(),
+  paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/),
+  subscriptionId: z.string().regex(/^sub_[A-Za-z0-9]+$/),
+  signature: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type MandateProof = z.infer<typeof mandateProofSchema>;
 export const paymentTermSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("calendar_month"),
@@ -112,6 +121,14 @@ export const paymentSnapshotSchema = z.object({
       disclosure: z.string(),
     })
     .optional(),
+  collection: z
+    .object({
+      method: z.enum(["card", "upi"]),
+      planId: z.string(),
+      totalCount: z.number().int().positive(),
+    })
+    .optional(),
+  upi: upiAgreementSchema.optional(),
   /** A separate immutable captured adjustment; never an ordinary renewable paid term. */
   adjustment: z
     .object({
@@ -248,7 +265,7 @@ export const paymentObservationSchema = z.strictObject({
       refundedMinor: z.string().regex(/^\d+$/).optional(),
       orderId: ref,
       planId: ref,
-      method: z.literal("card"),
+      method: z.enum(["card", "upi"]),
       international: z.boolean(),
       subscriptionStart: z.iso.datetime(),
       feeMinor: z.string().regex(/^\d+$/).nullable(),
@@ -435,6 +452,19 @@ export type PaymentGateway = {
     action: PaymentAction,
     input: { orderId: string; paymentId: string; signature: string },
   ): boolean;
+  authenticateCheckout?(input: {
+    action: PaymentAction;
+    paymentId: string;
+    subscriptionId: string;
+    signature: string;
+  }): Promise<AuthenticatedPaymentEvent>;
+  method?: "card" | "upi";
+  accounts?: PaymentGateway[];
+  nativeRequest?(
+    path: string,
+    body?: unknown,
+    method?: "POST" | "PATCH",
+  ): Promise<unknown>;
   reach?: ReachGateway;
   lifecyclePolicy?: LifecyclePolicy;
   updatePayment?(

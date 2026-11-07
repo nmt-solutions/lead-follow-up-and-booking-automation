@@ -2,7 +2,10 @@ import type { Clock } from "../../src/models/business";
 import type { RazorpayAccountReview } from "../../src/models/razorpay-account";
 
 /** Synthetic account review and HTTP boundary; no native credentials or account calls. */
-export function razorpayFixture(clock: Clock) {
+export function razorpayFixture(
+  clock: Clock,
+  options: { keyId?: string; secret?: string } = {},
+) {
   const review = {
     id: "fixture-review-1",
     version: 1,
@@ -133,8 +136,8 @@ export function razorpayFixture(clock: Clock) {
     },
     configuration: {
       env: {
-        RAZORPAY_KEY_ID: "rzp_test_fixture",
-        RAZORPAY_KEY_SECRET: "fixture-api-secret",
+        RAZORPAY_KEY_ID: options.keyId ?? "rzp_test_fixture",
+        RAZORPAY_KEY_SECRET: options.secret ?? "fixture-api-secret",
         RAZORPAY_WEBHOOK_SECRETS: JSON.stringify([
           "fixture-webhook-secret",
           "fixture-old-secret",
@@ -156,7 +159,7 @@ export function razorpayFixture(clock: Clock) {
           throw new Error("Unexpected provider origin");
         if (
           new Headers(init?.headers).get("authorization") !==
-          `Basic ${Buffer.from(`${fixture.configuration.env.RAZORPAY_KEY_ID}:fixture-api-secret`).toString("base64")}`
+          `Basic ${Buffer.from(`${fixture.configuration.env.RAZORPAY_KEY_ID}:${options.secret ?? "fixture-api-secret"}`).toString("base64")}`
         )
           throw new Error("Missing native authentication");
         if (url.pathname === "/v1/methods")

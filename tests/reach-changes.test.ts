@@ -965,12 +965,17 @@ describe("Approved reach changes at the public application seam", () => {
       financial.periods.find((p) => p.paymentId === "pay_delta")?.snapshot
         .provider.review,
     ).toBeUndefined();
-    const retained = await h.admin.query(
-      "select snapshot from subscription_period where business_id=$1 and payment_id='pay_delta'",
-      [f.business.id],
+    expect(JSON.stringify(financial)).not.toContain(
+      "private merchant activation marker",
     );
-    expect(retained.rows[0].snapshot.provider.review).toEqual(f.gateway.review);
-    expect(retained.rows[0].snapshot.provider.review.terms.activation).toBe(
+    const retained = (
+      await h.admin.query(
+        "SELECT snapshot->'provider'->'review' review FROM subscription_period WHERE business_id=$1 AND payment_id='pay_delta'",
+        [f.business.id],
+      )
+    ).rows[0].review;
+    expect(retained).toEqual(f.gateway.review);
+    expect(retained.terms.activation).toBe(
       "private merchant activation marker",
     );
     expect(f.effects).toHaveLength(1);

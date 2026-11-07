@@ -4,6 +4,14 @@ import {
 } from "../subscription-payments/projection";
 import { z } from "zod";
 import {
+  paymentAccount,
+  paymentAccounts,
+} from "../subscription-payments/accounts";
+import { publicFinancialValue } from "../models/public-financial";
+import { createHash } from "node:crypto";
+import { mandateProofSchema } from "../models/subscription-payments";
+import { paymentWorkspaceSchema } from "../models/subscription-payments";
+import {
   lifecycleObservationSchema,
   lifecycleCommandSchema,
   recoveryCheckoutSchema,
@@ -43,16 +51,30 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
   ) {
     const action = await d.repository.readWork(work);
     if (action.snapshot.adjustment) return action;
+    const gateway = paymentAccount(d.gateway, action.snapshot.provider);
     if (
-      action.snapshot.provider.key !== d.gateway.key ||
-      action.snapshot.provider.account !== d.gateway.account ||
-      action.snapshot.provider.mode !== d.gateway.mode
+      action.snapshot.provider.key !== gateway.key ||
+      action.snapshot.provider.account !== gateway.account ||
+      action.snapshot.provider.mode !== gateway.mode
     )
       throw new ApplicationError("SETUP_REQUIRED");
-    if (d.gateway.poll) {
+    if (gateway.authenticateCheckout)
+      for (const proof of await d.repository.checkoutProofs(work)) {
+        try {
+          const event = parse(
+            authenticatedPaymentEventSchema,
+            await gateway.authenticateCheckout({ action, ...proof }),
+          );
+          await d.repository.receive(event, d.clock.now());
+        } catch {
+          // A retained callback is only a hint. Keep it for original-identity
+          // recovery; no proof outcome authorizes another native mutation.
+        }
+      }
+    if (gateway.poll) {
       let result;
       try {
-        result = await d.gateway.poll({ action });
+        result = await gateway.poll({ action });
       } catch {
         return d.repository.pollUnavailable(work, d.clock.now());
       }
@@ -76,7 +98,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       await d.repository.lifecycle(
         work,
         d.clock.now(),
-        d.gateway.lifecyclePolicy,
+        gateway.lifecyclePolicy,
         result.lifecycle
           ? parse(lifecycleObservationSchema, result.lifecycle)
           : undefined,
@@ -87,7 +109,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
     try {
       observation = parse(
         paymentObservationSchema,
-        await d.gateway.reconcile({
+        await gateway.reconcile({
           operationKey: action.operationKey,
           checkout: action.checkout,
         }),
@@ -96,14 +118,10 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       /* Unknown outcomes stay durable and recoverable; creation is never retried here. */
     }
     await d.repository.reconcile(work, observation, d.clock.now());
-    await d.repository.lifecycle(
-      work,
-      d.clock.now(),
-      d.gateway.lifecyclePolicy,
-    );
+    await d.repository.lifecycle(work, d.clock.now(), gateway.lifecyclePolicy);
     return d.repository.readWork(work);
   }
-  return {
+  const application = {
     async preparePilotRenewal(
       credentials: Credentials,
       businessId: unknown,
@@ -152,6 +170,39 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         ),
       );
     },
+    async confirmMandate(
+      credentials: Credentials,
+      businessId: unknown,
+      value: unknown,
+    ) {
+      const id = parse(businessIdSchema, businessId),
+        input = parse(mandateProofSchema, value);
+      const work = await d.repository.checkoutProofIntent(
+        await d.authenticate(credentials),
+        id,
+        {
+          ...input,
+          payloadHash: createHash("sha256")
+            .update(JSON.stringify(input))
+            .digest("hex"),
+        },
+        d.clock.now(),
+      );
+      const action = await d.repository.readWork(work),
+        gateway = paymentAccount(d.gateway, action.snapshot.provider);
+      if (!gateway.authenticateCheckout)
+        throw new ApplicationError("SETUP_REQUIRED");
+      const event = parse(
+        authenticatedPaymentEventSchema,
+        await gateway.authenticateCheckout({ action, ...input }),
+      );
+      await d.repository.receive(event, d.clock.now());
+      return d.repository.readAuthorizedAction(
+        await d.authenticate(credentials),
+        id,
+        input.actionId,
+      );
+    },
     async updatePayment(
       credentials: Credentials,
       businessId: unknown,
@@ -166,17 +217,17 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         d.clock.now(),
       );
       const action = await d.repository.readWork(work);
+      const gateway = paymentAccount(d.gateway, action.snapshot.provider);
       if (
-        action.snapshot.provider.key !== d.gateway.key ||
-        action.snapshot.provider.account !== d.gateway.account ||
-        action.snapshot.provider.mode !== d.gateway.mode
+        action.snapshot.provider.key !== gateway.key ||
+        action.snapshot.provider.account !== gateway.account ||
+        action.snapshot.provider.mode !== gateway.mode
       )
         throw new ApplicationError("SETUP_REQUIRED");
-      if (!d.gateway.updatePayment)
-        throw new ApplicationError("SETUP_REQUIRED");
+      if (!gateway.updatePayment) throw new ApplicationError("SETUP_REQUIRED");
       const checkout = parse(
         recoveryCheckoutSchema,
-        await d.gateway.updatePayment(action),
+        await gateway.updatePayment(action),
       );
       if (checkout.subscription_id !== action.checkout?.subscriptionId)
         throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
@@ -186,7 +237,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         input.actionId,
         input.requestKey,
         d.clock.now(),
-        d.gateway,
+        gateway,
       );
       return checkout;
     },
@@ -197,19 +248,25 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
     ) {
       const id = parse(businessIdSchema, businessId),
         input = parse(lifecycleCommandSchema, value);
+      const boundAction = await d.repository.readAuthorizedAction(
+        await d.authenticate(credentials),
+        id,
+        input.actionId,
+      );
+      const gateway = paymentAccount(d.gateway, boundAction.snapshot.provider);
       const result = await d.repository.beginCancellation(
         await d.authenticate(credentials),
         id,
         input.actionId,
         input.requestKey,
         d.clock.now(),
-        d.gateway,
+        gateway,
       );
       if (!result.work) return publicPaymentAction(result.action);
       try {
         const observation = parse(
           lifecycleObservationSchema,
-          await d.gateway.cancel!(
+          await gateway.cancel!(
             await d.repository.readWork(result.work),
             result.action.lifecycle!.cancellation!.timing,
             async () => {
@@ -225,7 +282,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         await d.repository.cancellationResult(
           result.work,
           d.clock.now(),
-          d.gateway.lifecyclePolicy,
+          gateway.lifecyclePolicy,
           observation,
         );
       } catch {
@@ -338,24 +395,36 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         ),
       );
     },
-    async event(input: { body: Uint8Array; headers: Headers }) {
+    async event(
+      input: { body: Uint8Array; headers: Headers },
+      path: "card" | "upi" = "card",
+    ) {
+      const gateway =
+        path === "upi"
+          ? paymentAccounts(d.gateway).find((g) => g.method === "upi")
+          : d.gateway;
+      if (!gateway) throw new ApplicationError("SETUP_REQUIRED");
       const event = parse(
         authenticatedPaymentEventSchema,
-        await d.gateway.authenticateEvent(input),
+        await gateway.authenticateEvent(input),
       );
       if (
-        event.observation.provider !== d.gateway.key ||
-        event.observation.account !== d.gateway.account
+        event.observation.provider !== gateway.key ||
+        event.observation.account !== gateway.account
       )
         throw new ApplicationError("FORBIDDEN");
       const work = await d.repository.receive(event, d.clock.now());
       // Receipt commits first; a crash here is recovered from the persisted action.
-      if (work && !d.gateway.deferEvents) await reconcile(work);
+      if (work && !gateway.deferEvents) await reconcile(work);
       return { received: true };
     },
     async recover() {
       let reconciled = 0;
-      for (const work of await d.repository.pending(d.gateway)) {
+      for (const work of (
+        await Promise.all(
+          paymentAccounts(d.gateway).map((g) => d.repository.pending(g)),
+        )
+      ).flat()) {
         await reconcile(work);
         reconciled++;
       }
@@ -404,6 +473,43 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
           true,
         ),
       );
+    },
+  };
+  const publicAction = (value: unknown) =>
+    paymentActionSchema.parse(publicFinancialValue(value));
+  return {
+    ...application,
+    prepare: async (...args: Parameters<typeof application.prepare>) =>
+      publicAction(await application.prepare(...args)),
+    confirmMandate: async (
+      ...args: Parameters<typeof application.confirmMandate>
+    ) => publicAction(await application.confirmMandate(...args)),
+    start: async (...args: Parameters<typeof application.start>) =>
+      publicAction(await application.start(...args)),
+    refresh: async (...args: Parameters<typeof application.refresh>) =>
+      publicAction(await application.refresh(...args)),
+    cancel: async (...args: Parameters<typeof application.cancel>) =>
+      publicAction(await application.cancel(...args)),
+    operatorRefresh: async (
+      ...args: Parameters<typeof application.operatorRefresh>
+    ) => publicAction(await application.operatorRefresh(...args)),
+    operatorQueue: async (
+      ...args: Parameters<typeof application.operatorQueue>
+    ) => (await application.operatorQueue(...args)).map(publicAction),
+    workspace: async (...args: Parameters<typeof application.workspace>) => {
+      const value = await application.workspace(...args);
+      const projected = paymentWorkspaceSchema.parse(
+        publicFinancialValue(value),
+      );
+      return {
+        ...projected,
+        gateway: {
+          key: value.gateway.key,
+          mode: value.gateway.mode,
+          ready: value.gateway.ready,
+          reasons: value.gateway.reasons,
+        },
+      };
     },
   };
 }

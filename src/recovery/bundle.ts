@@ -34,6 +34,13 @@ export async function recoverySchemaBundle(root = process.cwd()) {
       .filter((f) => f.endsWith(".ts"))
       .sort()
       .map((f) => `src/subscription-payments/${f}`),
+    "src/models/upi-autopay.ts",
+    "src/models/public-financial.ts",
+    "src/models/financial-adjustments.ts",
+    "src/models/reach-changes.ts",
+    "src/financial-adjustments/accounts.ts",
+    "src/financial-adjustments/configuration.ts",
+    "src/financial-adjustments/razorpay.ts",
     "src/application/infrastructure-recovery.ts",
     "src/application/tax-filings.ts",
     "src/application/tax-periods.ts",

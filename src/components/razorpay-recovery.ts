@@ -12,7 +12,7 @@ declare global {
         | Omit<ReachCheckout, "script" | "kind">
         | Omit<NonNullable<CheckoutReference["standard"]>, "script">
       ) & {
-        handler(value: unknown): void;
+        handler(proof?: unknown): void;
         modal: { ondismiss(): void };
       },
     ) => { open(): void };

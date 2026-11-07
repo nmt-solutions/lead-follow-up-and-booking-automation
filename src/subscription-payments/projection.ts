@@ -1,3 +1,5 @@
+import { publicFinancialValue } from "../models/public-financial";
+import { paymentSnapshotSchema } from "../models/subscription-payments";
 import type {
   PaymentAction,
   PaymentSnapshot,
@@ -20,9 +22,8 @@ export function publicTaxCalculation(
 export function publicPaymentSnapshot(
   snapshot: PaymentSnapshot,
 ): PaymentSnapshot {
-  const { review: ignored, ...provider } = snapshot.provider;
-  void ignored;
-  return { ...snapshot, provider, tax: publicTaxCalculation(snapshot.tax) };
+  const projected = paymentSnapshotSchema.parse(publicFinancialValue(snapshot));
+  return { ...projected, tax: publicTaxCalculation(snapshot.tax) };
 }
 export function publicPaymentAction(action: PaymentAction): PaymentAction {
   const {

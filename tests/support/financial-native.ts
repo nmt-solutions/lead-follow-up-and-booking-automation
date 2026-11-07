@@ -23,9 +23,14 @@ export const fixtureAdjustmentPolicy = {
   disputeLostCredit: true,
   preserveRecords: true,
 };
-export function financialNativeFixture(clock: Clock) {
-  const native = razorpayFixture(clock),
-    base = native.configuration.fetch;
+export function financialNativeFixture(
+  clock: Clock,
+  options: { keyId?: string; secret?: string } = {},
+) {
+  const native = razorpayFixture(clock, options);
+  native.configuration.env.RAZORPAY_KEY_ID =
+    options.keyId ?? "rzp_test_fixture";
+  const base = native.configuration.fetch;
   const refunds: Record<string, unknown>[] = [],
     refundPosts: { key: string | null; body: unknown }[] = [],
     disputes = new Map<string, Record<string, unknown>>();
@@ -66,7 +71,7 @@ export function financialNativeFixture(clock: Clock) {
         if (url.origin !== "https://api.razorpay.com") throw Error("origin");
         if (
           new Headers(init?.headers).get("authorization") !==
-          `Basic ${Buffer.from("rzp_test_fixture:fixture-api-secret").toString("base64")}`
+          `Basic ${Buffer.from(`${native.configuration.env.RAZORPAY_KEY_ID}:${options.secret ?? "fixture-api-secret"}`).toString("base64")}`
         )
           throw Error("auth");
         if (method !== "GET" && method !== "HEAD")

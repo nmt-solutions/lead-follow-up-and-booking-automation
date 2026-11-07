@@ -227,6 +227,30 @@ export async function requireRefundOperator(tx: Transaction, actor: Actor) {
 }
 export function createFinancialAdjustmentRepository(database: Database) {
   return {
+    sourceForInvoice: (actor: Actor, businessId: string, invoiceId: string) =>
+      scoped(database, actor, businessId, async (tx) => {
+        await requireRefundOperator(tx, actor);
+        const [source] = await tx
+          .select({ provider: subscriptionPeriod.snapshot })
+          .from(sellerDocument)
+          .innerJoin(
+            subscriptionPeriod,
+            and(
+              eq(subscriptionPeriod.id, sellerDocument.periodId),
+              eq(subscriptionPeriod.businessId, sellerDocument.businessId),
+            ),
+          )
+          .where(
+            and(
+              eq(sellerDocument.id, invoiceId),
+              eq(sellerDocument.businessId, businessId),
+              eq(sellerDocument.kind, "invoice"),
+            ),
+          );
+        if (!source) throw new ApplicationError("NOT_FOUND");
+        const { key, account, mode } = source.provider.provider;
+        return { key, account, mode };
+      }),
     authorize: (actor: Actor, businessId: string, operator = true) =>
       scoped(database, actor, businessId, async (tx) => {
         if (operator) await requireRefundOperator(tx, actor);

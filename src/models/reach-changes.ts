@@ -58,6 +58,7 @@ export function reachFraction(
   };
 }
 export const previewReachSchema = z.strictObject({
+  paymentMethod: z.enum(["card", "upi"]).optional(),
   periodId: z.uuid(),
   quoteId: z.uuid(),
   requestKey: z.uuid(),
@@ -108,7 +109,22 @@ export const reachSnapshotSchema = z.object({
 });
 export type ReachSnapshot = z.infer<typeof reachSnapshotSchema>;
 export const reachFactSchema = z.object({
+  incurred: z
+    .object({
+      account: z.string(),
+      mode: z.enum(["test", "live"]),
+      paymentId: z.string(),
+      orderId: z.string(),
+      customerId: z.string().nullable(),
+      method: z.string(),
+      amountMinor: z.string().regex(/^\d+$/),
+      currency: z.enum(["INR", "USD"]),
+      refundedMinor: z.string().regex(/^\d+$/),
+      observedAt: z.iso.datetime(),
+    })
+    .optional(),
   kind: z.enum([
+    "method_review",
     "preview",
     "checked",
     "withdrawn",
@@ -204,6 +220,9 @@ export function reachUnsent(change: ReachChange) {
   );
 }
 export const reachWorkspaceSchema = z.object({
+  upi: z
+    .object({ available: z.boolean(), reason: z.string().nullable() })
+    .optional(),
   currentPeriodId: z.uuid().nullable().optional(),
   changes: z.array(reachChangeSchema),
   configuration: z
@@ -214,6 +233,8 @@ export const reachCheckoutRequestSchema = reachCommandSchema.extend({
   purpose: z.enum(["mandate", "delta"]),
 });
 const checkoutBase = z.object({
+  paymentMethod: z.literal("upi").optional(),
+  actionId: z.uuid().optional(),
   script: z.literal("https://checkout.razorpay.com/v1/checkout.js"),
   key: z.string().regex(/^rzp_(test|live)_[A-Za-z0-9]+$/),
   customer_id: z.string().regex(/^cust_[A-Za-z0-9]+$/),
