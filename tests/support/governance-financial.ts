@@ -24,6 +24,9 @@ export async function financialExportFixture(
     otherOfferId: string;
     otherPlanId: string;
   },
+  beforeAdjustment?: (
+    fixture: Awaited<ReturnType<typeof subscriptionFixture>>,
+  ) => Promise<void>,
 ) {
   const f = await subscriptionFixture(h),
     native = financialNativeFixture(h.clock);
@@ -174,6 +177,7 @@ export async function financialExportFixture(
     documents,
   });
   let refund = null;
+  await beforeAdjustment?.(f);
   if (nativeCredit) {
     refund = await adjustments.review(op, f.business.id, {
       kind: "refund",

@@ -1,3 +1,4 @@
+import { prepareRecoverySecurity, secureRecovery } from "./recovery-security";
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import type { Pool } from "pg";
 import {
@@ -243,6 +244,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await prepareFinancialSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
+  await prepareRecoverySecurity(pool);
   await prepareDataGovernance(pool);
   await prepareCostSecurity(pool);
   await prepareNotificationSecurity(pool);
@@ -702,7 +704,10 @@ export async function prepareDatabaseRole(pool: Pool) {
 }
 
 /** Idempotent security settings which the pinned Drizzle version cannot express. */
-export async function secureDatabase(pool: Pool) {
+export async function secureDatabase(
+  pool: Pool,
+  options: { allowQuarantined?: boolean } = {},
+) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -1379,9 +1384,10 @@ export async function secureDatabase(pool: Pool) {
       GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
     `);
     await secureOperations(client);
+    await secureRecovery(client);
     await secureDataGovernance(client);
     await client.query("SET LOCAL ROLE app_runtime");
-    await verifyRuntimeRole(client);
+    await verifyRuntimeRole(client, options);
     await client.query("COMMIT");
   } catch (error: unknown) {
     await client.query("ROLLBACK");

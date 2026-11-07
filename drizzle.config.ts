@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "infrastructure_recovery",
+    "infrastructure_recovery_event",
     "business_data_request",
     "business_data_export",
     "business_data_grant",

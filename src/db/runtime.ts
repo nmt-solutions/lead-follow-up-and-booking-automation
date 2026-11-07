@@ -1,3 +1,4 @@
+import { verifyRecoverySecurity } from "./recovery-security";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool, PoolClient } from "pg";
 import { ApplicationError } from "../models/application-error";
@@ -17,7 +18,17 @@ export type Database = ReturnType<typeof runtimeDatabase>;
 // Fail closed on an accidentally supplied Neon schema-owner connection.
 export async function verifyRuntimeRole(
   pool: Pool | PoolClient,
+  options: { allowQuarantined?: boolean } = {},
 ): Promise<void> {
+  if (!options.allowQuarantined) {
+    const quarantine = await pool.query<{ blocked: boolean }>(
+      "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='recovery_quarantine') AS blocked",
+    );
+    if (quarantine.rows[0]?.blocked)
+      throw new ApplicationError("SETUP_REQUIRED");
+  }
+  if (!(await verifyRecoverySecurity(pool)))
+    throw new ApplicationError("SETUP_REQUIRED");
   await verifyDataGovernance(pool);
   const result = await pool.query<{ safe: boolean }>(`
     SELECT (SELECT count(*)=3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('financial_case','financial_case_event','financial_receipt'))
