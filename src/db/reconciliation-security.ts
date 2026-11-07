@@ -53,15 +53,19 @@ export async function secureReconciliationRecords(pool: Pool | PoolClient) {
       IF coalesce(current_setting('app.business_id',true),'')<>'' OR NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.reconciliation) THEN RAISE EXCEPTION 'forbidden'; END IF;
       IF TG_TABLE_NAME='reconciliation_access' THEN NEW.at:=statement_timestamp(); NEW.expires_at:=statement_timestamp()+interval '60 seconds'; RETURN NEW; END IF;
       PERFORM pg_advisory_xact_lock(hashtextextended('reconciliation',0));
+      IF coalesce(current_setting('app.business_id',true),'')<>'' OR NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.reconciliation) THEN RAISE EXCEPTION 'forbidden'; END IF;
+      IF NOT coalesce(NEW.data->'money'->>'currency' IN ('INR','USD') AND NEW.data->'money'->>'precision'='2',false) THEN RAISE EXCEPTION 'invalid settlement units'; END IF;
       NEW.identity:=CASE WHEN NEW.data->>'kind'='settlement' THEN jsonb_build_array('settlement',NEW.data->>'provider',NEW.data->>'account',NEW.data->>'mode',NEW.data->>'settlementId')::text ELSE jsonb_build_array('bank_receipt',NEW.data->>'bankAccountRef',NEW.data->>'bankTransactionId')::text END;
       IF NOT EXISTS(SELECT 1 FROM public.reconciliation_evidence e WHERE e.id=NEW.evidence_id AND e.source=CASE WHEN NEW.data->>'kind'='settlement' THEN 'provider_statement' ELSE 'bank_statement' END) THEN RAISE EXCEPTION 'invalid evidence'; END IF;
       FOR predecessor IN SELECT NEW.supersedes WHERE NEW.supersedes IS NOT NULL UNION ALL SELECT value::uuid FROM jsonb_array_elements_text(NEW.data->'supersedesAlso') LOOP
         IF NOT EXISTS(SELECT 1 FROM public.reconciliation_record r WHERE r.id=predecessor AND r.identity=NEW.identity) OR EXISTS(SELECT 1 FROM public.reconciliation_record r WHERE r.supersedes=predecessor OR r.data->'supersedesAlso' ? predecessor::text) THEN RAISE EXCEPTION 'invalid correction'; END IF;
       END LOOP;
       IF NEW.data->>'kind'='settlement' THEN
+        IF NOT coalesce(jsonb_typeof(NEW.data->'lines')='array' AND jsonb_array_length(NEW.data->'lines') BETWEEN 1 AND 1000,false) THEN RAISE EXCEPTION 'invalid settlement coverage'; END IF;
         FOR l IN SELECT value FROM jsonb_array_elements(NEW.data->'lines') LOOP
+          IF l->>'conversion' IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.reconciliation_evidence e WHERE e.id=(l->'conversion'->>'evidenceId')::uuid AND e.source='conversion_confirmation') THEN RAISE EXCEPTION 'invalid conversion evidence'; END IF;
           IF l->>'kind'='unclassified' THEN
-            IF l->>'sourceId' IS NOT NULL OR l->>'businessId' IS NOT NULL OR l->>'paymentId' IS NOT NULL OR l->>'original' IS NOT NULL THEN RAISE EXCEPTION 'invalid unclassified binding'; END IF;
+            IF l->>'sourceId' IS NOT NULL OR l->>'businessId' IS NOT NULL OR l->>'paymentId' IS NOT NULL OR l->>'original' IS NOT NULL OR l->>'nativeInvoiceId' IS NOT NULL OR l->>'orderId' IS NOT NULL THEN RAISE EXCEPTION 'invalid unclassified binding'; END IF;
           ELSE
             IF l->>'kind'='capture' THEN SELECT * INTO p FROM public.subscription_period s WHERE s.id=(l->>'sourceId')::uuid; effect:=NULL;
             ELSE
@@ -71,7 +75,7 @@ export async function secureReconciliationRecords(pool: Pool | PoolClient) {
             IF NOT coalesce(p.id IS NOT NULL AND p.business_id::text=l->>'businessId' AND p.provider=NEW.data->>'provider' AND p.account=NEW.data->>'account'
               AND p.snapshot->'provider'->>'mode'=NEW.data->>'mode' AND p.payment_id=l->>'paymentId' AND p.charge->'charge'->>'orderId'=l->>'orderId'
               AND (p.charge->'charge'->>'invoiceId') IS NOT DISTINCT FROM l->>'nativeInvoiceId' AND p.charge->>'status'='confirmed'
-              AND l->'original'->>'currency'=p.charge->>'currency' AND l->'original'->>'minor'=CASE WHEN l->>'kind'='capture' THEN p.snapshot->'tax'->'totals'->>'totalMinor' ELSE effect->>'actualMinor' END
+              AND l->'original'->>'precision'='2' AND l->'original'->>'currency'=p.charge->>'currency' AND l->'original'->>'minor'=CASE WHEN l->>'kind'='capture' THEN p.snapshot->'tax'->'totals'->>'totalMinor' ELSE effect->>'actualMinor' END
               AND l->>'nativeId'=CASE WHEN l->>'kind'='capture' THEN p.payment_id ELSE effect->>'nativeId' END,false) THEN RAISE EXCEPTION 'invalid original source'; END IF;
           END IF;
         END LOOP;

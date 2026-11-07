@@ -38,6 +38,15 @@ function converted(
 ) {
   if (!line.original || line.kind === "unclassified")
     return { amount: null, reason: "unclassified_provider_movement" };
+  if (
+    line.kind === "capture" &&
+    source?.baseCurrency &&
+    source.baseCurrency !== currency
+  )
+    return {
+      amount: null,
+      reason: "settlement_currency_conflicts_with_native_base",
+    };
   let actual: string | null = null;
   if (line.original.currency === currency) actual = line.original.minor;
   else if (line.kind === "capture" && source?.baseCurrency === currency)
@@ -200,18 +209,46 @@ export function reconciliationReport(
               tax: sum(lineFees.map((f) => f!.tax)),
             }
           : null;
-    const knownNativeFees = movements
-      .filter(
-        (l) =>
-          l.kind === "capture" && l.source?.feeCurrency === data.money.currency,
-      )
-      .flatMap((l) => (l.source?.feeMinor ? [l.source.feeMinor] : []));
+    const knownNativeCaptures = movements.filter(
+      (l) =>
+        l.kind === "capture" && l.source?.feeCurrency === data.money.currency,
+    );
+    const knownNativeFees = knownNativeCaptures.flatMap((l) =>
+      l.source?.feeMinor ? [l.source.feeMinor] : [],
+    );
+    const knownNativeFeeTaxes = knownNativeCaptures.flatMap((l) =>
+      l.source?.feeTaxMinor ? [l.source.feeTaxMinor] : [],
+    );
+    const knownNativeCosts = knownNativeCaptures.flatMap((l) => {
+      const components = fees(
+        l.source?.feeMinor ?? null,
+        l.source?.feeTaxMinor ?? null,
+        "inclusive",
+      );
+      return components ? [components.cost] : [];
+    });
     if (
       data.fees.coverage === "aggregate" &&
       aggregate &&
       BigInt(aggregate.total) < BigInt(sum(knownNativeFees))
     ) {
       reasons.push("aggregate_omits_native_processing_fees");
+      fee = null;
+    }
+    if (
+      data.fees.coverage === "aggregate" &&
+      aggregate &&
+      BigInt(aggregate.tax) < BigInt(sum(knownNativeFeeTaxes))
+    ) {
+      reasons.push("aggregate_omits_native_fee_tax");
+      fee = null;
+    }
+    if (
+      data.fees.coverage === "aggregate" &&
+      aggregate &&
+      BigInt(aggregate.cost) < BigInt(sum(knownNativeCosts))
+    ) {
+      reasons.push("aggregate_omits_native_processing_cost");
       fee = null;
     }
     if (!fee) reasons.push("actual_fee_unavailable");

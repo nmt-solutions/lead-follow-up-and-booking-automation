@@ -629,6 +629,43 @@ describe("Subscription money reconciliation through the public application", () 
     expect(mismatch.expectedNetMinor).toBeNull();
     expect(mismatch.reasons).toContain("converted_amount_mismatch");
   });
+  it("does not let same-currency statement assertions bypass a retained native settlement conversion", async () => {
+    const f = await purchase("US"),
+      app = compose(),
+      e = await evidence(app, f.operator),
+      input = settlement(f, e.id);
+    await app.record(f.operator, {
+      ...input,
+      money: { currency: "USD", precision: 2, minor: "2750" },
+      creditMinor: "2750",
+      fees: {
+        coverage: "aggregate",
+        amountMinor: "0",
+        taxMinor: "0",
+        presentation: "inclusive",
+      },
+      lines: [
+        {
+          ...input.lines[0],
+          original: { currency: "USD", precision: 2, minor: "2750" },
+          convertedMinor: "2750",
+          creditMinor: "2750",
+          feeMinor: "0",
+          feeTaxMinor: "0",
+        },
+      ],
+    });
+    const view = await app.workspace(f.operator, cohort);
+    expect(view.sources[0]).toMatchObject({
+      currency: "USD",
+      baseAmountMinor: "240000",
+      baseCurrency: "INR",
+    });
+    expect(view.settlements[0].reasons).toContain(
+      "settlement_currency_conflicts_with_native_base",
+    );
+    expect(view.settlements[0].expectedNetMinor).toBeNull();
+  });
   it("rejects spoofed original Business/account/mode/payment/order/invoice identities and pending outcomes while retaining unknown movements for review", async () => {
     const f = await purchase(),
       app = compose(),
@@ -768,6 +805,54 @@ describe("Subscription money reconciliation through the public application", () 
     expect(row.reasons).toContain("aggregate_omits_native_processing_fees");
     expect(row.processingCostMinor).toBeNull();
   });
+  it.each([
+    {
+      component: "fee tax",
+      tax: "0",
+      reason: "aggregate_omits_native_fee_tax",
+    },
+    {
+      component: "cost",
+      tax: "10",
+      reason: "aggregate_omits_native_processing_cost",
+    },
+  ])(
+    "does not let aggregate coverage erase known native processing $component when included line fees are unavailable",
+    async ({ tax, reason }) => {
+      const f = await purchase(),
+        app = compose(),
+        e = await evidence(app, f.operator),
+        input = settlement(f, e.id);
+      await app.record(f.operator, {
+        ...input,
+        fees: {
+          coverage: "aggregate",
+          amountMinor: "25",
+          taxMinor: tax,
+          presentation: "inclusive",
+        },
+        lines: [
+          {
+            ...input.lines[0],
+            feeMinor: null,
+            feeTaxMinor: null,
+            feePresentation: "unavailable",
+          },
+        ],
+      });
+      const report = await app.workspace(f.operator, cohort),
+        row = report.settlements[0];
+      expect(report.sources[0]).toMatchObject({
+        feeMinor: "25",
+        feeTaxMinor: "3",
+        feeCurrency: "INR",
+      });
+      expect(row.reasons).toContain(reason);
+      expect(row.expectedNetMinor).toBeNull();
+      expect(row.processingCostMinor).toBeNull();
+      expect(row.feeTaxMinor).toBeNull();
+    },
+  );
   it("requires current platform authority after persistence I/O and isolates private expiring evidence from every other capability", async () => {
     const f = await purchase(),
       app = compose(),
@@ -1210,6 +1295,142 @@ describe("Subscription money reconciliation through the public application", () 
         ).toEqual([]);
         await client.query("rollback");
       } finally {
+        client.release();
+      }
+    });
+    it("requires retained conversion evidence and canonical money precision at the restricted database write boundary", async () => {
+      if (saved.data.kind !== "settlement")
+        throw Error("Settlement fixture expected");
+      const data = saved.data,
+        line = data.lines[0];
+      if (!line.original) throw Error("Original money fixture expected");
+      const conversion = {
+        numerator: "1",
+        denominator: "1",
+        units: "target_minor_per_source_minor",
+        effectiveAt: data.observedAt,
+        rounding: "half_up",
+        reference: "synthetic conversion",
+      };
+      const cases = [
+        { ...data, evidenceId: null },
+        { ...data, lines: [] },
+        {
+          ...data,
+          lines: [
+            {
+              ...line,
+              conversion: { ...conversion, evidenceId: randomUUID() },
+            },
+          ],
+        },
+        {
+          ...data,
+          lines: [{ ...line, conversion: { ...conversion, evidenceId: e.id } }],
+        },
+        {
+          ...data,
+          lines: [{ ...line, original: { ...line.original, precision: 3 } }],
+        },
+        { ...data, money: { ...data.money, precision: 3 } },
+        { ...data, money: { ...data.money, currency: "EUR" } },
+        {
+          ...data,
+          lines: [
+            {
+              ...line,
+              kind: "unclassified",
+              sourceId: null,
+              businessId: null,
+              paymentId: null,
+              original: null,
+              nativeInvoiceId: "forged-invoice",
+              orderId: "forged-order",
+            },
+          ],
+        },
+      ];
+      const actor = await h.authenticate(f.operator),
+        client = await h.runtime.connect();
+      try {
+        for (const sample of cases) {
+          const requestKey = randomUUID();
+          await client.query("begin");
+          try {
+            await client.query("select set_config('app.actor_id',$1,true)", [
+              actor.userId,
+            ]);
+            await expect(
+              client.query(
+                "insert into reconciliation_record(id,request_key,actor_id,evidence_id,identity,data) values($1,$2,$3,$4,'untrusted',$5)",
+                [
+                  randomUUID(),
+                  requestKey,
+                  actor.userId,
+                  e.id,
+                  { ...sample, requestKey },
+                ],
+              ),
+            ).rejects.toThrow();
+          } finally {
+            await client.query("rollback");
+          }
+        }
+      } finally {
+        client.release();
+      }
+    });
+    it("requires current reconciliation authority after a direct insert waits for serialization", async () => {
+      const actor = await h.authenticate(f.operator),
+        client = await h.runtime.connect(),
+        blocker = await h.admin.connect();
+      try {
+        await blocker.query("begin");
+        await blocker.query(
+          "select pg_advisory_xact_lock(hashtextextended('reconciliation',0))",
+        );
+        await client.query("begin");
+        await client.query("select set_config('app.actor_id',$1,true)", [
+          actor.userId,
+        ]);
+        const pid = (await client.query("select pg_backend_pid() as pid"))
+            .rows[0].pid,
+          requestKey = randomUUID();
+        const outcome = client
+          .query(
+            "insert into reconciliation_record(id,request_key,actor_id,evidence_id,identity,data) values($1,$2,$3,$4,'untrusted',$5)",
+            [
+              randomUUID(),
+              requestKey,
+              actor.userId,
+              e.id,
+              { ...saved.data, requestKey },
+            ],
+          )
+          .then(
+            () => "accepted",
+            () => "denied",
+          );
+        let waiting = false;
+        for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+          waiting = (
+            await h.admin.query(
+              "select cardinality(pg_blocking_pids($1))>0 as waiting",
+              [pid],
+            )
+          ).rows[0].waiting;
+        }
+        expect(waiting).toBe(true);
+        await h.admin.query(
+          "update platform_operator set reconciliation=false where user_id=$1",
+          [actor.userId],
+        );
+        await blocker.query("commit");
+        expect(await outcome).toBe("denied");
+      } finally {
+        await blocker.query("rollback");
+        await client.query("rollback");
+        blocker.release();
         client.release();
       }
     });
