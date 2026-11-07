@@ -9,13 +9,15 @@ import { financialExportFixture } from "./support/governance-financial";
 import { createMemoryStorage } from "./support/storage";
 import { recoveryTaxFilingFixture } from "./support/recovery-tax-filings";
 import { runtimeDatabase } from "../src/db/runtime";
+import { recoveryCapacityFixture } from "./support/recovery-capacity";
 
 describe("Populated managed recovery schema reapplication", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
     f: Awaited<ReturnType<typeof recoveryFixture>>,
     owner: Headers,
     operationId: string,
-    filings: Awaited<ReturnType<typeof recoveryTaxFilingFixture>>;
+    filings: Awaited<ReturnType<typeof recoveryTaxFilingFixture>>,
+    capacity: Awaited<ReturnType<typeof recoveryCapacityFixture>>;
   beforeAll(async () => {
     h = await createHarness();
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
@@ -33,6 +35,12 @@ describe("Populated managed recovery schema reapplication", () => {
       storage,
       "fixture:recovery-schema-tax-files",
       true,
+      undefined,
+      async (fixture) => {
+        h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
+        capacity = await recoveryCapacityFixture(h, fixture);
+        h.clock.set("2026-11-05T09:00:00Z");
+      },
     );
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
     filings = await recoveryTaxFilingFixture(h, financial);
@@ -148,8 +156,6 @@ describe("Populated managed recovery schema reapplication", () => {
       await f.advance(operationId, 1);
       f.controls.schemaRunner = () =>
         f.target.reapplySchema({ allowQuarantined: true });
-    });
-    it("applies the reviewed full schema through real Drizzle to the recovered backing store, then verifies actual restricted target records", async () => {
       expect(
         (
           await f.target.admin.query(
@@ -158,11 +164,14 @@ describe("Populated managed recovery schema reapplication", () => {
         ).rows[0].count,
       ).toBe(0);
       await f.advance(operationId, 2);
+    });
+    it("applies the reviewed full schema through real Drizzle to the recovered backing store, then verifies actual restricted target records", async () => {
       await verifyRuntimeRole(f.target.runtime, { allowQuarantined: true });
       const actual = await f
         .application()
         .inspect(owner, { businessId: f.plan.businessId, operationId });
       expect(actual.business.name).toBe("Preserved recovery journal");
+      await capacity.assertRestored(f.target, actual);
       expect(
         (
           await f.target.admin.query(

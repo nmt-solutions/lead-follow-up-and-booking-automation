@@ -27,6 +27,7 @@ import { createFileApplication } from "../src/application/files";
 import { createFileRepository } from "../src/db/file-repository";
 import { recoveryReconciliationFixture } from "./support/recovery-reconciliation";
 import { recoveryTaxFilingFixture } from "./support/recovery-tax-filings";
+import { recoveryCapacityFixture } from "./support/recovery-capacity";
 
 describe("Populated native PostgreSQL infrastructure drill", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
@@ -36,7 +37,8 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
     owner: Headers,
     unretainedId: string,
     reconciliation: Awaited<ReturnType<typeof recoveryReconciliationFixture>>,
-    filings: Awaited<ReturnType<typeof recoveryTaxFilingFixture>>;
+    filings: Awaited<ReturnType<typeof recoveryTaxFilingFixture>>,
+    capacity: Awaited<ReturnType<typeof recoveryCapacityFixture>>;
   beforeAll(async () => {
     h = await createHarness();
   });
@@ -64,6 +66,9 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
           fixture.business.id,
           research.request(),
         );
+        h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
+        capacity = await recoveryCapacityFixture(h, fixture);
+        h.clock.set("2026-11-05T09:00:00Z");
       },
     );
     const receiptBody = new TextEncoder().encode(
@@ -192,6 +197,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       id: f.business.id,
       name: f.business.name,
     });
+    const capacityEvidence = await capacity.assertRestored(r.target, recovered);
     expect(recovered.records).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -469,6 +475,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
               selectedBusinessProjectionExcluded: true,
               newFilingOrPaymentEffects: 0,
             },
+            capacity: capacityEvidence,
             productionVerified: false,
           },
           null,
