@@ -328,7 +328,7 @@ export function ReachChangeManager({
               {s.renewalScope.automation.quantity}{" "}
               {s.renewalScope.automation.unit}.{" "}
               {s.path === "replacement_mandate"
-                ? `The old renewal stops before a new mandate is created for ${time(s.renewalAt)}; authentication alone does not pay for expanded reach.`
+                ? `The old renewal stops before a new mandate with ${native?.totalCount ?? "the reviewed number of"} monthly collections is created for ${time(s.renewalAt)}; authentication alone does not pay for expanded reach.`
                 : `The reviewed international card update retains ${native?.remainingCount ?? "the reviewed remaining"} collection cycles.`}
             </p>
             <p className="text-sm">
@@ -376,7 +376,11 @@ export function ReachChangeManager({
                         s.target.tax.totals!.totalMinor,
                         s.target.quote.currency,
                       )}{" "}
-                      for each reviewed monthly renewal.{" "}
+                      for each of{" "}
+                      {s.path === "replacement_mandate"
+                        ? (native?.totalCount ?? "the reviewed")
+                        : (native?.remainingCount ?? "the reviewed")}{" "}
+                      remaining monthly collections.{" "}
                       {s.path === "replacement_mandate"
                         ? "The existing renewal is stopped before creating a replacement mandate; this may leave a payment gap until you complete authentication."
                         : "The saved native plan change may charge the approved prorated difference."}{" "}
