@@ -39,6 +39,7 @@ export function privilegedRoles(database: Database, userId: string) {
       operator: Boolean(
         operator?.tax ||
         operator?.reconciliation ||
+        operator?.refunds ||
         operator?.ai ||
         operator?.discovery ||
         operator?.emailPolicy ||

@@ -36,6 +36,11 @@ import type {
   MicrosoftIdentity,
 } from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
+import type {
+  AdjustmentIntent,
+  AdjustmentObservation,
+  FinancialReceipt,
+} from "../models/financial-adjustments";
 import type { CampaignSnapshot } from "../models/campaigns";
 import type {
   SequencePolicy,
@@ -692,6 +697,7 @@ export const subscriptionQuote = pgTable(
   ],
 ).enableRLS();
 
+const refundOperator = sql`exists (select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.refunds)`;
 const paymentOperator = sql`exists (select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.reconciliation)`;
 const paymentOwner = sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.subscription_payment'::regclass)`;
 function paymentHistoryPolicies(name: string, action: ReturnType<typeof sql>) {
@@ -701,7 +707,7 @@ function paymentHistoryPolicies(name: string, action: ReturnType<typeof sql>) {
     pgPolicy(`${name}_read`, {
       for: "select",
       to: appRuntime,
-      using: sql`(${paymentOperator}) ${name === "subscription_period" ? sql`or exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.documents)` : sql``} or ((${scope}) and (public.current_business_role() in ('owner','admin') or (${worker})))`,
+      using: sql`(${paymentOperator}) ${name === "subscription_period" ? sql`or exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and (o.documents or o.refunds))` : sql``} or ((${scope}) and (public.current_business_role() in ('owner','admin') or (${worker})))`,
     }),
     pgPolicy(`${name}_insert`, {
       for: "insert",
@@ -1123,6 +1129,7 @@ export const platformOperator = pgTable(
       .references(() => user.id),
     tax: boolean("tax").notNull().default(false),
     reconciliation: boolean("reconciliation").notNull().default(false),
+    refunds: boolean("refunds").notNull().default(false),
     ai: boolean("ai").notNull().default(false),
     discovery: boolean("discovery").notNull().default(false),
     emailPolicy: boolean("email_policy").notNull().default(false),
@@ -1750,7 +1757,7 @@ export const sellerDocument = pgTable(
     pgPolicy("seller_document_read", {
       for: "select",
       to: appRuntime,
-      using: sql`(${documentScope}) or (${documentWorker})`,
+      using: sql`(${documentScope}) or (${documentWorker}) or ((${refundOperator}) and business_id=nullif(current_setting('app.business_id',true),'')::uuid)`,
     }),
     pgPolicy("seller_document_insert", {
       for: "insert",
@@ -5399,3 +5406,158 @@ export const emailSequenceScopeForeignKeys = [
     }),
   ),
 ];
+
+// Financial intents and native facts are append-only. Recovery tokens grant reads/events,
+// never creation of another refund or seller document.
+const financialWorker = sql`public.financial_worker_authorized(case_id,business_id)`;
+export const financialCase = pgTable(
+  "financial_case",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    businessId: uuid("business_id").notNull(),
+    periodId: uuid("period_id").notNull(),
+    invoiceId: uuid("invoice_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    recoveryKey: uuid("recovery_key").notNull(),
+    kind: text("kind").$type<"refund" | "dispute">().notNull(),
+    nativeDisputeId: text("native_dispute_id"),
+    intent: jsonb("intent").$type<AdjustmentIntent>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique("financial_case_scope").on(t.id, t.businessId),
+    uniqueIndex("financial_case_request").on(t.businessId, t.requestKey),
+    uniqueIndex("financial_case_dispute").on(
+      t.nativeDisputeId,
+      sql`(${t.intent}->'period'->'snapshot'->'provider'->>'account')`,
+    ),
+    check(
+      "financial_case_binding",
+      sql`${t.intent}->'invoice'->>'id'=${t.invoiceId}::text and ${t.intent}->'period'->>'id'=${t.periodId}::text and ${t.intent}->'period'->>'businessId'=${t.businessId}::text and ${t.intent}->'input'->>'kind'=${t.kind}
+        and ${t.intent}->>'key'=${t.id}::text and ${t.intent}->'input'->>'invoiceId'=${t.invoiceId}::text and ${t.intent}->'input'->>'requestKey'=${t.requestKey}::text
+        and ${t.intent}->'invoice'->>'periodId'=${t.periodId}::text and ${t.intent}->'invoice'->>'businessId'=${t.businessId}::text
+        and ${t.intent}->'invoice'->'snapshot'->'source'->>'paymentId'=${t.intent}->'period'->>'paymentId'
+        and ((${t.kind}='refund' and ${t.nativeDisputeId} is null) or (${t.kind}='dispute' and ${t.nativeDisputeId}=${t.intent}->'input'->>'disputeId'))`,
+    ),
+    pgPolicy("financial_case_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${refundOperator}) or public.financial_worker_authorized(id,business_id)`,
+    }),
+    pgPolicy("financial_case_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${refundOperator}) and business_id=nullif(current_setting('app.business_id',true),'')::uuid and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy("financial_case_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const financialCaseEvent = pgTable(
+  "financial_case_event",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    caseId: uuid("case_id").notNull(),
+    businessId: uuid("business_id").notNull(),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    detail: jsonb("detail")
+      .$type<{
+        observation?: AdjustmentObservation;
+        access?: "preserve" | "block_period";
+        documentId?: string;
+        skip?: number;
+        [key: string]: unknown;
+      }>()
+      .notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("financial_case_event_once").on(t.caseId, t.key),
+    check(
+      "financial_case_event_access",
+      sql`not (${t.detail} ? 'access') or ${t.detail}->>'access' in ('preserve','block_period')`,
+    ),
+    pgPolicy("financial_case_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${refundOperator}) or (${financialWorker})`,
+    }),
+    pgPolicy("financial_case_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and (((${refundOperator}) and actor_id=current_setting('app.actor_id',true)) or (${financialWorker}))`,
+    }),
+    pgPolicy("financial_case_event_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const financialCaseScopeForeignKeys = [
+  new ForeignKey(
+    financialCase,
+    foreignKey({
+      name: "financial_case_period_scope",
+      columns: [financialCase.periodId, financialCase.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+  new ForeignKey(
+    financialCase,
+    foreignKey({
+      name: "financial_case_invoice_scope",
+      columns: [financialCase.invoiceId, financialCase.businessId],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+  new ForeignKey(
+    financialCaseEvent,
+    foreignKey({
+      name: "financial_case_event_scope",
+      columns: [financialCaseEvent.caseId, financialCaseEvent.businessId],
+      foreignColumns: [financialCase.id, financialCase.businessId],
+    }),
+  ),
+];
+export const financialReceipt = pgTable(
+  "financial_receipt",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    mode: text("mode").notNull(),
+    eventId: text("event_id").notNull(),
+    receipt: jsonb("receipt").$type<FinancialReceipt>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("financial_receipt_once").on(t.account, t.mode, t.eventId),
+    check(
+      "financial_receipt_binding",
+      sql`${t.receipt}->>'eventId'=${t.eventId} and ${t.receipt}->>'account'=${t.account} and ${t.receipt}->>'mode'=${t.mode}`,
+    ),
+    pgPolicy("financial_receipt_read", {
+      for: "select",
+      to: appRuntime,
+      using: refundOperator,
+    }),
+    pgPolicy("financial_receipt_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
