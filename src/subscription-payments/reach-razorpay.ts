@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { subscriptionCheckoutUrl } from "./razorpay-checkout";
 import { isDeepStrictEqual } from "node:util";
 import { ApplicationError } from "../models/application-error";
 import {
@@ -380,7 +381,8 @@ export function createRazorpayReachGateway(d: {
       mandateReady: false,
       updated: false,
       planId: plan.planId,
-      totalCount: sub.total_count,
+      totalCount:
+        s.path === "replacement_mandate" ? plan.totalCount : sub.total_count,
       remainingCount: sub.remaining_count ?? 0,
       deltaRefundedMinor: "0",
       customerId: s.original.charge!.customerId!,
@@ -474,16 +476,8 @@ export function createRazorpayReachGateway(d: {
             replacement.customer_id !== native.customerId)
         )
           throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
-        const url = new URL(replacement.short_url);
-        if (
-          url.origin !== "https://rzp.io" ||
-          !/^\/i\/[A-Za-z0-9]+$/.test(url.pathname) ||
-          url.search ||
-          url.hash
-        )
-          throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
         native.subscriptionId = replacement.id;
-        native.checkoutUrl = url.href;
+        native.checkoutUrl = subscriptionCheckoutUrl(replacement.short_url);
         if (
           ["authenticated", "active"].includes(replacement.status) &&
           replacement.customer_id === native.customerId &&

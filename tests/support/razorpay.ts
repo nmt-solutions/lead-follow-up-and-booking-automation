@@ -71,6 +71,7 @@ export function razorpayFixture(clock: Clock) {
     requests,
     loseCreation: false,
     loseCancellation: false,
+    shortUrl: "https://rzp.io/i/fixture1",
     charge(
       paymentId: string,
       start: string,
@@ -141,7 +142,10 @@ export function razorpayFixture(clock: Clock) {
         RAZORPAY_ACCOUNT_REVIEW: JSON.stringify(review),
       },
       clock,
-      fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+      fetch: (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => {
         const url = new URL(
           typeof input === "string" || input instanceof URL ? input : input.url,
         );
@@ -178,7 +182,7 @@ export function razorpayFixture(clock: Clock) {
             id: "sub_fixture1",
             entity: "subscription",
             customer_id: null,
-            short_url: "https://rzp.io/i/fixture1",
+            short_url: fixture.shortUrl,
             status: "created",
             created_at: Math.floor(clock.now().getTime() / 1000),
           };

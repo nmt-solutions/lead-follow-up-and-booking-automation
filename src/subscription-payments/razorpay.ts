@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
+import { subscriptionCheckoutUrl } from "./razorpay-checkout";
 import type {
   PaymentGateway,
   PaymentSnapshot,
@@ -204,22 +205,12 @@ export function createRazorpayGateway(d: {
     return mapping;
   }
   function checkout(sub: z.infer<typeof subscriptionSchema>) {
-    const url = new URL(sub.short_url);
-    if (
-      url.origin !== "https://rzp.io" ||
-      !/^\/i\/[A-Za-z0-9]+$/.test(url.pathname) ||
-      url.search ||
-      url.hash ||
-      url.username ||
-      url.password
-    )
-      throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
     return {
       customerId: sub.customer_id ?? null,
       checkoutId: sub.id,
       subscriptionId: sub.id,
       planId: sub.plan_id,
-      url: url.href,
+      url: subscriptionCheckoutUrl(sub.short_url),
     };
   }
   function bound(

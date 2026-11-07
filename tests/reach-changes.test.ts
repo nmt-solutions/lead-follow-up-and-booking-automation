@@ -59,6 +59,7 @@ describe("Approved reach changes at the public application seam", () => {
     reduction = false,
     dates?: { start: string; end: string; at: string },
     capacity = false,
+    nativeOptions: { targetCount?: number; replacementUrl?: string } = {},
   ) {
     const f = await subscriptionFixture(h, { country });
     await h.admin.query(
@@ -83,7 +84,7 @@ describe("Approved reach changes at the public application seam", () => {
       reservedCapacityId: capacity ? "reserved" : null,
       currency: country === "US" ? "USD" : "INR",
       planId: country === "US" ? "plan_expandedUSD" : "plan_expandedINR",
-      totalCount: 12,
+      totalCount: nativeOptions.targetCount ?? 12,
     });
     native.review.plans.push({
       offerId: "further",
@@ -129,7 +130,9 @@ describe("Approved reach changes at the public application seam", () => {
                   : capacity
                     ? 6600
                     : 5500
-                : 22011,
+                : reduction
+                  ? 5500
+                  : 22011,
             currency: country === "US" ? "USD" : "INR",
           },
         });
@@ -153,7 +156,8 @@ describe("Approved reach changes at the public application seam", () => {
           id: "sub_replacement",
           customer_id: null,
           status: "created",
-          short_url: "https://rzp.io/i/replacement",
+          short_url:
+            nativeOptions.replacementUrl ?? "https://rzp.io/i/replacement",
           created_at: Math.floor(h.clock.now().getTime() / 1000),
         };
         native.subscriptions.set(sub.id, sub);
@@ -285,7 +289,7 @@ describe("Approved reach changes at the public application seam", () => {
             unit: "provider calls",
           },
           prices: {
-            INR: { monthlyMinor: 20010, pilotMinor: null },
+            INR: { monthlyMinor: reduction ? 5000 : 20010, pilotMinor: null },
             USD: { monthlyMinor: reduction ? 1250 : 5000, pilotMinor: null },
           },
           pilot: null,
@@ -1098,6 +1102,252 @@ describe("Approved reach changes at the public application seam", () => {
     const renewed = await f.payments.workspace(owner, f.business.id);
     expect(renewed.access.period?.paymentId).toBe("pay_replacement");
     expect(renewed.allowances?.discovery.included).toBe(200);
+  });
+  it.each([
+    ["approved boundary", 1796461200, true],
+    ["unapproved early end", 1796461199, false],
+  ] as const)(
+    "applies a captured domestic reduction renewal only for its own old stop at the %s",
+    async (_reason, endedAt, eligible) => {
+      const f = await setup("IN", true);
+      f.gateway.lifecyclePolicy = {
+        id: "synthetic-lifecycle-policy",
+        version: 1,
+        mode: "test",
+        reviewedBy: "deployment-operator",
+        checkedAt: "2026-11-01T00:00:00.000Z",
+        effectiveFrom: "2026-11-01T00:00:00.000Z",
+        effectiveUntil: "2028-01-01T00:00:00.000Z",
+        evidence: ["fixture:reviewed-customer-terms"],
+        graceSeconds: 86400,
+        graceAccess: "remaining_allowance",
+        cancellationTiming: "cycle_end",
+        cancellationAccess: "paid_through",
+        preserveRecords: true,
+      };
+      const preview = await f.changes.preview(f.owner, f.business.id, {
+        periodId: f.original.id,
+        quoteId: f.target.id,
+        requestKey: randomUUID(),
+      });
+      expect(preview.snapshot.direction).toBe("reduction");
+      await f.changes.approve(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+        accept: true,
+        reviewHash: preview.reviewHash,
+      });
+      await f.changes.execute(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+      });
+      await f.authenticateReplacement();
+      await f.changes.recover();
+      expect(
+        (await f.payments.workspace(f.owner, f.business.id)).allowances
+          ?.discovery.included,
+      ).toBe(100);
+      h.clock.set("2026-12-05T09:00:00.000Z");
+      const owner = await h.signIn("tax-owner@example.com");
+      Object.assign(f.native.subscriptions.get("sub_fixture1")!, {
+        status: "cancelled",
+        ended_at: endedAt,
+      });
+      const stopped = await f.payments.refresh(owner, f.business.id, {
+        actionId: f.action.id,
+      });
+      expect(stopped.lifecycle?.state).toBe("cancelled");
+      Object.assign(f.native.subscriptions.get("sub_replacement")!, {
+        status: "active",
+        current_start: 1796461200,
+        current_end: 1799139600,
+      });
+      f.native.invoices.push({
+        id: "inv_replacement",
+        subscription_id: "sub_replacement",
+        customer_id: "cust_fixture",
+        payment_id: "pay_replacement",
+        order_id: "order_replacement",
+        status: "paid",
+        currency: "INR",
+        amount: 5500,
+        amount_paid: 5500,
+        amount_due: 0,
+        billing_start: 1796461200,
+        billing_end: 1799139600,
+        paid_at: 1796461200,
+        line_items: [
+          { type: "plan", quantity: 1, amount: 5500, currency: "INR" },
+        ],
+      });
+      f.native.payments.set("pay_replacement", {
+        id: "pay_replacement",
+        customer_id: "cust_fixture",
+        invoice_id: "inv_replacement",
+        order_id: "order_replacement",
+        status: "captured",
+        captured: true,
+        method: "card",
+        international: false,
+        amount: 5500,
+        currency: "INR",
+        amount_refunded: 0,
+      });
+      await f.payments.refresh(owner, f.business.id, {
+        actionId: preview.snapshot.replacementActionId,
+      });
+      await f.changes.recover();
+      const renewed = await f.payments.workspace(owner, f.business.id);
+      expect(renewed.access.period?.paymentId).toBe(
+        eligible ? "pay_replacement" : undefined,
+      );
+      expect(renewed.allowances?.discovery.included).toBe(
+        eligible ? 50 : undefined,
+      );
+      expect(
+        renewed.periods.some((p) => p.paymentId === "pay_replacement"),
+      ).toBe(true);
+      expect(
+        renewed.actions.find((a) => a.id === f.action.id)?.lifecycle?.state,
+      ).toBe("cancelled");
+      expect(renewed.periods.find((p) => p.id === f.original.id)).toEqual(
+        f.original,
+      );
+      expect(f.effects.filter((e) => e.path === "/v1/orders")).toHaveLength(0);
+      expect(
+        f.effects.filter((e) => e.path === "/v1/subscriptions"),
+      ).toHaveLength(1);
+    },
+  );
+  it("accepts the documented replacement subscription link without treating its URL or authentication as payment", async () => {
+    const f = await setup("IN", false, undefined, false, {
+      replacementUrl: "https://rzp.io/rzp/Dqdqx3h",
+    });
+    const preview = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: preview.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: preview.reviewHash,
+    });
+    const result = await f.changes.execute(f.owner, f.business.id, {
+      changeId: preview.id,
+      requestKey: randomUUID(),
+    });
+    expect(
+      result.events.filter((e) => e.fact.native).at(-1)?.fact.native
+        ?.subscriptionId,
+    ).toBe("sub_replacement");
+    expect(
+      await f.changes.checkout(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+        purpose: "mandate",
+      }),
+    ).toMatchObject({
+      kind: "mandate",
+      subscription_id: "sub_replacement",
+      customer_id: "cust_fixture",
+    });
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).allowances?.discovery
+        .included,
+    ).toBe(100);
+    await f.authenticateReplacement();
+    await f.changes.recover();
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).allowances?.discovery
+        .included,
+    ).toBe(100);
+    expect(
+      f.effects.filter((e) => e.path === "/v1/subscriptions"),
+    ).toHaveLength(1);
+  });
+  it.each([
+    "https://evil.example/i/replacement",
+    "https://rzp.io.evil.example/i/replacement",
+    "https://user:password@rzp.io/i/replacement",
+    "https://rzp.io/i/replacement?redirect=evil",
+    "https://rzp.io/i/replacement#fragment",
+    "https://rzp.io/unreviewed/replacement",
+  ])(
+    "rejects an unsafe replacement subscription link %s without duplicate mandate creation",
+    async (replacementUrl) => {
+      const f = await setup("IN", false, undefined, false, { replacementUrl });
+      const preview = await f.changes.preview(f.owner, f.business.id, {
+        periodId: f.original.id,
+        quoteId: f.target.id,
+        requestKey: randomUUID(),
+      });
+      await f.changes.approve(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+        accept: true,
+        reviewHash: preview.reviewHash,
+      });
+      await f.changes.execute(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+      });
+      await expect(
+        f.changes.checkout(f.owner, f.business.id, {
+          changeId: preview.id,
+          requestKey: randomUUID(),
+          purpose: "mandate",
+        }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      await f.changes.execute(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+      });
+      expect(
+        f.effects.filter((e) => e.path === "/v1/subscriptions"),
+      ).toHaveLength(1);
+      expect(
+        (await f.payments.workspace(f.owner, f.business.id)).allowances
+          ?.discovery.included,
+      ).toBe(100);
+    },
+  );
+  it("previews and approves the replacement target collection count rather than the old subscription duration", async () => {
+    const f = await setup("IN", false, undefined, false, { targetCount: 6 });
+    const preview = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    expect(preview.events.at(-1)?.fact.native).toMatchObject({
+      totalCount: 6,
+      remainingCount: 11,
+    });
+    const approved = await f.changes.approve(f.owner, f.business.id, {
+      changeId: preview.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: preview.reviewHash,
+    });
+    expect(
+      approved.events.find((e) => e.fact.kind === "approved")?.fact.native
+        ?.totalCount,
+    ).toBe(6);
+    await f.changes.execute(f.owner, f.business.id, {
+      changeId: preview.id,
+      requestKey: randomUUID(),
+    });
+    expect(
+      f.effects.find((e) => e.path === "/v1/subscriptions")?.body,
+    ).toMatchObject({
+      total_count: 6,
+      start_at: 1796461200,
+    });
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).allowances?.discovery
+        .included,
+    ).toBe(100);
   });
   it("binds approval to the exact native duration and frozen review; a changed duration cannot issue the native mutation", async () => {
     const f = await setup();

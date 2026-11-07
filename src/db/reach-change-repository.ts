@@ -308,10 +308,24 @@ export function createReachChangeRepository(database: Database) {
         throw new ApplicationError("SETUP_REQUIRED");
     }
     const action = paymentActionSchema.parse(camel(raw.action));
+    const expectedReplacementStop =
+      renewal &&
+      row.snapshot.path === "replacement_mandate" &&
+      action.lifecycle?.state === "cancelled" &&
+      action.lifecycle.provider?.status === "cancelled" &&
+      action.lifecycle.provider.subscriptionId ===
+        row.snapshot.action.checkout?.subscriptionId &&
+      action.lifecycle.provider.endedAt === row.snapshot.renewalAt &&
+      (!action.lifecycle.cancellation ||
+        (action.lifecycle.cancellation.actorId === "provider" &&
+          action.lifecycle.cancellation.effectiveEnd ===
+            row.snapshot.renewalAt)) &&
+      (await view(tx, row)).events.some((e) => e.fact.native?.oldStopped);
     if (
       !action ||
-      action.lifecycle?.cancellation ||
-      action.lifecycle?.state === "cancelled" ||
+      ((action.lifecycle?.cancellation ||
+        action.lifecycle?.state === "cancelled") &&
+        !expectedReplacementStop) ||
       action.state !== "confirmed"
     )
       throw new ApplicationError("CONFLICT");
