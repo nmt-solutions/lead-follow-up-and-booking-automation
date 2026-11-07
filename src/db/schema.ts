@@ -5837,14 +5837,21 @@ export const taxReportingPeriod = pgTable(
     obligationId: uuid("obligation_id")
       .notNull()
       .references(() => taxObligationRevision.id),
+    supersedesId: uuid("supersedes_id"),
     definition: jsonb("definition").$type<ReportingPeriod>().notNull(),
     ...taxAttribution(),
   },
   (t) => [
     uniqueIndex("tax_reporting_period_request").on(t.requestKey),
+    uniqueIndex("tax_reporting_period_successor").on(t.supersedesId),
+    foreignKey({
+      name: "tax_reporting_period_supersedes_fk",
+      columns: [t.supersedesId],
+      foreignColumns: [t.id],
+    }),
     check(
       "tax_reporting_period_binding",
-      sql`${t.definition}->>'id'=${t.id}::text and ${t.definition}->>'obligationId'=${t.obligationId}::text and (${t.definition}->>'end')::timestamptz>(${t.definition}->>'start')::timestamptz`,
+      sql`${t.definition}->>'id'=${t.id}::text and ${t.definition}->>'obligationId'=${t.obligationId}::text and coalesce(${t.definition}->>'supersedesId','')=coalesce(${t.supersedesId}::text,'') and ${t.supersedesId} is distinct from ${t.id} and (${t.definition}->>'end')::timestamptz>(${t.definition}->>'start')::timestamptz`,
     ),
     ...taxReportingPolicies("tax_reporting_period"),
   ],

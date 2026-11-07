@@ -180,7 +180,13 @@ async function view(
     .limit(1);
   const config = await configuration(tx, row.snapshot.obligation.id),
     population = await source(tx, row.periodId);
+  const [replacement] = await tx
+    .select({ id: periods.id })
+    .from(periods)
+    .where(eq(periods.supersedesId, row.periodId))
+    .limit(1);
   const current =
+    !replacement &&
     !records.some((a) => a.kind === "invalidated") &&
     config.fingerprint === row.snapshot.configurationFingerprint &&
     population.fingerprint === row.snapshot.sourceFingerprint &&
@@ -231,7 +237,7 @@ async function view(
     filed: false,
     paid: false,
     status:
-      latest.revision !== row.revision
+      replacement || latest.revision !== row.revision
         ? "superseded"
         : !current || unresolved.length
           ? "review_required"
@@ -381,7 +387,28 @@ export function createTaxPeriodRepository(
         if (!effective(config.current.definition, start, end))
           throw new ApplicationError("SETUP_REQUIRED");
         const existing = await tx.select().from(periods);
+        const replaced = input.supersedesId
+          ? existing.find((p) => p.id === input.supersedesId)
+          : null;
+        if (
+          input.supersedesId &&
+          (!replaced ||
+            existing.some((p) => p.supersedesId === input.supersedesId))
+        )
+          throw new ApplicationError("CONFLICT");
+        if (
+          replaced &&
+          (replaced.definition.obligationKey !== config.current.key ||
+            replaced.definition.start !== start ||
+            replaced.definition.end !== end)
+        )
+          throw new ApplicationError("INVALID_INPUT");
         for (const p of existing) {
+          if (
+            p.id === input.supersedesId ||
+            existing.some((next) => next.supersedesId === p.id)
+          )
+            continue;
           if (p.definition.start >= end || p.definition.end <= start) continue;
           const other = await configuration(tx, p.obligationId),
             a = other.current.definition,
@@ -398,6 +425,7 @@ export function createTaxPeriodRepository(
         const period: ReportingPeriod = {
           id: randomUUID(),
           obligationId: input.obligationId,
+          supersedesId: input.supersedesId,
           obligationKey: config.current.key,
           start,
           end,
@@ -413,6 +441,7 @@ export function createTaxPeriodRepository(
         await tx.insert(periods).values({
           id: period.id,
           obligationId: input.obligationId,
+          supersedesId: input.supersedesId,
           definition: period,
           requestKey: input.requestKey,
           input,
@@ -432,6 +461,16 @@ export function createTaxPeriodRepository(
           .from(periods)
           .where(eq(periods.id, input.periodId));
         if (!period) throw new ApplicationError("NOT_FOUND");
+        if (
+          (
+            await tx
+              .select({ id: periods.id })
+              .from(periods)
+              .where(eq(periods.supersedesId, period.id))
+              .limit(1)
+          ).length
+        )
+          throw new ApplicationError("CONFLICT");
         const config = await configuration(tx, period.obligationId);
         if (!config.current.definition.preparerIds.includes(actor.userId))
           throw new ApplicationError("FORBIDDEN");
@@ -562,12 +601,15 @@ export function createTaxPeriodRepository(
           const history = [];
           for (const r of rs) history.push(await view(tx, r));
           const report = history.at(-1) ?? null;
+          const replaced = ps.some((next) => next.supersedesId === p.id);
           result.push({
             period: p.definition,
             report,
             reports: history,
-            status: report?.status ?? "not_prepared",
-            overdue: at > new Date(p.definition.dueAt),
+            status: replaced
+              ? "superseded"
+              : (report?.status ?? "not_prepared"),
+            overdue: !replaced && at > new Date(p.definition.dueAt),
           });
         }
         const reminders = [];

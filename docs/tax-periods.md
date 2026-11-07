@@ -27,6 +27,10 @@ Open each period with included first and excluded next local calendar dates,
 an IANA timezone, exact UTC due instant and evidence. Calendar boundaries are
 converted with Temporal, including daylight-saving transitions; skipped dates
 are rejected. Registration/obligation coverage must contain the entire period.
+A timing correction creates an explicit successor period with the same obligation
+and coverage boundaries plus new due/reminder evidence. The old period/report
+remains immutable and superseded; preparation must target the successor. Old
+reminders cannot send, and genuinely new configured stages have new source IDs.
 Overlaps for the same obligation or mode/jurisdiction/registration are rejected
 across obligation references. Dates never infer a legal filing/payment interval.
 
@@ -54,7 +58,7 @@ Missing capture dates remain review gates. A permanent number remains an issued
 source even when artifact bytes are failed/pending; an attributable evidence
 resolution can acknowledge that limitation without claiming the bytes exist.
 
-Confirmed `financial_effect` retains actual cash, native/source identity, original
+Confirmed `financial_effect` retains actual cash (including earlier confirmations linked to period credits), native/source identity, original
 tax and allocation, approved credit, linked permanent credit and uncredited
 difference. Only the linked permanent credit affects the tax aggregate. Actual
 refund cash is never subtracted twice, and a rounding residual is not classified
@@ -91,9 +95,9 @@ requires resolution and a new approval. UUID retries bind original actor and exa
 payload; another authorized actor uses a new action/key. Expected versions and the
 shared database lock serialize preparation/review/configuration races.
 
-Five source-table triggers serialize relevant source changes with report commands
+Six source-table triggers serialize relevant source changes with report commands
 and append an explicit `invalidated` action: seller documents/artifact state,
-captured periods, confirmed financial effects and obligation revisions/decisions.
+captured periods, confirmed financial effects, obligation revisions/decisions and explicit timing successors.
 Source changes outside the period/jurisdiction do not rewrite the earlier report.
 A successor is explicit. Source/configuration fingerprints are also checked on
 reads, review and exports. Export rechecks current session/MFA and tax authority
@@ -141,7 +145,7 @@ Six new append-only, forced-RLS ledgers: `tax_obligation_revision`,
 `tax_obligation_decision`, `tax_reporting_period`, `tax_liability_report`,
 `tax_report_action`, `tax_period_reminder`. Runtime SELECT and INSERT are verified
 individually, with no UPDATE/DELETE/TRUNCATE or column-update privileges. Reminder
-INSERT is helper-only. All ten new foreign keys reference stable primary keys;
+INSERT is helper-only. All eleven new foreign keys reference stable primary keys;
 there are no new composite FKs depending on replaceable Drizzle UNIQUEs. Existing
 managed scopes still participate in the full prepare/Drizzle/secure cycle.
 
@@ -150,8 +154,8 @@ Five runtime helpers: `tax_reporting_operator()`, `tax_reporting_sources(uuid)`,
 `tax_reminder_visible(uuid)`. Two private functions: `tax_reporting_changed()` and
 `tax_reminder_current(uuid)`. Definers have empty fixed search paths, no PUBLIC
 execute, no owner-role membership for runtime and explicit required grants.
-Startup verification checks every ledger, ten validated FKs, eighteen policies,
-five source trigger bindings, required helper grants and private/default-PUBLIC
+Startup verification checks every ledger, eleven validated FKs, eighteen policies,
+six source trigger bindings, required helper grants and private/default-PUBLIC
 denials. Prepare pauses new raw ledger writes; secure restores them. Histories
 have no invented automatic legal purge period.
 

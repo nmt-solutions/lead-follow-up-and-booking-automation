@@ -67,6 +67,7 @@ export const openTaxPeriodSchema = z
   .strictObject({
     requestKey: z.uuid(),
     obligationId: z.uuid(),
+    supersedesId: z.uuid().nullable().default(null),
     startDate: z.iso.date(),
     endDate: z.iso.date(),
     dueAt: z.iso.datetime(),
@@ -125,6 +126,7 @@ export const obligationDecisionSchema = z.object({
 export const reportingPeriodSchema = z.object({
   id: z.uuid(),
   obligationId: z.uuid(),
+  supersedesId: z.uuid().nullable(),
   obligationKey: z.string(),
   start: z.iso.datetime(),
   end: z.iso.datetime(),

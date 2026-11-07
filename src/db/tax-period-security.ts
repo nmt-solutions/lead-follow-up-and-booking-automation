@@ -21,6 +21,7 @@ export const taxSourceTables = [
   "financial_case_event",
   "tax_obligation_revision",
   "tax_obligation_decision",
+  "tax_reporting_period",
 ];
 
 /** A narrow tax projection. No raw financial table or private native capability is granted. */
@@ -59,7 +60,7 @@ export async function prepareTaxPeriodSecurity(pool: Pool | PoolClient) {
           FROM public.financial_case_event e JOIN public.financial_case c ON c.id=e.case_id
           WHERE e.kind='financial_effect' AND (CASE WHEN c.intent->'period'->'snapshot'->'provider'->>'mode'='live' THEN 'live' ELSE 'fixture' END)=config->>'mode'
           AND EXISTS(SELECT 1 FROM jsonb_array_elements(e.detail->'originalTax'->'lines') l WHERE l->'rule'->'revision'->'rule'->'jurisdiction'->>'code'=config->>'jurisdiction')
-          AND e.at>=(p.definition->>'start')::timestamptz AND e.at<(p.definition->>'end')::timestamptz), '[]'::jsonb)
+          AND (e.at>=(p.definition->>'start')::timestamptz AND e.at<(p.definition->>'end')::timestamptz OR c.id IN (SELECT linked.adjustment_id FROM public.seller_document linked WHERE linked.at>=(p.definition->>'start')::timestamptz AND linked.at<(p.definition->>'end')::timestamptz))), '[]'::jsonb)
       ) INTO result;
       RETURN result||jsonb_build_object('fingerprint',md5(result::text));
     END $$;
@@ -73,6 +74,7 @@ export async function prepareTaxPeriodSecurity(pool: Pool | PoolClient) {
       SELECT * INTO r FROM public.tax_period_reminder WHERE id=reminder_ref;
       IF NOT FOUND THEN RETURN false; END IF;
       SELECT * INTO p FROM public.tax_reporting_period WHERE id=r.period_id;
+      IF EXISTS(SELECT 1 FROM public.tax_reporting_period newer WHERE newer.supersedes_id=p.id) THEN RETURN false; END IF;
       SELECT * INTO o FROM public.tax_obligation_revision WHERE key=p.definition->>'obligationKey' ORDER BY version DESC LIMIT 1;
       SELECT * INTO d FROM public.tax_obligation_decision WHERE revision_id=o.id ORDER BY version DESC LIMIT 1;
       IF NOT FOUND OR d.outcome<>'approved' OR o.id::text<>r.source->>'obligationId' OR d.id::text<>r.source->>'decisionId' OR (o.definition->>'effectiveFrom')::timestamptz>(p.definition->>'start')::timestamptz OR coalesce((o.definition->>'effectiveUntil')::timestamptz,'infinity')<(p.definition->>'end')::timestamptz OR (o.definition->'registration'->>'effectiveFrom')::timestamptz>(p.definition->>'start')::timestamptz OR coalesce((o.definition->'registration'->>'effectiveUntil')::timestamptz,'infinity')<(p.definition->>'end')::timestamptz THEN RETURN false; END IF;
@@ -93,7 +95,7 @@ export async function prepareTaxPeriodSecurity(pool: Pool | PoolClient) {
       IF nullif(current_setting('app.business_id',true),'') IS NOT NULL THEN RETURN 0; END IF;
       IF nullif(current_setting('app.actor_id',true),'') IS NOT NULL AND NOT public.tax_reporting_operator() THEN RETURN 0; END IF;
       PERFORM pg_advisory_xact_lock(hashtextextended('tax-reporting',0));
-      FOR p IN SELECT * FROM public.tax_reporting_period LOOP
+      FOR p IN SELECT x.* FROM public.tax_reporting_period x WHERE NOT EXISTS(SELECT 1 FROM public.tax_reporting_period newer WHERE newer.supersedes_id=x.id) LOOP
         SELECT * INTO o FROM public.tax_obligation_revision WHERE key=p.definition->>'obligationKey' ORDER BY version DESC LIMIT 1;
         SELECT * INTO d FROM public.tax_obligation_decision WHERE revision_id=o.id ORDER BY version DESC LIMIT 1;
         IF NOT FOUND OR d.outcome<>'approved' OR (o.definition->>'effectiveFrom')::timestamptz>(p.definition->>'start')::timestamptz OR coalesce((o.definition->>'effectiveUntil')::timestamptz,'infinity')<(p.definition->>'end')::timestamptz OR (o.definition->'registration'->>'effectiveFrom')::timestamptz>(p.definition->>'start')::timestamptz OR coalesce((o.definition->'registration'->>'effectiveUntil')::timestamptz,'infinity')<(p.definition->>'end')::timestamptz THEN CONTINUE; END IF;
@@ -124,11 +126,12 @@ export async function secureTaxPeriods(pool: Pool | PoolClient) {
     );
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.tax_reporting_changed() RETURNS trigger
-    LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE item record; config_key text; source_time timestamptz; source_mode text; source_lines jsonb; source_id text; actor text; BEGIN
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE item record; config_key text; source_time timestamptz; source_mode text; source_lines jsonb; source_id text; actor text; replaced_period uuid; BEGIN
       IF TG_TABLE_NAME='financial_case_event' THEN IF NEW.kind<>'financial_effect' THEN RETURN NEW; END IF; END IF;
       IF TG_TABLE_NAME='seller_document' AND TG_OP='UPDATE' THEN IF NEW.artifact_state=OLD.artifact_state THEN RETURN NEW; END IF; END IF;
       PERFORM pg_advisory_xact_lock(hashtextextended('tax-reporting',0));
-      IF TG_TABLE_NAME='tax_obligation_revision' THEN config_key:=NEW.key;
+      IF TG_TABLE_NAME='tax_reporting_period' THEN replaced_period:=NEW.supersedes_id; IF replaced_period IS NULL THEN RETURN NEW; END IF;
+      ELSIF TG_TABLE_NAME='tax_obligation_revision' THEN config_key:=NEW.key;
       ELSIF TG_TABLE_NAME='tax_obligation_decision' THEN SELECT key INTO config_key FROM public.tax_obligation_revision WHERE id=NEW.revision_id;
       ELSIF TG_TABLE_NAME='seller_document' THEN source_time:=NEW.at; source_mode:=NEW.snapshot->'issuer'->'revision'->'configuration'->>'mode'; source_lines:=NEW.snapshot->'lines';
       ELSIF TG_TABLE_NAME='subscription_period' THEN source_time:=(NEW.charge->>'paidAt')::timestamptz; source_mode:=CASE WHEN NEW.snapshot->'provider'->>'mode'='live' THEN 'live' ELSE 'fixture' END; source_lines:=NEW.snapshot->'tax'->'lines';
@@ -136,7 +139,7 @@ export async function secureTaxPeriods(pool: Pool | PoolClient) {
       source_id:=NEW.id::text;
       SELECT u.id INTO actor FROM public."user" u WHERE u.id=current_setting('app.actor_id',true);
       FOR item IN SELECT r.* FROM public.tax_liability_report r WHERE
-        (config_key IS NOT NULL AND r.snapshot->'obligation'->>'key'=config_key OR config_key IS NULL AND r.snapshot->'obligation'->'definition'->>'mode'=source_mode
+        (replaced_period IS NOT NULL AND r.period_id=replaced_period OR config_key IS NOT NULL AND r.snapshot->'obligation'->>'key'=config_key OR config_key IS NULL AND r.snapshot->'obligation'->'definition'->>'mode'=source_mode
           AND (source_time IS NULL OR source_time>=(r.snapshot->'period'->>'start')::timestamptz AND source_time<(r.snapshot->'period'->>'end')::timestamptz)
           AND EXISTS(SELECT 1 FROM jsonb_array_elements(source_lines) l WHERE l->'rule'->'revision'->'rule'->'jurisdiction'->>'code'=r.snapshot->'obligation'->'definition'->>'jurisdiction'))
         AND NOT EXISTS(SELECT 1 FROM public.tax_report_action a WHERE a.report_id=r.id AND a.kind='invalidated')
@@ -158,9 +161,9 @@ export async function verifyTaxPeriods(pool: Pool | PoolClient) {
   const result = await pool.query<{ safe: boolean }>(
     `SELECT
     (SELECT count(*)=$1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($2::text[]))
-    AND (SELECT count(*)=10 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conrelid IN (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($2::text[])))
+    AND (SELECT count(*)=11 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conrelid IN (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY($2::text[])))
     AND (SELECT count(*)=18 AND bool_and(CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL ELSE qual IS NOT NULL AND with_check IS NOT NULL END) FROM pg_policies WHERE schemaname='public' AND tablename=ANY($2::text[]))
-    AND (SELECT count(*)=5 AND bool_and(tgenabled='O' AND tgfoid='public.tax_reporting_changed()'::regprocedure) FROM pg_trigger WHERE tgname='tax_reporting_changed')
+    AND (SELECT count(*)=6 AND bool_and(tgenabled='O' AND tgfoid='public.tax_reporting_changed()'::regprocedure) FROM pg_trigger WHERE tgname='tax_reporting_changed')
     AND (SELECT count(*)=2 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND NOT has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('tax_reporting_changed','tax_reminder_current'))
     AND (SELECT count(*)=$3 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY($4::text[])) AS safe`,
     [

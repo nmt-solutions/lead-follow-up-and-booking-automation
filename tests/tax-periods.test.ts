@@ -165,6 +165,9 @@ describe("Tax periods at the public application seam", () => {
       kind: "approve",
       actorId: (await h.authenticate(f.operator)).userId,
     });
+    expect(JSON.stringify(prepared)).not.toMatch(
+      /"(?:recoveryKey|recovery_key|lease|capability|apiKey|credential)"\s*:/,
+    );
     expect((await app.workspace(f.operator)).periods[0].report?.id).toBe(
       prepared.id,
     );
@@ -355,6 +358,71 @@ describe("Tax periods at the public application seam", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
     expect((await app.workspace(f.operator)).periods).toHaveLength(1);
   });
+  it("corrects configured due timing through an explicit successor period while preserving approved history", async () => {
+    const f = await financialExportFixture(
+        h,
+        createMemoryStorage(),
+        "tax-period-successor",
+      ),
+      { period, config } = await configure(f.operator);
+    const report = await app.prepare(f.operator, {
+      requestKey: randomUUID(),
+      periodId: period.id,
+      expectedRevision: 0,
+      cutoff: h.clock.now().toISOString(),
+      note: "Original approved schedule",
+    });
+    await app.act(f.operator, {
+      requestKey: randomUUID(),
+      reportId: report.id,
+      expectedVersion: 0,
+      kind: "approve",
+      issueId: null,
+      note: "Original review",
+      evidence: ["fixture:review"],
+    });
+    const replacement = await app.openPeriod(f.operator, {
+      requestKey: randomUUID(),
+      obligationId: config.id,
+      supersedesId: period.id,
+      startDate: period.startDate,
+      endDate: period.endDate,
+      dueAt: "2026-12-20T12:30:00.000Z",
+      evidence: ["fixture:reviewed-due-date-correction"],
+      reminders: [{ key: "corrected-review", at: "2026-11-05T09:11:00.000Z" }],
+      note: "Explicit correction, no inferred legal extension",
+    });
+    expect(replacement).toMatchObject({
+      supersedesId: period.id,
+      dueAt: "2026-12-20T12:30:00.000Z",
+    });
+    expect(await app.report(f.operator, report.id)).toMatchObject({
+      status: "superseded",
+      current: false,
+      digest: report.digest,
+      snapshot: report.snapshot,
+    });
+    await expect(
+      app.prepare(f.operator, {
+        requestKey: randomUUID(),
+        periodId: period.id,
+        expectedRevision: 1,
+        cutoff: h.clock.now().toISOString(),
+        note: "Cannot prepare superseded timing",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const successor = await app.prepare(f.operator, {
+      requestKey: randomUUID(),
+      periodId: replacement.id,
+      expectedRevision: 0,
+      cutoff: h.clock.now().toISOString(),
+      note: "Review corrected explicit schedule",
+    });
+    expect(successor.snapshot.totals).toEqual(report.snapshot.totals);
+    expect(
+      (await app.workspace(f.operator)).periods.map((p) => p.status),
+    ).toEqual(["superseded", "prepared"]);
+  });
   it("persists only configured due reminder stages across restart and supersedes their source after review", async () => {
     const f = await financialExportFixture(
       h,
@@ -402,6 +470,12 @@ describe("Tax periods at the public application seam", () => {
     });
     expect(await restarted.evaluateReminders(f.operator)).toEqual({
       created: 0,
+    });
+    h.clock.set("2026-12-13T09:00:00Z");
+    const current = await h.signIn("tax-operator@example.com");
+    expect((await restarted.workspace(current)).periods[0]).toMatchObject({
+      overdue: true,
+      report: { status: "approved", filed: false, paid: false },
     });
   });
   it("retains configured report reminders for a covered historical obligation after its sales coverage has ended", async () => {
@@ -637,6 +711,29 @@ describe("Tax periods at the public application seam", () => {
         body: "arbitrary",
       }),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+  it("supersedes a persisted reminder before any email when its report stage changes", async () => {
+    await financialExportFixture(h, createMemoryStorage(), "tax-mail-stage");
+    const n = await financialNotifications(h),
+      operator = await h.signIn("tax-operator@example.com"),
+      { period } = await configure(operator);
+    await n.app.setPreference(operator, null, {
+      purpose: "tax_period",
+      enabled: true,
+      expectedVersion: 0,
+    });
+    await app.evaluateReminders(operator);
+    expect((await app.workspace(operator)).reminders[0].current).toBe(true);
+    await app.prepare(operator, {
+      requestKey: randomUUID(),
+      periodId: period.id,
+      expectedRevision: 0,
+      cutoff: h.clock.now().toISOString(),
+      note: "New persisted report stage supersedes the old reminder",
+    });
+    await n.app.recoverPending();
+    expect(n.effects).toHaveLength(0);
+    expect((await app.workspace(operator)).reminders[0].current).toBe(false);
   });
   it("requires explicit source coverage for a genuine captured charge without an issued invoice", async () => {
     const f = await taxCaptureFixture(h);
@@ -1183,6 +1280,69 @@ describe("Tax periods at the public application seam", () => {
       reason: "outside_period_original_context",
     });
   });
+  it("retains confirmed cash and original-tax provenance when its permanent credit is issued in a later period", async () => {
+    const f = await financialExportFixture(
+      h,
+      createMemoryStorage(),
+      "tax-later-credit",
+      true,
+    );
+    const refund = await f.adjustments.review(f.op, f.business.id, {
+      kind: "refund",
+      invoiceId: f.invoice.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "1000" }],
+      reason: "Second confirmed partial refund",
+      evidence: ["fixture:refund-review"],
+    });
+    await f.adjustments.execute(f.op, f.business.id, { caseId: refund.id });
+    f.native.refunds[1].status = "processed";
+    await f.adjustments.refresh(f.op, f.business.id, { caseId: refund.id });
+    h.clock.set("2026-11-06T09:00:00Z");
+    const documentsActor = await h.signIn("export-documents@example.com"),
+      taxActor = await h.signIn("tax-operator@example.com");
+    await f.adjustments.credit(documentsActor, f.business.id, {
+      caseId: refund.id,
+    });
+    const config = await obligation(taxActor, { timeZone: "Etc/GMT+9" });
+    await app.decideObligation(taxActor, {
+      requestKey: randomUUID(),
+      revisionId: config.id,
+      expectedVersion: 0,
+      outcome: "approved",
+      note: "Original issue-date basis",
+    });
+    const period = await app.openPeriod(taxActor, {
+      requestKey: randomUUID(),
+      obligationId: config.id,
+      startDate: "2026-11-06",
+      endDate: "2026-11-07",
+      dueAt: "2026-12-12T00:00:00.000Z",
+      evidence: ["fixture:calendar"],
+      reminders: [],
+      note: "Later credit period",
+    });
+    const report = await app.prepare(taxActor, {
+      requestKey: randomUUID(),
+      periodId: period.id,
+      expectedRevision: 0,
+      cutoff: h.clock.now().toISOString(),
+      note: "Cash context follows its linked credit",
+    });
+    expect(report.snapshot.totals).toEqual({
+      netMinor: "-1000",
+      taxMinor: "-100",
+      totalMinor: "-1100",
+    });
+    expect(report.snapshot.adjustments).toHaveLength(1);
+    expect(report.snapshot.adjustments[0]).toMatchObject({
+      actualMinor: "1100",
+      creditMinor: "1100",
+      uncreditedDifferenceMinor: "0",
+      originalTax: { id: f.invoice.snapshot.financial.tax.id },
+      taxEffect: "linked_credit_only",
+    });
+  });
   describe("complete retained document population", () => {
     let operator: Headers, periodId: string;
     beforeEach(async () => {
@@ -1319,6 +1479,27 @@ describe("Tax periods at the public application seam", () => {
         evidence: ["fixture:review"],
       });
       h.clock.set("2026-11-05T09:10:00Z");
+      await app.evaluateReminders(fixture.operator);
+      const successor = await app.openPeriod(fixture.operator, {
+        requestKey: randomUUID(),
+        obligationId: period.obligationId,
+        supersedesId: period.id,
+        startDate: period.startDate,
+        endDate: period.endDate,
+        dueAt: "2026-12-20T12:30:00.000Z",
+        evidence: ["fixture:explicit-timing-correction"],
+        reminders: [
+          { key: "corrected-review", at: "2026-11-05T09:10:00.000Z" },
+        ],
+        note: "Populate the stable-primary-key successor scope",
+      });
+      await app.prepare(fixture.operator, {
+        requestKey: randomUUID(),
+        periodId: successor.id,
+        expectedRevision: 0,
+        cutoff: h.clock.now().toISOString(),
+        note: "Retain original and successor review histories",
+      });
       await app.evaluateReminders(fixture.operator);
       before = await app.workspace(fixture.operator);
     });

@@ -420,7 +420,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
                   }}
                 >
                   <fieldset
-                    disabled={busy}
+                    disabled={busy || state === "superseded"}
                     className="grid gap-4 md:grid-cols-2"
                   >
                     <Field
@@ -801,6 +801,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
               "open_period",
               {
                 obligationId: text(data, "obligationId"),
+                supersedesId: text(data, "supersedesId") || null,
                 startDate: text(data, "startDate"),
                 endDate: text(data, "endDate"),
                 dueAt: text(data, "dueAt"),
@@ -827,6 +828,14 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
                   </option>
                 ))}
             </Choice>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="tax-timing-successor">Correct timing for an existing period (optional)</Label>
+              <NativeSelect id="tax-timing-successor" name="supersedesId" defaultValue="">
+                <option value="">New coverage period</option>
+                {workspace.periods.filter(p=>p.status!=="superseded").map(p=><option key={p.period.id} value={p.period.id}>{p.period.obligationKey}: {p.period.startDate} to {p.period.endDate}</option>)}
+              </NativeSelect>
+              <p className="text-sm text-muted-foreground">A timing correction must keep the same obligation and local boundaries. It preserves the old period and approval, supersedes old reminders and requires a newly prepared report with explicit correction evidence.</p>
+            </div>
             <Field name="dueAt" label="Configured due date and time (UTC)" />
             <Field
               name="startDate"

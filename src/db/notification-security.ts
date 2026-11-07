@@ -302,7 +302,7 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
     LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
       IF tenant IS NULL THEN IF NOT (public.notification_operator() OR public.tax_reporting_operator()) THEN RETURN NULL; END IF;
       ELSE IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL THEN RETURN NULL; END IF; END IF;
-      RETURN coalesce((SELECT jsonb_agg(jsonb_build_object('purpose',p.purpose,'enabled',p.enabled,'version',p.version)) FROM (SELECT DISTINCT ON (x.purpose) * FROM public.notification_preference x WHERE x.account=account_ref AND x.actor_id=current_setting('app.actor_id',true) AND x.business_id IS NOT DISTINCT FROM tenant AND (public.notification_operator() OR x.purpose='tax_period') ORDER BY x.purpose,x.version DESC) p),'[]'::jsonb);
+      RETURN coalesce((SELECT jsonb_agg(jsonb_build_object('purpose',p.purpose,'enabled',p.enabled,'version',p.version)) FROM (SELECT DISTINCT ON (x.purpose) * FROM public.notification_preference x WHERE x.account=account_ref AND x.actor_id=current_setting('app.actor_id',true) AND x.business_id IS NOT DISTINCT FROM tenant AND (tenant IS NOT NULL OR public.notification_operator() OR x.purpose='tax_period') ORDER BY x.purpose,x.version DESC) p),'[]'::jsonb);
     END $$;
     CREATE OR REPLACE FUNCTION public.notification_candidates(account_ref text) RETURNS TABLE(draft jsonb)
     LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
