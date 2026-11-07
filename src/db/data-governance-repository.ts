@@ -108,7 +108,7 @@ const sources = [
 export function customerText(value: unknown): unknown {
   if (typeof value === "string")
     return value
-      .replace(/https?:\/\/[^\s<>"']+/g, (raw) => {
+      .replace(/https?:\/\/[^\s<>"']+/gi, (raw) => {
         try {
           const u = new URL(raw);
           if (
@@ -216,6 +216,12 @@ export function createDataGovernanceRepository(database: Database) {
         sql`select public.finish_business_export_cleanup(${id}::uuid,${lease}::uuid,${success})`,
       );
     },
+    async expiredExportCurrent(id: string, lease: string, scope: string) {
+      const r = await database.execute<{ current: boolean }>(
+        sql`select public.business_export_cleanup_current(${id}::uuid,${lease}::uuid,${scope}) current`,
+      );
+      return r.rows[0]?.current === true;
+    },
     async offboard(
       actor: Actor,
       businessId: string,
@@ -229,7 +235,13 @@ export function createDataGovernanceRepository(database: Database) {
           .from(businessDataRequest)
           .where(eq(businessDataRequest.requestKey, input.requestKey));
         if (r) {
+          const [latest] = await tx
+            .select({ id: businessDataRequest.id })
+            .from(businessDataRequest)
+            .orderBy(desc(businessDataRequest.at), desc(businessDataRequest.id))
+            .limit(1);
           if (
+            latest?.id !== r.id ||
             r.kind !== "offboard" ||
             r.actorId !== actor.userId ||
             !isDeepStrictEqual(r.input, input) ||
@@ -308,6 +320,12 @@ export function createDataGovernanceRepository(database: Database) {
       await database.execute(
         sql`select public.finish_business_data_cleanup(${target.id}::uuid,${target.lease}::uuid,${outcome})`,
       );
+    },
+    async cleanupCurrent(target: NativeCleanup, policy: DataPolicy) {
+      const r = await database.execute<{ current: boolean }>(
+        sql`select public.business_data_cleanup_current(${target.id}::uuid,${target.lease}::uuid,${JSON.stringify(policy)}::jsonb) current`,
+      );
+      return r.rows[0]?.current === true;
     },
     async workspace(actor: Actor, businessId: string) {
       return access(actor, businessId, async (tx) => ({

@@ -35,6 +35,9 @@ BEGIN
  UPDATE public.discovery_schedule SET status='paused',revision=revision+1,dispatch_key=gen_random_uuid(),next_due_at=NULL WHERE business_id=r.business_id;
  UPDATE public.inbox_connection SET active=false WHERE business_id=r.business_id;
  UPDATE public.mailbox_policy SET version=version+1,configuration=jsonb_set(configuration,'{enabled}','false'),visibility='unsafe' WHERE business_id=r.business_id;
+ UPDATE public.sender_connection SET version=version+1,configuration=jsonb_set(configuration,'{enabled}','false'),updated_at=stamp WHERE business_id=r.business_id;
+ UPDATE public.sender_reply_route SET version=version+1,configuration=jsonb_set(configuration,'{enabled}','false'),updated_at=stamp WHERE business_id=r.business_id;
+ UPDATE public.sender_identity SET version=version+1,configuration=jsonb_set(configuration,'{enabled}','false'),updated_at=stamp WHERE business_id=r.business_id;
  UPDATE public.mailbox_job SET state=jsonb_set(jsonb_set(state,'{status}','"blocked"'),'{reason}','"scope_changed"') WHERE business_id=r.business_id AND state->>'status' IN ('queued','running');
  UPDATE public.inbox_opportunity SET control_state='human',control_version=control_version+1,handoff_reason='Business offboarding; explicit new approval required',next_action='Review retained work' WHERE business_id=r.business_id;
  UPDATE public.opportunity_due_action SET state='cancelled',reason='business_offboarding' WHERE business_id=r.business_id AND state='pending';
@@ -42,11 +45,11 @@ BEGIN
  UPDATE public.email_sequence_action SET state='cancelled',generation=generation+1,execution_key=gen_random_uuid(),queue_state='none',queue_run_id=NULL,reason='business_offboarding' WHERE business_id=r.business_id AND state IN ('pending','paused');
  -- Preserve committed/unknown provider acceptance for reconciliation; never label it unsent.
  FOR t,k IN SELECT * FROM (VALUES('gmail_grant','gmail'),('google_calendar_grant','google_calendar'),('microsoft_mail_grant','microsoft_mail'),('microsoft_calendar_grant','microsoft_calendar')) a(t,k) LOOP
-   FOR g IN EXECUTE format('SELECT *,to_jsonb(x) body FROM public.%I x WHERE business_id=$1 AND status<>''disconnected'' FOR UPDATE',t) USING r.business_id LOOP
+   FOR g IN EXECUTE format('SELECT *,to_jsonb(x) body FROM public.%I x WHERE business_id=$1 AND (status<>''disconnected'' OR credentials IS NOT NULL OR to_jsonb(x)->>''rejected_credentials'' IS NOT NULL) FOR UPDATE',t) USING r.business_id LOOP
      INSERT INTO public.business_data_step(id,business_id,request_id,kind,target_id,details,secret,state,due_at)
      VALUES(gen_random_uuid(),r.business_id,r.id,k,g.id::text,jsonb_build_object('generation',(g.generation+1)::text,'subject',coalesce(g.account_subject,'')),
        jsonb_build_object('credentials',g.credentials,'rejected',g.body->>'rejected_credentials'),'pending',stamp);
-     EXECUTE format('UPDATE public.%I SET generation=generation+1,status=''disconnected'',reason=NULL,credentials=NULL %s WHERE id=$1',t,CASE WHEN t IN ('gmail_grant','google_calendar_grant') THEN ',rejected_credentials=NULL' ELSE '' END) USING g.id;
+     EXECUTE format('UPDATE public.%I SET generation=generation+1,status=''disconnected'',reason=NULL,credentials=NULL %s WHERE id=$1',t,CASE WHEN t IN ('gmail_grant','google_calendar_grant','microsoft_mail_grant') THEN ',rejected_credentials=NULL' ELSE '' END) USING g.id;
    END LOOP;
  END LOOP;
  FOR g IN SELECT * FROM public.whatsapp_connection WHERE business_id=r.business_id AND status<>'disconnected' FOR UPDATE LOOP
@@ -114,6 +117,22 @@ BEGIN
    outcome=result,due_at=stamp+make_interval(secs=>(p->>'retrySeconds')::integer),lease=NULL WHERE id=s.id;
  INSERT INTO public.business_data_event(id,business_id,step_id,attempt,outcome) VALUES(gen_random_uuid(),s.business_id,s.id,s.attempts,result);
 END $$;
+CREATE OR REPLACE FUNCTION public.business_data_cleanup_current(step uuid,lease_key uuid,current_policy jsonb) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+ SELECT lease_key IS NOT NULL AND EXISTS(
+ SELECT 1 FROM public.business_data_step s JOIN public.business_data_request r ON r.id=s.request_id AND r.business_id=s.business_id
+ WHERE s.id=step AND s.lease=lease_key AND s.state='working' AND s.due_at>statement_timestamp()
+ AND r.policy=current_policy AND r.policy->'businessIds' ? s.business_id::text
+ AND (r.policy->>'effectiveFrom')::timestamptz<=statement_timestamp() AND (r.policy->>'effectiveUntil')::timestamptz>statement_timestamp()
+ AND (s.kind<>'file' OR ((r.policy->'deletion'->>'generalFiles')::boolean AND (r.policy->'deletion'->>'notBefore')::timestamptz<=statement_timestamp()
+   AND NOT public.business_file_protected(s.target_id::uuid,s.business_id)
+   AND EXISTS(SELECT 1 FROM public.business_file f WHERE f.id=s.target_id::uuid AND f.business_id=s.business_id AND f.purpose='general' AND f.account_scope=r.policy->>'storageScope')))
+ AND (s.kind NOT IN ('gmail','google_calendar') OR (coalesce(s.details->>'subject','')<>'' AND NOT EXISTS(
+   SELECT 1 FROM (SELECT account_subject,status FROM public.gmail_grant UNION ALL SELECT account_subject,status FROM public.google_calendar_grant) g
+   WHERE g.status<>'disconnected' AND g.account_subject=s.details->>'subject')))
+ AND (s.kind<>'meta' OR (coalesce(s.details->>'wabaId','')<>'' AND NOT EXISTS(
+   SELECT 1 FROM public.whatsapp_connection c WHERE c.status<>'disconnected' AND c.assets->>'wabaId'=s.details->>'wabaId'))))
+$$;
 CREATE OR REPLACE FUNCTION public.guard_data_identity_reconnect() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
@@ -177,6 +196,18 @@ BEGIN
  cleanup_due_at=statement_timestamp()+make_interval(secs=>(x.policy->>'retrySeconds')::integer),cleanup_lease=NULL
  WHERE x.id=target AND x.state='deleting' AND x.cleanup_lease=lease_key AND x.cleanup_due_at>statement_timestamp() AND x.expires_at<=statement_timestamp();
 END $$;
+CREATE OR REPLACE FUNCTION public.business_export_cleanup_current(target uuid,lease_key uuid,scope text) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+ SELECT lease_key IS NOT NULL AND EXISTS(SELECT 1 FROM public.business_data_export x WHERE x.id=target AND x.cleanup_lease=lease_key
+ AND x.state='deleting' AND x.cleanup_due_at>statement_timestamp() AND x.expires_at<=statement_timestamp() AND x.policy->>'storageScope'=scope)
+$$;
+CREATE OR REPLACE FUNCTION public.business_file_cleanup_current(target uuid,operation uuid,scope text) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+ SELECT operation IS NOT NULL AND EXISTS(SELECT 1 FROM public.business_file f WHERE f.id=target AND f.operation_id=operation
+ AND f.account_scope=scope AND f.state='deleting' AND f.cleanup_after>statement_timestamp()
+ AND NOT public.business_file_protected(f.id,f.business_id)
+ AND NOT EXISTS(SELECT 1 FROM public.business_data_step s WHERE s.business_id=f.business_id AND s.target_id=f.id::text AND s.kind='file' AND s.state IN ('pending','retry','working')))
+$$;
 CREATE OR REPLACE FUNCTION public.guard_data_export_update() RETURNS trigger
 LANGUAGE plpgsql SET search_path='' AS $$
 BEGIN

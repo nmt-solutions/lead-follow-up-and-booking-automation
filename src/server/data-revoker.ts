@@ -15,7 +15,10 @@ export function createDataRevoker(d: {
   google: GoogleCalendarConfiguration | null;
   meta: (MetaConfiguration & { providerKey?: string }) | null;
 }) {
-  return async (target: NativeCleanup): Promise<RevocationOutcome> => {
+  return async (
+    target: NativeCleanup,
+    current: () => Promise<boolean>,
+  ): Promise<RevocationOutcome> => {
     if (
       target.kind === "microsoft_mail" ||
       target.kind === "microsoft_calendar"
@@ -34,19 +37,15 @@ export function createDataRevoker(d: {
             .parse(JSON.parse(vault.decrypt(target.secret.credentials, aad)))
             .refreshToken,
         );
-      if (target.secret?.rejected)
-        tokens.push(
-          ...z
-            .array(z.string().min(1).max(8192))
-            .max(32)
-            .parse(
-              JSON.parse(
-                vault.decrypt(target.secret.rejected, `${aad}:rejected`),
-              ),
-            ),
-        );
+      // Rejected OAuth tokens have no persisted verified subject. They may be
+      // wrong-account callbacks belonging to another Business; the original
+      // subject's sharing guard cannot authorize their project-wide revocation.
+      const unattributed = Boolean(
+        target.secret && target.secret.rejected !== null,
+      );
       if (!tokens.length) return "manual_required";
       for (const token of new Set(tokens)) {
+        if (!(await current())) return "unconfirmed";
         const r = await d.fetch("https://oauth2.googleapis.com/revoke", {
           method: "POST",
           body: new URLSearchParams({ token }),
@@ -60,7 +59,7 @@ export function createDataRevoker(d: {
         await r.body?.cancel();
         if (r.status !== 200) return "unconfirmed";
       }
-      return "confirmed";
+      return unattributed ? "manual_required" : "confirmed";
     }
     if (target.kind !== "meta" || !d.meta || !target.secret?.credentials)
       return "unconfirmed";
@@ -150,6 +149,7 @@ export function createDataRevoker(d: {
       )
     )
       return "subscription_removed";
+    if (!(await current())) return "unconfirmed";
     // No guessed global identity revocation. DELETE removes this app's WABA
     // subscription. The customer's WABA, number and billing account remain theirs.
     const removed = z

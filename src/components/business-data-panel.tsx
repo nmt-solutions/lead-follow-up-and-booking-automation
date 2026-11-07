@@ -6,7 +6,7 @@ import {
   dataWorkspaceSchema,
   type DataWorkspace,
 } from "@/models/data-governance";
-import { Button } from "./ui/button";
+import { Button, buttonVariants } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -416,6 +416,7 @@ export function BusinessDataPanel({
               <div className="flex flex-wrap justify-end gap-3">
                 <AlertDialogCancel>Go back</AlertDialogCancel>
                 <AlertDialogAction
+                  className={buttonVariants({ variant: "outline" })}
                   onClick={() =>
                     run(async () => {
                       await command("offboard", {
@@ -455,6 +456,7 @@ export function BusinessDataPanel({
                     policyVersion: p!.version,
                     confirm: true,
                   });
+                  key.current = crypto.randomUUID();
                   setMessage(
                     "New setup is available. Old connections, jobs and approvals remain stopped; reconnect and approve new work explicitly.",
                   );

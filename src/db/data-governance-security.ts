@@ -29,7 +29,7 @@ export async function prepareDataGovernance(pool: Pool) {
     ALTER TABLE public.business_data_event DROP CONSTRAINT IF EXISTS business_data_event_step_scope;
   END IF; END $$`);
   await pool.query(`DO $$ DECLARE f record; BEGIN
-    FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('business_data_stopped','business_file_protected','start_business_offboarding','claim_business_data_cleanup','finish_business_data_cleanup','claim_business_exports','finish_business_export_cleanup','record_business_data_evidence','business_file_retained_until','expire_business_data_secrets') LOOP EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM app_runtime',f.signature); END LOOP;
+    FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('business_data_stopped','business_file_protected','start_business_offboarding','claim_business_data_cleanup','finish_business_data_cleanup','claim_business_exports','finish_business_export_cleanup','record_business_data_evidence','business_file_retained_until','expire_business_data_secrets','business_data_cleanup_current','business_export_cleanup_current','business_file_cleanup_current') LOOP EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM app_runtime',f.signature); END LOOP;
   END $$`);
 }
 export async function secureDataGovernance(client: PoolClient) {
@@ -98,6 +98,9 @@ export async function secureDataGovernance(client: PoolClient) {
     "whatsapp_oauth",
     "mailbox_policy",
     "mailbox_job",
+    "sender_connection",
+    "sender_reply_route",
+    "sender_identity",
     "inbox_connection",
     "inbox_opportunity",
     "opportunity_due_action",
@@ -121,6 +124,9 @@ export async function secureDataGovernance(client: PoolClient) {
       );
   }
   await client.query(dataGovernanceSql);
+  await client.query(
+    `REVOKE ALL ON FUNCTION public.business_data_cleanup_current(uuid,uuid,jsonb),public.business_export_cleanup_current(uuid,uuid,text),public.business_file_cleanup_current(uuid,uuid,text) FROM PUBLIC; GRANT EXECUTE ON FUNCTION public.business_data_cleanup_current(uuid,uuid,jsonb),public.business_export_cleanup_current(uuid,uuid,text),public.business_file_cleanup_current(uuid,uuid,text) TO app_runtime;`,
+  );
   await client.query(`REVOKE ALL ON FUNCTION public.expire_business_data_secrets() FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.expire_business_data_secrets() TO app_runtime;`);
   await client.query(`REVOKE ALL ON FUNCTION public.business_file_retained_until(uuid,uuid) FROM PUBLIC;
@@ -145,6 +151,7 @@ export async function secureDataGovernance(client: PoolClient) {
     GRANT EXECUTE ON FUNCTION public.business_data_stopped(uuid),public.business_file_protected(uuid,uuid),public.start_business_offboarding(uuid),public.claim_business_data_cleanup(jsonb),public.finish_business_data_cleanup(uuid,uuid,text) TO app_runtime;`);
   for (const name of [
     "discovery_run",
+    "discovery_dispatch",
     "discovery_schedule",
     "inbox_connection",
     "inbox_message",
@@ -162,6 +169,23 @@ export async function secureDataGovernance(client: PoolClient) {
       `DROP TRIGGER IF EXISTS guard_business_data_write ON public.${name}; CREATE TRIGGER guard_business_data_write BEFORE INSERT ON public.${name} FOR EACH ROW EXECUTE FUNCTION public.guard_business_data_write()`,
     );
   }
+  for (const name of [
+    "sender_connection",
+    "sender_reply_route",
+    "sender_identity",
+    "mailbox_policy",
+    "gmail_grant",
+    "google_calendar_grant",
+    "microsoft_mail_grant",
+    "microsoft_calendar_grant",
+    "whatsapp_connection",
+    "discovery_schedule",
+    "inbox_connection",
+  ]) {
+    await client.query(
+      `DROP TRIGGER IF EXISTS guard_business_data_write ON public.${name}; CREATE TRIGGER guard_business_data_write BEFORE INSERT OR UPDATE ON public.${name} FOR EACH ROW EXECUTE FUNCTION public.guard_business_data_write()`,
+    );
+  }
 }
 export async function verifyDataGovernance(pool: Pool | PoolClient) {
   const r = await pool.query<{ safe: boolean }>(`select
@@ -176,8 +200,8 @@ export async function verifyDataGovernance(pool: Pool | PoolClient) {
     and not has_any_column_privilege(current_user,'public.business_data_step','UPDATE')
     and not has_table_privilege(current_user,'public.business_data_event','INSERT,UPDATE,DELETE,TRUNCATE')
     and has_table_privilege(current_user,'public.business_data_event','SELECT')
-    and (select count(*)=10 and bool_and(p.prosecdef and p.proconfig=ARRAY['search_path=""'] and not pg_has_role(current_user,p.proowner,'MEMBER') and has_function_privilege(current_user,p.oid,'EXECUTE') and not exists(select 1 from aclexplode(p.proacl) a where a.grantee=0 and a.privilege_type='EXECUTE')) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('business_data_stopped','business_file_protected','start_business_offboarding','claim_business_data_cleanup','finish_business_data_cleanup','claim_business_exports','finish_business_export_cleanup','record_business_data_evidence','business_file_retained_until','expire_business_data_secrets'))
-    and (select count(*)=5 and bool_and(not has_function_privilege(current_user,p.oid,'EXECUTE') and not exists(select 1 from aclexplode(p.proacl) a where a.grantee=0 and a.privilege_type='EXECUTE') and p.proconfig=ARRAY['search_path=""']) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('guard_business_data_write','guard_data_identity_reconnect','guard_data_meta_reconnect','guard_data_export_update','guard_data_grant_use'))
+    and (select count(*)=13 and bool_and(p.prosecdef and p.proconfig=ARRAY['search_path=""'] and not pg_has_role(current_user,p.proowner,'MEMBER') and has_function_privilege(current_user,p.oid,'EXECUTE') and not exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE')) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('business_data_stopped','business_file_protected','start_business_offboarding','claim_business_data_cleanup','finish_business_data_cleanup','claim_business_exports','finish_business_export_cleanup','record_business_data_evidence','business_file_retained_until','expire_business_data_secrets','business_data_cleanup_current','business_export_cleanup_current','business_file_cleanup_current'))
+    and (select count(*)=5 and bool_and(not has_function_privilege(current_user,p.oid,'EXECUTE') and not exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE') and p.proconfig=ARRAY['search_path=""']) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('guard_business_data_write','guard_data_identity_reconnect','guard_data_meta_reconnect','guard_data_export_update','guard_data_grant_use'))
     and (select count(*)=15 and bool_and(case when policyname like '%_read' then qual is not null when policyname like '%_insert' then with_check is not null else qual is not null and with_check is not null end) from pg_policies where schemaname='public' and tablename in ('business_data_request','business_data_export','business_data_grant','business_data_step','business_data_event'))
     and (select count(*)=3 and bool_and(convalidated) from pg_constraint where conname in ('business_data_grant_export_scope','business_data_step_request_scope','business_data_event_step_scope') and contype='f') safe`);
   if (r.rows[0]?.safe !== true)

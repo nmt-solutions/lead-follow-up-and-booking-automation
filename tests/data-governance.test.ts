@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { createHarness } from "./support/harness";
 import { createMemoryStorage } from "./support/storage";
 import { runtimeDatabase } from "../src/db/runtime";
 import { verifyRuntimeRole } from "../src/db/runtime";
 import { createDataGovernanceApplication } from "../src/application/data-governance";
 import { createDataGovernanceRepository } from "../src/db/data-governance-repository";
+import { dataGovernanceSql } from "../src/db/data-governance-sql";
 import { createNotificationApplication } from "../src/application/notifications";
 import { createNotificationRepository } from "../src/db/notification-repository";
 import { notificationVault } from "../src/notifications/vault";
@@ -16,6 +18,8 @@ import { invitationTokens } from "../src/auth/invitation-tokens";
 import type { DataPolicy } from "../src/models/data-governance";
 import { createInboxApplication } from "../src/application/inbox";
 import { createInboxRepository } from "../src/db/inbox-repository";
+import { createDiscoveryApplication } from "../src/application/discovery";
+import { createDiscoveryRepository } from "../src/db/discovery-repository";
 import { normalizedInquiryAdapter } from "../src/inbox/adapter";
 import { createFileApplication } from "../src/application/files";
 import { createFileRepository } from "../src/db/file-repository";
@@ -27,6 +31,9 @@ import { createMailboxRepository } from "../src/db/mailbox-repository";
 import { unavailableMailboxProvider } from "../src/mailboxes/provider";
 import { createGmailApplication } from "../src/application/gmail";
 import { createGmailConnection } from "../src/gmail/connection";
+import { createMicrosoftMailApplication } from "../src/application/microsoft-mail";
+import { createMicrosoftMailConnection } from "../src/microsoft-mail/connection";
+import { microsoftMailFixture } from "./support/microsoft-mail";
 import { gmailFixture } from "./support/gmail";
 import { createDataRevoker } from "../src/server/data-revoker";
 import { createDataGovernanceHttp } from "../src/http/data-governance";
@@ -55,14 +62,17 @@ describe("Business data export and offboarding at the public application seam", 
     | ReturnType<typeof createSubscriptionPaymentApplication<Headers>>["cancel"]
     | undefined;
   const app = (
-    revoke: (target: NativeCleanup) => Promise<RevocationOutcome> = async () =>
-      "confirmed",
+    revoke: (
+      target: NativeCleanup,
+      current: () => Promise<boolean>,
+    ) => Promise<RevocationOutcome> = async () => "confirmed",
   ) =>
     createDataGovernanceApplication({
       authenticate: h.access.authenticatePrivileged,
       repository: createDataGovernanceRepository(runtimeDatabase(h.runtime)),
       clock: h.clock,
       storage,
+      storageScope: "fixture-private-bucket",
       policy: () => (withdrawn ? null : policy),
       revoke,
       documents,
@@ -189,6 +199,7 @@ describe("Business data export and offboarding at the public application seam", 
     policy.evidence.push(
       "https://identity.example/sign-in/private-policy-capability?token=private-policy-token",
       "password=private-policy-password",
+      "HTTPS://identity.example/callback/private-policy-upper-capability?ticket=private-policy-upper-ticket",
     );
     const created = await app().export(owner, a.id, {
       requestKey: randomUUID(),
@@ -214,10 +225,12 @@ describe("Business data export and offboarding at the public application seam", 
       name: "Retained steel",
     });
     expect(text).not.toContain("Private offering");
-    expect(text).not.toMatch(/private-policy-(?:capability|token|password)/);
+    expect(text).not.toMatch(
+      /private-policy-(?:capability|token|password|upper)/,
+    );
     expect(
       JSON.stringify((await app().workspace(owner, a.id)).policy),
-    ).not.toMatch(/private-policy-(?:capability|token|password)/);
+    ).not.toMatch(/private-policy-(?:capability|token|password|upper)/);
     expect(text).not.toMatch(
       /upload_hash|session_id|credentials|state_hash|execution_key|dispatch_key/,
     );
@@ -494,6 +507,60 @@ describe("Business data export and offboarding at the public application seam", 
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+  it("rejects an old stop approval after reopening and requires a new request to stop newly authorized setup", async () => {
+    const owner = await h.signIn("stop-again@example.com"),
+      b = await h.application.createBusiness(owner, {
+        name: "Stop again",
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+    policy.businessIds = [b.id];
+    const input = {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    };
+    await app().offboard(owner, b.id, input);
+    await app().reopen(owner, b.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirm: true,
+    });
+    await expect(app().offboard(owner, b.id, input)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect((await app().workspace(owner, b.id)).stopped).toBe(false);
+    await app().offboard(owner, b.id, { ...input, requestKey: randomUUID() });
+    expect((await app().workspace(owner, b.id)).stopped).toBe(true);
+  });
+  it("redacts authorization references from historical offboarding policy metadata", async () => {
+    const owner = await h.signIn("policy-history@example.com"),
+      b = await h.application.createBusiness(owner, {
+        name: "Historical policy",
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+    policy.businessIds = [b.id];
+    policy.id =
+      "https://identity.example/callback/private-policy-history-capability?token=private-policy-history-token";
+    await app().offboard(owner, b.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    expect(JSON.stringify(await app().workspace(owner, b.id))).not.toMatch(
+      /private-policy-history-(?:capability|token)/,
+    );
+  });
   it("disconnects the real Gmail grant before a failed revocation and resumes the original bounded cleanup after restart", async () => {
     const owner = await h.signIn("native-offboard@example.com"),
       b = await h.application.createBusiness(owner, {
@@ -575,6 +642,48 @@ describe("Business data export and offboarding at the public application seam", 
       ]),
     );
   });
+  it("cannot restore a quarantined Gmail token when an already exchanged callback finishes after stopped cleanup", async () => {
+    const owner = await h.signIn("late-offboard-callback@example.com");
+    const b = await h.application.createBusiness(owner, {
+      name: "Late callback",
+      offering: "Steel",
+      homeMarket: "US",
+      website: "",
+    });
+    policy.businessIds = [b.id];
+    const f = await nativeMailbox(owner, b.id);
+    const start = await f.gmail.start(owner, b.id, f.mailbox.id);
+    f.google.control.beforeToken = async () => {
+      await app().offboard(owner, b.id, {
+        requestKey: randomUUID(),
+        policyId: policy.id,
+        policyVersion: 1,
+        confirmStop: true,
+        deleteGeneralFiles: false,
+        cancellation: null,
+      });
+      await app().cleanup();
+    };
+    await Promise.allSettled([
+      f.gmail.callback(owner, b.id, f.mailbox.id, {
+        state: new URL(start.authorizationUrl).searchParams.get("state"),
+        code: "late-code",
+      }),
+    ]);
+    expect(await f.gmail.read(owner, b.id, f.mailbox.id)).toMatchObject({
+      status: "disconnected",
+      read: false,
+      send: false,
+    });
+    expect(
+      (
+        await h.admin.query(
+          "select credentials,rejected_credentials from gmail_grant where id=$1",
+          [f.mailbox.id],
+        )
+      ).rows[0],
+    ).toEqual({ credentials: null, rejected_credentials: null });
+  });
   it("leaves another Business's shared Google identity linked without sending global revocation", async () => {
     const owner = await h.signIn("shared-offboard@example.com"),
       other = await h.signIn("shared-other@example.com");
@@ -624,6 +733,392 @@ describe("Business data export and offboarding at the public application seam", 
         }),
       ]),
     );
+  });
+  it("does not revoke another Business through an unattributed rejected Google callback token", async () => {
+    const owner = await h.signIn("quarantine-offboard@example.com"),
+      other = await h.signIn("quarantine-foreign@example.com");
+    const a = await h.application.createBusiness(owner, {
+        name: "Local account",
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      }),
+      b = await h.application.createBusiness(other, {
+        name: "Foreign account",
+        offering: "Scissors",
+        homeMarket: "US",
+        website: "",
+      });
+    const local = gmailFixture(),
+      foreign = gmailFixture();
+    foreign.control.subject = "foreign-google-subject";
+    foreign.control.email = "foreign@supplier.example";
+    for (const fixture of [local, foreign]) {
+      const transport = fixture.fetch;
+      fixture.fetch = async (input, init) => {
+        const response = await transport(input, init);
+        if (new URL(String(input)).pathname !== "/token" || !response.ok)
+          return response;
+        const token = z
+          .object({
+            access_token: z.string(),
+            refresh_token: z.string(),
+            token_type: z.string(),
+            expires_in: z.number(),
+            scope: z.string(),
+          })
+          .parse(await response.json());
+        return Response.json({
+          ...token,
+          refresh_token: `${fixture.control.subject}-refresh`,
+        });
+      };
+    }
+    const first = await nativeMailbox(owner, a.id, local),
+      second = await nativeMailbox(other, b.id, foreign);
+    const start = await first.gmail.start(owner, a.id, first.mailbox.id);
+    local.control.subject = foreign.control.subject;
+    local.control.email = foreign.control.email;
+    await first.gmail.callback(owner, a.id, first.mailbox.id, {
+      state: new URL(start.authorizationUrl).searchParams.get("state"),
+      code: "wrong-account-code",
+    });
+    expect(await first.gmail.read(owner, a.id, first.mailbox.id)).toMatchObject(
+      { status: "reconnect_required", reason: "account_mismatch" },
+    );
+    policy.businessIds = [a.id];
+    const revoked: string[] = [];
+    const revoker = createDataRevoker({
+      gmail: local.configuration,
+      google: null,
+      meta: null,
+      fetch: async (_input, init) => {
+        revoked.push(
+          new URLSearchParams(String(init?.body)).get("token") ?? "",
+        );
+        return Response.json({});
+      },
+    });
+    await app(revoker).offboard(owner, a.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    await app(revoker).cleanup();
+    expect(revoked).toEqual(["gmail-subject-refresh"]);
+    expect(
+      await second.gmail.read(other, b.id, second.mailbox.id),
+    ).toMatchObject({ status: "connected", read: true });
+    expect((await app().workspace(owner, a.id)).offboarding[0].steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "gmail",
+          state: "incomplete",
+          outcome: "manual_required",
+          tokenWiped: true,
+        }),
+      ]),
+    );
+  });
+
+  it("does not begin another native cleanup effect after its original policy expires during a slow prior effect", async () => {
+    const owner = await h.signIn("cleanup-window@example.com");
+    const businesses = [];
+    for (const name of ["First cleanup", "Second cleanup"]) {
+      const business = await h.application.createBusiness(owner, {
+        name,
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+      businesses.push(business);
+      await nativeMailbox(owner, business.id);
+    }
+    policy.businessIds = businesses.map((b) => b.id);
+    const stamp = await h.admin.query<{ at: Date }>(
+      "select clock_timestamp() at",
+    );
+    policy.effectiveUntil = new Date(
+      stamp.rows[0].at.getTime() + 1500,
+    ).toISOString();
+    for (const business of businesses)
+      await app().offboard(owner, business.id, {
+        requestKey: randomUUID(),
+        policyId: policy.id,
+        policyVersion: 1,
+        confirmStop: true,
+        deleteGeneralFiles: false,
+        cancellation: null,
+      });
+    let effects = 0;
+    await app(async () => {
+      effects++;
+      await new Promise((resolve) => setTimeout(resolve, 1700));
+      return "confirmed";
+    }).cleanup();
+    expect(effects).toBe(1);
+    await app().cleanup();
+    const stages = await Promise.all(
+      businesses.map((b) => app().workspace(owner, b.id)),
+    );
+    expect(stages.flatMap((s) => s.offboarding[0].steps)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "gmail",
+          state: "incomplete",
+          tokenWiped: true,
+          outcome: "revocation_window_expired",
+        }),
+      ]),
+    );
+  });
+
+  it("fences every saved sender approval version before cleanup and requires fresh setup after reopening", async () => {
+    const f = await campaignFixture(h);
+    policy.businessIds = [f.business.id];
+    await app().offboard(f.owner, f.business.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    const stopped = await f.sender.app.workspace(f.owner, f.business.id);
+    expect(stopped.connections[0]).toMatchObject({
+      version: f.sender.connection.version + 1,
+      configuration: { enabled: false },
+    });
+    expect(stopped.replyRoutes[0]).toMatchObject({
+      version: f.sender.route.version + 1,
+      configuration: { enabled: false },
+    });
+    expect(stopped.identities[0]).toMatchObject({
+      version: f.sender.identity.version + 1,
+      configuration: { enabled: false },
+    });
+    await expect(
+      f.sender.app.saveConnection(f.owner, f.business.id, {
+        id: f.sender.connection.id,
+        expectedVersion: stopped.connections[0].version,
+        configuration: { ...f.sender.connection.configuration, enabled: true },
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await app().reopen(f.owner, f.business.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirm: true,
+    });
+    const reopened = await f.sender.app.workspace(f.owner, f.business.id);
+    expect(reopened.identities[0].configuration.enabled).toBe(false);
+    expect(reopened.identities[0].readiness.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "identity_disabled" }),
+        expect.objectContaining({ code: "observation_outdated" }),
+      ]),
+    );
+  });
+  it("fences queued discovery and recurring acquisition before slow cleanup and refuses reauthorization while stopped", async () => {
+    const f = await campaignFixture(h),
+      queued: unknown[] = [],
+      scheduled: unknown[] = [];
+    let searches = 0;
+    const discovery = createDiscoveryApplication({
+      authenticate: h.authenticate,
+      authenticateForWork: h.access.authenticateForWork,
+      authenticateWork: h.access.authenticateWork,
+      clock: h.clock,
+      repository: createDiscoveryRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      queue: {
+        async enqueue(work) {
+          queued.push(work);
+        },
+        async schedule(work) {
+          scheduled.push(work);
+        },
+      },
+      provider: {
+        id: "campaign-research-fixture",
+        async search() {
+          searches++;
+          return [];
+        },
+        async review() {
+          throw new Error("No review expected");
+        },
+      },
+    });
+    const search = {
+      markets: ["New Jersey, United States"],
+      publicOffering: "Galvanized steel",
+      confirmPublicQuery: true,
+      budget: 4,
+      requestKey: randomUUID(),
+    };
+    const run = await discovery.start(f.owner, f.business.id, search);
+    const schedule = await discovery.saveSchedule(f.owner, f.business.id, {
+      scheduleId: randomUUID(),
+      expectedRevision: 0,
+      name: "Retained discovery",
+      timeZone: "America/New_York",
+      localTime: "09:30",
+      weekdays: [1, 2, 3, 4, 5],
+      missed: "skip",
+      overlap: "skip",
+      dst: "compatible",
+      search: { ...search, requestKey: randomUUID() },
+      confirmRecurring: true,
+    });
+    policy.businessIds = [f.business.id];
+    await app().offboard(f.owner, f.business.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    const stopped = await discovery.workspace(f.owner, f.business.id);
+    const prior = stopped.runs.find((r) => r.id === run.id)!;
+    const recurring = stopped.schedules.find((s) => s.id === schedule.id)!;
+    expect(prior.status).toBe("stopped");
+    expect(recurring.status).toBe("paused");
+    await discovery.execute(queued[0]);
+    expect(searches).toBe(0);
+    await expect(
+      discovery.resume(f.owner, f.business.id, {
+        runId: run.id,
+        expectedAttempt: prior.attempt,
+        requestKey: randomUUID(),
+        confirmResume: true,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      discovery.scheduleCommand(f.owner, f.business.id, {
+        action: "resume",
+        scheduleId: schedule.id,
+        expectedRevision: recurring.revision,
+        requestKey: randomUUID(),
+        confirmRecurring: true,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(queued).toHaveLength(1);
+    expect(scheduled).toHaveLength(1);
+  });
+
+  it("moves every Microsoft mail token copy into bounded private cleanup while another Business remains connected", async () => {
+    const owner = await h.signIn("microsoft-offboard@example.com");
+    const setup = async (name: string) => {
+      const business = await h.application.createBusiness(owner, {
+        name,
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+      const database = runtimeDatabase(h.runtime),
+        graph = microsoftMailFixture(h.clock);
+      const senders = createSenderApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createSenderRepository(database, h.clock),
+        adapter: unavailableSenderAdapter,
+        clock: h.clock,
+      });
+      const connection = await senders.saveConnection(owner, business.id, {
+        id: null,
+        expectedVersion: 0,
+        configuration: {
+          label: "Microsoft sales",
+          provider: "microsoft",
+          account: graph.identity.email,
+          enabled: true,
+        },
+      });
+      const mailboxes = createMailboxApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createMailboxRepository(database, h.clock),
+        provider: unavailableMailboxProvider,
+        clock: h.clock,
+      });
+      const mailbox = await mailboxes.save(owner, business.id, {
+        id: null,
+        expectedVersion: 0,
+        configuration: {
+          connectionId: connection.id,
+          requestedRead: true,
+          requestedSend: false,
+          enabled: true,
+          scope: { kind: "folders", refs: ["sales"] },
+          history: null,
+        },
+      });
+      const microsoft = createMicrosoftMailApplication({
+        access: h.access,
+        connection: createMicrosoftMailConnection(database, {
+          clock: h.clock,
+          configuration: graph.configuration,
+          fetch: graph.fetch,
+        }),
+      });
+      const start = await microsoft.start(owner, business.id, mailbox.id);
+      graph.identity.nonce =
+        new URL(start.authorizationUrl).searchParams.get("nonce") ?? "";
+      await microsoft.callback(owner, business.id, mailbox.id, {
+        state: new URL(start.authorizationUrl).searchParams.get("state"),
+        code: "fixture-code",
+      });
+      return { business, mailbox, microsoft };
+    };
+    const a = await setup("Offboard Microsoft"),
+      b = await setup("Keep Microsoft");
+    // A historical/rotated copy is the same real encrypted credential envelope,
+    // never a persistence mock. All original token-bearing columns must be wiped.
+    await h.admin.query(
+      "update microsoft_mail_grant set rejected_credentials=credentials where id=$1",
+      [a.mailbox.id],
+    );
+    policy.businessIds = [a.business.id];
+    await app().offboard(owner, a.business.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    expect(
+      await a.microsoft.read(owner, a.business.id, a.mailbox.id),
+    ).toMatchObject({ status: "disconnected", read: false, send: false });
+    expect(
+      (
+        await h.admin.query(
+          "select credentials,rejected_credentials from microsoft_mail_grant where id=$1",
+          [a.mailbox.id],
+        )
+      ).rows[0],
+    ).toEqual({ credentials: null, rejected_credentials: null });
+    await app(async () => "manual_required").cleanup();
+    expect(
+      (await app().workspace(owner, a.business.id)).offboarding[0].steps,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "microsoft_mail",
+          state: "incomplete",
+          outcome: "manual_required",
+          tokenWiped: true,
+        }),
+      ]),
+    );
+    expect(
+      await b.microsoft.read(owner, b.business.id, b.mailbox.id),
+    ).toMatchObject({ status: "connected", read: true });
   });
   it("requires the current receiving Admin after storage I/O and blocks disclosure when policy is withdrawn", async () => {
     const owner = await h.signIn("receiving-owner@example.com"),
@@ -712,6 +1207,39 @@ describe("Business data export and offboarding at the public application seam", 
       app().download(owner, b.id, exported.id, second.token),
     ).rejects.toMatchObject({ code: "FILE_UNAVAILABLE" });
     expect(storage.effects.filter((e) => e.action === "get")).toHaveLength(1);
+  });
+  it("cleans only the original expired artifact under its storage identity after the current disclosure policy is withdrawn", async () => {
+    const owner = await h.signIn("artifact-cleanup@example.com"),
+      b = await h.application.createBusiness(owner, {
+        name: "Artifact expiry",
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+    policy.businessIds = [b.id];
+    const expired = await app().export(owner, b.id, {
+      requestKey: randomUUID(),
+    });
+    const kept = await app().export(owner, b.id, { requestKey: randomUUID() });
+    // Disposable fixture moves the original artifact's persisted deadline into
+    // the past; a caller-controlled maintenance timestamp is never authority.
+    await h.admin.query(
+      "update business_data_export set state='pending',expires_at=statement_timestamp()-interval '1 second' where id=$1",
+      [expired.id],
+    );
+    withdrawn = true;
+    await app().cleanup();
+    expect(
+      storage.objects.has(`business-exports/${b.id}/${expired.id}.json`),
+    ).toBe(false);
+    expect(
+      storage.objects.has(`business-exports/${b.id}/${kept.id}.json`),
+    ).toBe(true);
+    expect(
+      (await app().workspace(owner, b.id)).exports.find(
+        (e) => e.id === expired.id,
+      )?.state,
+    ).toBe("deleted");
   });
   it("denies a policy that expires during storage I/O using database time even when the application clock is stale", async () => {
     const owner = await h.signIn("expired-policy-export@example.com"),
@@ -821,6 +1349,72 @@ describe("Business data export and offboarding at the public application seam", 
     expect(
       storage.objects.has(`business-files/${b.id}/${future.file.id}`),
     ).toBe(true);
+  });
+  it("honors a new offboarding hold before deleting another already-claimed general file", async () => {
+    const owner = await h.signIn("claimed-file-hold@example.com"),
+      b = await h.application.createBusiness(owner, {
+        name: "Claimed holds",
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+    policy.businessIds = [b.id];
+    let deleted = 0;
+    const ids: string[] = [];
+    const files = createFileApplication({
+      authenticate: h.authenticate,
+      repository: createFileRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      storage: {
+        ...storage,
+        async delete(key) {
+          await storage.delete(key);
+          if (++deleted === 1) {
+            policy.deletion!.holds = ids;
+            await app().offboard(owner, b.id, {
+              requestKey: randomUUID(),
+              policyId: policy.id,
+              policyVersion: 1,
+              confirmStop: true,
+              deleteGeneralFiles: false,
+              cancellation: null,
+            });
+          }
+        },
+      },
+      policy: {
+        maxBytes: 1024,
+        allowedTypes: ["text/plain"],
+        uploadTtlSeconds: 60,
+        accessTtlSeconds: 30,
+        retentionSeconds: 3600,
+        operationTimeoutSeconds: 5,
+        cleanupGraceSeconds: 60,
+        recordRetentionSeconds: 3600,
+        accountScope: policy.storageScope,
+      },
+    });
+    for (const name of ["first.txt", "second.txt"]) {
+      const upload = await files.beginUpload(owner, b.id, {
+        name,
+        contentType: "text/plain",
+        size: 5,
+      });
+      await files.completeUpload(
+        owner,
+        b.id,
+        upload.file.id,
+        upload.token,
+        new TextEncoder().encode("proof"),
+      );
+      ids.push(upload.file.id);
+      await files.deleteFile(owner, b.id, upload.file.id);
+    }
+    await files.cleanup();
+    expect(deleted).toBe(1);
+    expect(
+      ids.filter((id) => storage.objects.has(`business-files/${b.id}/${id}`)),
+    ).toHaveLength(1);
   });
   it("exports repeated retained discovery with original relations after paid reach expires and omits sources without explicit rights", async () => {
     const f = await campaignFixture(h);
@@ -1064,6 +1658,142 @@ describe("Business data export and offboarding at the public application seam", 
     expect(updated.outcome).toBe("subscription_removed");
     expect(updated.state).toBe("incomplete");
   });
+  it("rechecks original cleanup authority after Meta subscription reads before a destructive DELETE", async () => {
+    const f = await metaSendingFixture(h, "expired-meta-offboard");
+    policy.businessIds = [f.businessId];
+    const stamp = await h.admin.query<{ at: Date }>(
+      "select clock_timestamp() at",
+    );
+    policy.effectiveUntil = new Date(
+      stamp.rows[0].at.getTime() + 1500,
+    ).toISOString();
+    let deletes = 0;
+    const revoker = createDataRevoker({
+      gmail: null,
+      google: null,
+      meta: {
+        providerKey: "deterministic-direct-meta",
+        appId: "900001",
+        appSecret: "fixture",
+        configId: "900002",
+        graphVersion: "v25.0",
+        activeKeyId: "test",
+        keys: { test: "ab".repeat(32) },
+      },
+      fetch: async (_input, init) => {
+        if (init?.method === "DELETE") {
+          deletes++;
+          return Response.json({ success: true });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1700));
+        return Response.json({
+          data: [{ whatsapp_business_api_data: { id: "900001" } }],
+        });
+      },
+    });
+    await app(revoker).offboard(f.credentials, f.businessId, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: 1,
+      confirmStop: true,
+      deleteGeneralFiles: false,
+      cancellation: null,
+    });
+    await app(revoker).cleanup();
+    expect(deletes).toBe(0);
+    await app(revoker).cleanup();
+    expect(
+      (await app().workspace(f.credentials, f.businessId)).offboarding[0].steps,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "meta",
+          state: "incomplete",
+          tokenWiped: true,
+          outcome: "revocation_window_expired",
+        }),
+      ]),
+    );
+  });
+  it("requires each writable data ledger read and append grant independently", async () => {
+    for (const table of [
+      "business_data_request",
+      "business_data_export",
+      "business_data_grant",
+    ])
+      for (const privilege of ["SELECT", "INSERT"]) {
+        await h.admin.query(
+          `revoke ${privilege} on public.${table} from app_runtime`,
+        );
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
+          "Business data security is incomplete",
+        );
+        await h.admin.query(
+          `grant ${privilege} on public.${table} to app_runtime`,
+        );
+      }
+    await verifyRuntimeRole(h.runtime);
+  });
+  it("requires every narrow data helper grant including the pre-effect lease guards", async () => {
+    for (const signature of [
+      "business_data_stopped(uuid)",
+      "business_file_protected(uuid,uuid)",
+      "business_file_retained_until(uuid,uuid)",
+      "start_business_offboarding(uuid)",
+      "claim_business_data_cleanup(jsonb)",
+      "finish_business_data_cleanup(uuid,uuid,text)",
+      "claim_business_exports(text)",
+      "finish_business_export_cleanup(uuid,uuid,boolean)",
+      "record_business_data_evidence(uuid,text,text)",
+      "expire_business_data_secrets()",
+      "business_data_cleanup_current(uuid,uuid,jsonb)",
+      "business_export_cleanup_current(uuid,uuid,text)",
+      "business_file_cleanup_current(uuid,uuid,text)",
+    ]) {
+      await h.admin.query(
+        `revoke execute on function public.${signature} from app_runtime`,
+      );
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
+        "Business data security is incomplete",
+      );
+      await h.admin.query(
+        `grant execute on function public.${signature} to app_runtime`,
+      );
+    }
+    for (const lease of [null, randomUUID()]) {
+      expect(
+        (
+          await h.runtime.query(
+            "select public.business_data_cleanup_current($1,$2,$3) allowed",
+            [randomUUID(), lease, policy],
+          )
+        ).rows[0].allowed,
+      ).toBe(false);
+      expect(
+        (
+          await h.runtime.query(
+            "select public.business_export_cleanup_current($1,$2,$3) allowed",
+            [randomUUID(), lease, policy.storageScope],
+          )
+        ).rows[0].allowed,
+      ).toBe(false);
+    }
+    await verifyRuntimeRole(h.runtime);
+  });
+  it("rejects accidental default PUBLIC execution on a recreated cleanup helper and restores managed security", async () => {
+    await h.admin.query(
+      "drop function public.business_export_cleanup_current(uuid,uuid,text)",
+    );
+    await h.admin.query(dataGovernanceSql);
+    try {
+      await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow(
+        "Business data security is incomplete",
+      );
+    } finally {
+      await h.reapplySchema();
+    }
+    await verifyRuntimeRole(h.runtime);
+  });
   it("requires every runtime ledger privilege, denies unscoped cleanup authority and preserves approved scope through replaceable-UNIQUE reapplication", async () => {
     const owner = await h.signIn("data-security@example.com"),
       b = await h.application.createBusiness(owner, {
@@ -1150,12 +1880,37 @@ describe("Business data export and offboarding at the public application seam", 
         return Response.json({ error: "invalid_token" }, { status: 400 });
       },
     });
-    const guardedRevoker = async (target: NativeCleanup) => {
-      for (const invalidLease of [null, randomUUID()])
+    const guardedRevoker = async (
+      target: NativeCleanup,
+      current: () => Promise<boolean>,
+    ) => {
+      for (const invalidLease of [null, randomUUID()]) {
+        expect(
+          (
+            await h.runtime.query(
+              "select public.business_data_cleanup_current($1,$2,$3) allowed",
+              [target.id, invalidLease, target.policy],
+            )
+          ).rows[0].allowed,
+        ).toBe(false);
         await h.runtime.query(
           "select public.finish_business_data_cleanup($1,$2,'confirmed')",
           [target.id, invalidLease],
         );
+      }
+      expect(
+        (
+          await h.runtime.query(
+            "select public.business_data_cleanup_current($1,$2,$3) allowed",
+            [
+              target.id,
+              target.lease,
+              { ...target.policy, version: target.policy.version + 1 },
+            ],
+          )
+        ).rows[0].allowed,
+      ).toBe(false);
+      expect(await current()).toBe(true);
       expect((await app().workspace(owner, b.id)).offboarding[0].steps).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1165,7 +1920,7 @@ describe("Business data export and offboarding at the public application seam", 
           }),
         ]),
       );
-      return revoker(target);
+      return revoker(target, current);
     };
     await app(guardedRevoker).offboard(owner, b.id, {
       requestKey: randomUUID(),

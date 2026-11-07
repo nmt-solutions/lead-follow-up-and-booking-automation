@@ -34,7 +34,10 @@ export function createDataGovernanceApplication<Credentials>(d: {
   storage: PrivateStorage | null;
   storageScope?: string;
   policy: () => DataPolicy | null;
-  revoke: (target: NativeCleanup) => Promise<RevocationOutcome>;
+  revoke: (
+    target: NativeCleanup,
+    current: () => Promise<boolean>,
+  ) => Promise<RevocationOutcome>;
   cancel?: (
     credentials: Credentials,
     businessId: string,
@@ -127,7 +130,7 @@ export function createDataGovernanceApplication<Credentials>(d: {
         offboarding: r.requests.map((request) => ({
           id: request.id,
           kind: request.kind,
-          policyId: request.policy.id,
+          policyId: String(customerText(request.policy.id)),
           policyVersion: request.policy.version,
           createdAt: request.at.toISOString(),
           cancellation: request.input?.cancellation ?? null,
@@ -215,6 +218,15 @@ export function createDataGovernanceApplication<Credentials>(d: {
       for (const target of exports) {
         let success = false;
         try {
+          if (
+            !scope ||
+            !(await d.repository.expiredExportCurrent(
+              target.id,
+              target.lease,
+              scope,
+            ))
+          )
+            continue;
           await storage().delete(dataExportKey(target.business_id, target.id));
           success = true;
         } catch {
@@ -240,24 +252,34 @@ export function createDataGovernanceApplication<Credentials>(d: {
       for (const target of targets) {
         let outcome: RevocationOutcome = "unconfirmed";
         try {
+          const current = async () => {
+            const policy = d.policy();
+            return (
+              !!policy &&
+              samePolicy(policy, p) &&
+              (await d.repository.cleanupCurrent(target, policy))
+            );
+          };
           const currentPolicy = d.policy();
           if (!currentPolicy || !samePolicy(currentPolicy, p))
             outcome = "unconfirmed";
           else if (target.kind === "file" || target.kind === "artifact") {
             // Exact persisted key only. Seller-document namespaces are never targets.
-            await storage().delete(
-              target.kind === "file"
-                ? `business-files/${target.businessId}/${parse(z.uuid(), target.targetId)}`
-                : dataExportKey(
-                    target.businessId,
-                    parse(z.uuid(), target.targetId),
-                  ),
-            );
-            outcome = "confirmed";
+            if (await current()) {
+              await storage().delete(
+                target.kind === "file"
+                  ? `business-files/${target.businessId}/${parse(z.uuid(), target.targetId)}`
+                  : dataExportKey(
+                      target.businessId,
+                      parse(z.uuid(), target.targetId),
+                    ),
+              );
+              outcome = "confirmed";
+            }
           } else if (target.details.shared === "true")
             outcome = "shared_identity";
           else if (!p.nativeRevocation) outcome = "manual_required";
-          else
+          else if (await current())
             outcome = parse(
               z.enum([
                 "confirmed",
@@ -266,7 +288,7 @@ export function createDataGovernanceApplication<Credentials>(d: {
                 "shared_identity",
                 "unconfirmed",
               ]),
-              await d.revoke(target),
+              await d.revoke(target, current),
             );
         } catch {
           /* No provider URL, token or private payload enters history. */

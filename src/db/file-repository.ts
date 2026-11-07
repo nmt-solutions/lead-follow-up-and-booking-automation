@@ -229,6 +229,16 @@ export function createFileRepository(
         sql`select public.finish_file_cleanup(${id}::uuid, ${operationId}::uuid, ${at.toISOString()}::timestamptz, ${success})`,
       );
     },
+    async cleanupCurrent(
+      id: string,
+      operationId: string,
+      accountScope: string,
+    ) {
+      const result = await database.execute<{ current: boolean }>(
+        sql`select public.business_file_cleanup_current(${id}::uuid,${operationId}::uuid,${accountScope}) current`,
+      );
+      return result.rows[0]?.current === true;
+    },
   };
 }
 export type FileRepository = ReturnType<typeof createFileRepository>;

@@ -182,7 +182,7 @@ async function prepareFileCleanup(pool: Pool) {
         ORDER BY f.cleanup_after, f.id LIMIT 50 FOR UPDATE SKIP LOCKED
       ), claimed AS (
         UPDATE public.business_file f SET state = 'deleting', operation_id = gen_random_uuid(),
-          cleanup_after = at_time + make_interval(secs => lease_seconds)
+          cleanup_after = statement_timestamp() + make_interval(secs => lease_seconds)
         FROM due WHERE f.id = due.id RETURNING f.*
       ), attempts AS (
         INSERT INTO public.file_usage (id, file_id, business_id, account_scope, action, outcome, at)
@@ -199,7 +199,8 @@ async function prepareFileCleanup(pool: Pool) {
         purge_after = CASE WHEN success THEN at_time + make_interval(secs => f.record_retention_seconds) ELSE NULL END,
         cleanup_after = CASE WHEN success THEN NULL ELSE f.cleanup_after END,
         failure = CASE WHEN success THEN NULL ELSE 'CLEANUP_FAILED' END
-      WHERE f.id = file_id AND f.operation_id = operation AND f.state = 'deleting';
+      WHERE f.id = file_id AND f.operation_id = operation AND f.state = 'deleting'
+        AND f.cleanup_after > statement_timestamp() AND NOT public.business_file_protected(f.id,f.business_id);
       IF FOUND AND success THEN
         UPDATE public.file_usage u SET outcome = 'succeeded' WHERE u.id = operation AND u.file_id = finish_file_cleanup.file_id;
         DELETE FROM public.file_access a WHERE a.file_id = finish_file_cleanup.file_id;
