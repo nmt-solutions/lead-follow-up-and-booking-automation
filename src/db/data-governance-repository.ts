@@ -132,17 +132,30 @@ export function customerText(value: unknown): unknown {
         "[credential value omitted]",
       );
   if (Array.isArray(value)) return value.map(customerText);
-  if (value && typeof value === "object")
+  if (value && typeof value === "object") {
+    // Merchant reviews contain deployment-wide terms, evidence and plan mappings.
+    // Keep the original transaction identity and omit only its operator review.
+    const paymentProvider =
+      "key" in value &&
+      typeof value.key === "string" &&
+      "account" in value &&
+      typeof value.account === "string" &&
+      "mode" in value &&
+      (value.mode === "fixture" ||
+        value.mode === "test" ||
+        value.mode === "live");
     return Object.fromEntries(
       Object.entries(value)
         .filter(
           ([k]) =>
+            !(paymentProvider && k === "review") &&
             !/secret|password|token|credentials|callback|checkout|recoveryKey|operationKey|requestKey|sessionId|executionKey|dispatchKey|accountScope|storageKey|^(?:actor|user|owner|responsible|device)[_]?id$|assurance|authContext/i.test(
               k,
             ),
         )
         .map(([k, v]) => [k, customerText(v)]),
     );
+  }
   return value;
 }
 export function createDataGovernanceRepository(database: Database) {
@@ -609,6 +622,7 @@ export function createDataGovernanceRepository(database: Database) {
               "Credentials, authorization links, private callback/worker/recovery capabilities, raw provider events and unrelated/global operator/auth records are excluded.",
               "Authentication, invitation and transactional notification ledgers are outside this customer export; their independent global or Business history and payload-retention authority remain unchanged.",
               "Financial cases use the authorized customer projection. Canonical cash effects, original tax and separately approved credit/residual are included; operator evidence, native receipts, commands, private leases and raw actor/device/auth references are excluded. A residual is not classified as a fee, tax or FX.",
+              "Merchant activation terms, operator evidence and mappings for other plans are excluded. Agreed prices, customer billing/tax reviews, transaction identities and original financial-document bytes are preserved.",
               "Source rights and row/byte limits apply. Missing or unapproved source rights omit affected evidence, including after cancellation.",
               "URLs have no query/fragment; free text is redacted for authorization links. Canonical JSON preserves formula-like text without spreadsheet execution.",
               "Private file bytes use separate current authorized downloads. Issued attachments below are verified against immutable hashes; missing, unsafe or bounded-out attachments have explicit per-document omissions.",
