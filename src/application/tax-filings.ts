@@ -116,7 +116,7 @@ export function createTaxFilingApplication<Credentials>(d: {
     },
     workspace: (credentials: Credentials) =>
       authorized(credentials, async (actor) => {
-        const filings = await d.repository.workspace(actor, d.clock.now());
+        const filings = await d.repository.workspace(actor);
         const workspace = await d.periods.workspace(credentials);
         return {
           ...workspace,

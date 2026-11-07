@@ -70,6 +70,14 @@ with #51, not a second serialization algorithm.
    superseded away. Late contradictory facts can still be retained and reviewed;
    they never silently repeat money or erase a later confirmation.
 
+No-effect evidence must cover the attempt and all recorded acknowledgements in
+time; an earlier account statement cannot resolve a later initiation. A late
+matching final filing or settlement acknowledgement blocks its replacement even
+after independent issue review. Confirm the original fact under its original
+identity instead. Current assigned report/procedure reviewers and the procedure's
+effective window are checked again after serialization and when new authorization
+is inserted.
+
 Original files are deliberately global private tax storage in PostgreSQL. They do
 not use an arbitrary customer's file ownership or accept a storage URL/key. The
 logical object is the private byte-ledger row plus evidence UUID and SHA-256;
@@ -108,6 +116,8 @@ views compose actual confirmation state separately.
 In-app reminders retain #51's once-per-period/stage identities, timing successors
 and current-source guards. Partial remittance leaves requirements due. Completed
 configured requirements suppress current reminders and typed #59 mail sources.
+Required unresolved issues on an earlier report for the same obligation and
+coverage keep those requirements due after amendment or payment carry-forward.
 Mail acceptance/delivery remain separate from in-app and filing/payment truth;
 current verified self-preferences and tax audience rights still apply. Tax authority
 does not grant notification administration.

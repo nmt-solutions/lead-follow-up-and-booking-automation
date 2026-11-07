@@ -221,6 +221,19 @@ function unresolved(
     )
     .map((e) => e.id);
 }
+async function originalEffectObserved(tx: Transaction, intentId: string) {
+  const history = await tx
+    .select()
+    .from(events)
+    .where(eq(events.intentId, intentId));
+  return history.some(
+    (e) =>
+      e.kind === "confirm" ||
+      (e.kind === "acknowledge" &&
+        e.detail.matches === true &&
+        ["filed", "settled"].includes(String(e.detail.result))),
+  );
+}
 async function filingBasis(
   tx: Transaction,
   target: { obligationKey: string; start: string; end: string },
@@ -328,14 +341,11 @@ async function intentView(
     });
     const current = await currentPolicy(tx, row.policyId, at);
     authorizationCurrent = current.decision.id === row.policyDecisionId;
-    if (row.supersedesId) {
-      const parent = await tx
-        .select()
-        .from(events)
-        .where(eq(events.intentId, row.supersedesId));
-      if (parent.some((e) => e.kind === "confirm"))
-        authorizationCurrent = false;
-    }
+    if (
+      row.supersedesId &&
+      (await originalEffectObserved(tx, row.supersedesId))
+    )
+      authorizationCurrent = false;
   } catch (error) {
     if (!(error instanceof ApplicationError)) throw error;
   }
@@ -439,6 +449,9 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
       );
       await access(tx);
       await currentSession(tx, actor);
+      await tx.execute(
+        sql`select set_config('app.tax_at',${clock.now().toISOString()},true)`,
+      );
       const result = await operation(tx);
       await currentSession(tx, actor);
       await access(tx);
@@ -676,7 +689,7 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
             policy,
             decision,
             obligation: o,
-          } = await currentPolicy(tx, input.policyId, at);
+          } = await currentPolicy(tx, input.policyId, clock.now());
         if (
           policy.obligationId !== report.snapshot.obligation.id ||
           (input.kind === "submission" &&
@@ -704,6 +717,8 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
           const priorView = await intentView(tx, prior, clock.now());
           if (priorView.status === "confirmed") confirmedPrior.push(prior);
           else if (priorView.status === "superseded") {
+            if (await originalEffectObserved(tx, prior.id))
+              throw new ApplicationError("CONFLICT");
             if (!previous.some((p) => p.supersedesId === prior.id))
               unlinkedSuperseded.push(prior);
           } else throw new ApplicationError("CONFLICT");
@@ -797,17 +812,16 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
               note: input.note,
             });
         if (!factual) {
-          const { decision } = await currentPolicy(tx, row.policyId, at);
+          const { decision } = await currentPolicy(
+            tx,
+            row.policyId,
+            clock.now(),
+          );
           if (decision.id !== row.policyDecisionId)
             throw new ApplicationError("CONFLICT");
           if (
             row.supersedesId &&
-            (
-              await tx
-                .select()
-                .from(events)
-                .where(eq(events.intentId, row.supersedesId))
-            ).some((e) => e.kind === "confirm")
+            (await originalEffectObserved(tx, row.supersedesId))
           )
             throw new ApplicationError("CONFLICT");
         }
@@ -958,6 +972,13 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
             throw new ApplicationError("FORBIDDEN");
           if (
             current.events.some((e) => e.kind === "confirm") ||
+            current.unresolvedIssueIds.length > 0 ||
+            current.events.some(
+              (e) =>
+                ["attempt", "acknowledge"].includes(e.kind) &&
+                new Date(String(e.detail.occurredAt)) >
+                  new Date(artifact.metadata.occurredAt),
+            ) ||
             !isDeepStrictEqual(artifact.target, row.target) ||
             artifact.reportId !== row.reportId ||
             artifact.metadata.result !== "no_effect" ||
@@ -988,7 +1009,9 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
               (e) =>
                 e.id === input.issueId &&
                 (e.kind === "raise_issue" ||
-                  (e.kind === "acknowledge" && !e.detail.matches)),
+                  (e.kind === "acknowledge" &&
+                    (e.detail.matches === false ||
+                      e.detail.contradiction === true))),
             );
             if (
               !issue ||
@@ -1051,7 +1074,11 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
             ...attributed(old),
           };
         const report = await approvedReport(tx, input),
-          { policy, decision } = await currentPolicy(tx, input.policyId, at);
+          { policy, decision } = await currentPolicy(
+            tx,
+            input.policyId,
+            clock.now(),
+          );
         await reviewer(tx, actor, report.snapshot.obligation.id);
         const [allocation] = await tx
           .select()
@@ -1204,7 +1231,7 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
         if (!result.rows[0]?.body) throw new ApplicationError("FORBIDDEN");
         return Buffer.from(result.rows[0].body, "base64");
       }),
-    workspace: (actor: Actor, at: Date) =>
+    workspace: (actor: Actor) =>
       locked(actor, async (tx) => {
         const ps = await tx
             .select()
@@ -1219,7 +1246,7 @@ export function createTaxFilingRepository(database: Database, clock: Clock) {
         const configured: string[] = [];
         for (const p of ps) {
           try {
-            await currentPolicy(tx, p.id, at);
+            await currentPolicy(tx, p.id, clock.now());
             configured.push(p.obligationId);
           } catch (error) {
             if (!(error instanceof ApplicationError)) throw error;

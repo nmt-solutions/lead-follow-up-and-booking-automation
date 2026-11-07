@@ -80,7 +80,8 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
       SELECT coalesce(sum(x.amount_minor::numeric),0) INTO historical FROM public.tax_remittance_allocation x JOIN public.tax_filing_intent i ON i.id=x.intent_id
         WHERE i.target->>'obligationKey'=p.definition->>'obligationKey' AND i.target->>'start'=p.definition->>'start' AND i.target->>'end'=p.definition->>'end';
       SELECT count(*)::integer INTO unresolved FROM public.tax_filing_event e JOIN public.tax_filing_intent i ON i.id=e.intent_id
-        WHERE i.report_id=r.id AND (e.kind='acknowledge' AND (e.detail->>'matches'='false' OR e.detail->>'contradiction'='true') OR e.kind='raise_issue')
+        WHERE i.target->>'obligationKey'=p.definition->>'obligationKey' AND i.target->>'start'=p.definition->>'start' AND i.target->>'end'=p.definition->>'end'
+          AND (e.kind='acknowledge' AND (e.detail->>'matches'='false' OR e.detail->>'contradiction'='true') OR e.kind='raise_issue')
           AND NOT EXISTS(SELECT 1 FROM public.tax_filing_event resolved WHERE resolved.intent_id=i.id AND resolved.kind='resolve_issue' AND resolved.detail->>'issueId'=e.id::text);
       liability:=CASE WHEN r.snapshot->>'totalsKnown'='true' THEN (r.snapshot->'totals'->>'taxMinor')::numeric ELSE NULL END;
       paid:=coalesce(allocated>0 AND liability>=0 AND allocated>=liability,false);
@@ -154,6 +155,10 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
           OR EXISTS(SELECT 1 FROM public.tax_liability_report newer WHERE newer.period_id=r.period_id AND newer.revision>r.revision)
           OR EXISTS(SELECT 1 FROM public.tax_reporting_period newer WHERE newer.supersedes_id=r.period_id)
           OR r.snapshot->>'sourceFingerprint' IS DISTINCT FROM public.tax_reporting_sources(r.period_id)->>'fingerprint'
+          OR NOT coalesce(r.snapshot->'obligation'->'definition'->'reviewerIds' ? d.actor_id AND r.snapshot->'obligation'->'definition'->'reviewerIds' ? approval.actor_id,false)
+          OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(public.tax_reporting_people()) person WHERE person->>'id'=d.actor_id)
+          OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(public.tax_reporting_people()) person WHERE person->>'id'=approval.actor_id)
+          OR NOT coalesce((p.definition->>'effectiveFrom')::timestamptz<=nullif(current_setting('app.tax_at',true),'')::timestamptz AND coalesce((p.definition->>'effectiveUntil')::timestamptz,'infinity')>nullif(current_setting('app.tax_at',true),'')::timestamptz,false)
           THEN RAISE EXCEPTION 'Tax filing report binding denied' USING ERRCODE='23514'; END IF;
         expected:=jsonb_build_object('reportId',r.id,'periodId',r.period_id,'revision',r.revision,'digest',r.digest,'approvalId',approval.id,
           'obligationId',p.obligation_id,'obligationKey',r.snapshot->'obligation'->>'key','registration',r.snapshot->'obligation'->'definition'->'registration'->>'identifier',
@@ -168,7 +173,7 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
             IF i.id IS NULL OR i.kind<>NEW.kind OR i.target->>'obligationKey' IS DISTINCT FROM expected->>'obligationKey'
               OR i.target->>'start' IS DISTINCT FROM expected->>'start' OR i.target->>'end' IS DISTINCT FROM expected->>'end'
               OR NOT EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND e.kind='supersede')
-              OR EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND e.kind='confirm')
+              OR EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND (e.kind='confirm' OR e.kind='acknowledge' AND e.detail->>'matches'='true' AND e.detail->>'result' IN('filed','settled')))
               THEN RAISE EXCEPTION 'Tax filing replacement lineage denied' USING ERRCODE='23514'; END IF;
           END IF;
           IF NEW.amendment_of IS NOT NULL THEN
@@ -204,8 +209,13 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
           THEN RAISE EXCEPTION 'Tax filing initiation already observed' USING ERRCODE='23514'; END IF;
         SELECT * INTO approval FROM public.tax_report_action WHERE report_id=i.report_id ORDER BY version DESC LIMIT 1;
         SELECT * INTO d FROM public.tax_filing_policy_decision WHERE policy_id=i.policy_id ORDER BY version DESC LIMIT 1;
+        SELECT * INTO p FROM public.tax_filing_policy WHERE id=i.policy_id;
         IF approval.id<>i.report_approval_id OR approval.kind<>'approve' OR d.id<>i.policy_decision_id OR d.outcome<>'approved'
-          OR i.supersedes_id IS NOT NULL AND EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.supersedes_id AND e.kind='confirm')
+          OR NOT coalesce(i.report->'snapshot'->'obligation'->'definition'->'reviewerIds' ? d.actor_id AND i.report->'snapshot'->'obligation'->'definition'->'reviewerIds' ? approval.actor_id,false)
+          OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(public.tax_reporting_people()) person WHERE person->>'id'=d.actor_id)
+          OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(public.tax_reporting_people()) person WHERE person->>'id'=approval.actor_id)
+          OR NOT coalesce((p.definition->>'effectiveFrom')::timestamptz<=nullif(current_setting('app.tax_at',true),'')::timestamptz AND coalesce((p.definition->>'effectiveUntil')::timestamptz,'infinity')>nullif(current_setting('app.tax_at',true),'')::timestamptz,false)
+          OR i.supersedes_id IS NOT NULL AND EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.supersedes_id AND (e.kind='confirm' OR e.kind='acknowledge' AND e.detail->>'matches'='true' AND e.detail->>'result' IN('filed','settled')))
           OR EXISTS(SELECT 1 FROM public.tax_filing_policy newer WHERE newer.obligation_id=(i.target->>'obligationId')::uuid AND newer.version>(i.policy->>'version')::integer)
           OR i.report->'snapshot'->>'sourceFingerprint' IS DISTINCT FROM public.tax_reporting_sources((i.target->>'periodId')::uuid)->>'fingerprint'
           THEN RAISE EXCEPTION 'Tax filing current approval denied' USING ERRCODE='23514'; END IF;
@@ -225,6 +235,9 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
           OR artifact.metadata->>'result' IS DISTINCT FROM 'no_effect' OR NEW.actor_id IN(i.actor_id,artifact.actor_id)
           OR artifact.metadata->>'kind' IS DISTINCT FROM (CASE WHEN i.kind='submission' THEN 'authority_acknowledgement' ELSE 'bank_confirmation' END)
           OR EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND e.kind='confirm')
+          OR EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND e.kind IN('attempt','acknowledge') AND (e.detail->>'occurredAt')::timestamptz>(artifact.metadata->>'occurredAt')::timestamptz)
+          OR EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND (e.kind='raise_issue' OR e.kind='acknowledge' AND (e.detail->>'matches'='false' OR e.detail->>'contradiction'='true'))
+            AND NOT EXISTS(SELECT 1 FROM public.tax_filing_event resolved WHERE resolved.intent_id=i.id AND resolved.kind='resolve_issue' AND resolved.detail->>'issueId'=e.id::text))
           OR NOT EXISTS(SELECT 1 FROM public.tax_filing_bytes b WHERE b.id=artifact.id AND encode(sha256(decode(b.body,'base64')),'hex')=artifact.metadata->>'sha256')
           THEN RAISE EXCEPTION 'Tax filing supersession denied' USING ERRCODE='23514'; END IF;
       END IF;

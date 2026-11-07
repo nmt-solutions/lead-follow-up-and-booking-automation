@@ -1362,6 +1362,322 @@ describe("Tax filing confirmations at the public application seam", () => {
     });
     expect((await app.workspace(f.operator)).allocations).toHaveLength(0);
   });
+  it("does not supersede a payment using no-effect evidence older than its initiation", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f);
+    const intent = await app.prepare(f.operator, {
+      ...identity(f.report),
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      kind: "remittance",
+      amountMinor: "400",
+      amendmentOf: null,
+      note: "Exact original payment",
+    });
+    await app.act(f.reviewer, {
+      requestKey: randomUUID(),
+      intentId: intent.id,
+      expectedVersion: 0,
+      kind: "approve",
+      note: "Reviewed original payment",
+    });
+    await app.act(f.operator, {
+      requestKey: randomUUID(),
+      intentId: intent.id,
+      expectedVersion: 1,
+      kind: "attempt",
+      outcome: "unknown",
+      reference: "original-bank-attempt",
+      occurredAt: h.clock.now().toISOString(),
+      note: "Uncertain original transfer",
+    });
+    const bytes = Buffer.from(
+      "Bank account statement from BEFORE the original transfer request",
+    );
+    const artifact = await app.storeEvidence(f.operator, {
+      requestKey: randomUUID(),
+      reportId: f.report.id,
+      target: intent.target,
+      kind: "bank_confirmation",
+      result: "no_effect",
+      reference: "older-no-transfer",
+      amountMinor: "400",
+      occurredAt: "2026-11-05T08:59:00.000Z",
+      name: "older.txt",
+      contentType: "text/plain",
+      bytesBase64: bytes.toString("base64"),
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      note: "Retain the earlier original",
+    });
+    await expect(
+      app.act(f.reviewer, {
+        requestKey: randomUUID(),
+        intentId: intent.id,
+        expectedVersion: 2,
+        kind: "supersede",
+        evidenceId: artifact.id,
+        note: "Earlier absence cannot resolve a later transfer",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(
+      (await app.workspace(f.operator)).intents.find((i) => i.id === intent.id),
+    ).toMatchObject({ status: "unknown", paid: false });
+  });
+  it("retains and reviews a late settled original without authorizing its replacement", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f);
+    const input = {
+      ...identity(f.report),
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      kind: "remittance",
+      amountMinor: "400",
+      amendmentOf: null,
+      note: "Original payment",
+    };
+    const original = await app.prepare(f.operator, input);
+    await app.act(f.reviewer, {
+      requestKey: randomUUID(),
+      intentId: original.id,
+      expectedVersion: 0,
+      kind: "approve",
+      note: "Original approval",
+    });
+    await app.act(f.operator, {
+      requestKey: randomUUID(),
+      intentId: original.id,
+      expectedVersion: 1,
+      kind: "attempt",
+      outcome: "unknown",
+      reference: "original-attempt",
+      occurredAt: h.clock.now().toISOString(),
+      note: "Original unknown attempt",
+    });
+    async function fact(result: "no_effect" | "settled") {
+      const bytes = Buffer.from(
+        `Synthetic original ${result} for original payment`,
+      );
+      return app.storeEvidence(f.operator, {
+        requestKey: randomUUID(),
+        reportId: f.report.id,
+        target: original.target,
+        kind: "bank_confirmation",
+        result,
+        reference: `original-${result}`,
+        amountMinor: "400",
+        occurredAt: h.clock.now().toISOString(),
+        name: `${result}.txt`,
+        contentType: "text/plain",
+        bytesBase64: bytes.toString("base64"),
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        note: "Retained attributed original",
+      });
+    }
+    const noEffect = await fact("no_effect");
+    await app.act(f.reviewer, {
+      requestKey: randomUUID(),
+      intentId: original.id,
+      expectedVersion: 2,
+      kind: "supersede",
+      evidenceId: noEffect.id,
+      note: "Independent no-effect review",
+    });
+    const replacement = await app.prepare(f.operator, {
+      ...input,
+      requestKey: randomUUID(),
+      supersedesId: original.id,
+    });
+    const settled = await fact("settled");
+    const ack = await app.act(f.operator, {
+      requestKey: randomUUID(),
+      intentId: original.id,
+      expectedVersion: 3,
+      kind: "acknowledge",
+      evidenceId: settled.id,
+      note: "Late actual original settlement contradicts no-effect assertion",
+    });
+    expect(ack.unresolvedIssueIds).toContain(ack.events.at(-1)!.id);
+    const reviewed = await app.act(f.reviewer, {
+      requestKey: randomUUID(),
+      intentId: original.id,
+      expectedVersion: 4,
+      kind: "resolve_issue",
+      issueId: ack.events.at(-1)!.id,
+      evidenceId: settled.id,
+      note: "Independent review retains original settlement; replacement must not transfer",
+    });
+    expect(reviewed.unresolvedIssueIds).toHaveLength(0);
+    const current = (await app.workspace(f.operator)).intents.find(
+      (i) => i.id === replacement.id,
+    )!;
+    await expect(
+      app.act(f.reviewer, {
+        requestKey: randomUUID(),
+        intentId: replacement.id,
+        expectedVersion: 0,
+        kind: "approve",
+        basisDigest: current.currentBasisDigest,
+        note: "A reviewed original settlement cannot unlock a duplicate transfer",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const completed = await app.act(f.reviewer, {
+      requestKey: randomUUID(),
+      intentId: original.id,
+      expectedVersion: 5,
+      kind: "confirm",
+      acknowledgementId: ack.events.at(-1)!.id,
+      note: "Recover the original settled payment fact",
+    });
+    expect(completed.paid).toBe(true);
+    expect((await app.workspace(f.operator)).allocations).toHaveLength(1);
+  });
+  it("keeps a required historical filing issue due after a reviewed amendment and payment carry-forward", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f);
+    const original = await confirmed(f, policy, "submission", "901");
+    await confirmed(f, policy, "remittance", "901");
+    const prepared = await periods.prepare(f.operator, {
+      requestKey: randomUUID(),
+      periodId: f.report.periodId,
+      expectedRevision: 1,
+      cutoff: h.clock.now().toISOString(),
+      note: "Explicit same-liability successor review",
+    });
+    const report = await periods.act(f.reviewer, {
+      requestKey: randomUUID(),
+      reportId: prepared.id,
+      expectedVersion: 0,
+      kind: "approve",
+      issueId: null,
+      evidence: ["Exact same original liability reviewed"],
+      note: "Current report approval",
+    });
+    await confirmed(
+      { ...f, report },
+      policy,
+      "submission",
+      "901",
+      original.intent.id,
+    );
+    const allocation = (await app.workspace(f.operator)).allocations[0];
+    await app.reconcileRemittance(f.reviewer, {
+      ...identity(report),
+      requestKey: randomUUID(),
+      allocationId: allocation.id,
+      expectedVersion: 0,
+      expectedReportId: f.report.id,
+      policyId: policy.id,
+      note: "Review same original payment once",
+    });
+    expect((await app.workspace(f.operator)).periods[0].fulfilled).toBe(true);
+    await app.act(f.reviewer, {
+      requestKey: randomUUID(),
+      intentId: original.intent.id,
+      expectedVersion: 3,
+      kind: "raise_issue",
+      evidenceId: original.artifact.id,
+      note: "Required review of original authority filing remains relevant to the same coverage",
+    });
+    expect((await app.workspace(f.operator)).periods[0]).toMatchObject({
+      filed: true,
+      paid: true,
+      fulfilled: false,
+      unresolvedEvidenceCount: 1,
+    });
+    await periods.evaluateReminders(f.operator);
+    expect(
+      (await periods.workspace(f.operator)).reminders.some((r) => r.current),
+    ).toBe(true);
+  });
+  it("rejects new authorization when its procedure reviewer loses authority at insertion", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f);
+    const reviewerId = (await h.authenticate(f.reviewer)).userId;
+    await h.admin
+      .query(`create function public.revoke_filing_review_before_insert() returns trigger language plpgsql security definer set search_path='' as $$ begin update public.platform_operator set tax=false where user_id='${reviewerId}'; return NEW; end $$;
+      create trigger aa_revoke_filing_review before insert on tax_filing_intent for each row execute function public.revoke_filing_review_before_insert()`);
+    try {
+      await expect(
+        app.prepare(f.operator, {
+          ...identity(f.report),
+          requestKey: randomUUID(),
+          policyId: policy.id,
+          kind: "remittance",
+          amountMinor: "400",
+          amendmentOf: null,
+          note: "Final authority required",
+        }),
+      ).rejects.toMatchObject({ cause: { code: "23514" } });
+      expect((await app.workspace(f.operator)).intents).toHaveLength(0);
+    } finally {
+      await h.admin.query(
+        "drop trigger aa_revoke_filing_review on tax_filing_intent; drop function public.revoke_filing_review_before_insert()",
+      );
+    }
+  });
+  it("rechecks the procedure effective window after waiting for tax serialization", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f, {
+        effectiveUntil: "2026-11-05T09:00:01.000Z",
+      });
+    const blocker = await h.admin.connect();
+    let ready: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    let calls = 0;
+    const guarded = createTaxFilingApplication({
+      periods,
+      clock: h.clock,
+      repository: createTaxFilingRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      authenticatePlatform: async (credentials: Headers) => {
+        const actor = await h.access.authenticatePlatformForWork(credentials);
+        if (++calls === 1) {
+          await blocker.query("begin");
+          await blocker.query(
+            "select pg_advisory_xact_lock(hashtextextended('tax-reporting',0))",
+          );
+          ready();
+        }
+        return actor;
+      },
+    });
+    const pending = guarded.prepare(f.operator, {
+      ...identity(f.report),
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      kind: "remittance",
+      amountMinor: "400",
+      amendmentOf: null,
+      note: "Exact expiring procedure",
+    });
+    const result = expect(pending).rejects.toMatchObject({
+      code: "SETUP_REQUIRED",
+    });
+    try {
+      await started;
+      let waiting = false;
+      for (let attempt = 0; attempt < 200 && !waiting; attempt++) {
+        waiting = (
+          await h.admin.query<{ waiting: boolean }>(
+            "select exists(select 1 from pg_stat_activity where usename='app_runtime' and wait_event_type='Lock' and query like '%tax-reporting%') waiting",
+          )
+        ).rows[0].waiting;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(waiting).toBe(true);
+      h.clock.set("2026-11-05T09:00:02.000Z");
+      await blocker.query("commit");
+      await result;
+      expect((await app.workspace(f.operator)).intents).toHaveLength(0);
+    } finally {
+      await blocker.query("rollback");
+      blocker.release();
+    }
+  });
   it("recovers late original facts after source correction and obsolete initiating sessions without another effect", async () => {
     const f = await approvedPeriod(),
       policy = await manualPolicy(f);

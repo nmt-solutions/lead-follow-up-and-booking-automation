@@ -899,7 +899,10 @@ function IntentPanel({
               using an original source that conclusively establishes no
               submission or transfer. Generic failure or uncertainty is
               insufficient. A previously confirmed filing or payment remains
-              recorded.
+              recorded. The original must cover the attempt and acknowledgements
+              in time. A late final filing or settlement acknowledgement blocks
+              its replacement and must be reviewed under the original work
+              order.
             </p>
           )}
           {kind === "confirm" && (
