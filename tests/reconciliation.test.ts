@@ -1313,6 +1313,8 @@ describe("Subscription money reconciliation through the public application", () 
         reference: "synthetic conversion",
       };
       const cases = [
+        { ...data, evidenceId: null },
+        { ...data, lines: [] },
         {
           ...data,
           lines: [

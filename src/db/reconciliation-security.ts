@@ -61,6 +61,7 @@ export async function secureReconciliationRecords(pool: Pool | PoolClient) {
         IF NOT EXISTS(SELECT 1 FROM public.reconciliation_record r WHERE r.id=predecessor AND r.identity=NEW.identity) OR EXISTS(SELECT 1 FROM public.reconciliation_record r WHERE r.supersedes=predecessor OR r.data->'supersedesAlso' ? predecessor::text) THEN RAISE EXCEPTION 'invalid correction'; END IF;
       END LOOP;
       IF NEW.data->>'kind'='settlement' THEN
+        IF NOT coalesce(jsonb_typeof(NEW.data->'lines')='array' AND jsonb_array_length(NEW.data->'lines') BETWEEN 1 AND 1000,false) THEN RAISE EXCEPTION 'invalid settlement coverage'; END IF;
         FOR l IN SELECT value FROM jsonb_array_elements(NEW.data->'lines') LOOP
           IF l->>'conversion' IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.reconciliation_evidence e WHERE e.id=(l->'conversion'->>'evidenceId')::uuid AND e.source='conversion_confirmation') THEN RAISE EXCEPTION 'invalid conversion evidence'; END IF;
           IF l->>'kind'='unclassified' THEN

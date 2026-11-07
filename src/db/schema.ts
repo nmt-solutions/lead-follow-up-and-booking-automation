@@ -6117,7 +6117,7 @@ export const reconciliationRecord = pgTable(
     }),
     check(
       "reconciliation_record_binding",
-      sql`${t.data}->>'requestKey'=${t.requestKey}::text and ${t.data}->>'evidenceId'=${t.evidenceId}::text and (${t.data}->>'supersedes') is not distinct from ${t.supersedes}::text and ${t.data}->>'kind' in ('settlement','bank_receipt') and octet_length(${t.data}::text)<=1048576`,
+      sql`coalesce((${t.data}->>'requestKey'=${t.requestKey}::text and ${t.data}->>'evidenceId'=${t.evidenceId}::text and (${t.data}->>'supersedes') is not distinct from ${t.supersedes}::text and ${t.data}->>'kind' in ('settlement','bank_receipt') and octet_length(${t.data}::text)<=1048576),false)`,
     ),
     ...reconciliationPolicies("reconciliation_record"),
   ],
