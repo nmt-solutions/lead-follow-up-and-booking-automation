@@ -3,7 +3,7 @@ import { ApplicationError } from "../models/application-error";
 import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
 import { createCostRepository } from "../db/cost-repository";
 import { createCostApplication } from "../application/costs";
-import { configuredCostMailer } from "./mailer";
+import { configuredNotifications } from "../notifications/configuration";
 
 export async function recoverOperatorCosts() {
   if (!process.env.DATABASE_URL) throw new ApplicationError("SETUP_REQUIRED");
@@ -16,13 +16,23 @@ export async function recoverOperatorCosts() {
   pool.on("error", () => {});
   try {
     await verifyRuntimeRole(pool);
+    const stream = configuredNotifications({
+      database: runtimeDatabase(pool),
+      env: process.env,
+      authenticate: async () => {
+        throw new ApplicationError("FORBIDDEN");
+      },
+      authenticatePlatform: async () => {
+        throw new ApplicationError("FORBIDDEN");
+      },
+    });
     return await createCostApplication({
       authenticatePlatform: async () => {
         throw new ApplicationError("FORBIDDEN");
       },
       repository: createCostRepository(runtimeDatabase(pool)),
       clock: { now: () => new Date() },
-      mailer: configuredCostMailer(process.env),
+      mailer: stream.costEmailConfigured ? stream.application.costMailer : null,
     }).recoverPending();
   } finally {
     await pool.end();

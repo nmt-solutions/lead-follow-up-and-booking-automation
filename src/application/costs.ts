@@ -63,6 +63,11 @@ export function createCostApplication<Credentials>(dependencies: {
           key: `operator-cost/${claim.id}`,
           email: claim.email,
           text: claim.summary,
+          authority: {
+            alertId: claim.id,
+            lease: claim.lease_key,
+            actorId: actor.userId,
+          },
         });
         const parsed = z
           .object({ id: z.string().regex(/^[a-zA-Z0-9_.:/-]{1,256}$/) })

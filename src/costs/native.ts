@@ -13,8 +13,9 @@ export const nativeCostRowSchema = z.object({
     "sequence_mail",
     "meta",
     "payment",
+    "transactional",
   ]),
-  business_id: z.uuid(),
+  business_id: z.uuid().nullable(),
   run_id: z.uuid().nullable(),
   at: z.coerce.date(),
   details: z.record(
@@ -110,6 +111,23 @@ export function nativeCost(
     base.unit = "message";
     base.allocation =
       "Paid directly by the Business; excluded from operator totals and platform billing";
+  } else if (row.kind === "transactional") {
+    base.provider = "resend";
+    base.category = "messaging";
+    base.unit = "transactional_email";
+    base.funding =
+      d.funding === "existing_subscription"
+        ? "existing_subscription"
+        : "unknown";
+    base.plan = typeof d.selectedTerms === "string" ? d.selectedTerms : null;
+    base.allocation =
+      "Platform authentication and authorized notices; selected plan commitment is context, not a per-email charge";
+    base.quantity =
+      d.outcome === "rejected" || d.outcome === "rate_limited" ? 0 : 1;
+    if (d.acceptanceUncertain === true) {
+      base.quantity = 1;
+      base.status = "uncertain";
+    }
   } else if (row.kind === "storage") {
     base.provider = "r2";
     base.category = "hosting";

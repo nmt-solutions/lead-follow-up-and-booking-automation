@@ -26,7 +26,7 @@ const auditNames: Record<string, string> = {
   "invitation.accepted": "Invitation accepted",
   "invitation.revoked": "Invitation revoked",
   "invitation.expired": "Invitation expired",
-  "invitation.delivery_sent": "Invitation email sent",
+  "invitation.delivery_sent": "Invitation email accepted by provider",
   "invitation.delivery_unconfirmed": "Invitation email delivery unconfirmed",
   "membership.role_changed": "Role changed",
   "membership.removed": "Member removed",
@@ -419,7 +419,9 @@ export function TeamManager({
                     Email:{" "}
                     {invitation.delivery === "unconfirmed"
                       ? "delivery unconfirmed"
-                      : invitation.delivery}
+                      : invitation.delivery === "sent"
+                        ? "provider accepted"
+                        : invitation.delivery}
                   </p>
                 </div>
                 {invitation.status === "pending" &&
@@ -463,8 +465,9 @@ export function TeamManager({
           </ul>
         )}
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          If email delivery is unconfirmed, retry within 24 hours of inviting.
-          After that, revoke the invitation and create a new one.
+          If acceptance is unconfirmed, review the saved notification deadline
+          before retrying. Held or expired attempts need native evidence review;
+          revoke the invitation before issuing a replacement.
         </p>
       </section>
       <section aria-labelledby="audit-title">

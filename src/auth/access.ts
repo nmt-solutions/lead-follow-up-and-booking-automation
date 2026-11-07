@@ -47,7 +47,8 @@ export function privilegedRoles(database: Database, userId: string) {
         operator?.senderHealth ||
         operator?.documents ||
         operator?.operations ||
-        operator?.costs,
+        operator?.costs ||
+        operator?.notifications,
       ),
     };
   });

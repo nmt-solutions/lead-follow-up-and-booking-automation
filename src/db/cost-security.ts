@@ -151,6 +151,13 @@ export async function prepareCostSecurity(pool: Pool | PoolClient) {
         FROM public.whatsapp_receipt r WHERE r.kind='status' AND r.message_ref IS NOT NULL
         GROUP BY r.connection_id,r.message_ref,r.business_id HAVING to_char(min(r.at) AT TIME ZONE 'UTC','YYYY-MM')=cost_month
       UNION ALL
+        SELECT 'native:notification:'||n.id,'transactional',n.business_id,NULL::uuid,n.first_attempt_at,
+          jsonb_build_object('provider','resend','purpose',n.purpose,'mode',n.binding->>'mode','outcome',n.state,'acceptanceUncertain',n.uncertain,
+            'funding',CASE WHEN n.terms->>'kind' IN ('free','selected_paid') THEN 'existing_subscription' ELSE 'unknown' END,
+            'selectedTerms',n.terms->>'reference','termsKind',n.terms->>'kind')
+        FROM public.notification_notice n WHERE n.first_attempt_at IS NOT NULL AND EXISTS(SELECT 1 FROM public.notification_event e WHERE e.notice_id=n.id AND e.kind='dispatch_boundary')
+          AND to_char(n.first_attempt_at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
         SELECT 'native:payment:'||p.id,'payment',p.business_id,NULL::uuid,coalesce((p.charge->>'paidAt')::timestamptz,p.start),
           jsonb_build_object('provider',p.provider,'feeMinor',coalesce(e.observation->'charge'->'feeMinor',p.charge->'charge'->'feeMinor'),
             'feeTaxMinor',coalesce(e.observation->'charge'->'feeTaxMinor',p.charge->'charge'->'feeTaxMinor'),
