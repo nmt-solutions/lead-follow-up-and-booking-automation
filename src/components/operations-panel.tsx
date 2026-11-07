@@ -347,9 +347,8 @@ export function OperationsPanel({
                       {row.responsibleUserId ?? "unassigned"}
                     </p>
                     {row.reason && (
-                      <p className="font-medium text-warning">
-                        Blocked or review reason:{" "}
-                        {row.reason.replaceAll("_", " ")}
+                      <p className="font-medium">
+                        Source reason: {row.reason.replaceAll("_", " ")}
                       </p>
                     )}
                     {row.handoff && <p>Handoff: {row.handoff.reason}</p>}
@@ -437,6 +436,33 @@ export function OperationsPanel({
                   Recorded {e.status.replaceAll("_", " ")}
                   {e.reason ? ` · ${e.reason.replaceAll("_", " ")}` : ""}
                 </p>
+                <details className="mt-2 text-sm">
+                  <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                    Recorded approval and recovery context
+                  </summary>
+                  <dl className="grid gap-2 sm:grid-cols-[minmax(8rem,1fr)_2fr]">
+                    <dt>Source time</dt>
+                    <dd>{e.sourceAt ?? "Unavailable"}</dd>
+                    <dt>Responsible person</dt>
+                    <dd className="wrap-anywhere">
+                      {e.responsibleUserId ?? "Unassigned"}
+                    </dd>
+                    <dt>Recovery request</dt>
+                    <dd className="wrap-anywhere">
+                      {e.requestKey ?? "Source observation"}
+                    </dd>
+                    {Object.entries(e.context).map(([key, value]) => (
+                      <div key={key} className="contents">
+                        <dt className="wrap-anywhere text-muted-foreground">
+                          {key}
+                        </dt>
+                        <dd className="wrap-anywhere">
+                          {value === null ? "Unavailable" : String(value)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
               </li>
             ))}
           </ol>

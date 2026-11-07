@@ -27,7 +27,24 @@ function parse<T>(schema: z.ZodType<T>, value: unknown) {
   if (!p.success) throw new ApplicationError("INVALID_INPUT");
   return p.data;
 }
-function needsAttention(row: { status: string; reason: string | null }) {
+function needsAttention(row: {
+  source: string;
+  status: string;
+  reason: string | null;
+}) {
+  if (row.source === "inquiry")
+    return row.status === "handoff" || row.status === "stale";
+  if (
+    row.source === "action" &&
+    row.status === "dispatched" &&
+    [
+      "whatsapp_accepted_delivery_unconfirmed",
+      "whatsapp_sent",
+      "whatsapp_delivered",
+      "whatsapp_read",
+    ].includes(row.reason ?? "")
+  )
+    return false;
   return (
     [
       "blocked",
@@ -45,6 +62,7 @@ function needsAttention(row: { status: string; reason: string | null }) {
         "ready",
         "connected",
         "booked",
+        "business_evidence",
       ].includes(row.reason),
     )
   );
@@ -139,18 +157,41 @@ export function createOperationsApplication<C>(d: {
       const events = records.history;
       let nativeActions: { id: string; evidence: string }[] = [];
       const nativeUnavailable: string[] = [];
-      if (!operator && d.commands.whatsapp) {
+      const nativeActionIds = new Set(
+        records.latest
+          .filter((r) => r.source === "whatsapp_action_history")
+          .flatMap((r) => (r.context.actionId ? [r.context.actionId] : [])),
+      );
+      if (!operator && nativeActionIds.size && d.commands.whatsapp) {
         try {
           nativeActions = (
             await d.commands.whatsapp.workspace(credentials, businessId)
           ).actions;
         } catch (error: unknown) {
           if (!(error instanceof ApplicationError)) throw error;
+          if (
+            ![
+              "FORBIDDEN",
+              "NOT_FOUND",
+              "CHANNEL_SETUP_REQUIRED",
+              "SETUP_REQUIRED",
+              "PROVIDER_UNAVAILABLE",
+              "INVALID_PROVIDER_RESPONSE",
+            ].includes(error.code)
+          )
+            throw error;
           nativeUnavailable.push(
-            "Current native message evidence is unavailable with this actor’s channel access or setup. Review the source with its authorized Business actor.",
+            error.code === "PROVIDER_UNAVAILABLE" ||
+              error.code === "INVALID_PROVIDER_RESPONSE"
+              ? "Current native message evidence could not be checked because the channel provider is unavailable or its response could not be verified."
+              : "Current native message evidence is unavailable with this actor’s channel access or setup. Review the source with its authorized Business actor.",
           );
         }
       }
+      if (!operator && nativeActionIds.size && !d.commands.whatsapp)
+        nativeUnavailable.push(
+          "Current native message evidence is unavailable because the channel query is not configured.",
+        );
       const resources = records.latest.map((e) => {
         const ownership = records.latest.find(
           (r) => r.source === "ownership" && r.targetId === e.opportunityId,

@@ -272,10 +272,24 @@ describe("Operations at the public application seam", () => {
       responsibleUserId: (await h.authenticate(owner)).userId,
       resolved: false,
     });
+    const acknowledgmentKey = crypto.randomUUID();
     await operations().acknowledge(owner, business.id, {
       eventId: alert!.id,
-      requestKey: crypto.randomUUID(),
+      requestKey: acknowledgmentKey,
     });
+    await operations().acknowledge(owner, business.id, {
+      eventId: alert!.id,
+      requestKey: acknowledgmentKey,
+    });
+    const otherObservation = failed.history.find(
+      (e) => e.id !== alert!.id && e.outcome === "observed",
+    )!;
+    await expect(
+      operations().acknowledge(owner, business.id, {
+        eventId: otherObservation.id,
+        requestKey: acknowledgmentKey,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(
       (await operations().workspace(owner, business.id)).notifications.find(
         (a) => a.id === alert!.id,
@@ -308,6 +322,25 @@ describe("Operations at the public application seam", () => {
         (e) => e.targetId === work.jobId && e.reason === "provider_unavailable",
       ),
     ).toBe(true);
+    const firstPage = await operations().workspace(owner, business.id, false, {
+      limit: 1,
+    });
+    expect(firstPage.history).toHaveLength(1);
+    expect(firstPage.nextHistoryBefore).not.toBeNull();
+    const secondPage = await operations().workspace(owner, business.id, false, {
+      limit: 1,
+      before: firstPage.nextHistoryBefore,
+    });
+    expect(secondPage.history).toHaveLength(1);
+    expect(secondPage.history[0].position).toBeLessThan(
+      firstPage.history[0].position,
+    );
+    expect(secondPage.resources.find((r) => r.id === work.jobId)).toMatchObject(
+      {
+        status: "completed",
+        context: { captured: 2, checkpoint: 2 },
+      },
+    );
     await operations().recover(owner, business.id, command);
     expect(queued).toHaveLength(2);
   });

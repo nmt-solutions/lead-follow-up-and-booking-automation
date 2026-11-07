@@ -585,6 +585,46 @@ describe("Inquiry handling at the persisted application seam", () => {
       nextAction: "Answer and collect missing requirements",
     });
   }
+  it("retains a successful inquiry reason in history without creating a failure alert", async () => {
+    const f = await fixture("operations-success");
+    await handback(f);
+    const result = await f.app.process(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      { messageId: f.first.id },
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      reason: "grounded_response",
+    });
+    const operations = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { inquiries: f.restart() },
+    });
+    const state = await operations.workspace(f.credentials, f.business.id);
+    expect(
+      state.resources.find((r) => r.source === "inquiry" && r.id === result.id),
+    ).toMatchObject({
+      status: "ready",
+      reason: "grounded_response",
+    });
+    expect(
+      state.history.some(
+        (e) => e.targetId === result.id && e.reason === "grounded_response",
+      ),
+    ).toBe(true);
+    expect(
+      state.notifications.filter(
+        (n) => n.source === "inquiry" && n.targetId === result.id,
+      ),
+    ).toEqual([]);
+    expect(f.effects).toEqual([]);
+  });
   it("routes an absent shared profile to an accountable setup handoff without inventing a model configuration", async () => {
     const f = await fixture("no-profile", "rfq", false);
     await handback(f);

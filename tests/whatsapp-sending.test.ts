@@ -162,6 +162,11 @@ describe("WhatsApp sends through current public application commands", () => {
         (r) => r.id === action.id,
       ),
     ).toMatchObject({ context: { nativeEvidence: "delivered" } });
+    expect(
+      (await operations.workspace(f.credentials, f.businessId)).notifications
+        .filter((n) => n.source === "action" && n.targetId === action.id)
+        .every((n) => n.resolved),
+    ).toBe(true);
     expect(workspace.usage[0]).toMatchObject({
       state: "observed_unpriced",
       currency: null,

@@ -130,6 +130,33 @@ export function createOperationsRepository(database: Database, clock: Clock) {
           )
             throw new ApplicationError("FORBIDDEN");
         }
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`operations:${businessId}:${requestKey}`},0))`,
+        );
+        const previous = await tx
+          .select()
+          .from(operationEvent)
+          .where(
+            and(
+              eq(operationEvent.businessId, businessId),
+              eq(operationEvent.requestKey, requestKey),
+            ),
+          );
+        if (previous.length) {
+          if (
+            previous.some(
+              (saved) =>
+                saved.actorId !== identity.userId ||
+                saved.action !== "acknowledge" ||
+                saved.outcome !== "acknowledged" ||
+                saved.snapshot.context.notificationId !== eventId ||
+                saved.snapshot.context.notificationAudience !==
+                  (operator ? "operator" : "business"),
+            )
+          )
+            throw new ApplicationError("CONFLICT");
+          return;
+        }
         await tx
           .insert(operationEvent)
           .values({
