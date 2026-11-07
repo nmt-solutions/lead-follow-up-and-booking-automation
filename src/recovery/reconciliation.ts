@@ -38,6 +38,7 @@ export function createRecoveryReconciler<C>(d: {
           id: row.id,
           nativeId: observation?.nativeId ?? null,
           outcome: observation ? "accepted" : "unknown",
+          status: observation?.status ?? null,
           amountMinor: observation?.amountMinor ?? null,
           currency: observation?.currency ?? null,
         });

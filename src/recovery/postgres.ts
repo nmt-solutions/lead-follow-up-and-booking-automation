@@ -5,7 +5,7 @@ import {
   randomBytes,
 } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -33,6 +33,11 @@ const manifestSchema = z.object({
   cutoff: z.iso.datetime(),
   schemaHash: z.string(),
   nativeSchemaHash: z.string(),
+  snapshot: z.object({
+    id: z.string(),
+    transaction: z.string(),
+    walLsn: z.string(),
+  }),
   source: z.record(z.string(), z.string()),
   tables: z.array(
     z.object({ table: z.string(), count: z.string(), hash: z.string() }),
@@ -152,7 +157,15 @@ async function native(
 ) {
   try {
     await run(binary, args, {
-      env: { ...process.env, ...environment },
+      env: {
+        NODE_ENV: process.env.NODE_ENV,
+        PATH: process.env.PATH,
+        Path: process.env.Path,
+        SystemRoot: process.env.SystemRoot,
+        TEMP: process.env.TEMP,
+        TMP: process.env.TMP,
+        ...environment,
+      },
       windowsHide: true,
       timeout: 120000,
       maxBuffer: 1024 * 1024,
@@ -187,6 +200,7 @@ export async function captureRecoveryArchive(d: {
   id: string;
   key: Buffer;
   pgDump: string;
+  maxBytes: number;
 }): Promise<RecoveryArchive> {
   if (d.key.length !== 32) throw new ApplicationError("SETUP_REQUIRED");
   const client = await d.source.admin.connect(),
@@ -194,8 +208,13 @@ export async function captureRecoveryArchive(d: {
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const snapshot = (
-      await client.query<{ snapshot: string; cutoff: Date }>(
-        "SELECT pg_export_snapshot() AS snapshot,transaction_timestamp() AS cutoff",
+      await client.query<{
+        snapshot: string;
+        cutoff: Date;
+        transaction: string;
+        wal_lsn: string;
+      }>(
+        "SELECT pg_export_snapshot() AS snapshot,statement_timestamp() AS cutoff,pg_current_snapshot()::text AS transaction,pg_current_wal_lsn()::text AS wal_lsn",
       )
     ).rows[0];
     const manifest: RecoveryManifest = {
@@ -204,11 +223,17 @@ export async function captureRecoveryArchive(d: {
       cutoff: snapshot.cutoff.toISOString(),
       schemaHash: d.schemaHash,
       nativeSchemaHash: await nativeSchemaHash(client),
+      snapshot: {
+        id: snapshot.snapshot,
+        transaction: snapshot.transaction,
+        walLsn: snapshot.wal_lsn,
+      },
       source: d.sourceIdentity,
       tables: await inventory(client),
       facts: await facts(client, d.businessId),
     };
     const path = join(directory, "backup.dump");
+    await writeFile(path, Buffer.alloc(0), { mode: 0o600, flag: "wx" });
     await native(
       d.pgDump,
       [
@@ -223,6 +248,8 @@ export async function captureRecoveryArchive(d: {
     );
     const iv = randomBytes(12),
       cipher = createCipheriv("aes-256-gcm", d.key, iv);
+    if ((await stat(path)).size > d.maxBytes)
+      throw new ApplicationError("SETUP_REQUIRED");
     cipher.setAAD(Buffer.from(JSON.stringify(manifest)));
     const ciphertext = Buffer.concat([
       cipher.update(await readFile(path)),
@@ -381,7 +408,7 @@ export function createPostgresRecoveryAdapter(d: {
       throw new ApplicationError("CONFLICT");
     return a;
   }
-  async function targetState(id: string) {
+  async function targetState() {
     return (
       await d.target.admin.query<{
         operation_id: string | null;
@@ -425,7 +452,7 @@ export function createPostgresRecoveryAdapter(d: {
               : null;
       if (column && columns.includes("id"))
         selects.push(
-          `SELECT '${table}'::text AS "table",id::text,encode(sha256(convert_to(to_jsonb(r)::text,'UTF8')),'hex') AS hash,jsonb_build_object('name',to_jsonb(r)->'name','offering',to_jsonb(r)->'offering','subject',to_jsonb(r)->'subject','text',CASE WHEN '${table}'='inbox_message' THEN to_jsonb(r)->'text' ELSE NULL END,'kind',to_jsonb(r)->'kind','status',to_jsonb(r)->'status','phase',to_jsonb(r)->'phase','paymentId',to_jsonb(r)->'payment_id','invoiceId',to_jsonb(r)->'invoice_id','periodId',to_jsonb(r)->'period_id') AS value FROM public.${quoted(table)} r WHERE ${column === "receipt_case" ? "EXISTS(SELECT 1 FROM public.financial_case c WHERE c.id::text=r.receipt->>'caseRef' AND c.business_id=(SELECT business_id FROM recovery_quarantine.target WHERE singleton AND operation_id=op))" : `${column}=(SELECT business_id FROM recovery_quarantine.target WHERE singleton AND operation_id=op)`}`,
+          `SELECT '${table}'::text AS "table",id::text,encode(sha256(convert_to(to_jsonb(r)::text,'UTF8')),'hex') AS hash,jsonb_build_object('name',to_jsonb(r)->'name','offering',to_jsonb(r)->'offering','subject',coalesce(to_jsonb(r)->'subject',to_jsonb(r)->'content'->'subject'),'text',CASE WHEN '${table}'='inbox_message' THEN to_jsonb(r)->'content'->'text' ELSE NULL END,'kind',to_jsonb(r)->'kind','status',to_jsonb(r)->'status','phase',to_jsonb(r)->'phase','paymentId',to_jsonb(r)->'payment_id','invoiceId',to_jsonb(r)->'invoice_id','periodId',to_jsonb(r)->'period_id','actualMinor',CASE WHEN '${table}'='financial_case_event' AND to_jsonb(r)->>'kind'='financial_effect' THEN to_jsonb(r)->'detail'->'actualMinor' ELSE NULL END,'nativeId',CASE WHEN '${table}'='financial_case_event' THEN to_jsonb(r)->'detail'->'nativeId' WHEN '${table}'='financial_receipt' THEN to_jsonb(r)->'receipt'->'nativeId' ELSE NULL END,'totalMinor',CASE WHEN '${table}'='seller_document' THEN to_jsonb(r)->'snapshot'->'totals'->'totalMinor' ELSE NULL END,'artifactHash',CASE WHEN '${table}'='seller_document' THEN to_jsonb(r)->'sha256' ELSE NULL END) AS value FROM public.${quoted(table)} r WHERE ${column === "receipt_case" ? "EXISTS(SELECT 1 FROM public.financial_case c WHERE c.id::text=r.receipt->>'caseRef' AND c.business_id=(SELECT business_id FROM recovery_quarantine.target WHERE singleton AND operation_id=op))" : `${column}=(SELECT business_id FROM recovery_quarantine.target WHERE singleton AND operation_id=op)`}`,
         );
     }
     await d.target.admin
@@ -435,8 +462,11 @@ export function createPostgresRecoveryAdapter(d: {
       "UPDATE recovery_quarantine.target SET business_id=$1,operation_id=$2 WHERE singleton",
       [plan.businessId, id],
     );
-    const safety=await d.target.runtime.query<{safe:boolean}>(`SELECT current_setting('transaction_read_only')='on' AND NOT has_table_privilege(current_user,'recovery_quarantine.target','SELECT,INSERT,UPDATE,DELETE,TRUNCATE') AND EXISTS(SELECT 1 FROM pg_proc p WHERE p.oid='recovery_quarantine.records(uuid)'::regprocedure AND p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) AS safe`);
-    if(safety.rows[0]?.safe!==true)throw new ApplicationError("SETUP_REQUIRED");
+    const safety = await d.target.runtime.query<{ safe: boolean }>(
+      `SELECT current_setting('transaction_read_only')='on' AND NOT has_table_privilege(current_user,'recovery_quarantine.target','SELECT,INSERT,UPDATE,DELETE,TRUNCATE') AND EXISTS(SELECT 1 FROM pg_proc p WHERE p.oid='recovery_quarantine.records(uuid)'::regprocedure AND p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) AS safe`,
+    );
+    if (safety.rows[0]?.safe !== true)
+      throw new ApplicationError("SETUP_REQUIRED");
     const result = await d.target.runtime.query(
       "SELECT * FROM recovery_quarantine.records($1) ORDER BY 1,2",
       [id],
@@ -472,7 +502,7 @@ export function createPostgresRecoveryAdapter(d: {
       const physicalTarget = await check(plan);
       await artifact(plan);
       await authorize();
-      const state = await targetState(id);
+      const state = await targetState();
       if (state.operation_id && state.operation_id !== id)
         throw new ApplicationError("CONFLICT");
       if (stage === "target_verified") {
@@ -628,6 +658,19 @@ export function createPostgresRecoveryAdapter(d: {
                     .regex(/^[a-zA-Z0-9_:-]{1,150}$/)
                     .nullable(),
                   outcome: z.enum(["accepted", "unknown", "stopped"]),
+                  status: z
+                    .enum([
+                      "pending",
+                      "processed",
+                      "failed",
+                      "open",
+                      "under_review",
+                      "won",
+                      "lost",
+                      "closed",
+                    ])
+                    .nullable()
+                    .optional(),
                   amountMinor: z.string().regex(/^\d+$/).nullable(),
                   currency: z.enum(["INR", "USD"]).nullable(),
                 }),

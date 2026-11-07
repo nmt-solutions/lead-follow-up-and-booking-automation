@@ -89,7 +89,9 @@ export async function startPostgres(
       });
     }
   }
-  async function reapplySchema() {
+  async function reapplySchema(
+    securityOptions: { allowQuarantined?: boolean } = {},
+  ) {
     await prepareDatabaseRole(admin);
     const pushed = await run(process.execPath, [drizzleCli, "push"], {
       env: {
@@ -104,7 +106,7 @@ export async function startPostgres(
       throw new Error(
         `The test schema push reported a database failure: ${`${pushed.stdout}\n${pushed.stderr}`.match(/^(?:error|Error):[^\n]*/m)?.[0]}`,
       );
-    await secureDatabase(admin);
+    await secureDatabase(admin, securityOptions);
   }
   try {
     await postgres.initialise();

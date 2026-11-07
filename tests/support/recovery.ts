@@ -86,6 +86,7 @@ export async function recoveryFixture(
       id: `backup-${randomUUID()}`,
       key,
       pgDump: pgTool("pg_dump"),
+      maxBytes: 100000000,
     });
     const future = new Date(Date.now() + 86400000).toISOString();
     const plan = recoveryPlanSchema.parse({
@@ -151,6 +152,7 @@ export async function recoveryFixture(
       expiresAt: future,
       archive: archive as RecoveryArchive,
       failSchema: false,
+      schemaRunner: null as null | (() => Promise<void>),
       failAfterRestore: false,
       restoreCalls: 0,
       evidence: {
@@ -196,7 +198,8 @@ export async function recoveryFixture(
           apply: async (pool) => {
             if (controls.failSchema)
               throw Error("isolated schema runner unavailable");
-            await prepareDatabaseRole(pool);
+            if (controls.schemaRunner) await controls.schemaRunner();
+            else await prepareDatabaseRole(pool);
           },
         },
         observeIdentities: async () => {

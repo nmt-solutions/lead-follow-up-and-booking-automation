@@ -9,10 +9,22 @@ export async function recoverySchemaBundle(root = process.cwd()) {
     "drizzle.config.ts",
     "scripts/database-environment.ts",
     "scripts/database-security.ts",
+    "scripts/recovery-tools.ts",
+    "trigger.recovery.config.ts",
+    "src/models/infrastructure-recovery.ts",
+    "src/application/infrastructure-recovery.ts",
     ...(await readdir(join(root, "src/db")))
       .filter((f) => f.endsWith(".ts"))
       .sort()
       .map((f) => `src/db/${f}`),
+    ...(await readdir(join(root, "src/recovery")))
+      .filter((f) => f.endsWith(".ts"))
+      .sort()
+      .map((f) => `src/recovery/${f}`),
+    ...(await readdir(join(root, "src/recovery-trigger")))
+      .filter((f) => f.endsWith(".ts"))
+      .sort()
+      .map((f) => `src/recovery-trigger/${f}`),
   ];
   const contents = [];
   for (const path of files)

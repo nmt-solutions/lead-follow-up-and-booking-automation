@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { isDeepStrictEqual } from "node:util";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -153,16 +154,36 @@ export async function configuredRecoveryNative(
         inventory.storage.targetBucket,
         "RECOVERY_TARGET_R2",
       );
-    const object = (id: string) => {
+    const object = async (id: string) => {
       const f = plan.files.find((f) => f.id === id),
         m = objects.find((o) => o.id === id);
       if (
         !f ||
         !m ||
+        m.id !== m.metadata.fileId ||
         m.metadata.businessId !== plan.businessId ||
         m.metadata.sha256 !== f.hash
       )
         throw new ApplicationError("SETUP_REQUIRED");
+      const reference = (
+        await target.admin.query<{
+          kind: string;
+          owner_id: string;
+          bytes: string;
+          sha256: string;
+        }>(
+          `SELECT 'business-files' AS kind,owner_id,size::text AS bytes,sha256 FROM public.business_file WHERE id::text=$1 AND business_id=$2 AND sha256=$3
+        UNION ALL SELECT 'seller-documents',actor_id,bytes::text,sha256 FROM public.seller_document WHERE id::text=$1 AND business_id=$2 AND sha256=$3`,
+          [id, plan.businessId, f.hash],
+        )
+      ).rows;
+      if (
+        reference.length !== 1 ||
+        reference[0].owner_id !== m.metadata.ownerId ||
+        Number(reference[0].bytes) !== f.bytes ||
+        m.key !== `${reference[0].kind}/${plan.businessId}/${id}`
+      )
+        throw new ApplicationError("CONFLICT");
       return { f, m };
     };
     const financial = createFinancialAdjustmentApplication({
@@ -233,27 +254,35 @@ export async function configuredRecoveryNative(
         observeIdentities: observe,
         files: {
           async readRetained(id) {
-            const { f, m } = object(id);
+            const { f, m } = await object(id);
             try {
-              return Buffer.from(
-                (await backupStorage.get(m.key, f.bytes)).bytes,
-              );
+              const stored = await backupStorage.get(m.key, f.bytes);
+              if (
+                !isDeepStrictEqual(stored.metadata, m.metadata) ||
+                stored.contentType !== m.contentType
+              )
+                throw new ApplicationError("CONFLICT");
+              return Buffer.from(stored.bytes);
             } catch {
               return null;
             }
           },
           async readTarget(id) {
-            const { f, m } = object(id);
+            const { f, m } = await object(id);
             try {
-              return Buffer.from(
-                (await targetStorage.get(m.key, f.bytes)).bytes,
-              );
+              const stored = await targetStorage.get(m.key, f.bytes);
+              if (
+                !isDeepStrictEqual(stored.metadata, m.metadata) ||
+                stored.contentType !== m.contentType
+              )
+                throw new ApplicationError("CONFLICT");
+              return Buffer.from(stored.bytes);
             } catch {
               return null;
             }
           },
           async writeTarget(id, bytes) {
-            const { m } = object(id);
+            const { m } = await object(id);
             await targetStorage.put(m.key, {
               bytes,
               metadata: m.metadata,

@@ -164,13 +164,11 @@ describe("Recovery authority, replay and database security", () => {
         target: { ...r.plan.target, environment: "production" },
       };
       await expect(
-        r
-          .application()
-          .request(owner, {
-            planId: r.plan.id,
-            requestKey: randomUUID(),
-            target: invalid.target,
-          }),
+        r.application().request(owner, {
+          planId: r.plan.id,
+          requestKey: randomUUID(),
+          target: invalid.target,
+        }),
       ).rejects.toMatchObject({ code: "INVALID_INPUT" });
       await expect(
         r
@@ -310,6 +308,26 @@ describe("Recovery authority, replay and database security", () => {
       r.controls.onObserve = async () => {};
       // A caller's future application clock cannot expire the DB-owned destructive lease.
       const before = r.controls.targetFiles.size;
+      const identity = await h.access.authenticateForWork(owner),
+        client = await h.runtime.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT set_config('app.actor_id',$1,true),set_config('app.recovery_session',$2,true),set_config('app.business_id',$3,true),set_config('app.at','2100-01-01T00:00:00Z',true)",
+          [identity.userId, identity.sessionId, r.plan.businessId],
+        );
+        expect(
+          (
+            await client.query(
+              "SELECT public.claim_infrastructure_recovery($1) AS lease",
+              [op.id],
+            )
+          ).rows[0].lease,
+        ).toBeNull();
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
       await r.advance(op.id, 1);
       expect(r.controls.targetFiles.size).toBe(before);
     } finally {

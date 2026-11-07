@@ -7,10 +7,22 @@ import {
 } from "../recovery/configuration";
 import { ApplicationError } from "../models/application-error";
 export function configuredRecoveryWeb(env: Record<string, string | undefined>) {
-  const plans = configuredRecoveryPlans(env),
+  let plans: ReturnType<typeof configuredRecoveryPlans> = [],
+    inventories: ReturnType<typeof configuredRecoveryInventories> = [];
+  const setupIssues: string[] = [];
+  try {
+    plans = configuredRecoveryPlans(env);
     inventories = configuredRecoveryInventories(env);
+  } catch {
+    setupIssues.push(
+      "The approved recovery registry or inventory is invalid. Ask its owner to verify the immutable registry hash and exact environment evidence.",
+    );
+    plans = [];
+    inventories = [];
+  }
   return {
     plans,
+    setupIssues,
     readiness: () => recoveryReadiness(plans, inventories, env, new Date()),
     queue: env.TRIGGER_RECOVERY_SECRET_KEY
       ? {

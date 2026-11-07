@@ -105,7 +105,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       reason: "Fixture reviewed pending refund",
       evidence: ["fixture:reviewed-refund"],
     });
-    const copies = [...storage.objects.entries()].map(([_key, object], i) => ({
+    const copies = [...storage.objects.values()].map((object, i) => ({
       id: `artifact-${i}`,
       bytes: Buffer.from(object.bytes),
       retained: true,
@@ -148,6 +148,35 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       id: f.business.id,
       name: f.business.name,
     });
+    expect(recovered.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "inbox_message",
+          value: expect.objectContaining({
+            text: "Please quote 500 kg of steel.",
+          }),
+        }),
+        expect.objectContaining({
+          table: "financial_case_event",
+          value: expect.objectContaining({
+            actualMinor: "1100",
+            nativeId: "rfnd_fixture1",
+          }),
+        }),
+        expect.objectContaining({
+          table: "seller_document",
+          id: f.credit.id,
+          value: expect.objectContaining({
+            totalMinor: "1099",
+            artifactHash: f.credit.artifact.sha256,
+          }),
+        }),
+        expect.objectContaining({
+          table: "discovery_run",
+          value: expect.objectContaining({ status: "queued" }),
+        }),
+      ]),
+    );
     for (const table of [
       "discovery_prospect",
       "discovery_observation",
@@ -191,6 +220,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
           id: pending.id,
           nativeId: "rfnd_fixture2",
           outcome: "accepted",
+          status: "pending",
           amountMinor: "55",
           currency: "INR",
         },

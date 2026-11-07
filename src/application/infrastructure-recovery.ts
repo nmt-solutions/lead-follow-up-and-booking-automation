@@ -43,6 +43,7 @@ export function createRecoveryApplication<C>(d: {
   queue?: { enqueue(operationId: string): Promise<void> };
   readiness?: () => ReturnType<typeof recoveryReadiness>;
   executionEvidence?: RecoveryEvidence["execution"];
+  setupIssues?: string[];
 }) {
   async function actor(c: C) {
     const a = await d.authenticate(c);
@@ -93,10 +94,50 @@ export function createRecoveryApplication<C>(d: {
       const operations = [];
       for (const businessId of new Set(d.plans.map((p) => p.businessId)))
         operations.push(...(await d.repository.list(a, businessId)));
+      const current = operations.filter((o) =>
+        d.plans.some((p) => isDeepStrictEqual(p, o.plan)),
+      );
+      const readiness = d.readiness?.() ?? [];
       return {
         configured: Boolean((d.adapter || d.queue) && d.plans.length),
         productionVerified: false as const,
-        readiness: d.readiness?.() ?? [],
+        setupIssues: d.setupIssues ?? [],
+        configuredDrillVerified: current.some(
+          (o) =>
+            o.plan.mode === "configured" &&
+            readiness.some((r) => r.planId === o.plan.id && r.fresh) &&
+            o.events.some(
+              (e) => e.stage === "verified" && e.outcome === "completed",
+            ),
+        ),
+        readiness: readiness.map((r) => {
+          const evidence = current
+            .filter(
+              (o) => o.plan.id === r.planId && o.plan.mode === "configured",
+            )
+            .flatMap((o) => o.events)
+            .filter((e) => e.outcome === "completed");
+          return {
+            ...r,
+            neon: {
+              ...r.neon,
+              status:
+                r.fresh && evidence.some((e) => e.evidence.physicalTarget)
+                  ? "native_endpoints_observed"
+                  : r.neon.status,
+            },
+            trigger: {
+              ...r.trigger,
+              status:
+                r.fresh &&
+                evidence.some(
+                  (e) => e.evidence.execution?.region === "us-east-1",
+                )
+                  ? "native_run_observed"
+                  : r.trigger.status,
+            },
+          };
+        }),
         plans: d.plans.map((p) => ({
           id: p.id,
           businessId: p.businessId,

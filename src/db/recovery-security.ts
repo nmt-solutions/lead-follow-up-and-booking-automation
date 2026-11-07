@@ -56,7 +56,13 @@ export async function secureRecovery(pool: Pool | PoolClient) {
       IF NOT FOUND THEN RAISE EXCEPTION 'forbidden'; END IF;
     END $$;
   CREATE OR REPLACE FUNCTION public.pending_infrastructure_recovery() RETURNS TABLE(id uuid,business_id uuid,actor_id text,session_id text) LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
-    SELECT r.id,r.business_id,r.actor_id,r.authorized_session_id FROM public.infrastructure_recovery r WHERE r.stage<>'inspection_ready' AND (r.lease_until IS NULL OR r.lease_until<=statement_timestamp()) AND (r.plan->>'retainUntil')::timestamptz>statement_timestamp() AND (r.plan->>'observationExpiresAt')::timestamptz>statement_timestamp() ORDER BY r.at LIMIT 100
+    SELECT r.id,r.business_id,r.actor_id,r.authorized_session_id FROM public.infrastructure_recovery r
+    JOIN public.platform_operator o ON o.user_id=r.actor_id AND o.recovery
+    JOIN public.session s ON s.id=r.authorized_session_id AND s.user_id=r.actor_id
+    JOIN public."user" u ON u.id=r.actor_id JOIN public.two_factor f ON f.user_id=u.id
+    WHERE r.stage<>'inspection_ready' AND (r.lease_until IS NULL OR r.lease_until<=statement_timestamp()) AND (r.plan->>'retainUntil')::timestamptz>statement_timestamp() AND (r.plan->>'observationExpiresAt')::timestamptz>statement_timestamp()
+    AND s.expires_at>statement_timestamp() AND u.two_factor_enabled AND f.verified AND s.mfa_factor_id=f.id AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND s.mfa_verified_at<=statement_timestamp() AND s.mfa_verified_at>statement_timestamp()-interval '15 minutes'
+    ORDER BY r.at LIMIT 100
   $$;
   REVOKE ALL ON FUNCTION public.delegate_infrastructure_recovery(uuid),public.pending_infrastructure_recovery() FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION public.delegate_infrastructure_recovery(uuid),public.pending_infrastructure_recovery() TO app_runtime;

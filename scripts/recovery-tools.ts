@@ -64,6 +64,7 @@ try {
           id: plan.backupId,
           key: Buffer.from(required("RECOVERY_BACKUP_KEY"), "base64"),
           pgDump: required("RECOVERY_PG_DUMP"),
+          maxBytes: plan.limits.backupBytes,
         });
         if (archive.ciphertext.length > plan.limits.backupBytes) throw Error();
         await writeRecoveryArchive(

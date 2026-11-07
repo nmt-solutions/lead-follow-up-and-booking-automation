@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { ApplicationError } from "../models/application-error";
@@ -26,7 +26,9 @@ export async function readRecoveryArchive(
   maxBytes: number,
 ): Promise<RecoveryArchive> {
   try {
-    const bytes = await readFile(join(directory, `${safeId.parse(id)}.json`));
+    const path = join(directory, `${safeId.parse(id)}.json`);
+    if ((await stat(path)).size > maxBytes * 2 + 10_000_000) throw Error();
+    const bytes = await readFile(path);
     if (bytes.length > maxBytes * 2 + 10_000_000) throw Error();
     const parsed = z
       .object({

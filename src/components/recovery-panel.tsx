@@ -84,6 +84,11 @@ export function RecoveryPanel({
   }
   return (
     <div className="space-y-6" aria-busy={busy}>
+      {state.setupIssues.map((issue) => (
+        <Alert key={issue} variant="destructive">
+          {issue}
+        </Alert>
+      ))}
       <Alert>
         Restored state stays private and external work stays disabled. A
         successful local drill does not verify production deployment or
@@ -349,10 +354,12 @@ export function RecoveryPanel({
                           key={`${n.source}:${n.id}`}
                           className="break-all text-sm"
                         >
-                          {n.source} {n.id}: {n.outcome} · native{" "}
+                          {n.source} {n.id}: {n.outcome} ·{" "}
+                          {n.status ?? "unresolved native status"} · native{" "}
                           {n.nativeId ?? "unresolved"} ·{" "}
                           {n.amountMinor ?? "unknown"} {n.currency ?? ""} minor
-                          units
+                          units in the native record; acceptance is separate
+                          from a completed money effect
                         </p>
                       ))}
                     </li>

@@ -143,7 +143,12 @@ export const recoveryRequestSchema = z.strictObject({
 });
 export type RecoveryFacts = { table: string; id: string; hash: string }[];
 export const recoveryEvidenceSchema = z.strictObject({
-  assurance:z.strictObject({actorId:z.string().min(1).max(150),verifiedAt:z.iso.datetime({offset:true})}).optional(),
+  assurance: z
+    .strictObject({
+      actorId: z.string().min(1).max(150),
+      verifiedAt: z.iso.datetime({ offset: true }),
+    })
+    .optional(),
   facts: z
     .array(
       z.strictObject({
@@ -171,6 +176,19 @@ export const recoveryEvidenceSchema = z.strictObject({
         id: identity,
         nativeId: identity.nullable(),
         outcome: z.enum(["accepted", "unknown", "stopped"]),
+        status: z
+          .enum([
+            "pending",
+            "processed",
+            "failed",
+            "open",
+            "under_review",
+            "won",
+            "lost",
+            "closed",
+          ])
+          .nullable()
+          .optional(),
         amountMinor: z.string().regex(/^\d+$/).nullable(),
         currency: z.enum(["INR", "USD"]).nullable(),
       }),
