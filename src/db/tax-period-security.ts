@@ -126,20 +126,22 @@ export async function secureTaxPeriods(pool: Pool | PoolClient) {
     );
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.tax_reporting_changed() RETURNS trigger
-    LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE item record; config_key text; source_time timestamptz; source_mode text; source_lines jsonb; source_id text; actor text; replaced_period uuid; BEGIN
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE item record; config_key text; source_time timestamptz; source_mode text; source_lines jsonb; source_id text; actor text; replaced_period uuid; document_source boolean:=false; credit_case uuid; BEGIN
       IF TG_TABLE_NAME='financial_case_event' THEN IF NEW.kind<>'financial_effect' THEN RETURN NEW; END IF; END IF;
       IF TG_TABLE_NAME='seller_document' AND TG_OP='UPDATE' THEN IF NEW.artifact_state=OLD.artifact_state THEN RETURN NEW; END IF; END IF;
       PERFORM pg_advisory_xact_lock(hashtextextended('tax-reporting',0));
       IF TG_TABLE_NAME='tax_reporting_period' THEN replaced_period:=NEW.supersedes_id; IF replaced_period IS NULL THEN RETURN NEW; END IF;
       ELSIF TG_TABLE_NAME='tax_obligation_revision' THEN config_key:=NEW.key;
       ELSIF TG_TABLE_NAME='tax_obligation_decision' THEN SELECT key INTO config_key FROM public.tax_obligation_revision WHERE id=NEW.revision_id;
-      ELSIF TG_TABLE_NAME='seller_document' THEN source_time:=NEW.at; source_mode:=NEW.snapshot->'issuer'->'revision'->'configuration'->>'mode'; source_lines:=NEW.snapshot->'lines';
+      ELSIF TG_TABLE_NAME='seller_document' THEN document_source:=true; credit_case:=NEW.adjustment_id; source_time:=NEW.at; source_mode:=NEW.snapshot->'issuer'->'revision'->'configuration'->>'mode'; source_lines:=NEW.snapshot->'lines';
       ELSIF TG_TABLE_NAME='subscription_period' THEN source_time:=(NEW.charge->>'paidAt')::timestamptz; source_mode:=CASE WHEN NEW.snapshot->'provider'->>'mode'='live' THEN 'live' ELSE 'fixture' END; source_lines:=NEW.snapshot->'tax'->'lines';
       ELSE source_time:=NEW.at; SELECT CASE WHEN c.intent->'period'->'snapshot'->'provider'->>'mode'='live' THEN 'live' ELSE 'fixture' END INTO source_mode FROM public.financial_case c WHERE c.id=NEW.case_id; source_lines:=NEW.detail->'originalTax'->'lines'; END IF;
       source_id:=NEW.id::text;
       SELECT u.id INTO actor FROM public."user" u WHERE u.id=current_setting('app.actor_id',true);
       FOR item IN SELECT r.* FROM public.tax_liability_report r WHERE
-        (replaced_period IS NOT NULL AND r.period_id=replaced_period OR config_key IS NOT NULL AND r.snapshot->'obligation'->>'key'=config_key OR config_key IS NULL AND r.snapshot->'obligation'->'definition'->>'mode'=source_mode
+        (replaced_period IS NOT NULL AND r.period_id=replaced_period OR config_key IS NOT NULL AND r.snapshot->'obligation'->>'key'=config_key
+          OR document_source AND (EXISTS(SELECT 1 FROM jsonb_array_elements(r.snapshot->'sources') s WHERE s->>'id'=source_id) OR credit_case IS NOT NULL AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.snapshot->'adjustments') a JOIN public.financial_case_event e ON e.id::text=a->>'id' WHERE e.case_id=credit_case))
+          OR config_key IS NULL AND r.snapshot->'obligation'->'definition'->>'mode'=source_mode
           AND (source_time IS NULL OR source_time>=(r.snapshot->'period'->>'start')::timestamptz AND source_time<(r.snapshot->'period'->>'end')::timestamptz)
           AND EXISTS(SELECT 1 FROM jsonb_array_elements(source_lines) l WHERE l->'rule'->'revision'->'rule'->'jurisdiction'->>'code'=r.snapshot->'obligation'->'definition'->>'jurisdiction'))
         AND NOT EXISTS(SELECT 1 FROM public.tax_report_action a WHERE a.report_id=r.id AND a.kind='invalidated')

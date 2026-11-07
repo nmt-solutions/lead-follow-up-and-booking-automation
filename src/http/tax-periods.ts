@@ -19,8 +19,8 @@ export function createTaxPeriodHttp(d: {
     body = createJsonBodyReader(d.origin, 128 * 1024),
     respond = createResponder(d.reportFailure);
   async function screen(headers: Headers) {
-    const workspace = await app.workspace(headers);
     const preferences = await d.notifications.preferences(headers, null);
+    const workspace = await app.workspace(headers);
     return {
       workspace,
       emailPreference:

@@ -11,11 +11,11 @@ export default async function TaxPeriodsPage() {
     try {
       const services = await getServices(),
         credentials = await headers(),
-        workspace = await services.taxPeriods.workspace(credentials),
         preferences = await services.notifications.preferences(
           credentials,
           null,
-        );
+        ),
+        workspace = await services.taxPeriods.workspace(credentials);
       return taxPeriodScreenSchema.parse({
         workspace,
         emailPreference:

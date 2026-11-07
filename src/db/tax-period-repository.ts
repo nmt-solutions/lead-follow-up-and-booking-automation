@@ -44,7 +44,10 @@ async function locked<T>(
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtextextended('tax-reporting',0))`,
     );
-    return operation(tx);
+    await access(tx);
+    const result = await operation(tx);
+    await access(tx);
+    return result;
   });
 }
 async function attribution(

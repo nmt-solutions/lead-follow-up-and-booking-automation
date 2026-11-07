@@ -6,6 +6,10 @@ Owner/Admin, document, refund, reconciliation, operations, notification and
 customer financial-export rights do not confer tax access. The existing tax grant
 already participates in central privileged-role/MFA classification.
 
+Commands and queries recheck the current session, fresh MFA and tax grant before
+returning sensitive data. Tax email preferences remain self-only and do not grant
+global notification setup, terms or history access.
+
 ## Explicit operating inputs
 
 Save and approve an exact obligation revision containing jurisdiction, fixture or
@@ -99,6 +103,10 @@ Six source-table triggers serialize relevant source changes with report commands
 and append an explicit `invalidated` action: seller documents/artifact state,
 captured periods, confirmed financial effects, obligation revisions/decisions and explicit timing successors.
 Source changes outside the period/jurisdiction do not rewrite the earlier report.
+A later credit linked to a retained cash adjustment, or an artifact-state change
+to an original document retained as context, explicitly invalidates that report's
+review and reminder source. The original snapshot remains intact; the credit's tax
+components still belong only to its own issue period.
 A successor is explicit. Source/configuration fingerprints are also checked on
 reads, review and exports. Export rechecks current session/MFA and tax authority
 after reading sensitive data. It returns approved JSON with the stable IDs and

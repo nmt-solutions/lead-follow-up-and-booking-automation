@@ -237,7 +237,7 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
     END $$;
     CREATE OR REPLACE FUNCTION public.notification_workspace(account_ref text,tenant uuid DEFAULT NULL) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE s record; result jsonb; BEGIN
-      IF tenant IS NULL THEN IF NOT (public.notification_operator() OR public.tax_reporting_operator()) THEN RETURN NULL; END IF;
+      IF tenant IS NULL THEN IF NOT public.notification_operator() THEN RETURN NULL; END IF;
       ELSE IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL THEN RETURN NULL; END IF; END IF;
       SELECT * INTO s FROM public.notification_setup x WHERE x.account=account_ref AND x.setup IS NOT NULL ORDER BY x.completed_at DESC,x.id DESC LIMIT 1;
       SELECT jsonb_build_object('bootstrapAuthOnly',coalesce((SELECT t.auth_bootstrap FROM public.notification_terms t WHERE t.account=account_ref ORDER BY t.at DESC,t.id DESC LIMIT 1),false),'setup',s.setup,'setupCheckedAt',s.at,'setupFresh',coalesce(s.at>statement_timestamp()-interval '5 minutes',false),

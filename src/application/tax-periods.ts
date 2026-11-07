@@ -62,58 +62,63 @@ export function createTaxPeriodApplication<Credentials>(dependencies: {
   clock: Clock;
 }) {
   const { repository, clock, authenticatePlatform } = dependencies;
+  async function authorized<T>(
+    credentials: Credentials,
+    operation: (actor: Actor) => Promise<T>,
+  ) {
+    const actor = await authenticatePlatform(credentials);
+    const result = await operation(actor);
+    const current = await authenticatePlatform(credentials);
+    if (current.userId !== actor.userId)
+      throw new ApplicationError("FORBIDDEN");
+    await repository.authorize(current);
+    return result;
+  }
   return {
     async saveObligation(credentials: Credentials, value: unknown) {
-      return repository.saveObligation(
-        await authenticatePlatform(credentials),
-        parse(saveObligationSchema, value),
-        clock.now(),
+      const input = parse(saveObligationSchema, value);
+      return authorized(credentials, (actor) =>
+        repository.saveObligation(actor, input, clock.now()),
       );
     },
     async decideObligation(credentials: Credentials, value: unknown) {
-      return repository.decideObligation(
-        await authenticatePlatform(credentials),
-        parse(decideObligationSchema, value),
-        clock.now(),
+      const input = parse(decideObligationSchema, value);
+      return authorized(credentials, (actor) =>
+        repository.decideObligation(actor, input, clock.now()),
       );
     },
     async openPeriod(credentials: Credentials, value: unknown) {
-      return repository.openPeriod(
-        await authenticatePlatform(credentials),
-        parse(openTaxPeriodSchema, value),
-        clock.now(),
+      const input = parse(openTaxPeriodSchema, value);
+      return authorized(credentials, (actor) =>
+        repository.openPeriod(actor, input, clock.now()),
       );
     },
     async prepare(credentials: Credentials, value: unknown) {
-      return repository.prepare(
-        await authenticatePlatform(credentials),
-        parse(prepareTaxReportSchema, value),
-        clock.now(),
+      const input = parse(prepareTaxReportSchema, value);
+      return authorized(credentials, (actor) =>
+        repository.prepare(actor, input, clock.now()),
       );
     },
     async act(credentials: Credentials, value: unknown) {
-      return repository.act(
-        await authenticatePlatform(credentials),
-        parse(taxReportActionSchema, value),
-        clock.now(),
+      const input = parse(taxReportActionSchema, value);
+      return authorized(credentials, (actor) =>
+        repository.act(actor, input, clock.now()),
       );
     },
     async workspace(credentials: Credentials) {
-      return repository.workspace(
-        await authenticatePlatform(credentials),
-        clock.now(),
+      return authorized(credentials, (actor) =>
+        repository.workspace(actor, clock.now()),
       );
     },
     async evaluateReminders(credentials: Credentials) {
-      return repository.evaluateReminders(
-        await authenticatePlatform(credentials),
-        clock.now(),
+      return authorized(credentials, (actor) =>
+        repository.evaluateReminders(actor, clock.now()),
       );
     },
     async report(credentials: Credentials, id: unknown) {
-      return repository.report(
-        await authenticatePlatform(credentials),
-        parse(z.uuid(), id),
+      const reportId = parse(z.uuid(), id);
+      return authorized(credentials, (actor) =>
+        repository.report(actor, reportId),
       );
     },
     async exportReport(credentials: Credentials, value: unknown) {

@@ -712,6 +712,40 @@ describe("Tax periods at the public application seam", () => {
       }),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
+  it("does not grant a tax-only operator global notification administration", async () => {
+    const n = await financialNotifications(h);
+    const operator = await h.signIn("tax-only-notifications@example.com");
+    await h.provisionOperator(operator, { tax: true, reconciliation: false });
+    await n.app.setPreference(operator, null, {
+      purpose: "tax_period",
+      enabled: true,
+      expectedVersion: 0,
+    });
+    expect(await n.app.preferences(operator, null)).toEqual([
+      { purpose: "tax_period", enabled: true, version: 1 },
+    ]);
+    await expect(n.app.workspace(operator)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const client = await h.runtime.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id','',true)",
+        [(await h.authenticate(operator)).userId],
+      );
+      expect(
+        (
+          await client.query(
+            "select public.notification_workspace('financial-fixture',null::uuid) as value",
+          )
+        ).rows[0].value,
+      ).toBeNull();
+      await client.query("rollback");
+    } finally {
+      client.release();
+    }
+  });
   it("supersedes a persisted reminder before any email when its report stage changes", async () => {
     await financialExportFixture(h, createMemoryStorage(), "tax-mail-stage");
     const n = await financialNotifications(h),
@@ -1030,6 +1064,28 @@ describe("Tax periods at the public application seam", () => {
       ).status,
     ).toBe(403);
   });
+  it("rechecks current tax authority before returning the global workspace", async () => {
+    const operator = await h.signIn("tax-workspace-race@example.com");
+    await h.provisionOperator(operator, { tax: true, reconciliation: false });
+    await configure(operator);
+    let calls = 0;
+    const raced = createTaxPeriodApplication({
+      clock: h.clock,
+      repository: createTaxPeriodRepository(runtimeDatabase(h.runtime)),
+      authenticatePlatform: async (credentials: Headers) => {
+        const actor = await h.access.authenticatePlatform(credentials);
+        if (++calls === 2)
+          await h.admin.query(
+            "update platform_operator set tax=false where user_id=$1",
+            [actor.userId],
+          );
+        return actor;
+      },
+    });
+    await expect(raced.workspace(operator)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
   it("rechecks current tax authority after reading a sensitive approved export", async () => {
     const f = await financialExportFixture(
         h,
@@ -1298,20 +1354,46 @@ describe("Tax periods at the public application seam", () => {
     await f.adjustments.execute(f.op, f.business.id, { caseId: refund.id });
     f.native.refunds[1].status = "processed";
     await f.adjustments.refresh(f.op, f.business.id, { caseId: refund.id });
-    h.clock.set("2026-11-06T09:00:00Z");
-    const documentsActor = await h.signIn("export-documents@example.com"),
-      taxActor = await h.signIn("tax-operator@example.com");
-    await f.adjustments.credit(documentsActor, f.business.id, {
-      caseId: refund.id,
-    });
-    const config = await obligation(taxActor, { timeZone: "Etc/GMT+9" });
-    await app.decideObligation(taxActor, {
+    const config = await obligation(f.operator, { timeZone: "Etc/GMT+9" });
+    await app.decideObligation(f.operator, {
       requestKey: randomUUID(),
       revisionId: config.id,
       expectedVersion: 0,
       outcome: "approved",
       note: "Original issue-date basis",
     });
+    const cashPeriod = await app.openPeriod(f.operator, {
+      requestKey: randomUUID(),
+      obligationId: config.id,
+      startDate: "2026-11-05",
+      endDate: "2026-11-06",
+      dueAt: "2026-12-12T00:00:00.000Z",
+      evidence: ["fixture:calendar"],
+      reminders: [{ key: "cash-review", at: h.clock.now().toISOString() }],
+      note: "Original cash context before its later credit",
+    });
+    const cashReport = await app.prepare(f.operator, {
+      requestKey: randomUUID(),
+      periodId: cashPeriod.id,
+      expectedRevision: 0,
+      cutoff: h.clock.now().toISOString(),
+      note: "Freeze uncredited cash context",
+    });
+    await app.evaluateReminders(f.operator);
+    h.clock.set("2026-11-06T09:00:00Z");
+    const documentsActor = await h.signIn("export-documents@example.com"),
+      taxActor = await h.signIn("tax-operator@example.com");
+    await f.adjustments.credit(documentsActor, f.business.id, {
+      caseId: refund.id,
+    });
+    const originalCash = await app.report(taxActor, cashReport.id);
+    expect(originalCash.snapshot).toEqual(cashReport.snapshot);
+    expect(originalCash.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidated" }),
+      ]),
+    );
+    expect((await app.workspace(taxActor)).reminders[0].current).toBe(false);
     const period = await app.openPeriod(taxActor, {
       requestKey: randomUUID(),
       obligationId: config.id,
