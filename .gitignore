@@ -8,3 +8,6 @@ coverage/
 .scratch/
 test-results/
 playwright-report/
+
+# Private native client bundle staged only for the separate recovery worker image.
+/recovery-tools/

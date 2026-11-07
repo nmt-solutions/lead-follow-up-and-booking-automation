@@ -9,6 +9,8 @@ export default defineConfig({
   tablesFilter: [
     "discovery_capacity_policy",
     "discovery_capacity_binding",
+    "infrastructure_recovery",
+    "infrastructure_recovery_event",
     "reconciliation_evidence",
     "reconciliation_record",
     "reconciliation_review",

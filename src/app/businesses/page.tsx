@@ -27,6 +27,23 @@ export default async function BusinessesPage() {
       return null;
     }
   })();
+  const recoveryLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).team.requirePlatformCapability(await headers(), "recovery.manage");
+      return (
+        <Link
+          href="/platform/recovery"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Inspect infrastructure recovery
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   const businesses = await (async () => {
     try {
       return await (
@@ -247,12 +264,14 @@ export default async function BusinessesPage() {
           </p>
         </div>
         {operationsLink}
+        {recoveryLink}
         <ProfileForm />
       </div>
     );
   return (
     <div className="space-y-8">
       {operationsLink}
+      {recoveryLink}
       {billingReviewLink}
       {pricingLink}
       {capacityLink}

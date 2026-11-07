@@ -1,6 +1,10 @@
 import { createDiscoveryCapacityApplication } from "../application/discovery-capacity";
 import { createDiscoveryCapacityHttp } from "../http/discovery-capacity";
 import { createDiscoveryCapacityRepository } from "../db/discovery-capacity-repository";
+import { createRecoveryApplication } from "../application/infrastructure-recovery";
+import { createRecoveryRepository } from "../db/recovery-repository";
+import { createRecoveryHttp } from "../http/infrastructure-recovery";
+import { configuredRecoveryWeb } from "./recovery-web";
 import { createFinancialAdjustmentApplication } from "../application/financial-adjustments";
 import { createReconciliationApplication } from "../application/reconciliation";
 import { createReconciliationRepository } from "../db/reconciliation-repository";
@@ -655,6 +659,15 @@ async function composeServices() {
     ...whatsappComposition,
     configuration: configuredMetaWebhook(process.env),
   });
+  const recovery = createRecoveryApplication({
+    authenticate: access.authenticateForWork,
+    repository: createRecoveryRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    adapter: null,
+    costs,
+    ...configuredRecoveryWeb(process.env),
+  });
   const operations = createOperationsApplication({
     authenticate: access.authenticateForWork,
     repository: createOperationsRepository(runtimeDatabase(pool), {
@@ -693,6 +706,12 @@ async function composeServices() {
       reportFailure,
     }),
     operations,
+    recovery,
+    recoveryHttp: createRecoveryHttp({
+      application: recovery,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     operationsHttp: createOperationsHttp({
       application: operations,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
