@@ -1967,6 +1967,91 @@ describe("Tax filing confirmations at the public application seam", () => {
       }),
     ).toMatchObject({ status: "pending", paid: false });
   });
+  it("keeps original remittance separate from a foreign obligation with unknown reporting FX liability", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f),
+      original = await confirmed(f, policy, "remittance", "901");
+    await expect(
+      periods.saveObligation(f.operator, {
+        requestKey: randomUUID(),
+        key: f.obligation.key,
+        expectedVersion: 1,
+        definition: { ...f.obligation.definition, currency: "USD" },
+        note: "An obligation cannot silently change currency identity",
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    const foreign = await periods.saveObligation(f.operator, {
+      requestKey: randomUUID(),
+      key: "synthetic-foreign-return",
+      expectedVersion: 0,
+      definition: {
+        ...f.obligation.definition,
+        currency: "USD",
+        registration: {
+          ...f.obligation.definition.registration,
+          key: "synthetic-foreign-registration",
+          identifier: "TEST-USD-ONLY",
+        },
+      },
+      note: "Separate explicit reporting obligation; original remittance is not conversion evidence",
+    });
+    await periods.decideObligation(f.reviewer, {
+      requestKey: randomUUID(),
+      revisionId: foreign.id,
+      expectedVersion: 0,
+      outcome: "approved",
+      note: "Review the separate explicit reporting policy",
+    });
+    const period = await periods.openPeriod(f.operator, {
+      requestKey: randomUUID(),
+      obligationId: foreign.id,
+      startDate: f.reportingPeriod.startDate,
+      endDate: f.reportingPeriod.endDate,
+      dueAt: f.reportingPeriod.dueAt,
+      reminders: [],
+      evidence: ["Synthetic distinct obligation coverage"],
+      note: "Separate explicit coverage, never adopt original INR payment",
+    });
+    const report = await periods.prepare(f.operator, {
+      requestKey: randomUUID(),
+      periodId: period.id,
+      expectedRevision: 0,
+      cutoff: h.clock.now().toISOString(),
+      note: "No invented reporting FX",
+    });
+    expect(report.snapshot.currency).toBe("USD");
+    expect(report.snapshot.totalsKnown).toBe(false);
+    expect(report.unresolved.map((i) => i.code)).toContain(
+      "reporting_currency_evidence_required",
+    );
+    const workspace = await app.workspace(f.operator);
+    expect(
+      workspace.periods.find((p) => p.period.id === period.id),
+    ).toMatchObject({
+      liabilityMinor: null,
+      remainingMinor: null,
+      confirmedPaidMinor: "0",
+      historicalPaidMinor: "0",
+      unallocatedPaidMinor: "0",
+      paid: false,
+      fulfilled: false,
+    });
+    expect(workspace.allocations[0]).toMatchObject({
+      amountMinor: "901",
+      currency: "INR",
+      currentReportId: f.report.id,
+    });
+    expect(
+      workspace.intents.find((i) => i.id === original.intent.id),
+    ).toMatchObject({ paid: true, target: { currency: "INR" } });
+    expect(
+      (
+        await app.downloadEvidence(f.reviewer, {
+          evidenceId: original.artifact.id,
+        })
+      ).bytes,
+    ).toEqual(new Uint8Array(original.bytes));
+  });
   describe("populated complete schema preservation", () => {
     let f: Awaited<ReturnType<typeof approvedPeriod>>,
       original: Awaited<ReturnType<typeof confirmed>>,

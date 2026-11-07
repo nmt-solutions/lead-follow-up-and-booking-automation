@@ -82,7 +82,7 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
       SELECT count(*)::integer INTO unresolved FROM public.tax_filing_event e JOIN public.tax_filing_intent i ON i.id=e.intent_id
         WHERE i.report_id=r.id AND (e.kind='acknowledge' AND (e.detail->>'matches'='false' OR e.detail->>'contradiction'='true') OR e.kind='raise_issue')
           AND NOT EXISTS(SELECT 1 FROM public.tax_filing_event resolved WHERE resolved.intent_id=i.id AND resolved.kind='resolve_issue' AND resolved.detail->>'issueId'=e.id::text);
-      liability:=(r.snapshot->'totals'->>'taxMinor')::numeric;
+      liability:=CASE WHEN r.snapshot->>'totalsKnown'='true' THEN (r.snapshot->'totals'->>'taxMinor')::numeric ELSE NULL END;
       paid:=coalesce(allocated>0 AND liability>=0 AND allocated>=liability,false);
       fulfilled:=coalesce(configured AND current_report AND unresolved=0 AND historical=allocated AND allocated<=greatest(liability,0)
         AND (c.definition->>'filingRequired'='false' OR current_filed) AND (c.definition->>'paymentRequired'='false' OR paid),false);
