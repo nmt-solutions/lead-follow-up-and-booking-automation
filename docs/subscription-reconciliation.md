@@ -81,12 +81,15 @@ it does not authenticate statement contents or claim native bank verification.
 - Aggregate fee coverage and its included transaction lines are alternatives. The
   selected coverage is deducted once and overlapping presentations are compared.
   A zero settlement aggregate cannot erase a known native capture processing fee.
-  Missing or contradictory actual fee evidence stays unavailable/review.
+  Aggregate coverage also cannot erase either known native processing cost or fee
+  tax. Missing or contradictory actual fee evidence stays unavailable/review.
 - Original INR/USD transaction currencies and precision 2 are retained. This is the
   explicitly supported initial billing scope, not a worldwide currency/accounting
   rule. Mixed currencies are never summed.
 - A native captured `base_amount`/`base_currency` can establish that capture's actual
-  conversion. A refund does not inherit it. Other conversion requires retained
+  conversion. A statement currency conflicting with that retained native settlement
+  base remains unresolved, even when it equals the original transaction currency.
+  A refund does not inherit capture conversion. Other conversion requires retained
   authoritative evidence with explicit target-minor/source-minor numerator and
   denominator, effective timestamp, original rounding and reference. Arithmetic is
   exact integer/rational arithmetic. A mismatch is unresolved; planning FX is unused.

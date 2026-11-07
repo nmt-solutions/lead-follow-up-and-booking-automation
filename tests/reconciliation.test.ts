@@ -629,6 +629,43 @@ describe("Subscription money reconciliation through the public application", () 
     expect(mismatch.expectedNetMinor).toBeNull();
     expect(mismatch.reasons).toContain("converted_amount_mismatch");
   });
+  it("does not let same-currency statement assertions bypass a retained native settlement conversion", async () => {
+    const f = await purchase("US"),
+      app = compose(),
+      e = await evidence(app, f.operator),
+      input = settlement(f, e.id);
+    await app.record(f.operator, {
+      ...input,
+      money: { currency: "USD", precision: 2, minor: "2750" },
+      creditMinor: "2750",
+      fees: {
+        coverage: "aggregate",
+        amountMinor: "0",
+        taxMinor: "0",
+        presentation: "inclusive",
+      },
+      lines: [
+        {
+          ...input.lines[0],
+          original: { currency: "USD", precision: 2, minor: "2750" },
+          convertedMinor: "2750",
+          creditMinor: "2750",
+          feeMinor: "0",
+          feeTaxMinor: "0",
+        },
+      ],
+    });
+    const view = await app.workspace(f.operator, cohort);
+    expect(view.sources[0]).toMatchObject({
+      currency: "USD",
+      baseAmountMinor: "240000",
+      baseCurrency: "INR",
+    });
+    expect(view.settlements[0].reasons).toContain(
+      "settlement_currency_conflicts_with_native_base",
+    );
+    expect(view.settlements[0].expectedNetMinor).toBeNull();
+  });
   it("rejects spoofed original Business/account/mode/payment/order/invoice identities and pending outcomes while retaining unknown movements for review", async () => {
     const f = await purchase(),
       app = compose(),
@@ -768,6 +805,54 @@ describe("Subscription money reconciliation through the public application", () 
     expect(row.reasons).toContain("aggregate_omits_native_processing_fees");
     expect(row.processingCostMinor).toBeNull();
   });
+  it.each([
+    {
+      component: "fee tax",
+      tax: "0",
+      reason: "aggregate_omits_native_fee_tax",
+    },
+    {
+      component: "cost",
+      tax: "10",
+      reason: "aggregate_omits_native_processing_cost",
+    },
+  ])(
+    "does not let aggregate coverage erase known native processing $component when included line fees are unavailable",
+    async ({ tax, reason }) => {
+      const f = await purchase(),
+        app = compose(),
+        e = await evidence(app, f.operator),
+        input = settlement(f, e.id);
+      await app.record(f.operator, {
+        ...input,
+        fees: {
+          coverage: "aggregate",
+          amountMinor: "25",
+          taxMinor: tax,
+          presentation: "inclusive",
+        },
+        lines: [
+          {
+            ...input.lines[0],
+            feeMinor: null,
+            feeTaxMinor: null,
+            feePresentation: "unavailable",
+          },
+        ],
+      });
+      const report = await app.workspace(f.operator, cohort),
+        row = report.settlements[0];
+      expect(report.sources[0]).toMatchObject({
+        feeMinor: "25",
+        feeTaxMinor: "3",
+        feeCurrency: "INR",
+      });
+      expect(row.reasons).toContain(reason);
+      expect(row.expectedNetMinor).toBeNull();
+      expect(row.processingCostMinor).toBeNull();
+      expect(row.feeTaxMinor).toBeNull();
+    },
+  );
   it("requires current platform authority after persistence I/O and isolates private expiring evidence from every other capability", async () => {
     const f = await purchase(),
       app = compose(),
