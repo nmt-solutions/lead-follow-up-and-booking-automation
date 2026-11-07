@@ -1,8 +1,15 @@
 import type { MailAcceptance } from "../models/mail-dispatch";
 import type {
+  FilingPolicyDefinition,
+  FilingTarget,
+  FilingPolicy,
+  FilingEvidence,
+} from "../models/tax-filings";
+import type {
   ObligationDefinition,
   ReportingPeriod,
   LiabilitySnapshot,
+  LiabilityReport,
   TaxReminder,
 } from "../models/tax-periods";
 import type { ReachSnapshot, ReachFact } from "../models/reach-changes";
@@ -6039,5 +6046,280 @@ export const taxPeriodReminder = pgTable(
       using: paymentOwner,
       withCheck: paymentOwner,
     }),
+  ],
+).enableRLS();
+
+export const taxFilingExport = pgTable(
+  "tax_filing_export",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    report: jsonb("report").$type<LiabilityReport>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_export_request").on(t.requestKey),
+    check(
+      "tax_filing_export_binding",
+      sql`${t.report}->>'id'=${t.reportId}::text and ${t.report}->>'status'='approved' and (${t.report}->>'current')::boolean`,
+    ),
+    ...taxReportingPolicies("tax_filing_export"),
+  ],
+).enableRLS();
+
+export const taxFilingPolicy = pgTable(
+  "tax_filing_policy",
+  {
+    id: uuid("id").primaryKey(),
+    obligationId: uuid("obligation_id")
+      .notNull()
+      .references(() => taxObligationRevision.id),
+    version: integer("version").notNull(),
+    definition: jsonb("definition").$type<FilingPolicyDefinition>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_policy_request").on(t.requestKey),
+    uniqueIndex("tax_filing_policy_version").on(t.obligationId, t.version),
+    check("tax_filing_policy_positive_version", sql`${t.version}>0`),
+    ...taxReportingPolicies("tax_filing_policy"),
+  ],
+).enableRLS();
+export const taxFilingPolicyDecision = pgTable(
+  "tax_filing_policy_decision",
+  {
+    id: uuid("id").primaryKey(),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => taxFilingPolicy.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_policy_decision_request").on(t.requestKey),
+    uniqueIndex("tax_filing_policy_decision_version").on(t.policyId, t.version),
+    check(
+      "tax_filing_policy_decision_valid",
+      sql`${t.version}>0 and ${t.outcome} in ('approved','withdrawn')`,
+    ),
+    ...taxReportingPolicies("tax_filing_policy_decision"),
+  ],
+).enableRLS();
+export const taxFilingIntent = pgTable(
+  "tax_filing_intent",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => taxFilingPolicy.id),
+    policyDecisionId: uuid("policy_decision_id")
+      .notNull()
+      .references(() => taxFilingPolicyDecision.id),
+    reportApprovalId: uuid("report_approval_id")
+      .notNull()
+      .references(() => taxReportAction.id),
+    kind: text("kind").$type<"submission" | "remittance">().notNull(),
+    target: jsonb("target").$type<FilingTarget>().notNull(),
+    report: jsonb("report").$type<LiabilityReport>().notNull(),
+    policy: jsonb("policy").$type<FilingPolicy>().notNull(),
+    amountMinor: text("amount_minor").notNull(),
+    basisDigest: text("basis_digest").notNull(),
+    amendmentOf: uuid("amendment_of"),
+    supersedesId: uuid("supersedes_id"),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_intent_request").on(t.requestKey),
+    foreignKey({
+      name: "tax_filing_amendment_fk",
+      columns: [t.amendmentOf],
+      foreignColumns: [t.id],
+    }),
+    foreignKey({
+      name: "tax_filing_supersedes_fk",
+      columns: [t.supersedesId],
+      foreignColumns: [t.id],
+    }),
+    uniqueIndex("tax_filing_amendment_child").on(t.amendmentOf),
+    uniqueIndex("tax_filing_supersedes_child").on(t.supersedesId),
+    check(
+      "tax_filing_basis_digest",
+      sql`${t.basisDigest} ~ '^[a-f0-9]{64}$' and ${t.supersedesId} is distinct from ${t.id}`,
+    ),
+    check(
+      "tax_filing_intent_binding",
+      sql`${t.kind} in ('submission','remittance') and ${t.report}->>'id'=${t.reportId}::text and ${t.target}->>'reportId'=${t.reportId}::text and ${t.policy}->>'id'=${t.policyId}::text and ${t.amountMinor} ~ '^-?(0|[1-9][0-9]{0,59})$' and (${t.kind}='submission' or ${t.amountMinor} not like '-%') and ${t.amendmentOf} is distinct from ${t.id}`,
+    ),
+    ...taxReportingPolicies("tax_filing_intent"),
+  ],
+).enableRLS();
+export const taxFilingEvent = pgTable(
+  "tax_filing_event",
+  {
+    id: uuid("id").primaryKey(),
+    intentId: uuid("intent_id")
+      .notNull()
+      .references(() => taxFilingIntent.id),
+    version: integer("version").notNull(),
+    kind: text("kind").notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull(),
+    confirmationKey: text("confirmation_key"),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_event_request").on(t.requestKey),
+    uniqueIndex("tax_filing_event_version").on(t.intentId, t.version),
+    uniqueIndex("tax_filing_confirmation_reference").on(t.confirmationKey),
+    uniqueIndex("tax_filing_attempt_once")
+      .on(t.intentId)
+      .where(sql`${t.kind}='attempt'`),
+    uniqueIndex("tax_filing_confirm_once")
+      .on(t.intentId)
+      .where(sql`${t.kind}='confirm'`),
+    check(
+      "tax_filing_confirmation_key",
+      sql`(${t.kind}='confirm' and ${t.confirmationKey} ~ '^[a-f0-9]{64}$') or (${t.kind}<>'confirm' and ${t.confirmationKey} is null)`,
+    ),
+    check(
+      "tax_filing_event_valid",
+      sql`${t.version}>0 and ${t.kind} in ('approve','attempt','acknowledge','confirm','raise_issue','resolve_issue','supersede')`,
+    ),
+    ...taxReportingPolicies("tax_filing_event"),
+  ],
+).enableRLS();
+
+export const taxFilingEvidence = pgTable(
+  "tax_filing_evidence",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    target: jsonb("target").$type<FilingEvidence["target"]>(),
+    metadata: jsonb("metadata")
+      .$type<
+        Omit<
+          FilingEvidence,
+          "id" | "reportId" | "target" | "actorId" | "actorName" | "at" | "note"
+        >
+      >()
+      .notNull(),
+    storageDatabase: text("storage_database")
+      .notNull()
+      .default(sql`current_database()`),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_evidence_request").on(t.requestKey),
+    ...taxReportingPolicies("tax_filing_evidence"),
+  ],
+).enableRLS();
+export const taxFilingBytes = pgTable(
+  "tax_filing_bytes",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .references(() => taxFilingEvidence.id),
+    body: text("body").notNull(),
+  },
+  () => [
+    pgPolicy("tax_filing_bytes_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const taxFilingAccess = pgTable(
+  "tax_filing_access",
+  {
+    id: uuid("id").primaryKey(),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => taxFilingEvidence.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    accessHash: text("access_hash").notNull(),
+    sessionId: text("session_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_access_hash").on(t.accessHash),
+    check(
+      "tax_filing_access_expiry",
+      sql`${t.expiresAt}>${t.at} and ${t.expiresAt}<=${t.at}+interval '30 seconds'`,
+    ),
+    ...taxReportingPolicies("tax_filing_access"),
+  ],
+).enableRLS();
+export const taxRemittanceAllocation = pgTable(
+  "tax_remittance_allocation",
+  {
+    id: uuid("id").primaryKey(),
+    intentId: uuid("intent_id")
+      .notNull()
+      .references(() => taxFilingIntent.id),
+    confirmationId: uuid("confirmation_id")
+      .notNull()
+      .references(() => taxFilingEvent.id),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => taxFilingEvidence.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    referenceKey: text("reference_key").notNull(),
+    amountMinor: text("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_remittance_confirmation").on(t.confirmationId),
+    uniqueIndex("tax_remittance_evidence").on(t.evidenceId),
+    uniqueIndex("tax_remittance_reference").on(t.referenceKey),
+    uniqueIndex("tax_remittance_intent").on(t.intentId),
+    check(
+      "tax_remittance_amount",
+      sql`${t.amountMinor} ~ '^(0|[1-9][0-9]{0,59})$' and ${t.currency} in ('INR','USD')`,
+    ),
+    ...taxReportingPolicies("tax_remittance_allocation"),
+  ],
+).enableRLS();
+export const taxRemittanceReview = pgTable(
+  "tax_remittance_review",
+  {
+    id: uuid("id").primaryKey(),
+    allocationId: uuid("allocation_id")
+      .notNull()
+      .references(() => taxRemittanceAllocation.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    version: integer("version").notNull(),
+    ...taxAttribution(),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => taxFilingPolicy.id),
+    policyDecisionId: uuid("policy_decision_id")
+      .notNull()
+      .references(() => taxFilingPolicyDecision.id),
+    reportApprovalId: uuid("report_approval_id")
+      .notNull()
+      .references(() => taxReportAction.id),
+  },
+  (t) => [
+    uniqueIndex("tax_remittance_review_request").on(t.requestKey),
+    uniqueIndex("tax_remittance_review_version").on(t.allocationId, t.version),
+    check("tax_remittance_review_positive_version", sql`${t.version}>0`),
+    ...taxReportingPolicies("tax_remittance_review"),
   ],
 ).enableRLS();

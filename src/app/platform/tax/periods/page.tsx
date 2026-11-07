@@ -40,6 +40,12 @@ export default async function TaxPeriodsPage() {
           review. Preparing, approving or exporting a report does not file a
           return or pay tax.
         </p>
+        <Link
+          href="/platform/tax/filings"
+          className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Record filing and remittance confirmations
+        </Link>
       </header>
       <TaxPeriodManager initial={initial} />
     </div>

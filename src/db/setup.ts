@@ -1,5 +1,9 @@
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import {
+  prepareTaxFilingSecurity,
+  secureTaxFilings,
+} from "./tax-filing-security";
+import {
   prepareTaxPeriodSecurity,
   secureTaxPeriods,
 } from "./tax-period-security";
@@ -101,6 +105,16 @@ import {
   taxLiabilityReport,
   taxReportAction,
   taxPeriodReminder,
+  taxFilingExport,
+  taxFilingPolicy,
+  taxFilingPolicyDecision,
+  taxFilingIntent,
+  taxFilingEvent,
+  taxFilingEvidence,
+  taxFilingBytes,
+  taxFilingAccess,
+  taxRemittanceAllocation,
+  taxRemittanceReview,
   taxScopeForeignKeys,
   subscriptionPricingRevision,
   subscriptionQuote,
@@ -260,6 +274,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   );
   await prepareFinancialSecurity(pool);
   await prepareTaxPeriodSecurity(pool);
+  await prepareTaxFilingSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
   await prepareDataGovernance(pool);
@@ -911,6 +926,16 @@ export async function secureDatabase(pool: Pool) {
       taxLiabilityReport,
       taxReportAction,
       taxPeriodReminder,
+      taxFilingExport,
+      taxFilingPolicy,
+      taxFilingPolicyDecision,
+      taxFilingIntent,
+      taxFilingEvent,
+      taxFilingEvidence,
+      taxFilingBytes,
+      taxFilingAccess,
+      taxRemittanceAllocation,
+      taxRemittanceReview,
       subscriptionPricingRevision,
       subscriptionQuote,
       subscriptionPayment,
@@ -1417,6 +1442,7 @@ export async function secureDatabase(pool: Pool) {
     await secureOperations(client);
     await secureDataGovernance(client);
     await secureTaxPeriods(client);
+    await secureTaxFilings(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");

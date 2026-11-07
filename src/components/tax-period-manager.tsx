@@ -365,7 +365,14 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
         )}
         <ul className="space-y-6">
           {workspace.periods.map(
-            ({ period, report, reports, status: state, overdue }) => (
+            ({
+              period,
+              report,
+              reports,
+              status: state,
+              overdue,
+              confirmation,
+            }) => (
               <li
                 key={period.id}
                 className="space-y-4 rounded-xl border border-border p-4 wrap-anywhere"
@@ -383,12 +390,40 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
                   <div className="flex flex-wrap gap-2">
                     <Badge>{readable(state)}</Badge>
                     {overdue && (
-                      <Badge>
-                        Due date passed · filing/payment unconfirmed
-                      </Badge>
+                      <Badge>Due date passed · requirements remain due</Badge>
                     )}
                   </div>
                 </div>
+                <p>
+                  Filing:{" "}
+                  {confirmation.filed
+                    ? "confirmed for a retained revision"
+                    : confirmation.filingRequired === false
+                      ? "not required by this procedure"
+                      : "unconfirmed"}{" "}
+                  · Remittance:{" "}
+                  {confirmation.paid
+                    ? "confirmed"
+                    : confirmation.paymentRequired === false
+                      ? "not required by this procedure"
+                      : "incomplete"}{" "}
+                  ·{" "}
+                  {confirmation.fulfilled
+                    ? "Configured requirements satisfied"
+                    : "Requirements remain due"}
+                </p>
+                {confirmation.correctionRequired && (
+                  <p className="text-warning">
+                    An earlier revision was filed. Review the correction and
+                    amendment lineage.
+                  </p>
+                )}
+                <Link
+                  href="/platform/tax/filings"
+                  className="inline-flex min-h-11 items-center text-primary underline"
+                >
+                  Review actual filing and remittance evidence
+                </Link>
                 <details>
                   <summary className="cursor-pointer py-2 font-medium">
                     Period boundaries and configured evidence
@@ -944,7 +979,10 @@ function ReportDetails({
           this is not a complete zero liability.
         </p>
       )}
-      <p>Filing unconfirmed · Payment unconfirmed</p>
+      <p>
+        This preparation record does not establish filing or payment. Actual
+        confirmations are recorded separately.
+      </p>
       <p className="text-sm">
         {snapshot.obligation.definition.distinctReviewer
           ? "Approval requires an assigned reviewer distinct from this preparer."

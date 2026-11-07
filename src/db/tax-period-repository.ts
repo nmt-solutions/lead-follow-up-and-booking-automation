@@ -1,4 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { sha256SortedJsonV1 as hash } from "../tax-periods/digest";
+import { taxFilingStatusSchema } from "../models/tax-filing-status";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { Temporal } from "@js-temporal/polyfill";
@@ -117,22 +119,6 @@ async function configuration(tx: Transaction, id: string) {
     .where(eq(decisions.revisionId, current.id))
     .orderBy(asc(decisions.version));
   return { current, decision: ds.at(-1), fingerprint: hash([revisions, ds]) };
-}
-function hash(value: unknown) {
-  const normalized: unknown = JSON.parse(JSON.stringify(value));
-  const sorted = (v: unknown): unknown =>
-    Array.isArray(v)
-      ? v.map(sorted)
-      : v !== null && typeof v === "object"
-        ? Object.fromEntries(
-            Object.entries(v)
-              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-              .map(([key, item]) => [key, sorted(item)]),
-          )
-        : v;
-  return createHash("sha256")
-    .update(JSON.stringify(sorted(normalized)))
-    .digest("hex");
 }
 function effective(
   config: ObligationRevision["definition"],
@@ -262,6 +248,12 @@ async function view(
     unresolved,
   };
 }
+/** Shared current-source query; callers serialize with the tax-reporting lock. */
+export async function readTaxReport(tx: Transaction, id: string) {
+  const [row] = await tx.select().from(reports).where(eq(reports.id, id));
+  if (!row) throw new ApplicationError("NOT_FOUND");
+  return view(tx, row);
+}
 export function createTaxPeriodRepository(
   database: Database,
 ): TaxPeriodRepository {
@@ -275,11 +267,7 @@ export function createTaxPeriodRepository(
         return { created: result.rows[0].created };
       }),
     report: (actor, id) =>
-      locked(database, actor, async (tx) => {
-        const [row] = await tx.select().from(reports).where(eq(reports.id, id));
-        if (!row) throw new ApplicationError("NOT_FOUND");
-        return view(tx, row);
-      }),
+      locked(database, actor, (tx) => readTaxReport(tx, id)),
     saveObligation: (actor, input, at) =>
       locked(database, actor, async (tx) => {
         const [old] = await tx
@@ -605,6 +593,14 @@ export function createTaxPeriodRepository(
           for (const r of rs) history.push(await view(tx, r));
           const report = history.at(-1) ?? null;
           const replaced = ps.some((next) => next.supersedesId === p.id);
+          const confirmationResult = await tx.execute<{
+            confirmation: unknown;
+          }>(
+            sql`select public.tax_filing_status(${p.id}::uuid) as confirmation`,
+          );
+          const confirmation = taxFilingStatusSchema.parse(
+            confirmationResult.rows[0]?.confirmation,
+          );
           result.push({
             period: p.definition,
             report,
@@ -612,7 +608,11 @@ export function createTaxPeriodRepository(
             status: replaced
               ? "superseded"
               : (report?.status ?? "not_prepared"),
-            overdue: !replaced && at > new Date(p.definition.dueAt),
+            overdue:
+              !replaced &&
+              !confirmation.fulfilled &&
+              at > new Date(p.definition.dueAt),
+            confirmation,
           });
         }
         const reminders = [];
