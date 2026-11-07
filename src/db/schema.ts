@@ -6700,7 +6700,7 @@ export const pilotEvent = pgTable(
   (t) => [
     check(
       "pilot_event_kind",
-      sql`${t.kind} in ('prepared','approved','activated','effort','results','renewal','reuse','stopped')`,
+      sql`${t.kind} in ('prepared','approved','activated','effort','results','renewal','reuse','stopped','setup_authorized')`,
     ),
     uniqueIndex("pilot_event_request_once").on(t.businessId, t.requestKey),
     pgPolicy("pilot_event_read", {

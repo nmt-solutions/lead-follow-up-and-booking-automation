@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { z } from "zod";
 import {
@@ -247,9 +248,9 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
       {error && (
         <Alert>
           <p>{error}</p>
-          <Link href="/security" className="underline">
+          <RecoveryLink href="/security" className="underline">
             Review sign-in and MFA
-          </Link>
+          </RecoveryLink>
         </Alert>
       )}
       {status && (

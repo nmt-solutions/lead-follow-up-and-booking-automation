@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { Actor, Clock } from "../models/business";
+import type { Clock } from "../models/business";
+import type { WorkIdentity } from "../models/discovery";
 import { ApplicationError } from "../models/application-error";
 import {
   reconciliationPeriodSchema,
@@ -20,14 +21,18 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 }
 
 export function createReconciliationApplication<Credentials>(dependencies: {
-  authenticatePlatform(credentials: Credentials): Promise<Actor>;
+  authenticatePlatform(credentials: Credentials): Promise<WorkIdentity>;
   repository: ReturnType<typeof createReconciliationRepository>;
   clock: Clock;
 }) {
   const { repository, clock } = dependencies;
-  async function current(credentials: Credentials, previous?: Actor) {
+  async function current(credentials: Credentials, previous?: WorkIdentity) {
     const actor = await dependencies.authenticatePlatform(credentials);
-    if (previous && actor.userId !== previous.userId)
+    if (
+      previous &&
+      (actor.userId !== previous.userId ||
+        actor.sessionId !== previous.sessionId)
+    )
       throw new ApplicationError("FORBIDDEN");
     await repository.authorize(actor);
     return actor;
@@ -142,8 +147,21 @@ export function createReconciliationApplication<Credentials>(dependencies: {
       )
         throw new ApplicationError("CONFLICT");
       await current(credentials, actor);
-      await repository.checkAccess(actor, data.evidenceId, data.token);
+      await repository.checkAccess(
+        actor,
+        data.evidenceId,
+        data.token,
+        clock.now,
+      );
       await current(credentials, actor);
+      // The generic identity adapter may wait across the original DB expiry.
+      // Keep this exact grant check after it; never issue a replacement grant.
+      await repository.checkAccess(
+        actor,
+        data.evidenceId,
+        data.token,
+        clock.now,
+      );
       return {
         name: evidence.name,
         contentType: evidence.contentType,

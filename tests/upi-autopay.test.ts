@@ -721,6 +721,68 @@ describe("Separate UPI AutoPay at the public application seam", () => {
     ).toHaveLength(1);
     expect(f.mutations).toHaveLength(2);
   });
+  it("projects only selected transaction tax after valid native mandate confirmation while retaining private originals", async () => {
+    const f = await eligible(),
+      marker = "private-unrelated-mandate-tax-draft";
+    await f.tax.saveRule(f.operator, {
+      key: "unrelated-region",
+      expectedVersion: 0,
+      rule: {
+        ...f.rules.revisions[0].rule,
+        customerRegion: "KA",
+        rationale: marker,
+      },
+      note: marker,
+    });
+    const c = await approve(f);
+    await f.changes.execute(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+    });
+    Object.assign(f.upi.subscriptions.get("sub_fixture1")!, {
+      customer_id: "cust_upi",
+      status: "authenticated",
+    });
+    f.upi.payments.set("pay_taxprojection", {
+      id: "pay_taxprojection",
+      customer_id: "cust_upi",
+      invoice_id: null,
+      order_id: null,
+      status: "authorized",
+      captured: false,
+      method: "upi",
+      vpa: "synthetic@fixture",
+      international: false,
+      amount: 500,
+      currency: "INR",
+      amount_refunded: 0,
+    });
+    const confirmed = await f.payments.confirmMandate(f.owner, f.business.id, {
+      actionId: c.snapshot.replacementActionId,
+      requestKey: randomUUID(),
+      paymentId: "pay_taxprojection",
+      subscriptionId: "sub_fixture1",
+      signature: createHmac("sha256", "upi-api-secret")
+        .update("pay_taxprojection|sub_fixture1")
+        .digest("hex"),
+    });
+    expect(confirmed.snapshot.tax.totals).toEqual(c.snapshot.target.tax.totals);
+    expect(confirmed.snapshot.tax.lines).toEqual(c.snapshot.target.tax.lines);
+    expect(JSON.stringify(confirmed)).not.toContain(marker);
+    expect(
+      confirmed.snapshot.tax.configuration.revisions.map((r) => r.id),
+    ).toEqual([f.rules.revisions[0].id]);
+    expect(
+      JSON.stringify(await f.payments.workspace(f.owner, f.business.id)),
+    ).not.toContain(marker);
+    expect(
+      JSON.stringify(await f.tax.reviewWorkspace(f.operator, f.business.id)),
+    ).toContain(marker);
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).periods,
+    ).toHaveLength(1);
+    expect(f.mutations).toHaveLength(2);
+  });
   it("binds a signed checkout proof to the original UPI action/account/customer and original actor payload without granting a paid period", async () => {
     const f = await eligible(),
       c = await approve(f);
@@ -1109,7 +1171,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
     const f = await subscriptionFixture(h);
     const changes = createReachChangeApplication({
       authenticate: h.authenticate,
-      authenticatePlatform: h.access.authenticatePlatform,
+      authenticatePlatform: h.access.authenticatePlatformForWork,
       repository: createReachChangeRepository(runtimeDatabase(h.runtime)),
       gateway: configuredPayments({ env: {}, clock: h.clock }),
       clock: h.clock,
@@ -1145,7 +1207,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
       );
       documents = createSellerDocumentApplication({
         authenticate: h.authenticate,
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createSellerDocumentRepository(runtimeDatabase(h.runtime)),
         clock: h.clock,
         storage: createMemoryStorage(),
@@ -1174,7 +1236,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
       });
       adjustments = createFinancialAdjustmentApplication({
         authenticate: h.authenticate,
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createFinancialAdjustmentRepository(
           runtimeDatabase(h.runtime),
         ),
@@ -1206,7 +1268,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
       };
       adjustments = createFinancialAdjustmentApplication({
         authenticate: h.authenticate,
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createFinancialAdjustmentRepository(
           runtimeDatabase(h.runtime),
         ),
@@ -1258,7 +1320,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
         "fixture account settings/MCC/PSP support",
       );
       const reconciliation = createReconciliationApplication({
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
         clock: h.clock,
       });
@@ -1358,7 +1420,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
         creditDocumentId: null,
       });
       const report = await createReconciliationApplication({
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
         clock: h.clock,
       }).workspace(f.operator, {

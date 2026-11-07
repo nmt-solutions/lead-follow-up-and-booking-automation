@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { z } from "zod";
 import {
   dataWorkspaceSchema,
@@ -103,9 +104,9 @@ export function BusinessDataPanel({
       {error && (
         <Alert role="alert">
           {error}{" "}
-          <Link className="underline" href="/security">
+          <RecoveryLink className="underline" href="/security">
             Review security
-          </Link>
+          </RecoveryLink>
         </Alert>
       )}
       {message && (

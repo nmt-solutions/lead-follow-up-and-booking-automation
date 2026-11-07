@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import {
   taxCalculationInputSchema,
@@ -199,12 +200,12 @@ export function TaxManager({
         >
           {busy ? "Working…" : "Refresh saved status"}
         </Button>
-        <Link
+        <RecoveryLink
           href="/security"
           className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Security
-        </Link>
+        </RecoveryLink>
       </div>
       {error && <Alert>{error}</Alert>}
       {message && (

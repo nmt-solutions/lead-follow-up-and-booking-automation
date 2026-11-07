@@ -1343,7 +1343,7 @@ describe("Approved reach changes at the public application seam", () => {
       await app.execute(op, f.business.id, { caseId: reviewed.id });
       expect(f.native.refundPosts).toHaveLength(1);
       const reconciliation = createReconciliationApplication({
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
         clock: h.clock,
       });

@@ -1,23 +1,11 @@
 import { publicFinancialValue } from "../models/public-financial";
 import { paymentSnapshotSchema } from "../models/subscription-payments";
+import { publicTaxCalculation } from "../tax/projection";
 import type {
   PaymentAction,
   PaymentSnapshot,
   PaymentWorkspace,
 } from "../models/subscription-payments";
-export function publicTaxCalculation(
-  tax: PaymentSnapshot["tax"],
-): PaymentSnapshot["tax"] {
-  const revisions = new Set(tax.lines.map((l) => l.rule.revision.id));
-  const decisions = new Set(tax.lines.map((l) => l.rule.approval.id));
-  return {
-    ...tax,
-    configuration: {
-      revisions: tax.configuration.revisions.filter((r) => revisions.has(r.id)),
-      decisions: tax.configuration.decisions.filter((r) => decisions.has(r.id)),
-    },
-  };
-}
 /** Preserve the private financial record. Selected-Business responses contain no deployment-wide merchant review. */
 export function publicPaymentSnapshot(
   snapshot: PaymentSnapshot,

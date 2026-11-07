@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -149,9 +149,12 @@ export function FileManager({
       {error && (
         <Alert variant="destructive">
           {error}{" "}
-          <Link href="/security" className="underline underline-offset-4">
+          <RecoveryLink
+            href="/security"
+            className="underline underline-offset-4"
+          >
             Check Security
-          </Link>{" "}
+          </RecoveryLink>{" "}
           if verification is required.
         </Alert>
       )}

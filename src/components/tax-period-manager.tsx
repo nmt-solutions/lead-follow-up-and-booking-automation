@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { z } from "zod";
 import {
   useEffect,
@@ -313,9 +314,9 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
       {error && (
         <Alert>
           <p>{error}</p>
-          <Link href="/security" className="underline">
+          <RecoveryLink href="/security" className="underline">
             Review sign-in and MFA
-          </Link>
+          </RecoveryLink>
         </Alert>
       )}
       {status && (

@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import { z } from "zod";
 import {
@@ -179,12 +179,12 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
         >
           Load month
         </Button>
-        <Link
+        <RecoveryLink
           href="/security"
           className="inline-flex min-h-11 items-center text-primary underline"
         >
           Security and MFA
-        </Link>
+        </RecoveryLink>
       </div>
       {error && <Alert role="alert">{error}</Alert>}
       {status && <p role="status">{status}</p>}

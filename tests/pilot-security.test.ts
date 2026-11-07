@@ -192,6 +192,20 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
       h.clock.now(),
     ]);
   });
+  it.each(["PUBLIC", "app_runtime"])(
+    "rejects accidental %s execution of the private setup predicate at startup",
+    async (role) => {
+      await h.admin.query(
+        `grant execute on function public.pilot_setup_current(uuid,text,text) to ${role}`,
+      );
+      try {
+        await expect(verifyRuntimeRole(h.runtime)).rejects.toThrow();
+      } finally {
+        await secureDatabase(h.admin);
+      }
+      await verifyRuntimeRole(h.runtime);
+    },
+  );
   it("checks SELECT and INSERT grants independently at startup", async () => {
     for (const table of pilotTables) {
       for (const privilege of ["SELECT", "INSERT"]) {
@@ -250,6 +264,29 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
       }
       return rows;
     }
+    async function schemaCatalog() {
+      const queries = {
+        columns:
+          "select c.relname,a.attname,format_type(a.atttypid,a.atttypmod) type,a.attnotnull,a.attidentity,a.attgenerated,a.attacl,pg_get_expr(d.adbin,d.adrelid) expression from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace left join pg_attrdef d on d.adrelid=c.oid and d.adnum=a.attnum where n.nspname='public' and c.relkind in ('r','p','v','m','f') and a.attnum>0 and not a.attisdropped order by c.relname,a.attnum",
+        relations:
+          "select c.relname,c.relkind,c.relrowsecurity,c.relforcerowsecurity,c.relacl,pg_get_userbyid(c.relowner) owner from pg_class c where c.relnamespace='public'::regnamespace order by c.relname",
+        indexes:
+          "select tablename,indexname,indexdef from pg_indexes where schemaname='public' order by tablename,indexname",
+        triggers:
+          "select t.tgrelid::regclass::text relation,t.tgname,t.tgenabled,pg_get_triggerdef(t.oid) definition from pg_trigger t where t.tgrelid in(select oid from pg_class where relnamespace='public'::regnamespace) and not t.tgisinternal order by 1,2",
+        sequences:
+          "select * from pg_sequences where schemaname='public' order by sequencename",
+        functionACL:
+          "select oid::regprocedure::text signature,prosecdef,proconfig,proacl,pg_get_userbyid(proowner) owner from pg_proc where pronamespace='public'::regnamespace order by 1",
+        defaultACL:
+          "select defaclrole::regrole::text owner,defaclnamespace::regnamespace::text schema,defaclobjtype,defaclacl from pg_default_acl order by 1,2,3",
+      };
+      const catalog: Record<string, unknown[]> = {};
+      for (const [name, query] of Object.entries(queries))
+        catalog[name] = (await h.admin.query(query)).rows;
+      return catalog;
+    }
+    const originalCatalog = await schemaCatalog();
     const originalContent = await content();
     const originalPolicies = (
       await h.admin.query(
@@ -290,6 +327,8 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
                 "select public.pilot_effect_current(gen_random_uuid(),'discovery','x')",
               pilot_path_allowed:
                 "select public.pilot_path_allowed(gen_random_uuid(),'discovery','{}')",
+              pilot_setup_current:
+                "select public.pilot_setup_current(gen_random_uuid(),'forged','forged')",
             })[f] ?? `select public.${f}()`,
         ),
       ]) {
@@ -306,6 +345,7 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
     await h.reapplySchema();
     await verifyRuntimeRole(h.runtime);
     expect(await content()).toEqual(originalContent);
+    expect(await schemaCatalog()).toEqual(originalCatalog);
     expect(
       (
         await h.admin.query(
@@ -371,6 +411,7 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
             postgresVersion: (await h.admin.query("show server_version"))
               .rows[0],
             contentPreserved: originalContent,
+            catalogPreserved: originalCatalog,
             constraintsPreserved: constraints,
             functionsPreserved: functions,
             allPoliciesPreserved: originalPolicies,

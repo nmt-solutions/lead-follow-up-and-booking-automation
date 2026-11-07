@@ -36,7 +36,11 @@ const reasons: Record<NonNullable<GmailView["reason"]>, string> = {
   invalid_response:
     "The Google response could not be validated. Ask the operator to review setup.",
   account_mismatch:
-    "The authorized account did not match this mailbox. Reconnect with the selected account; rejected credentials are held only for revocation.",
+    "The authorized account did not match this mailbox. Reconnect with the selected account. Rejected credentials cannot authorize consent removal.",
+  manual_required:
+    "Disconnected locally. Unattributed credentials were disposed of without revoking an unverified account. Review consent in the intended Google account; remote removal is incomplete.",
+  shared_identity:
+    "Disconnected locally. Google consent is still used by another connection and was not revoked. Review shared consent before removing it in Google.",
   revocation_pending:
     "Sync is disabled locally. Retry revocation when Google is available, or remove the application in your Google account permissions.",
 };

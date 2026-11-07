@@ -1,4 +1,4 @@
-import { publicTaxCalculation } from "../subscription-payments/projection";
+import { publicTaxCalculation } from "../tax/projection";
 import { taxCalculationSchema } from "../models/tax";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";

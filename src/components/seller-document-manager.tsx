@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -261,12 +261,12 @@ export function SellerDocumentManager({
         >
           Refresh saved history
         </Button>
-        <Link
+        <RecoveryLink
           href="/security"
           className="inline-flex min-h-11 items-center text-primary underline"
         >
           Security
-        </Link>
+        </RecoveryLink>
       </div>
       {!state.storageReady && (
         <Alert>

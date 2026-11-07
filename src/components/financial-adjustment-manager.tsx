@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -408,12 +409,12 @@ export function FinancialAdjustmentManager({
         >
           Refresh saved records
         </Button>
-        <Link
+        <RecoveryLink
           className="inline-flex min-h-11 items-center text-primary underline"
           href="/security"
         >
           Security and MFA
-        </Link>
+        </RecoveryLink>
         {!operator && (
           <Link
             className="inline-flex min-h-11 items-center text-primary underline"

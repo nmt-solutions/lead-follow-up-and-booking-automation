@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "./runtime";
 import { scoped, requireCapability } from "./scope";
 import { requireSalesSession } from "./sales-session";
@@ -156,6 +156,13 @@ export function createMailboxAuthorizationRepository(
             },
             invalidate: () =>
               invalidateMailboxVisibility(tx, businessId, mailboxId),
+            async googlePrimaryRevocable() {
+              if (provider !== "gmail" || !grant) return false;
+              const result = await tx.execute<{ allowed: boolean }>(
+                sql`select public.google_primary_revocable('gmail',${grant.id}::uuid,${grant.generation}) allowed`,
+              );
+              return result.rows[0]?.allowed === true;
+            },
           };
           return operation(store);
         },

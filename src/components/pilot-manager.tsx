@@ -1,17 +1,20 @@
 "use client";
 import { useId, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import type { EmailActionRef } from "@/models/email-eligibility";
 import { z } from "zod";
 import {
   pilotWorkspaceSchema,
   pilotViewSchema,
   pilotCapabilitySchema,
+  pilotSetupAuthorizationSchema,
   type PilotView,
 } from "@/models/pilots";
 import { readCommercialResponse } from "./subscription-quote-client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Checkbox } from "./ui/checkbox";
 import { Label } from "./ui/label";
 import { NativeSelect } from "./ui/native-select";
 import { Card, CardHeader, CardTitle, CardContent } from "./ui/card";
@@ -40,11 +43,17 @@ function Field({
   label,
   type = "text",
   required = true,
+  min,
+  max,
+  step,
 }: {
   name: string;
   label: string;
   type?: string;
   required?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
 }) {
   const id = useId();
   return (
@@ -55,7 +64,9 @@ function Field({
         name={name}
         type={type}
         required={required}
-        step={type === "number" ? "any" : undefined}
+        min={min}
+        max={max}
+        step={step ?? (type === "number" ? "any" : undefined)}
       />
     </div>
   );
@@ -236,9 +247,9 @@ export function PilotManager({
       {error && (
         <Alert role="alert">
           {error}{" "}
-          <Link href="/security" className="underline">
+          <RecoveryLink href="/security" className="underline">
             Open Security
-          </Link>
+          </RecoveryLink>
         </Alert>
       )}
       {message && <p role="status">{message}</p>}
@@ -643,12 +654,22 @@ export function PilotManager({
                   {g.reasons.map((r) => (
                     <p key={r}>{r}</p>
                   ))}
-                  <Link
-                    className="inline-flex min-h-11 items-center text-primary underline"
-                    href={g.destination}
-                  >
-                    Review this setup
-                  </Link>
+                  {g.destination === "/security" ||
+                  g.destination === "/sign-in" ? (
+                    <RecoveryLink
+                      className="inline-flex min-h-11 items-center text-primary underline"
+                      href={g.destination}
+                    >
+                      Review session security
+                    </RecoveryLink>
+                  ) : (
+                    <Link
+                      className="inline-flex min-h-11 items-center text-primary underline"
+                      href={g.destination}
+                    >
+                      Review this setup
+                    </Link>
+                  )}
                 </div>
               ))}
             </section>
@@ -683,6 +704,142 @@ export function PilotManager({
                 Record verified paid monthly renewal
               </Button>
             </div>
+            <details className="rounded-xl border border-border p-4">
+              <summary className="min-h-11 cursor-pointer font-medium">
+                Repair selected mailbox readiness
+              </summary>
+              <p className="my-3 text-sm text-muted-foreground">
+                Explicitly authorize one incremental read job for this plan’s
+                exact mailbox. Permission checks, provider reads and token
+                refreshes use the original remaining cash, spend and time. The
+                allowance ends at its server deadline, within 15 minutes and the
+                original paid and operating windows. Sends, discovery, bookings
+                and activation still need their full separate approval. A
+                stopped or expired operating phase needs a new bounded plan.
+              </p>
+              <form
+                className="space-y-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const data = new FormData(event.currentTarget);
+                  void run(() =>
+                    command("authorize-setup", {
+                      ...ref(p),
+                      mailboxId: p.plan.mailboxId,
+                      maxNativeCalls: Number(value(data, "setup-calls")),
+                      durationSeconds: Number(value(data, "setup-duration")),
+                      evidence: value(data, "setup-evidence"),
+                      acceptReadOnlySetup: data.get("setup-accept") === "on",
+                    }),
+                  );
+                }}
+              >
+                <p>
+                  Selected mailbox:{" "}
+                  {choices.mailboxes.find(
+                    (mailbox) => mailbox.id === p.plan.mailboxId,
+                  )?.label ?? "Select a supported mailbox in a new plan."}
+                </p>
+                <Field
+                  name="setup-calls"
+                  min={1}
+                  max={100}
+                  step={1}
+                  label="Maximum guarded phases and native requests (1–100)"
+                  type="number"
+                />
+                <Field
+                  name="setup-duration"
+                  min={1}
+                  max={900}
+                  step={1}
+                  label="Setup allowance duration in seconds (1–900)"
+                  type="number"
+                />
+                <Field
+                  name="setup-evidence"
+                  label="Explicit setup approval evidence"
+                />
+                <Label
+                  htmlFor={`pilot-setup-${p.id}`}
+                  className="flex min-h-11 items-center gap-3"
+                >
+                  <Checkbox
+                    id={`pilot-setup-${p.id}`}
+                    name="setup-accept"
+                    required
+                  />
+                  Approve these bounded selected-mailbox reads against this
+                  plan’s remaining limits.
+                </Label>
+                <Button
+                  disabled={
+                    busy ||
+                    !p.canRecord ||
+                    !p.plan.mailboxId ||
+                    p.status === "stopped" ||
+                    p.status === "expired"
+                  }
+                >
+                  Authorize mailbox setup
+                </Button>
+              </form>
+              <ul className="mt-4 space-y-3">
+                {p.events
+                  .filter((event) => event.kind === "setup_authorized")
+                  .map((event) => {
+                    const parsed = pilotSetupAuthorizationSchema.safeParse(
+                      event.data,
+                    );
+                    if (!parsed.success) return null;
+                    const grant = parsed.data;
+                    return (
+                      <li
+                        key={event.id}
+                        className="space-y-2 rounded-xl border border-border p-3"
+                      >
+                        <p>
+                          Original setup deadline:{" "}
+                          {new Date(grant.expiresAt).toLocaleString()}. Maximum{" "}
+                          {grant.maxNativeCalls} setup units.
+                        </p>
+                        <Button
+                          variant="outline"
+                          disabled={busy || !p.canRecord}
+                          onClick={() =>
+                            void run(async () => {
+                              await readCommercialResponse(
+                                await fetch(
+                                  `/api/businesses/${businessId}/mailboxes/${grant.mailboxId}/sync`,
+                                  {
+                                    method: "POST",
+                                    headers: {
+                                      "content-type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      mode: "incremental",
+                                      pilotSetupRequestKey: grant.jobId,
+                                    }),
+                                  },
+                                ),
+                                z.object({ jobId: z.uuid() }),
+                              );
+                              await refresh();
+                            })
+                          }
+                        >
+                          Request this approved setup job
+                        </Button>
+                        <p className="text-sm text-muted-foreground">
+                          Retries keep this job, deadline and used limits.
+                          Review Mailboxes for worker progress, then refresh
+                          preflight here and explicitly activate when ready.
+                        </p>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </details>
             <details className="rounded-xl border border-border p-4">
               <summary className="min-h-11 cursor-pointer font-medium">
                 Record measured effort

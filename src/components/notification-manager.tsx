@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useState, useId, useRef, useEffect, type ComponentProps } from "react";
 import { z } from "zod";
 import {
@@ -368,9 +369,9 @@ export function NotificationManager({
           <AlertTitle>Action needs review</AlertTitle>
           <AlertDescription>
             {error}{" "}
-            <Link href="/security" className="underline">
+            <RecoveryLink href="/security" className="underline">
               Open Security
-            </Link>
+            </RecoveryLink>
           </AlertDescription>
         </Alert>
       )}
@@ -733,9 +734,9 @@ export function BusinessNotifications({
       {error && (
         <Alert variant="destructive">
           {error}{" "}
-          <Link href="/security" className="underline">
+          <RecoveryLink href="/security" className="underline">
             Open Security
-          </Link>
+          </RecoveryLink>
         </Alert>
       )}
       {status && <Alert variant="success">{status}</Alert>}

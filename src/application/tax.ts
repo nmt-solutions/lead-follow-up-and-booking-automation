@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Actor, Clock } from "../models/business";
 import { businessIdSchema } from "../models/business";
 import { ApplicationError } from "../models/application-error";
+import { publicTaxCalculation } from "../tax/projection";
 import {
   taxCalculationInputSchema,
   taxRuleSaveSchema,
@@ -85,13 +86,17 @@ export function createTaxApplication<Credentials>(dependencies: {
       );
     },
     async workspace(credentials: Credentials, businessId: unknown) {
-      return repository.workspace(
+      const workspace = await repository.workspace(
         await dependencies.authenticate(credentials),
         parse(businessIdSchema, businessId),
         clock.now(),
         mode,
         false,
       );
+      return {
+        ...workspace,
+        calculations: workspace.calculations.map(publicTaxCalculation),
+      };
     },
     async reviewWorkspace(credentials: Credentials, businessId: unknown) {
       return repository.workspace(
@@ -107,12 +112,14 @@ export function createTaxApplication<Credentials>(dependencies: {
       businessId: unknown,
       value: unknown,
     ) {
-      return repository.calculate(
-        await dependencies.authenticate(credentials),
-        parse(businessIdSchema, businessId),
-        parse(taxCalculationInputSchema, value),
-        clock.now(),
-        mode,
+      return publicTaxCalculation(
+        await repository.calculate(
+          await dependencies.authenticate(credentials),
+          parse(businessIdSchema, businessId),
+          parse(taxCalculationInputSchema, value),
+          clock.now(),
+          mode,
+        ),
       );
     },
     async resolve(

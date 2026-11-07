@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
@@ -450,22 +450,27 @@ export function createGoogleCalendarRepository(
           g.status !== "revocation_pending"
         )
           return view(tx, businessId);
-        if (!http || !vault) return view(tx, businessId);
-        try {
-          const tokens = [
-            ...new Set([
-              ...(g.credentials ? [decode(g).refreshToken] : []),
-              ...rejectedTokens(g),
-            ]),
-          ];
-          for (const token of tokens) await http.revoke(token);
-        } catch {
-          await update(tx, g, { reason: "revocation_pending" });
-          return view(tx, businessId);
+        let reason: "manual_required" | "shared_identity" | null =
+          g.rejectedCredentials ? "manual_required" : null;
+        if (g.credentials) {
+          if (!http || !vault) return view(tx, businessId);
+          const allowed = await tx.execute<{ allowed: boolean }>(
+            sql`select public.google_primary_revocable('google_calendar',${g.id}::uuid,${g.generation}) allowed`,
+          );
+          if (!allowed.rows[0]?.allowed)
+            reason ??= g.accountSubject ? "shared_identity" : "manual_required";
+          else {
+            try {
+              await http.revoke(decode(g).refreshToken);
+            } catch {
+              await update(tx, g, { reason: "revocation_pending" });
+              return view(tx, businessId);
+            }
+          }
         }
         await update(tx, g, {
           status: "disconnected",
-          reason: null,
+          reason,
           credentials: null,
           rejectedCredentials: null,
         });

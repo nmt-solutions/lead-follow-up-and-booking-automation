@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { z } from "zod";
 import {
   businessReportSchema,
@@ -208,13 +209,19 @@ export function BusinessReportPanel({
                 {error}
                 {security && (
                   <span className="ml-2">
-                    <Link className="text-primary underline" href="/security">
+                    <RecoveryLink
+                      className="text-primary underline"
+                      href="/security"
+                    >
                       Security
-                    </Link>{" "}
+                    </RecoveryLink>{" "}
                     ·{" "}
-                    <Link className="text-primary underline" href="/sign-in">
+                    <RecoveryLink
+                      className="text-primary underline"
+                      href="/sign-in"
+                    >
                       Sign in
-                    </Link>
+                    </RecoveryLink>
                   </span>
                 )}
               </Alert>

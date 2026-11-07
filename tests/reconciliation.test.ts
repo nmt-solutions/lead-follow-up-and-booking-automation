@@ -28,7 +28,7 @@ describe("Subscription money reconciliation through the public application", () 
   afterEach(async () => h?.close());
   function compose() {
     return createReconciliationApplication({
-      authenticatePlatform: h.access.authenticatePlatform,
+      authenticatePlatform: h.access.authenticatePlatformForWork,
       repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
       clock: h.clock,
     });
@@ -43,7 +43,7 @@ describe("Subscription money reconciliation through the public application", () 
       native = financialNativeFixture(h.clock);
     const payments = createSubscriptionPaymentApplication({
       authenticate: h.authenticate,
-      authenticatePlatform: h.access.authenticatePlatform,
+      authenticatePlatform: h.access.authenticatePlatformForWork,
       repository: createSubscriptionPaymentRepository(
         runtimeDatabase(h.runtime),
       ),
@@ -264,7 +264,7 @@ describe("Subscription money reconciliation through the public application", () 
       );
       const documents = createSellerDocumentApplication({
         authenticate: h.authenticate,
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createSellerDocumentRepository(runtimeDatabase(h.runtime)),
         clock: h.clock,
         storage: createMemoryStorage(),
@@ -299,7 +299,7 @@ describe("Subscription money reconciliation through the public application", () 
       });
       const financial = createFinancialAdjustmentApplication({
         authenticate: h.authenticate,
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createFinancialAdjustmentRepository(
           runtimeDatabase(h.runtime),
         ),
@@ -884,7 +884,7 @@ describe("Subscription money reconciliation through the public application", () 
             "update platform_operator set reconciliation=false where user_id=$1",
             [actor.userId],
           );
-        return h.access.authenticatePlatform(headers);
+        return h.access.authenticatePlatformForWork(headers);
       },
     });
     await expect(revoking.workspace(f.operator, cohort)).rejects.toMatchObject({
@@ -921,7 +921,7 @@ describe("Subscription money reconciliation through the public application", () 
       clock: h.clock,
       authenticatePlatform: async (headers: Headers) => {
         if (++reads === 2) h.clock.set("2026-11-05T09:16:00.000Z");
-        return h.access.authenticatePlatform(headers);
+        return h.access.authenticatePlatformForWork(headers);
       },
     });
     await expect(
@@ -930,6 +930,76 @@ describe("Subscription money reconciliation through the public application", () 
         token: grant.token,
       }),
     ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+  });
+  it("denies original evidence when its original grant expires during the last identity wait", async () => {
+    const operator = await h.signIn("last-evidence-wait@example.com");
+    await h.provisionOperator(operator, { tax: false, reconciliation: true });
+    const app = compose(),
+      original = await evidence(app, operator),
+      grant = await app.evidenceAccess(operator, { evidenceId: original.id }),
+      frozen = h.clock.now().toISOString();
+    // Technical lease fixture: age the publicly issued, unchanged token with
+    // its original 60-second lifetime. Expiry during I/O uses real DB time.
+    await h.admin.query(
+      "with stamp as(select clock_timestamp() observed) update reconciliation_access set at=stamp.observed-interval '59 seconds',expires_at=stamp.observed+interval '1 second' from stamp where token_hash=$1",
+      [createHash("sha256").update(grant.token).digest("hex")],
+    );
+    let identities = 0;
+    const delayed = createReconciliationApplication({
+      repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      authenticatePlatform: async (headers: Headers) => {
+        const actor = await h.access.authenticatePlatformForWork(headers);
+        if (++identities === 3) {
+          const remaining = await h.admin.query<{ milliseconds: number }>(
+            "select extract(epoch from expires_at-clock_timestamp())*1000 milliseconds from reconciliation_access where token_hash=$1",
+            [createHash("sha256").update(grant.token).digest("hex")],
+          );
+          expect(Number(remaining.rows[0].milliseconds)).toBeGreaterThan(0);
+          await new Promise((resolve) =>
+            setTimeout(resolve, Number(remaining.rows[0].milliseconds) + 50),
+          );
+        }
+        return actor;
+      },
+    });
+    await expect(
+      delayed.evidenceContent(operator, {
+        evidenceId: original.id,
+        token: grant.token,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(identities).toBe(3);
+    expect(h.clock.now().toISOString()).toBe(frozen);
+    await expect(
+      app.evidenceContent(operator, {
+        evidenceId: original.id,
+        token: grant.token,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+  it("requires the original persisted session after the last identity adapter has returned", async () => {
+    const operator = await h.signIn("last-session-evidence@example.com");
+    await h.provisionOperator(operator, { tax: false, reconciliation: true });
+    const app = compose(),
+      original = await evidence(app, operator),
+      grant = await app.evidenceAccess(operator, { evidenceId: original.id });
+    let calls = 0;
+    const signingOut = createReconciliationApplication({
+      repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      authenticatePlatform: async (headers: Headers) => {
+        const actor = await h.access.authenticatePlatformForWork(headers);
+        if (++calls === 3) await h.auth.api.signOut({ headers });
+        return actor;
+      },
+    });
+    await expect(
+      signingOut.evidenceContent(operator, {
+        evidenceId: original.id,
+        token: grant.token,
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
   });
   it("rechecks the current session after the final evidence grant serialization wait", async () => {
     const f = await purchase(),
@@ -946,7 +1016,7 @@ describe("Subscription money reconciliation through the public application", () 
       repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
       clock: h.clock,
       authenticatePlatform: async (headers: Headers) => {
-        const actor = await h.access.authenticatePlatform(headers);
+        const actor = await h.access.authenticatePlatformForWork(headers);
         if (++reads === 2) {
           await blocker.query("begin");
           await blocker.query(
@@ -1149,7 +1219,7 @@ describe("Subscription money reconciliation through the public application", () 
       );
       const documents = createSellerDocumentApplication({
         authenticate: h.authenticate,
-        authenticatePlatform: h.access.authenticatePlatform,
+        authenticatePlatform: h.access.authenticatePlatformForWork,
         repository: createSellerDocumentRepository(runtimeDatabase(h.runtime)),
         clock: h.clock,
         storage: createMemoryStorage(),

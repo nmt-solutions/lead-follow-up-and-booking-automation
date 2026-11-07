@@ -6,6 +6,7 @@ import { ApplicationError } from "../models/application-error";
 import {
   pilotPrepareSchema,
   pilotRefSchema,
+  pilotSetupSchema,
   pilotEffortSchema,
   pilotResultSchema,
   pilotReuseSchema,
@@ -122,6 +123,37 @@ export function createPilotApplication<C>(d: {
     });
   }
   return {
+    async authorizeSetup(c: C, b: unknown, v: unknown) {
+      const { actor, id } = await context(c, b),
+        input = parse(pilotSetupSchema, v);
+      const state = await view(c, id, input.pilotId);
+      if (input.mailboxId !== state.plan.mailboxId)
+        throw new ApplicationError("INVALID_INPUT");
+      if (state.events.some((event) => event.requestKey === input.requestKey)) {
+        await d.repository.authorizeSetup(actor, id, input);
+        return view(c, id, input.pilotId);
+      }
+      // Readiness of the selected mailbox is the thing this explicitly bounded
+      // operation repairs. The other source, financial and rights gates remain.
+      const relevant = new Set([
+        "authority",
+        "operating_approval",
+        "remaining_limits",
+        "limits",
+        "billing_tax",
+        "business",
+        "payment",
+        "offboarding",
+        "global_budget",
+        "retention",
+      ]);
+      if (
+        state.gates.some((gate) => relevant.has(gate.capability) && !gate.ready)
+      )
+        throw new ApplicationError("SETUP_REQUIRED");
+      await d.repository.authorizeSetup(actor, id, input);
+      return view(c, id, input.pilotId);
+    },
     async prepare(c: C, b: unknown, v: unknown) {
       const { actor, id } = await context(c, b),
         input = parse(pilotPrepareSchema, v);

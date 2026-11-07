@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import {
   pricingCatalogSchema,
@@ -564,12 +564,12 @@ export function SubscriptionPricingManager({
           preserved and assessed against current configuration; publishing never
           charges a Business.
         </p>
-        <Link
+        <RecoveryLink
           href="/security"
           className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Security and operator verification
-        </Link>
+        </RecoveryLink>
       </section>
       <SubscriptionDisclosures />
       <form

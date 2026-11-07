@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -201,9 +202,9 @@ export function ReachChangeManager({
       {error && (
         <Alert role="alert">
           {error}{" "}
-          <Link href="/security" className="underline">
+          <RecoveryLink href="/security" className="underline">
             Open Security
-          </Link>
+          </RecoveryLink>
         </Alert>
       )}
       {message && (

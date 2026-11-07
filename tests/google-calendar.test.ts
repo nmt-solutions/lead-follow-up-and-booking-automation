@@ -16,6 +16,13 @@ describe("Business Google Calendar grants through real persistence", () => {
   afterAll(async () => {
     await h?.close();
   });
+  async function authorizeNativeRevoke(credentials: Headers) {
+    const stamp = (
+      await h.admin.query<{ now: Date }>("select clock_timestamp() now")
+    ).rows[0].now;
+    h.clock.set(stamp.toISOString());
+    await h.reverifyAuthenticator(credentials);
+  }
   async function fixture() {
     h.clock.set("2026-11-05T09:00:00Z");
     const credentials = await h.signIn(`google-${randomUUID()}@example.com`);
@@ -26,6 +33,7 @@ describe("Business Google Calendar grants through real persistence", () => {
       website: "",
     });
     const google = googleFixture();
+    google.control.subject = `calendar-${randomUUID()}`;
     const application = createGoogleCalendarApplication({
       database: runtimeDatabase(h.runtime),
       access: h.access,
@@ -244,6 +252,69 @@ describe("Business Google Calendar grants through real persistence", () => {
       count,
     );
   });
+  it("never revokes another Business's genuine Calendar token rejected during ordinary reconnect and disconnect", async () => {
+    const a = await fixture(),
+      b = await fixture();
+    const stamp = (
+      await h.admin.query<{ now: Date }>("select clock_timestamp() now")
+    ).rows[0].now;
+    h.clock.set(stamp.toISOString());
+    await h.reverifyAuthenticator(a.credentials);
+    await h.reverifyAuthenticator(b.credentials);
+    Object.assign(a.google.control, {
+      subject: `a-${randomUUID()}`,
+      refreshToken: "calendar-a",
+    });
+    Object.assign(b.google.control, {
+      subject: `b-${randomUUID()}`,
+      refreshToken: "genuine-calendar-b",
+      accessToken: "genuine-calendar-access-b",
+      email: "other@example.com",
+    });
+    await connect(a);
+    await connect(b);
+    Object.assign(a.google.control, {
+      subject: b.google.control.subject,
+      email: b.google.control.email,
+      refreshToken: b.google.control.refreshToken,
+      accessToken: b.google.control.accessToken,
+    });
+    const start = await a.application.start(a.credentials, a.business.id, {
+      returnPath: `/businesses/${a.business.id}/calendar`,
+    });
+    await a.application.callback(a.credentials, a.business.id, {
+      state: new URL(start.authorizationUrl).searchParams.get("state"),
+      code: "fixture-code",
+    });
+    expect(
+      await a.application.read(a.credentials, a.business.id),
+    ).toMatchObject({ status: "insufficient", reason: "insufficient" });
+    const disabled = await a.application.disconnect(
+      a.credentials,
+      a.business.id,
+    );
+    expect(
+      a.google.calls
+        .filter((call) => call.url.endsWith("/revoke"))
+        .map((call) => call.body),
+    ).not.toContainEqual({ token: "genuine-calendar-b" });
+    expect(disabled).toMatchObject({
+      status: "disconnected",
+      reason: "manual_required",
+    });
+    await a.application.disconnect(a.credentials, a.business.id);
+    expect(
+      a.google.calls
+        .filter((call) => call.url.endsWith("/revoke"))
+        .map((call) => call.body),
+    ).toEqual([{ token: "calendar-a" }]);
+    expect(
+      await b.application.read(b.credentials, b.business.id),
+    ).toMatchObject({ status: "ready" });
+    expect(
+      b.google.calls.some((call) => call.url.includes("calendarList")),
+    ).toBe(true);
+  });
   it("makes disconnect durable before remote revoke, supports retry and invalidates concurrent OAuth callbacks", async () => {
     const f = await fixture();
     await connect(f);
@@ -251,6 +322,7 @@ describe("Business Google Calendar grants through real persistence", () => {
       returnPath: `/businesses/${f.business.id}/calendar`,
     });
     f.google.control.revokeError = 503;
+    await authorizeNativeRevoke(f.credentials);
     expect(
       await f.application.disconnect(f.credentials, f.business.id),
     ).toMatchObject({ status: "revocation_pending", calendars: [] });
@@ -292,6 +364,7 @@ describe("Business Google Calendar grants through real persistence", () => {
     };
     const read = f.application.read(f.credentials, f.business.id);
     await entered;
+    await authorizeNativeRevoke(f.credentials);
     const disconnect = f.application.disconnect(f.credentials, f.business.id);
     release();
     await read;
@@ -476,6 +549,7 @@ describe("Business Google Calendar grants through real persistence", () => {
       state: new URL(start.authorizationUrl).searchParams.get("state"),
       error: "access_denied",
     });
+    await authorizeNativeRevoke(f.credentials);
     await f.application.disconnect(f.credentials, f.business.id);
     expect(
       f.google.calls.find((c) => c.url.endsWith("/revoke"))?.body,
@@ -555,6 +629,7 @@ describe("Business Google Calendar grants through real persistence", () => {
       configuration: f.google.configuration,
       fetch: f.google.fetch,
     });
+    await authorizeNativeRevoke(f.credentials);
     const disconnecting = delayed.disconnect(f.credentials, f.business.id);
     await waiting;
     await f.application.disconnect(f.credentials, f.business.id);

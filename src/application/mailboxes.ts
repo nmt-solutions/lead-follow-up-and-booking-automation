@@ -51,12 +51,13 @@ export function createMailboxApplication<Credentials>(dependencies: {
       input: unknown,
     ) {
       const c = await context(credentials, id),
-        { mode } = parse(queueMailboxSchema, input);
+        { mode, pilotSetupRequestKey } = parse(queueMailboxSchema, input);
       const work = await repository.queue(
         c.identity,
         c.businessId,
         parse(z.uuid(), mailboxId),
         mode,
+        pilotSetupRequestKey,
       );
       if (provider.mode !== "unconfigured" && dependencies.enqueue) {
         try {
@@ -116,12 +117,13 @@ export function createMailboxApplication<Credentials>(dependencies: {
       input: unknown,
     ) {
       const c = await context(credentials, id);
-      const { mode } = parse(queueMailboxSchema, input);
+      const { mode, pilotSetupRequestKey } = parse(queueMailboxSchema, input);
       const work = await repository.queue(
         c.identity,
         c.businessId,
         parse(z.uuid(), mailboxId),
         mode,
+        pilotSetupRequestKey,
       );
       if (provider.mode === "unconfigured") {
         const snapshot = await repository.prepare(work);
@@ -145,6 +147,11 @@ export function createMailboxApplication<Credentials>(dependencies: {
       const work = parse(mailboxWorkSchema, input);
       const snapshot = await repository.prepare(work);
       if (!snapshot) return null;
+      if (snapshot.pilotSetupRequestKey)
+        snapshot.authorizeNative = (operation) =>
+          repository.authorizeCall(work, snapshot.checkpoint, "native:read", {
+            operation,
+          });
       if (snapshot.retryAt && new Date(snapshot.retryAt) > clock.now())
         return repository.fail(
           snapshot,

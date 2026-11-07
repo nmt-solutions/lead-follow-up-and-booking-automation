@@ -1,4 +1,5 @@
 import { nativeCostSourcesSql } from "./cost-security";
+import { securePilotSetup } from "./pilot-setup-security";
 import { pilotCostReadTables } from "./pilot-owner-policies";
 import type { Pool, PoolClient } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -15,11 +16,12 @@ export const pilotFunctions = [
   "pilot_budget_ready",
   "pilot_path_allowed",
   "protect_pilot_write",
+  "pilot_setup_current",
 ];
 export async function preparePilotSecurity(pool: Pool | PoolClient) {
   await pool.query(`DO $$ DECLARE t text; f record; BEGIN
  FOREACH t IN ARRAY ARRAY['pilot_record','pilot_event','pilot_effect'] LOOP IF to_regclass('public.'||t) IS NOT NULL THEN EXECUTE format('REVOKE ALL ON public.%I FROM app_runtime,PUBLIC',t); END IF; END LOOP;
- FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname=ANY(ARRAY['pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed','protect_pilot_write']) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime,PUBLIC',f.signature); END LOOP;
+ FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname=ANY(ARRAY['pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed','protect_pilot_write','pilot_setup_current']) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime,PUBLIC',f.signature); END LOOP;
  END $$;
  CREATE OR REPLACE FUNCTION public.pilot_authorized() RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
  RETURN EXISTS(SELECT 1 FROM public.membership m JOIN public.session s ON s.user_id=m.user_id JOIN public."user" u ON u.id=m.user_id JOIN public.two_factor f ON f.user_id=u.id
@@ -54,9 +56,10 @@ export async function securePilots(pool: PoolClient) {
       `DROP POLICY IF EXISTS ${name}_owner ON public.${name}; CREATE POLICY ${name}_owner ON public.${name} FOR ALL TO PUBLIC USING(current_user=(SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid='public.${name}'::regclass)) WITH CHECK(current_user=(SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid='public.${name}'::regclass)); REVOKE ALL ON public.${name} FROM app_runtime,PUBLIC; GRANT SELECT,INSERT ON public.${name} TO app_runtime;`,
     );
   }
+  await securePilotSetup(pool);
   await pool.query(`
  CREATE OR REPLACE FUNCTION public.protect_pilot_write() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
- DECLARE plan jsonb; p record; source record; caller name; needs_operator boolean:=true; renewal_id uuid; renewal_payment text; renewal_at timestamptz; renewal_amount text;
+ DECLARE plan jsonb; p record; source record; caller name; needs_operator boolean:=true; renewal_id uuid; renewal_payment text; renewal_at timestamptz; renewal_amount text; setup_until timestamptz; mailbox_version integer;
  BEGIN
  -- Schema-owner recovery/import is a separate administrative boundary. SET ROLE
  -- app_runtime must still use the restricted path, even on an owner connection.
@@ -122,6 +125,33 @@ export async function securePilots(pool: PoolClient) {
    SELECT r.* INTO p FROM public.pilot_record r WHERE r.id=NEW.pilot_id AND r.business_id=NEW.business_id;
    IF p.id IS NULL OR (NEW.kind NOT IN ('approved','stopped') AND NOT coalesce(public.pilot_operator(),false)) THEN RAISE insufficient_privilege; END IF;
    plan=p.snapshot->'plan';
+   IF NEW.kind='setup_authorized' THEN
+     IF NOT coalesce(NEW.data->>'mailboxId'=plan->>'mailboxId'
+       AND NEW.data->>'jobId'=NEW.request_key::text
+       AND NEW.data->'input'->>'pilotId'=p.id::text AND NEW.data->'input'->>'requestKey'=NEW.request_key::text
+       AND NEW.data->'input'->>'mailboxId'=NEW.data->>'mailboxId'
+       AND NEW.data->'input'->'acceptReadOnlySetup'='true'::jsonb
+       AND NEW.data->'input'->>'maxNativeCalls'=NEW.data->>'maxNativeCalls'
+       AND NEW.data->'input'->>'durationSeconds'=NEW.data->>'durationSeconds'
+       AND NEW.data->>'maxNativeCalls' ~ '^[0-9]{1,3}$' AND (NEW.data->>'maxNativeCalls')::integer BETWEEN 1 AND 100
+       AND NEW.data->>'durationSeconds' ~ '^[0-9]{1,3}$' AND (NEW.data->>'durationSeconds')::integer BETWEEN 1 AND 900
+       AND length(NEW.data->'input'->>'evidence') BETWEEN 1 AND 2000
+       AND plan->'capabilities' ?| ARRAY['mailbox','inquiry_email','outreach_email']
+       AND jsonb_typeof(plan->'ceilings'->'mailbox')='object'
+       AND (plan->>'endsAt')::timestamptz>clock_timestamp(),false)
+       OR public.business_data_stopped(NEW.business_id)
+       OR NOT EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.business_id=NEW.business_id AND e.pilot_id=p.id AND e.kind='approved')
+       OR EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.business_id=NEW.business_id AND e.pilot_id=p.id AND e.kind='stopped') THEN RAISE insufficient_privilege; END IF;
+     SELECT m.version INTO mailbox_version FROM public.mailbox_policy m JOIN public.sender_connection c ON c.id=m.connection_id AND c.business_id=m.business_id
+       WHERE m.business_id=NEW.business_id AND m.id::text=plan->>'mailboxId' AND m.connection_version=c.version
+       AND m.configuration->'enabled'='true'::jsonb AND m.configuration->'requestedRead'='true'::jsonb AND c.configuration->'enabled'='true'::jsonb;
+     SELECT least(clock_timestamp()+make_interval(secs=>(NEW.data->>'durationSeconds')::integer),(plan->>'endsAt')::timestamptz,paid.end) INTO setup_until
+       FROM public.subscription_period paid WHERE paid.business_id=NEW.business_id AND paid.action_id::text=plan->>'paymentActionId'
+       AND paid.start<=(plan->>'startsAt')::timestamptz AND paid.end>=(plan->>'endsAt')::timestamptz
+       AND paid.id IN(SELECT current_paid.id FROM public.current_paid_scope(NEW.business_id,clock_timestamp()) current_paid) LIMIT 1;
+     IF mailbox_version IS NULL OR setup_until IS NULL OR setup_until<=clock_timestamp() OR NOT public.pilot_global_room('INR',0) THEN RAISE insufficient_privilege; END IF;
+     NEW.data=NEW.data||jsonb_build_object('mailboxVersion',mailbox_version,'expiresAt',to_char(setup_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'));
+   END IF;
    IF NEW.kind='effort' AND NOT coalesce(jsonb_typeof(NEW.data)='object'
      AND NEW.data->>'kind' IN ('setup','support','sales','billing_tax','maintenance')
      AND NEW.data->>'cashMinor' ~ '^[0-9]{1,15}$' AND NEW.data->>'spendMinor' ~ '^[0-9]{1,15}$'
@@ -224,15 +254,24 @@ export async function securePilots(pool: PoolClient) {
  END $$;
  DROP FUNCTION IF EXISTS public.reserve_pilot_effect(uuid,text,text,integer);
  CREATE OR REPLACE FUNCTION public.reserve_pilot_effect(tenant uuid,effect_kind text,operation text,units integer,effect_intent jsonb default '{}'::jsonb) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
- DECLARE p record; prior record; ceiling jsonb; cash numeric; spend numeric; duration bigint; used_cash numeric; used_spend numeric; used_seconds bigint; global_cost numeric; BEGIN
+ DECLARE p record; prior record; setup record; ceiling jsonb; cash numeric; spend numeric; duration bigint; used_cash numeric; used_spend numeric; used_seconds bigint; global_cost numeric; BEGIN
  IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL OR units<=0 OR effect_kind NOT IN ('discovery','automation','mailbox','calendar') THEN RETURN false; END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(tenant::text,0));
+ SELECT e.* INTO setup FROM public.pilot_event e WHERE e.business_id=tenant AND e.kind='setup_authorized' AND e.request_key::text=effect_intent->>'jobId';
+ IF setup.id IS NOT NULL THEN
+   IF effect_kind<>'mailbox' OR units<>1 OR NOT public.pilot_setup_current(tenant,effect_intent->>'jobId',effect_intent->>'mailboxId')
+     OR NOT coalesce(effect_intent->>'phase' IN ('inspect','list','body','confirm_grant') OR effect_intent->>'phase' LIKE 'native:%',false)
+     OR operation NOT LIKE (effect_intent->>'jobId')||':%' THEN RETURN false; END IF;
+   SELECT r.* INTO p FROM public.pilot_record r WHERE r.id=setup.pilot_id AND r.business_id=tenant;
+ ELSE
  SELECT r.* INTO p FROM public.pilot_record r WHERE r.business_id=tenant AND EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.pilot_id=r.id AND e.business_id=r.business_id AND e.kind='activated') ORDER BY r.at DESC,r.id DESC LIMIT 1;
+ END IF;
  IF p.id IS NULL THEN RETURN NOT EXISTS(SELECT 1 FROM public.pilot_record r WHERE r.business_id=tenant) AND NOT EXISTS(SELECT 1 FROM public.subscription_period paid WHERE paid.business_id=tenant AND paid.end>clock_timestamp() AND paid.charge->>'status'='confirmed' AND (paid.snapshot->'term'->>'kind'='days' AND jsonb_typeof(paid.snapshot->'provider'->'review'->'pilotOrders')='object' OR jsonb_typeof(paid.snapshot->'pilotContinuation')='object')); END IF;
- IF public.business_data_stopped(tenant) OR EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.pilot_id=p.id AND e.business_id=p.business_id AND e.kind='stopped') OR (p.snapshot->'plan'->>'startsAt')::timestamptz>clock_timestamp() OR (p.snapshot->'plan'->>'endsAt')::timestamptz<=clock_timestamp() THEN RETURN false; END IF;
+ IF public.business_data_stopped(tenant) OR EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.pilot_id=p.id AND e.business_id=p.business_id AND e.kind='stopped') OR (setup.id IS NULL AND (p.snapshot->'plan'->>'startsAt')::timestamptz>clock_timestamp()) OR (p.snapshot->'plan'->>'endsAt')::timestamptz<=clock_timestamp() THEN RETURN false; END IF;
  SELECT * INTO prior FROM public.pilot_effect e WHERE e.business_id=tenant AND e.kind=effect_kind AND e.operation_id=operation;
  IF prior.id IS NOT NULL THEN RETURN prior.pilot_id=p.id AND prior.quantity=units AND prior.actor_id=current_setting('app.actor_id',true) AND prior.intent=effect_intent AND public.pilot_effect_current(tenant,effect_kind,operation); END IF;
- IF (effect_kind='discovery' AND NOT p.snapshot->'plan'->'capabilities' ? 'discovery') OR (effect_kind='mailbox' AND NOT p.snapshot->'plan'->'capabilities' ? 'mailbox') OR (effect_kind='calendar' AND NOT p.snapshot->'plan'->'capabilities' ? 'calendar') OR (effect_kind='automation' AND NOT p.snapshot->'plan'->'capabilities' ?| ARRAY['inquiry_email','outreach_email','whatsapp']) THEN RETURN false; END IF;
+ IF (effect_kind='discovery' AND NOT p.snapshot->'plan'->'capabilities' ? 'discovery') OR (effect_kind='mailbox' AND setup.id IS NULL AND NOT p.snapshot->'plan'->'capabilities' ? 'mailbox') OR (effect_kind='calendar' AND NOT p.snapshot->'plan'->'capabilities' ? 'calendar') OR (effect_kind='automation' AND NOT p.snapshot->'plan'->'capabilities' ?| ARRAY['inquiry_email','outreach_email','whatsapp']) THEN RETURN false; END IF;
+ IF setup.id IS NOT NULL AND (SELECT coalesce(sum(e.quantity),0) FROM public.pilot_effect e WHERE e.business_id=tenant AND e.pilot_id=p.id AND e.kind='mailbox' AND e.intent->>'jobId'=setup.request_key::text)+units>(setup.data->>'maxNativeCalls')::integer THEN RETURN false; END IF;
  ceiling=p.snapshot->'plan'->'ceilings'->effect_kind;
  IF ceiling IS NULL OR ceiling='null'::jsonb THEN RETURN false; END IF;
  global_cost=CASE WHEN p.snapshot->'plan'->>'currency'='INR' THEN (ceiling->>'spendMinor')::numeric*units*10000 ELSE (ceiling->>'globalSpendInrMicros')::numeric*units END;
@@ -242,10 +281,15 @@ export async function securePilots(pool: PoolClient) {
  SELECT used_cash+coalesce(sum((e.data->>'cashMinor')::numeric),0),used_spend+coalesce(sum((e.data->>'spendMinor')::numeric),0),used_seconds+coalesce(sum((e.data->>'seconds')::bigint),0) INTO used_cash,used_spend,used_seconds FROM public.pilot_event e WHERE e.pilot_id=p.id AND e.business_id=p.business_id AND e.kind='effort';
  IF used_cash+cash>(p.snapshot->'plan'->>'cashLimitMinor')::numeric OR used_spend+spend>(p.snapshot->'plan'->>'spendLimitMinor')::numeric OR used_seconds+duration>(p.snapshot->'plan'->>'timeLimitSeconds')::bigint OR NOT public.pilot_global_room('INR',global_cost/10000,jsonb_build_object('tenant',tenant,'kind',effect_kind,'operation',operation)) THEN RETURN false; END IF;
  IF public.current_business_role() IS NULL OR public.business_data_stopped(tenant) OR (p.snapshot->'plan'->>'endsAt')::timestamptz<=clock_timestamp() OR EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.pilot_id=p.id AND e.business_id=p.business_id AND e.kind='stopped') OR NOT EXISTS(SELECT 1 FROM public.session s JOIN public."user" u ON u.id=s.user_id JOIN public.two_factor f ON f.user_id=u.id WHERE s.id=current_setting('app.pilot_session',true) AND s.user_id=current_setting('app.actor_id',true) AND s.expires_at>clock_timestamp() AND u.two_factor_enabled AND f.verified AND s.mfa_factor_id=f.id AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND s.mfa_verified_at<=clock_timestamp() AND s.mfa_verified_at>clock_timestamp()-interval '12 hours') THEN RETURN false; END IF;
+ IF setup.id IS NOT NULL AND NOT public.pilot_setup_current(tenant,effect_intent->>'jobId',effect_intent->>'mailboxId') THEN RETURN false; END IF;
  INSERT INTO public.pilot_effect(id,business_id,pilot_id,kind,operation_id,quantity,cash_minor,spend_minor,global_inr_micros,seconds,actor_id,intent) VALUES(gen_random_uuid(),tenant,p.id,effect_kind,operation,units,cash,spend,global_cost,duration,current_setting('app.actor_id',true),effect_intent); RETURN true;
  END $$;
  CREATE OR REPLACE FUNCTION public.pilot_effect_current(tenant uuid,effect_kind text,operation text) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE p record; BEGIN
  IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL THEN RETURN false; END IF;
+ IF effect_kind='mailbox' AND EXISTS(SELECT 1 FROM public.pilot_effect effect JOIN public.pilot_event setup ON setup.business_id=effect.business_id AND setup.pilot_id=effect.pilot_id AND setup.kind='setup_authorized' AND setup.request_key::text=effect.intent->>'jobId' WHERE effect.business_id=tenant AND effect.kind=effect_kind AND effect.operation_id=operation) THEN
+   IF NOT public.pilot_global_room('INR',0) THEN RETURN false; END IF;
+   RETURN EXISTS(SELECT 1 FROM public.pilot_effect effect WHERE effect.business_id=tenant AND effect.kind=effect_kind AND effect.operation_id=operation AND effect.actor_id=current_setting('app.actor_id',true) AND public.pilot_setup_current(tenant,effect.intent->>'jobId',effect.intent->>'mailboxId'));
+ END IF;
  SELECT r.* INTO p FROM public.pilot_record r WHERE r.business_id=tenant AND EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.pilot_id=r.id AND e.business_id=r.business_id AND e.kind='activated') ORDER BY r.at DESC,r.id DESC LIMIT 1;
  IF p.id IS NULL THEN RETURN NOT EXISTS(SELECT 1 FROM public.pilot_record r WHERE r.business_id=tenant) AND NOT EXISTS(SELECT 1 FROM public.subscription_period paid WHERE paid.business_id=tenant AND paid.end>clock_timestamp() AND paid.charge->>'status'='confirmed' AND (paid.snapshot->'term'->>'kind'='days' AND jsonb_typeof(paid.snapshot->'provider'->'review'->'pilotOrders')='object' OR jsonb_typeof(paid.snapshot->'pilotContinuation')='object')); END IF;
  IF NOT public.pilot_global_room('INR',0) THEN RETURN false; END IF;
@@ -253,6 +297,9 @@ export async function securePilots(pool: PoolClient) {
  END $$;
  CREATE OR REPLACE FUNCTION public.pilot_path_allowed(tenant uuid,capability text,path jsonb) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE p record; plan jsonb; BEGIN
  IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL THEN RETURN false; END IF;
+ IF capability='mailbox' AND (path ? 'pilotSetupRequestKey' OR EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.business_id=tenant AND e.kind='setup_authorized' AND e.request_key::text=path->>'jobId')) THEN
+   RETURN coalesce(path->>'pilotSetupRequestKey'=path->>'jobId',false) AND public.pilot_setup_current(tenant,path->>'jobId',path->>'mailboxId');
+ END IF;
  SELECT r.* INTO p FROM public.pilot_record r WHERE r.business_id=tenant AND EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.pilot_id=r.id AND e.business_id=r.business_id AND e.kind='activated') ORDER BY r.at DESC,r.id DESC LIMIT 1;
  IF p.id IS NULL THEN RETURN NOT EXISTS(SELECT 1 FROM public.pilot_record r WHERE r.business_id=tenant) AND NOT EXISTS(SELECT 1 FROM public.subscription_period paid WHERE paid.business_id=tenant AND paid.end>clock_timestamp() AND paid.charge->>'status'='confirmed' AND (paid.snapshot->'term'->>'kind'='days' AND jsonb_typeof(paid.snapshot->'provider'->'review'->'pilotOrders')='object' OR jsonb_typeof(paid.snapshot->'pilotContinuation')='object')); END IF;
  plan=p.snapshot->'plan';
@@ -279,7 +326,7 @@ export async function verifyPilots(pool: Pool | PoolClient) {
   const result = await pool.query<{ safe: boolean }>(`SELECT
  (SELECT count(*)=${pilotCostReadTables.length} AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname=ANY(ARRAY[${pilotCostReadTables.map((n) => `'${n}'`).join(",")}]::name[])) AND
  (SELECT count(*)=3 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE') AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE a.grantee=0)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('pilot_record','pilot_event','pilot_effect'))
- AND (SELECT count(*)=8 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE')=(p.proname NOT IN ('pilot_global_room','protect_pilot_write')) AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname IN ('pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed','protect_pilot_write'))
+ AND (SELECT count(*)=9 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE')=(p.proname NOT IN ('pilot_global_room','protect_pilot_write','pilot_setup_current')) AND NOT EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname IN ('pilot_authorized','pilot_operator','reserve_pilot_effect','pilot_effect_current','pilot_global_room','pilot_budget_ready','pilot_path_allowed','protect_pilot_write','pilot_setup_current'))
  AND (SELECT count(*)=3 AND bool_and(t.tgenabled='O' AND t.tgtype=7 AND p.proname='protect_pilot_write') FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE (t.tgrelid='public.pilot_record'::regclass AND t.tgname='pilot_record_guard' OR t.tgrelid='public.pilot_event'::regclass AND t.tgname='pilot_event_guard' OR t.tgrelid='public.subscription_payment_history'::regclass AND t.tgname='pilot_creation_history_guard'))
  AND (SELECT count(*)=2 AND bool_and(convalidated) FROM pg_constraint WHERE conname IN ('pilot_event_scope','pilot_effect_scope') AND contype='f')
  AND NOT has_column_privilege(current_user,'public.platform_operator','pilots','UPDATE')

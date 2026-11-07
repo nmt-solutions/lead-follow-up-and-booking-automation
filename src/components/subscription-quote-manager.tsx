@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import {
   quoteReviewSchema,
@@ -88,12 +89,12 @@ export function SubscriptionQuoteManager({
         >
           Edit billing profile and evidence
         </Link>
-        <Link
+        <RecoveryLink
           href="/security"
           className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Security
-        </Link>
+        </RecoveryLink>
       </div>
       <SubscriptionDisclosures />
       <section

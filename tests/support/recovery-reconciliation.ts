@@ -25,7 +25,7 @@ export async function recoveryReconciliationFixture(
           credentials,
           "reconciliation.manage",
         );
-        return h.access.authenticatePlatform(credentials);
+        return h.access.authenticatePlatformForWork(credentials);
       },
       repository: createReconciliationRepository(database),
       clock: h.clock,

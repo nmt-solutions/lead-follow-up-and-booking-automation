@@ -69,6 +69,7 @@ export type MailboxAuthorizationStore = {
   createState(state: Omit<MailboxStoredState, "consumed">): Promise<void>;
   consumeState(id: string): Promise<void>;
   invalidate(): Promise<void>;
+  googlePrimaryRevocable(): Promise<boolean>;
 };
 export type MailboxAuthorizationRepository = {
   withMailbox<T>(

@@ -18,6 +18,8 @@ export function gmailFixture() {
   const bodyReads: string[] = [];
   const sends: string[] = [];
   const control = {
+    accessToken: "fixture-access",
+    refreshToken: "fixture-refresh",
     scopes: `openid email ${gmailReadScope}`,
     subject: "gmail-subject",
     email: "sales@supplier.example",
@@ -52,8 +54,8 @@ export function gmailFixture() {
       if (control.tokenError)
         return response({ error: "invalid_grant" }, control.tokenError);
       return response({
-        access_token: "fixture-access",
-        refresh_token: "fixture-refresh",
+        access_token: control.accessToken,
+        refresh_token: control.refreshToken,
         token_type: "Bearer",
         expires_in: control.expiresIn,
         scope: control.scopes,

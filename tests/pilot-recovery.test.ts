@@ -2,16 +2,20 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { createHarness } from "./support/harness";
-import { pilotFixture } from "./support/pilot";
+import { pilotSetupFixture } from "./support/pilot-setup";
+import { runtimeDatabase } from "../src/db/runtime";
+import type { MailboxWork } from "../src/models/mailboxes";
 import { recoveryFixture } from "./support/recovery";
 import { recoverySchemaDefinitionHash } from "../src/recovery/postgres";
 import { verifyRuntimeRole } from "../src/db/runtime";
 
 describe("Populated pilot archive restore and reviewed schema repair", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
-    s: Awaited<ReturnType<typeof pilotFixture>>,
+    s: Awaited<ReturnType<typeof pilotSetupFixture>>,
     r: Awaited<ReturnType<typeof recoveryFixture>>,
-    operationId: string;
+    operationId: string,
+    setupWork: MailboxWork,
+    nativeReads: number;
   const ledgerRows = new Map<string, unknown[]>();
   async function evidence(mode: string) {
     if (!process.env.PILOT_RECOVERY_EVIDENCE_PATH) return;
@@ -38,6 +42,8 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
           ),
           restoreCalls: r.controls.restoreCalls,
           nativeMutations: s.mutations.length,
+          nativeMailboxAttempts: nativeReads,
+          populatedSetupAuthorization: true,
           ordinaryStartupRejected: true,
         },
         null,
@@ -48,7 +54,28 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
   beforeAll(async () => {
     h = await createHarness();
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
-    s = await pilotFixture(h);
+    s = await pilotSetupFixture(h, true, true);
+    const setupKey = randomUUID();
+    await s.pilots.authorizeSetup(s.f.owner, s.f.business.id, {
+      pilotId: s.pilot.id,
+      requestKey: setupKey,
+      mailboxId: s.mailboxId,
+      maxNativeCalls: 30,
+      durationSeconds: 300,
+      evidence: "fixture:original-retained-setup-approval",
+      acceptReadOnlySetup: true,
+    });
+    setupWork = await s.mailboxes.queue(
+      s.f.owner,
+      s.f.business.id,
+      s.mailboxId,
+      { mode: "incremental", pilotSetupRequestKey: setupKey },
+    );
+    let sync = await s.mailboxes.execute(setupWork);
+    for (let page = 0; page < 6 && sync?.status === "partial"; page++)
+      sync = await s.mailboxes.execute(setupWork);
+    expect(sync?.status).toBe("completed");
+    nativeReads = s.google.calls.length;
     await s.app.confirmPilotCheckout(s.f.owner, s.f.business.id, {
       actionId: s.action.id,
       orderId: "order_pilot",
@@ -63,6 +90,25 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
     });
     await s.discovery.start(s.f.owner, s.f.business.id, s.request());
     await s.discovery.execute(s.queued.at(-1));
+    // A second public approval deliberately remains queued with current source
+    // authority before backup. Quarantine must fence this genuinely live intent.
+    const pendingSetup = randomUUID();
+    await s.pilots.authorizeSetup(s.f.owner, s.f.business.id, {
+      pilotId: s.pilot.id,
+      requestKey: pendingSetup,
+      mailboxId: s.mailboxId,
+      maxNativeCalls: 10,
+      durationSeconds: 900,
+      evidence: "fixture:retained-pending-repair",
+      acceptReadOnlySetup: true,
+    });
+    setupWork = await s.mailboxes.queue(
+      s.f.owner,
+      s.f.business.id,
+      s.mailboxId,
+      { mode: "incremental", pilotSetupRequestKey: pendingSetup },
+    );
+    expect(setupWork.jobId).toBe(pendingSetup);
     const period = (await s.app.workspace(s.f.owner, s.f.business.id))
       .periods[0];
     const renewal = await s.app.preparePilotRenewal(
@@ -89,6 +135,7 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
       "subscription_payment",
       "subscription_period",
       "subscription_payment_history",
+      "mailbox_job",
     ])
       ledgerRows.set(
         table,
@@ -139,6 +186,10 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
     await expect(verifyRuntimeRole(r.target.runtime)).rejects.toMatchObject({
       code: "SETUP_REQUIRED",
     });
+    await expect(
+      s.mailboxesFor(runtimeDatabase(r.target.runtime)).execute(setupWork),
+    ).rejects.toThrow();
+    expect(s.google.calls).toHaveLength(nativeReads);
     expect(s.mutations).toHaveLength(2);
     await evidence("physical");
   });
@@ -178,6 +229,10 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
         code: "SETUP_REQUIRED",
       });
       expect(s.mutations).toHaveLength(2);
+      await expect(
+        s.mailboxesFor(runtimeDatabase(r.target.runtime)).execute(setupWork),
+      ).rejects.toThrow();
+      expect(s.google.calls).toHaveLength(nativeReads);
       await evidence("reviewed_schema_repair");
     });
   });

@@ -3,6 +3,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { Actor } from "../models/business";
+import type { WorkIdentity } from "../models/discovery";
+import { hasMfa, operatorMfaLifetime } from "../auth/access";
 import { ApplicationError } from "../models/application-error";
 import {
   reconciliationSourceSchema,
@@ -17,6 +19,7 @@ import {
   reconciliationRecord,
   reconciliationReview,
   reconciliationAccess,
+  session,
 } from "./schema";
 import { scoped, type Transaction } from "./scope";
 import type { Database } from "./runtime";
@@ -376,7 +379,49 @@ export function createReconciliationRepository(database: Database) {
         if (!e) throw new ApplicationError("NOT_FOUND");
         return e;
       }),
-    checkAccess: (actor: Actor, evidenceId: string, token: string) =>
-      global(actor, (tx) => requireGrant(tx, actor, evidenceId, token)),
+    checkAccess: (
+      actor: WorkIdentity,
+      evidenceId: string,
+      token: string,
+      now: () => Date,
+    ) =>
+      scoped(database, actor, "", async (tx) => {
+        await authorize(tx, actor);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended('reconciliation',0))`,
+        );
+        await authorize(tx, actor);
+        // Last protected read: no generic authorization wait follows expiry.
+        const [originalSession] = await tx
+          .select()
+          .from(session)
+          .where(
+            and(
+              eq(session.id, actor.sessionId),
+              eq(session.userId, actor.userId),
+            ),
+          );
+        if (!originalSession || originalSession.expiresAt <= now())
+          throw new ApplicationError("UNAUTHENTICATED");
+        if (
+          !(await hasMfa(tx, originalSession.token, now(), operatorMfaLifetime))
+        )
+          throw new ApplicationError("MFA_REQUIRED");
+        const at = now().toISOString();
+        const current = await tx.execute<{ id: string }>(sql`
+          select a.id from public.reconciliation_access a
+          join public.session s on s.user_id=a.actor_id
+          join public."user" u on u.id=s.user_id
+          join public.two_factor f on f.user_id=u.id
+          join public.platform_operator o on o.user_id=u.id
+          where a.evidence_id=${evidenceId}::uuid and a.actor_id=${actor.userId}
+            and a.token_hash=${reconciliationHash(token)} and a.expires_at>clock_timestamp()
+            and s.id=${actor.sessionId} and s.expires_at>${at}::timestamptz
+            and o.reconciliation and u.two_factor_enabled and f.verified
+            and s.mfa_factor_id=f.id and s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex')
+            and s.mfa_verified_at<=${at}::timestamptz and s.mfa_verified_at>${at}::timestamptz-interval '15 minutes'
+        `);
+        if (!current.rows.length) throw new ApplicationError("FORBIDDEN");
+      }),
   };
 }

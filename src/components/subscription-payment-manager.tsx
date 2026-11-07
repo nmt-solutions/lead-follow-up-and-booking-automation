@@ -3,6 +3,7 @@ import { openPilotCheckout } from "./razorpay-pilot-checkout";
 import { openReachCheckout } from "./razorpay-reach-checkout";
 import { Input } from "./ui/input";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { SubscriptionLifecyclePanel } from "./subscription-lifecycle-panel";
 import { openCardRecovery } from "./razorpay-recovery";
 import { recoveryCheckoutSchema } from "@/models/subscription-lifecycle";
@@ -417,12 +418,12 @@ export function SubscriptionPaymentManager({
         >
           Billing evidence
         </Link>
-        <Link
+        <RecoveryLink
           href="/security"
           className="inline-flex min-h-11 items-center text-primary underline"
         >
           Security
-        </Link>
+        </RecoveryLink>
       </div>
       <section className="space-y-3 rounded-2xl border border-border bg-card p-6">
         <h2 className="text-xl font-semibold">
@@ -765,12 +766,12 @@ export function SubscriptionPaymentOperator({
         cannot manually mark a payment as paid or grant access. Tax review
         requires approved rules and a new checkout review.
       </p>
-      <Link
+      <RecoveryLink
         href="/security"
         className="inline-flex min-h-11 items-center text-primary underline"
       >
         Verify operator MFA in Security
-      </Link>
+      </RecoveryLink>
       {error && (
         <Alert role="alert" variant="destructive">
           {error}

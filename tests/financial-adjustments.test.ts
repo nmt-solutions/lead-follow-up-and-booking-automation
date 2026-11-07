@@ -407,7 +407,7 @@ describe("Refunds and disputes at the public application seam", () => {
       },
     ]);
     const bank = createReconciliationApplication({
-      authenticatePlatform: h.access.authenticatePlatform,
+      authenticatePlatform: h.access.authenticatePlatformForWork,
       repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
       clock: h.clock,
     });

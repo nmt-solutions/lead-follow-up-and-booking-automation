@@ -13,14 +13,13 @@ describe("Pilot review authority boundaries", () => {
 
   it("does not execute a captured paid pilot before its first bounded operating plan exists", async () => {
     let observed = false;
-    await pilotFixture(h, {}, async (native) => ({
+    const s = await pilotFixture(h, {}, async (native) => ({
       plan: {},
-      async beforePrepare(discovery, queued, searches) {
+      async beforePrepare(discovery, queued, searches, pilots) {
         observed = true;
         expect(
-          (await h.admin.query("select count(*)::int n from pilot_record"))
-            .rows,
-        ).toEqual([{ n: 0 }]);
+          (await pilots.workspace(native.f.owner, native.f.business.id)).pilots,
+        ).toEqual([]);
         await discovery.start(native.f.owner, native.f.business.id, {
           markets: ["Pune"],
           publicOffering: "Steel",
@@ -30,13 +29,29 @@ describe("Pilot review authority boundaries", () => {
         });
         await discovery.execute(queued.at(-1)).catch(() => {});
         expect(searches).toHaveLength(0);
-        expect(
-          (await h.admin.query("select count(*)::int n from pilot_effect"))
-            .rows,
-        ).toEqual([{ n: 0 }]);
+        const visible = await discovery.workspace(
+          native.f.owner,
+          native.f.business.id,
+        );
+        expect(visible.runs).toHaveLength(1);
+        expect(visible.runs[0]).toMatchObject({ used: 0 });
+        expect(visible.prospects).toEqual([]);
       },
     }));
     expect(observed).toBe(true);
+    expect(
+      (await s.pilots.workspace(s.f.owner, s.f.business.id)).pilots[0].usage,
+    ).toMatchObject({ cashMinor: "0", spendMinor: "0", seconds: 0 });
+    await s.pilots.activate(s.f.owner, s.f.business.id, {
+      pilotId: s.pilot.id,
+      requestKey: randomUUID(),
+    });
+    await s.discovery.start(s.f.owner, s.f.business.id, s.request());
+    await s.discovery.execute(s.queued.at(-1));
+    expect(s.searches).toHaveLength(1);
+    expect(
+      (await s.discovery.workspace(s.f.owner, s.f.business.id)).prospects,
+    ).toHaveLength(1);
   });
 
   it("refuses raw renewal and reuse milestones without measured results and an actual monthly capture", async () => {

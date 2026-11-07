@@ -28,6 +28,8 @@ import { createOpportunityApplication } from "../src/application/opportunity-con
 import { createOpportunityRepository } from "../src/db/opportunity-control-repository";
 import { createCommercialAuthorityApplication } from "../src/application/commercial-authority";
 import { createCommercialAuthorityRepository } from "../src/db/commercial-authority-repository";
+import { createGoogleCalendarApplication } from "../src/application/google-calendar";
+import { googleFixture } from "./support/google-calendar";
 
 describe("Selected Gmail at the persisted application seam", () => {
   let h: Awaited<ReturnType<typeof createHarness>>;
@@ -37,7 +39,14 @@ describe("Selected Gmail at the persisted application seam", () => {
   afterAll(async () => {
     await h?.close();
   });
-  async function setup() {
+  async function authorizeNativeRevoke(credentials: Headers) {
+    const stamp = (
+      await h.admin.query<{ now: Date }>("select clock_timestamp() now")
+    ).rows[0].now;
+    h.clock.set(stamp.toISOString());
+    await h.reverifyAuthenticator(credentials);
+  }
+  async function setup(account = "sales@supplier.example") {
     h.clock.set("2026-11-05T09:00:00Z");
     const credentials = await h.signIn(`gmail-${randomUUID()}@example.com`);
     const business = await h.application.createBusiness(credentials, {
@@ -64,7 +73,7 @@ describe("Selected Gmail at the persisted application seam", () => {
       configuration: {
         label: "Gmail sales",
         provider: "gmail",
-        account: "sales@supplier.example",
+        account,
         enabled: true,
       },
     });
@@ -88,6 +97,8 @@ describe("Selected Gmail at the persisted application seam", () => {
       },
     });
     const google = gmailFixture();
+    google.control.email = account;
+    google.control.subject = `gmail-${randomUUID()}`;
     const app = createGmailApplication({
       access: h.access,
       connection: createGmailConnection(database, {
@@ -811,6 +822,7 @@ describe("Selected Gmail at the persisted application seam", () => {
     );
     await start;
     f.google.control.revokeError = 503;
+    await authorizeNativeRevoke(f.credentials);
     expect(
       await f.app.disconnect(f.credentials, f.businessId, f.mailbox.id),
     ).toMatchObject({ status: "revocation_pending", read: false });
@@ -824,7 +836,7 @@ describe("Selected Gmail at the persisted application seam", () => {
       await f.app.disconnect(f.credentials, f.businessId, f.mailbox.id),
     ).toMatchObject({ status: "disconnected", read: false });
     await connect(f);
-    h.clock.set("2026-11-05T11:02:00Z");
+    h.clock.set(new Date(h.clock.now().getTime() + 61 * 60000).toISOString());
     f.google.control.beforeRefresh = undefined;
     expect(await synchronize(f)).toMatchObject({ status: "completed" });
     expect(f.google.control.refreshes).toBe(2);
@@ -929,6 +941,122 @@ describe("Selected Gmail at the persisted application seam", () => {
     ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
     expect(f.google.calls).toEqual([]);
   });
+  it("protects adopted consent shared between Gmail and Calendar before either ordinary disconnect", async () => {
+    const a = await setup(),
+      b = await setup("other@example.com"),
+      nativeCalendar = googleFixture();
+    const stamp = (
+      await h.admin.query<{ now: Date }>("select clock_timestamp() now")
+    ).rows[0].now;
+    h.clock.set(stamp.toISOString());
+    await h.reverifyAuthenticator(a.credentials);
+    await h.reverifyAuthenticator(b.credentials);
+    nativeCalendar.configuration.clientId = a.google.configuration.clientId;
+    nativeCalendar.control.subject = a.google.control.subject;
+    nativeCalendar.control.email = a.google.control.email;
+    const calendar = createGoogleCalendarApplication({
+      database: a.database,
+      access: h.access,
+      clock: h.clock,
+      configuration: nativeCalendar.configuration,
+      fetch: nativeCalendar.fetch,
+    });
+    await connect(a);
+    const start = await calendar.start(b.credentials, b.businessId, {
+      returnPath: `/businesses/${b.businessId}/calendar`,
+    });
+    await calendar.callback(b.credentials, b.businessId, {
+      state: new URL(start.authorizationUrl).searchParams.get("state"),
+      code: "fixture-code",
+    });
+    await calendar.select(b.credentials, b.businessId, {
+      calendarId: "dedicated@example.com",
+    });
+    expect(
+      await a.app.disconnect(a.credentials, a.businessId, a.mailbox.id),
+    ).toMatchObject({
+      status: "disconnected",
+      reason: "shared_identity",
+      read: false,
+    });
+    expect(
+      a.google.calls.filter((call) => call.url.pathname === "/revoke"),
+    ).toEqual([]);
+    expect(await calendar.read(b.credentials, b.businessId)).toMatchObject({
+      status: "ready",
+    });
+    await connect(a);
+    expect(
+      await calendar.disconnect(b.credentials, b.businessId),
+    ).toMatchObject({ status: "disconnected", reason: "shared_identity" });
+    expect(
+      nativeCalendar.calls.filter((call) => call.url.endsWith("/revoke")),
+    ).toEqual([]);
+    expect(await synchronize(a)).toMatchObject({ status: "completed" });
+    expect(
+      await a.app.disconnect(a.credentials, a.businessId, a.mailbox.id),
+    ).toMatchObject({ status: "disconnected", reason: null });
+    expect(
+      a.google.calls.filter((call) => call.url.pathname === "/revoke"),
+    ).toHaveLength(1);
+  });
+  it("never revokes another Business's genuine Google token rejected during ordinary reconnect and disconnect", async () => {
+    const a = await setup(),
+      b = await setup("other@example.com");
+    h.clock.set(new Date().toISOString());
+    const stamp = (
+      await h.admin.query<{ now: Date }>("select clock_timestamp() now")
+    ).rows[0].now;
+    h.clock.set(stamp.toISOString());
+    await h.reverifyAuthenticator(a.credentials);
+    await h.reverifyAuthenticator(b.credentials);
+    Object.assign(a.google.control, {
+      subject: `a-${randomUUID()}`,
+      refreshToken: "original-a",
+    });
+    Object.assign(b.google.control, {
+      subject: `b-${randomUUID()}`,
+      refreshToken: "genuine-active-b",
+      accessToken: "genuine-access-b",
+    });
+    await connect(a);
+    await connect(b);
+    Object.assign(a.google.control, {
+      subject: b.google.control.subject,
+      email: b.google.control.email,
+      refreshToken: b.google.control.refreshToken,
+      accessToken: b.google.control.accessToken,
+    });
+    await connect(a);
+    expect(
+      await a.app.read(a.credentials, a.businessId, a.mailbox.id),
+    ).toMatchObject({ reason: "account_mismatch", read: false });
+    const disabled = await a.app.disconnect(
+      a.credentials,
+      a.businessId,
+      a.mailbox.id,
+    );
+    expect(
+      a.google.calls
+        .filter((call) => call.url.pathname === "/revoke")
+        .map((call) => call.body.token),
+    ).not.toContain("genuine-active-b");
+    expect(disabled).toMatchObject({
+      status: "disconnected",
+      read: false,
+      reason: "manual_required",
+    });
+    await a.app.disconnect(a.credentials, a.businessId, a.mailbox.id);
+    expect(
+      a.google.calls
+        .filter((call) => call.url.pathname === "/revoke")
+        .map((call) => call.body.token),
+    ).toEqual(["original-a"]);
+    expect(await synchronize(b)).toMatchObject({ status: "completed" });
+    expect(
+      await b.app.read(b.credentials, b.businessId, b.mailbox.id),
+    ).toMatchObject({ read: true });
+  });
   it("consumes denied and failed callbacks, quarantines account substitutions and revokes only by explicit action", async () => {
     const f = await setup();
     const denied = await f.app.start(f.credentials, f.businessId, f.mailbox.id),
@@ -969,7 +1097,7 @@ describe("Selected Gmail at the persisted application seam", () => {
     ).toMatchObject({ status: "disconnected" });
     expect(
       f.google.calls.find((c) => c.url.pathname === "/revoke")?.body.token,
-    ).toBe("fixture-refresh");
+    ).toBeUndefined();
     f.google.control.email = "sales@supplier.example";
     f.google.control.tokenError = 400;
     const failed = await connect(f);
@@ -1726,6 +1854,7 @@ describe("Selected Gmail at the persisted application seam", () => {
         reason: "buyer_replied_dispatch_unconfirmed",
       });
       expect(f.effects).toHaveLength(2);
+      await authorizeNativeRevoke(f.credentials);
       await f.app.disconnect(f.credentials, f.businessId, f.mailbox.id);
       const blocked = await f.control.queue(
         f.credentials,

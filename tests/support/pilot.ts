@@ -40,6 +40,7 @@ export async function pilotFixture(
       discovery: ReturnType<typeof createDiscoveryApplication<Headers>>,
       queued: DiscoveryWork[],
       searches: SearchInput[],
+      pilots: ReturnType<typeof createPilotApplication<Headers>>,
     ): Promise<void>;
     setupCost?: {
       provider: string;
@@ -343,7 +344,7 @@ export async function pilotFixture(
     ...limits,
     ...priorSetup?.plan,
   };
-  await priorSetup?.beforePrepare?.(discovery, queued, searches);
+  await priorSetup?.beforePrepare?.(discovery, queued, searches, pilots);
   const p = await pilots.prepare(s.f.owner, bid, {
     requestKey: randomUUID(),
     plan,

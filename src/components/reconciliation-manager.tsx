@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 import {
@@ -387,12 +388,12 @@ export function ReconciliationManager({
         verification.
       </Alert>
       <div className="flex flex-wrap gap-4">
-        <Link
+        <RecoveryLink
           href="/security"
           className="inline-flex min-h-11 items-center text-primary underline"
         >
           Security and MFA
-        </Link>
+        </RecoveryLink>
         <Link
           href="/platform/subscription-payments"
           className="inline-flex min-h-11 items-center text-primary underline"

@@ -29,6 +29,7 @@ import {
 import {
   pilotPlanSchema,
   pilotEventSchema,
+  pilotSetupSchema,
   type PilotPlan,
   type PilotGate,
   type PilotEvent,
@@ -348,6 +349,57 @@ export function createPilotRepository(database: Database, clock: Clock) {
     };
   }
   return {
+    authorizeSetup(
+      actor: WorkIdentity,
+      businessId: string,
+      input: z.infer<typeof pilotSetupSchema>,
+    ) {
+      return access(
+        actor,
+        businessId,
+        async (tx) => {
+          const [prior] = await tx
+            .select()
+            .from(pilotEvent)
+            .where(
+              and(
+                eq(pilotEvent.businessId, businessId),
+                eq(pilotEvent.requestKey, input.requestKey),
+              ),
+            );
+          if (prior) {
+            const saved = z
+              .object({ input: pilotSetupSchema })
+              .safeParse(prior.data);
+            if (
+              prior.kind !== "setup_authorized" ||
+              prior.actorId !== actor.userId ||
+              prior.pilotId !== input.pilotId ||
+              !saved.success ||
+              !isDeepStrictEqual(saved.data.input, input)
+            )
+              throw new ApplicationError("CONFLICT");
+            return;
+          }
+          await append(
+            tx,
+            actor,
+            businessId,
+            input.pilotId,
+            "setup_authorized",
+            input.requestKey,
+            {
+              input,
+              jobId: input.requestKey,
+              mailboxId: input.mailboxId,
+              maxNativeCalls: input.maxNativeCalls,
+              durationSeconds: input.durationSeconds,
+            },
+          );
+        },
+        true,
+      );
+    },
     canRecord: (actor: WorkIdentity, businessId: string) =>
       access(
         actor,

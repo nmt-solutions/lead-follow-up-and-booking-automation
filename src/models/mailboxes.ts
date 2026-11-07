@@ -56,6 +56,7 @@ export const saveMailboxSchema = z
   .refine((v) => v.id !== null || v.expectedVersion === 0);
 export const queueMailboxSchema = z.strictObject({
   mode: z.enum(["incremental", "history"]),
+  pilotSetupRequestKey: z.uuid().optional(),
 });
 export const mailboxWorkSchema = z.strictObject({
   businessId: z.uuid(),
@@ -162,6 +163,8 @@ export type MailboxWorkspace = {
   mailboxes: MailboxView[];
 };
 export type MailboxSnapshot = {
+  pilotSetupRequestKey?: string;
+  authorizeNative?(operation: string): Promise<void>;
   work: MailboxWork;
   configuration: MailboxConfiguration;
   inboxConnectionId: string;
@@ -229,6 +232,7 @@ export type MailboxRepository = {
     businessId: string,
     mailboxId: string,
     mode: "incremental" | "history",
+    pilotSetupRequestKey?: string,
   ): Promise<MailboxWork>;
   prepare(work: MailboxWork): Promise<MailboxSnapshot | null>;
   authorizeCall(
@@ -304,6 +308,7 @@ export function permissionAllows(
 }
 
 const jobStateSchema = z.object({
+  pilotSetupRequestKey: z.uuid().optional(),
   retryAt: z.iso.datetime({ offset: true }).nullable().optional(),
   id: z.uuid(),
   mode: z.enum(["incremental", "history"]),

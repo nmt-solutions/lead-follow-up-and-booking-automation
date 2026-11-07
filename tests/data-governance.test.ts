@@ -1644,8 +1644,25 @@ describe("Business data export and offboarding at the public application seam", 
         (d) => d.id === f.invoice.id,
       )?.snapshot,
     ).toEqual(f.invoice.snapshot);
-    expect(f.period.snapshot.provider.review?.terms.fees).toBe(
-      markers.feeTerms,
+    for (const marker of Object.values(markers))
+      expect(JSON.stringify(f.period.snapshot)).not.toContain(marker);
+    // Private archival snapshot invariant: verify retention without creating a
+    // customer/operator API that discloses the deployment-wide merchant catalog.
+    const retained = (
+      await h.admin.query<{ snapshot: typeof f.period.snapshot }>(
+        "select snapshot from subscription_period where id=$1 and business_id=$2",
+        [f.period.id, f.business.id],
+      )
+    ).rows[0].snapshot;
+    expect(retained.provider.review?.terms.fees).toBe(markers.feeTerms);
+    expect(JSON.stringify(retained.provider.review)).toContain(
+      markers.evidence,
+    );
+    expect(JSON.stringify(retained.provider.review)).toContain(
+      markers.otherOfferId,
+    );
+    expect(JSON.stringify(retained.provider.review)).toContain(
+      markers.otherPlanId,
     );
     expect(f.native.refundPosts).toHaveLength(1);
   });
@@ -2045,6 +2062,7 @@ describe("Business data export and offboarding at the public application seam", 
       "business_export_cleanup_current(uuid,uuid,text)",
       "business_file_cleanup_current(uuid,uuid,text)",
       "business_financial_export(uuid)",
+      "google_primary_revocable(text,uuid,integer)",
     ]) {
       await h.admin.query(
         `revoke execute on function public.${signature} from app_runtime`,
@@ -2056,6 +2074,14 @@ describe("Business data export and offboarding at the public application seam", 
         `grant execute on function public.${signature} to app_runtime`,
       );
     }
+    expect(
+      (
+        await h.runtime.query(
+          "select public.google_primary_revocable('gmail',$1,1) allowed",
+          [randomUUID()],
+        )
+      ).rows[0].allowed,
+    ).toBe(false);
     for (const lease of [null, randomUUID()]) {
       expect(
         (
@@ -2079,6 +2105,7 @@ describe("Business data export and offboarding at the public application seam", 
   it.each([
     "business_export_cleanup_current(uuid,uuid,text)",
     "business_financial_export(uuid)",
+    "google_primary_revocable(text,uuid,integer)",
   ])(
     "rejects accidental default PUBLIC execution on recreated %s and restores managed security",
     async (signature) => {

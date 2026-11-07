@@ -107,6 +107,22 @@ export const pilotRefSchema = z.strictObject({
   pilotId: z.uuid(),
   requestKey: z.uuid(),
 });
+export const pilotSetupSchema = pilotRefSchema.extend({
+  mailboxId: z.uuid(),
+  maxNativeCalls: z.number().int().min(1).max(100),
+  durationSeconds: z.number().int().min(1).max(900),
+  evidence: text,
+  acceptReadOnlySetup: z.literal(true),
+});
+export const pilotSetupAuthorizationSchema = z.object({
+  input: pilotSetupSchema,
+  jobId: z.uuid(),
+  mailboxId: z.uuid(),
+  mailboxVersion: z.number().int().positive(),
+  maxNativeCalls: z.number().int().positive(),
+  durationSeconds: z.number().int().positive(),
+  expiresAt: z.iso.datetime(),
+});
 export const pilotGateSchema = z.strictObject({
   capability: z.string(),
   ready: z.boolean(),
@@ -165,6 +181,7 @@ export const pilotEventSchema = z.object({
     "renewal",
     "reuse",
     "stopped",
+    "setup_authorized",
   ]),
   requestKey: z.uuid(),
   actorId: z.string(),

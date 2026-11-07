@@ -214,6 +214,59 @@ describe("Subscription tax at the public application seam", () => {
     );
   });
 
+  it("returns only the selected transaction tax basis in customer POST and GET while retaining private rule history", async () => {
+    const { owner, operator, business } = await setup();
+    const applied = await approve(operator, "region-a", {
+      ...rule,
+      customerRegion: "MH",
+    });
+    const marker = "private-region-b-draft-evidence";
+    await tax.saveRule(operator, {
+      key: "region-b",
+      expectedVersion: 0,
+      rule: { ...rule, customerRegion: "KA", rationale: marker },
+      note: marker,
+    });
+    const http = createTaxHttp({
+      application: tax,
+      origin: "http://localhost:3000",
+      reportFailure: (diagnostic) => h.diagnostics.push(diagnostic),
+    });
+    const headers = new Headers(owner);
+    headers.set("origin", "http://localhost:3000");
+    headers.set("content-type", "application/json");
+    const response = await http.calculate(
+      new Request("http://localhost:3000/api/tax", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(request()),
+      }),
+      business.id,
+    );
+    expect(response.status).toBe(200);
+    const calculated = taxCalculationSchema.parse((await response.json()).data);
+    expect(calculated).toMatchObject({
+      totals: { netMinor: "10005", taxMinor: "1001", totalMinor: "11006" },
+      lines: [{ rule: { revision: { id: applied.id } } }],
+    });
+    expect(calculated.configuration.revisions.map((r) => r.id)).toEqual([
+      applied.id,
+    ]);
+    expect(JSON.stringify(calculated)).not.toContain(marker);
+    const workspace = await http.get(
+      new Request("http://localhost:3000/api/tax", { headers: owner }),
+      business.id,
+    );
+    const body = await workspace.json();
+    expect(body.data.calculations).toEqual([calculated]);
+    expect(JSON.stringify(body)).not.toContain(marker);
+    const privateView = await tax.reviewWorkspace(operator, business.id);
+    expect(JSON.stringify(privateView.calculations[0].configuration)).toContain(
+      marker,
+    );
+    expect(privateView.calculations[0].lines).toEqual(calculated.lines);
+    expect(JSON.stringify(await tax.rules(operator))).toContain(marker);
+  });
   it("calculates a domestic preview using approved rules, exact currency rounding and retained reviewed evidence", async () => {
     const { owner, operator, business } = await setup();
     const revision = await approve(operator, "domestic");
@@ -285,7 +338,12 @@ describe("Subscription tax at the public application seam", () => {
       request("USD"),
     );
     expect(stillUnresolved.status).toBe("review_required");
-    expect(stillUnresolved.configuration.revisions).toEqual(draft.revisions);
+    expect(stillUnresolved.configuration.revisions).toEqual([]);
+    expect(
+      (await tax.reviewWorkspace(operator, business.id)).calculations.find(
+        (calculation) => calculation.id === stillUnresolved.id,
+      )?.configuration.revisions,
+    ).toEqual(draft.revisions);
     await tax.decideRule(operator, {
       revisionId: draft.revisions[0].id,
       expectedDecisionVersion: 0,
@@ -467,7 +525,11 @@ describe("Subscription tax at the public application seam", () => {
       totals: null,
       reasons: [{ kind: "conflicting", code: "ambiguous_tax_rules" }],
     });
-    expect(original.configuration.decisions).toHaveLength(2);
+    expect(original.configuration.decisions).toEqual([]);
+    expect(
+      (await tax.reviewWorkspace(operator, business.id)).calculations[0]
+        .configuration.decisions,
+    ).toHaveLength(2);
     await tax.decideRule(operator, {
       revisionId: ambiguous.id,
       expectedDecisionVersion: 1,
@@ -520,7 +582,11 @@ describe("Subscription tax at the public application seam", () => {
     expect(revised.totals?.totalMinor).toBe("12006");
     const all = (await tax.workspace(owner, business.id)).calculations;
     expect(all[0]).toEqual(original);
-    expect(all[1]).toEqual(approved);
+    expect(all[1].lines).toEqual(approved.lines);
+    expect(all[1].totals).toEqual(approved.totals);
+    expect(
+      (await tax.reviewWorkspace(operator, business.id)).calculations[1],
+    ).toEqual(approved);
     expect(all[1].billing.current?.profile.legalName).toBe("Synthetic buyer");
   });
 
@@ -583,7 +649,10 @@ describe("Subscription tax at the public application seam", () => {
       findings: [],
       note: "Conflict resolved",
     });
-    await files.deleteFile(owner, business.id, fileId);
+    await expect(
+      files.deleteFile(owner, business.id, fileId),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    h.clock.set("2026-11-05T10:00:01Z");
     expect(
       (
         await tax.calculate(owner, business.id, {

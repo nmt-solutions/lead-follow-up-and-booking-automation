@@ -479,7 +479,11 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
     },
   };
   const publicAction = (value: unknown) =>
-    paymentActionSchema.parse(publicFinancialValue(value));
+    paymentActionSchema.parse(
+      publicFinancialValue(
+        publicPaymentAction(paymentActionSchema.parse(value)),
+      ),
+    );
   return {
     ...application,
     prepare: async (...args: Parameters<typeof application.prepare>) =>

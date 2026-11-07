@@ -2,6 +2,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { z } from "zod";
 import {
   discoveryWorkspaceSchema,
@@ -287,9 +288,9 @@ function RunControls({
         <Alert variant="destructive">
           <AlertDescription>
             {error}{" "}
-            <Link href="/security" className="underline">
+            <RecoveryLink href="/security" className="underline">
               Security
-            </Link>
+            </RecoveryLink>
           </AlertDescription>
         </Alert>
       )}
@@ -921,9 +922,9 @@ export function DiscoveryManager({
         <Alert variant="destructive">
           <AlertDescription>
             {error}{" "}
-            <Link href="/security" className="underline">
+            <RecoveryLink href="/security" className="underline">
               Security
-            </Link>
+            </RecoveryLink>
           </AlertDescription>
         </Alert>
       )}

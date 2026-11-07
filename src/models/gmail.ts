@@ -58,6 +58,8 @@ export const gmailViewSchema = z.object({
       "invalid_response",
       "account_mismatch",
       "revocation_pending",
+      "manual_required",
+      "shared_identity",
     ])
     .nullable(),
   read: z.boolean(),

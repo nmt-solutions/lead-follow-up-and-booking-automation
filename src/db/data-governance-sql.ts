@@ -164,10 +164,49 @@ $$;
 CREATE OR REPLACE FUNCTION public.guard_data_identity_reconnect() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
+ IF NEW.account_subject IS NOT NULL THEN
+   PERFORM pg_advisory_xact_lock(hashtextextended('google-consent:'||NEW.account_subject,0));
+   IF NEW.status IN ('connected','ready','selection_required') AND
+     (TG_OP='INSERT' OR OLD.status IN ('connecting','disconnected') OR OLD.account_subject IS DISTINCT FROM NEW.account_subject)
+     AND EXISTS(SELECT 1 FROM (
+       SELECT 'gmail_grant' kind,id,account_subject,status FROM public.gmail_grant
+       UNION ALL SELECT 'google_calendar_grant',id,account_subject,status FROM public.google_calendar_grant
+     ) g WHERE g.account_subject=NEW.account_subject AND g.status='revocation_pending' AND (g.kind<>TG_TABLE_NAME OR g.id<>NEW.id))
+     THEN RAISE EXCEPTION 'Provider identity revocation pending' USING ERRCODE='42501'; END IF;
+ END IF;
  IF NEW.status<>'disconnected' AND NEW.account_subject IS NOT NULL AND EXISTS(
  SELECT 1 FROM public.business_data_step s WHERE s.kind IN ('gmail','google_calendar') AND s.details->>'subject'=NEW.account_subject AND s.state IN ('pending','working','retry')) THEN
  RAISE EXCEPTION 'Provider identity cleanup pending' USING ERRCODE='42501'; END IF;
  RETURN NEW;
+END $$;
+CREATE OR REPLACE FUNCTION public.google_primary_revocable(kind text,target uuid,expected_generation integer) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE subject text; business uuid;
+BEGIN
+ IF coalesce(current_setting('app.business_id',true),'')='' THEN RETURN false; END IF;
+ IF coalesce(public.current_business_role(),'') NOT IN ('owner','admin') THEN RAISE insufficient_privilege; END IF;
+ SELECT g.account_subject,g.business_id INTO subject,business FROM (
+   SELECT 'gmail' kind,id,business_id,generation,status,credentials,account_subject FROM public.gmail_grant
+   UNION ALL SELECT 'google_calendar',id,business_id,generation,status,credentials,account_subject FROM public.google_calendar_grant
+ ) g WHERE g.kind=$1 AND g.id=target AND g.generation=$3 AND g.status='revocation_pending' AND g.credentials IS NOT NULL
+   AND g.business_id::text=current_setting('app.business_id',true);
+ IF subject IS NULL OR subject='' THEN RETURN false; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('google-consent:'||subject,0));
+ IF NOT EXISTS(SELECT 1 FROM public.membership m JOIN public.session s ON s.user_id=m.user_id
+   JOIN public."user" u ON u.id=m.user_id JOIN public.two_factor f ON f.user_id=u.id
+   WHERE m.business_id=business AND m.user_id=current_setting('app.actor_id',true) AND m.role IN ('owner','admin')
+   AND s.id=current_setting('app.pilot_session',true) AND s.expires_at>clock_timestamp()
+   AND u.two_factor_enabled AND f.verified AND s.mfa_factor_id=f.id
+   AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex')
+   AND s.mfa_verified_at<=clock_timestamp() AND s.mfa_verified_at>clock_timestamp()-interval '12 hours')
+   THEN RAISE insufficient_privilege; END IF;
+ -- Subject attribution applies only to this adopted primary. Legacy grants do
+ -- not persist client IDs, so conservatively protect this subject across both
+ -- configured Google clients. This returns no other Business's grant or secret.
+ RETURN NOT EXISTS(SELECT 1 FROM (
+   SELECT 'gmail' kind,id,account_subject,status FROM public.gmail_grant
+   UNION ALL SELECT 'google_calendar',id,account_subject,status FROM public.google_calendar_grant
+ ) g WHERE g.account_subject=subject AND g.status<>'disconnected' AND (g.kind<>$1 OR g.id<>target));
 END $$;
 CREATE OR REPLACE FUNCTION public.record_business_data_evidence(step uuid,fact text,reference text) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$

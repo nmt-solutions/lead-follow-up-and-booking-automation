@@ -19,6 +19,10 @@ export function createPilotHttp(d: {
       respond(async () => {
         const input = await body(r);
         switch (command) {
+          case "authorize-setup":
+            return dataResponse(
+              await d.application.authorizeSetup(r.headers, b, input),
+            );
           case "prepare":
             return dataResponse(
               await d.application.prepare(r.headers, b, input),

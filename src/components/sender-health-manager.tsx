@@ -3,6 +3,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { RecoveryLink } from "./recovery-link";
 import { z } from "zod";
 import type { createSenderHealthApplication } from "@/application/sender-health";
 import {
@@ -178,12 +179,12 @@ export function SenderHealthManager({
       {error && (
         <Alert role="alert">
           <p>{error}</p>
-          <Link
+          <RecoveryLink
             href="/security"
             className="inline-flex min-h-11 items-center text-primary underline"
           >
             Open Security
-          </Link>
+          </RecoveryLink>
         </Alert>
       )}
       {message && <p role="status">{message}</p>}

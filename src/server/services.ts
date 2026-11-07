@@ -441,7 +441,7 @@ async function composeServices() {
     documents: sellerDocuments,
   });
   const reconciliation = createReconciliationApplication({
-    authenticatePlatform,
+    authenticatePlatform: access.authenticatePlatformForWork,
     repository: createReconciliationRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
   });

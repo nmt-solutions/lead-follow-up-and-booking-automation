@@ -152,6 +152,7 @@ export function createGmailGrantService(options: {
       };
     let token: GmailToken;
     try {
+      await snapshot.authorizeNative?.("gmail:refresh");
       token = await http.token(
         {
           grant_type: "refresh_token",
@@ -430,7 +431,7 @@ export function createGmailGrantService(options: {
         id,
         async (tx) => {
           const g = tx.grant;
-          if (!g) return null;
+          if (!g || g.status === "disconnected") return null;
           const generation = g.generation + 1;
           await tx.updateGrant({
             generation,
@@ -441,16 +442,7 @@ export function createGmailGrantService(options: {
           return { ...g, generation };
         },
       );
-      if (!captured || !http || !vault) return this.read(actor, businessId, id);
-      try {
-        for (const token of new Set([
-          ...(captured.credentials ? [decode(captured).refreshToken] : []),
-          ...rejected(captured),
-        ]))
-          await http.revoke(token);
-      } catch {
-        return this.read(actor, businessId, id);
-      }
+      if (!captured) return this.read(actor, businessId, id);
       await repository.withMailbox(actor, businessId, id, async (tx) => {
         const g = tx.grant;
         if (
@@ -460,9 +452,26 @@ export function createGmailGrantService(options: {
           g.status !== "revocation_pending"
         )
           throw new ApplicationError("CONFLICT");
+        let reason: "manual_required" | "shared_identity" | null =
+          g.rejectedCredentials ? "manual_required" : null;
+        // Rejected tokens have no original subject attribution. Dispose locally;
+        // only the adopted primary can authorize native consent revocation.
+        if (g.credentials) {
+          if (!http || !vault) return;
+          if (!(await tx.googlePrimaryRevocable()))
+            reason ??= g.accountSubject ? "shared_identity" : "manual_required";
+          else {
+            try {
+              // The repository holds the subject lock through native I/O.
+              await http.revoke(decode(g).refreshToken);
+            } catch {
+              return;
+            }
+          }
+        }
         await tx.updateGrant({
           status: "disconnected",
-          reason: null,
+          reason,
           credentials: null,
           rejectedCredentials: null,
         });

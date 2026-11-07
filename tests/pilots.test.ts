@@ -618,14 +618,19 @@ describe("Bounded paid pilot application", () => {
       await blocker.query("ROLLBACK");
       await execution;
       expect(s.searches).toHaveLength(0);
+      const current = await h.signIn("tax-owner@example.com");
       expect(
-        (
-          await h.admin.query(
-            "select * from pilot_effect where business_id=$1",
-            [b],
-          )
-        ).rows,
-      ).toEqual([]);
+        (await s.pilots.workspace(current, b)).pilots[0].usage,
+      ).toMatchObject({ cashMinor: "0", spendMinor: "0", seconds: 0 });
+      const state = await s.discovery.workspace(current, b);
+      expect(state.runs[0]).toMatchObject({ used: 0 });
+      expect(state.prospects).toEqual([]);
+      await s.discovery.start(current, b, s.request());
+      await s.discovery.execute(s.queued.at(-1));
+      expect(s.searches).toHaveLength(1);
+      expect((await s.discovery.workspace(current, b)).prospects).toHaveLength(
+        1,
+      );
     } finally {
       await blocker.query("ROLLBACK");
       blocker.release();
