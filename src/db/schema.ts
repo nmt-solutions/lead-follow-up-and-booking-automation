@@ -1,4 +1,10 @@
 import type { MailAcceptance } from "../models/mail-dispatch";
+import type {
+  ObligationDefinition,
+  ReportingPeriod,
+  LiabilitySnapshot,
+  TaxReminder,
+} from "../models/tax-periods";
 import type { ReachSnapshot, ReachFact } from "../models/reach-changes";
 import type { DataPolicy, OffboardInput } from "../models/data-governance";
 import type {
@@ -1489,7 +1495,7 @@ export const notificationNotice = pgTable(
     uniqueIndex("notification_provider_identity").on(t.account, t.providerId),
     check(
       "notification_purpose",
-      sql`${t.purpose} in ('authentication','invitation','cost_alert','sender_health','handoff','operations','subscription')`,
+      sql`${t.purpose} in ('authentication','invitation','cost_alert','sender_health','handoff','operations','subscription','tax_period')`,
     ),
     check(
       "notification_state",
@@ -5854,6 +5860,180 @@ export const financialReceipt = pgTable(
       using: refundOperator,
     }),
     pgPolicy("financial_receipt_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+
+const taxReportingScope = sql`public.tax_reporting_operator()`;
+function taxReportingPolicies(name: string) {
+  return [
+    pgPolicy(name + "_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxReportingScope,
+    }),
+    pgPolicy(name + "_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${taxReportingScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy(name + "_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ];
+}
+const taxAttribution = () => ({
+  requestKey: uuid("request_key").notNull(),
+  input: jsonb("input").$type<Record<string, unknown>>().notNull(),
+  actorId: text("actor_id")
+    .notNull()
+    .references(() => user.id),
+  actorName: text("actor_name").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+  note: text("note").notNull(),
+});
+export const taxObligationRevision = pgTable(
+  "tax_obligation_revision",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    version: integer("version").notNull(),
+    definition: jsonb("definition").$type<ObligationDefinition>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_obligation_key_version").on(t.key, t.version),
+    uniqueIndex("tax_obligation_request").on(t.requestKey),
+    check("tax_obligation_version", sql`${t.version}>0`),
+    ...taxReportingPolicies("tax_obligation_revision"),
+  ],
+).enableRLS();
+export const taxObligationDecision = pgTable(
+  "tax_obligation_decision",
+  {
+    id: uuid("id").primaryKey(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => taxObligationRevision.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_obligation_decision_version").on(t.revisionId, t.version),
+    uniqueIndex("tax_obligation_decision_request").on(t.requestKey),
+    check(
+      "tax_obligation_decision_outcome",
+      sql`${t.outcome} in ('approved','withdrawn') and ${t.version}>0`,
+    ),
+    ...taxReportingPolicies("tax_obligation_decision"),
+  ],
+).enableRLS();
+export const taxReportingPeriod = pgTable(
+  "tax_reporting_period",
+  {
+    id: uuid("id").primaryKey(),
+    obligationId: uuid("obligation_id")
+      .notNull()
+      .references(() => taxObligationRevision.id),
+    supersedesId: uuid("supersedes_id"),
+    definition: jsonb("definition").$type<ReportingPeriod>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_reporting_period_request").on(t.requestKey),
+    uniqueIndex("tax_reporting_period_successor").on(t.supersedesId),
+    foreignKey({
+      name: "tax_reporting_period_supersedes_fk",
+      columns: [t.supersedesId],
+      foreignColumns: [t.id],
+    }),
+    check(
+      "tax_reporting_period_binding",
+      sql`${t.definition}->>'id'=${t.id}::text and ${t.definition}->>'obligationId'=${t.obligationId}::text and coalesce(${t.definition}->>'supersedesId','')=coalesce(${t.supersedesId}::text,'') and ${t.supersedesId} is distinct from ${t.id} and (${t.definition}->>'end')::timestamptz>(${t.definition}->>'start')::timestamptz`,
+    ),
+    ...taxReportingPolicies("tax_reporting_period"),
+  ],
+).enableRLS();
+export const taxLiabilityReport = pgTable(
+  "tax_liability_report",
+  {
+    id: uuid("id").primaryKey(),
+    periodId: uuid("period_id")
+      .notNull()
+      .references(() => taxReportingPeriod.id),
+    revision: integer("revision").notNull(),
+    snapshot: jsonb("snapshot").$type<LiabilitySnapshot>().notNull(),
+    digest: text("digest").notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_liability_report_revision").on(t.periodId, t.revision),
+    uniqueIndex("tax_liability_report_request").on(t.requestKey),
+    check(
+      "tax_liability_report_binding",
+      sql`${t.snapshot}->'period'->>'id'=${t.periodId}::text and ${t.digest} ~ '^[a-f0-9]{64}$' and ${t.revision}>0`,
+    ),
+    ...taxReportingPolicies("tax_liability_report"),
+  ],
+).enableRLS();
+export const taxReportAction = pgTable(
+  "tax_report_action",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    version: integer("version").notNull(),
+    kind: text("kind").notNull(),
+    detail: jsonb("detail")
+      .$type<{ issueId: string | null; evidence: string[] }>()
+      .notNull(),
+    ...taxAttribution(),
+    actorId: text("actor_id").references(() => user.id),
+  },
+  (t) => [
+    uniqueIndex("tax_report_action_version").on(t.reportId, t.version),
+    uniqueIndex("tax_report_action_request").on(t.requestKey),
+    check(
+      "tax_report_action_kind",
+      sql`${t.kind} in ('review','raise_issue','resolve_issue','approve','invalidated') and ${t.version}>0`,
+    ),
+    ...taxReportingPolicies("tax_report_action"),
+  ],
+).enableRLS();
+export const taxPeriodReminder = pgTable(
+  "tax_period_reminder",
+  {
+    id: uuid("id").primaryKey(),
+    periodId: uuid("period_id")
+      .notNull()
+      .references(() => taxReportingPeriod.id),
+    stage: text("stage").notNull(),
+    stageAt: timestamp("stage_at", { withTimezone: true }).notNull(),
+    source: jsonb("source").$type<TaxReminder["source"]>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("tax_period_reminder_stage").on(t.periodId, t.stage),
+    pgPolicy("tax_period_reminder_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxReportingScope,
+    }),
+    pgPolicy("tax_period_reminder_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`false`,
+    }),
+    pgPolicy("tax_period_reminder_system", {
       for: "all",
       to: "public",
       using: paymentOwner,

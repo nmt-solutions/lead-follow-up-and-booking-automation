@@ -68,6 +68,15 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
             AND NOT EXISTS(SELECT 1 FROM public.operator_cost_budget b JOIN public.operator_cost_budget newer ON newer.month=b.month AND newer.category=b.category AND newer.version>b.version WHERE b.id=a.budget_id);
         IF FOUND THEN RETURN jsonb_build_object('expiresAt',least(v.retain_until,v.first_attempt_at+interval '23 hours'),'email',v.email,'summary',v.summary,'userId',v.owner_id); END IF;
       END IF;
+      IF purpose='tax_period' AND tenant IS NULL THEN
+        SELECT * INTO p FROM public.notification_preference x WHERE x.id::text=split_part(authority,':',1) AND x.actor_id=actor AND x.business_id IS NULL AND x.purpose='tax_period';
+        IF NOT FOUND OR NOT public.notification_preference_current(p.id) THEN RETURN NULL; END IF;
+        SELECT * INTO e FROM public.tax_period_reminder x WHERE x.id::text=split_part(authority,':',2);
+        IF NOT FOUND OR source_ref<>e.id::text||':'||actor||':tax_operator' OR NOT public.tax_reminder_current(e.id) OR e.at<=statement_timestamp()-interval '23 hours' THEN RETURN NULL; END IF;
+        SELECT definition INTO v FROM public.tax_obligation_revision x WHERE x.id::text=e.source->>'obligationId';
+        IF NOT (v.definition->'preparerIds' ? actor OR v.definition->'reviewerIds' ? actor) THEN RETURN NULL; END IF;
+        RETURN jsonb_build_object('expiresAt',e.at+interval '23 hours','email',(SELECT u.email FROM public."user" u WHERE u.id=actor),'userId',actor,'sourceStage',e.stage);
+      END IF;
       IF purpose IN ('operations','subscription') THEN
         SELECT * INTO p FROM public.notification_preference x WHERE x.id::text=split_part(authority,':',1) AND x.actor_id=actor AND x.business_id IS NOT DISTINCT FROM tenant AND x.purpose=notification_source.purpose;
         IF NOT FOUND OR NOT public.notification_preference_current(p.id) THEN RETURN NULL; END IF;
@@ -130,7 +139,7 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
       PERFORM pg_advisory_xact_lock(hashtextextended('notification:'||(deployment->>'account'),0));
       source:=public.notification_source(draft->>'purpose',draft->>'sourceId',draft->>'authority',draft->>'actorId',(draft->>'businessId')::uuid);
       IF source IS NULL THEN RETURN NULL; END IF;
-      IF draft->>'purpose' IN ('operations','subscription') AND NOT EXISTS(SELECT 1 FROM public.notification_preference p WHERE p.id::text=split_part(draft->>'authority',':',1) AND p.account=deployment->>'account') THEN RETURN NULL; END IF;
+      IF draft->>'purpose' IN ('operations','subscription','tax_period') AND NOT EXISTS(SELECT 1 FROM public.notification_preference p WHERE p.id::text=split_part(draft->>'authority',':',1) AND p.account=deployment->>'account') THEN RETURN NULL; END IF;
       SELECT * INTO n FROM public.notification_notice x WHERE x.purpose=draft->>'purpose' AND x.source_id=draft->>'sourceId';
       IF FOUND THEN
         IF n.account<>deployment->>'account' THEN RETURN NULL; END IF;
@@ -234,7 +243,7 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
       SELECT jsonb_build_object('bootstrapAuthOnly',coalesce((SELECT t.auth_bootstrap FROM public.notification_terms t WHERE t.account=account_ref ORDER BY t.at DESC,t.id DESC LIMIT 1),false),'setup',s.setup,'setupCheckedAt',s.at,'setupFresh',coalesce(s.at>statement_timestamp()-interval '5 minutes',false),
         'terms',(SELECT t.terms FROM public.notification_terms t WHERE t.account=account_ref ORDER BY t.at DESC,t.id DESC LIMIT 1),
         'pendingReservations',(SELECT count(*)::integer FROM public.notification_notice n WHERE n.account=account_ref AND n.first_attempt_at IS NOT NULL AND n.provider_id IS NULL AND (n.uncertain OR n.state='sending' AND n.lease_until>statement_timestamp())),
-        'allowedPreferences',CASE WHEN tenant IS NOT NULL THEN CASE WHEN public.current_business_role() IN ('owner','admin') THEN '["operations","subscription"]'::jsonb ELSE '["operations"]'::jsonb END ELSE (CASE WHEN EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND (o.operations OR o.sender_health)) THEN '["operations"]'::jsonb ELSE '[]'::jsonb END)||(CASE WHEN EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.reconciliation) THEN '["subscription"]'::jsonb ELSE '[]'::jsonb END) END,
+        'allowedPreferences',CASE WHEN tenant IS NOT NULL THEN CASE WHEN public.current_business_role() IN ('owner','admin') THEN '["operations","subscription"]'::jsonb ELSE '["operations"]'::jsonb END ELSE (CASE WHEN EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND (o.operations OR o.sender_health)) THEN '["operations"]'::jsonb ELSE '[]'::jsonb END)||(CASE WHEN EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.reconciliation) THEN '["subscription"]'::jsonb ELSE '[]'::jsonb END)||(CASE WHEN EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.tax) THEN '["tax_period"]'::jsonb ELSE '[]'::jsonb END) END,
         'notices',coalesce((SELECT jsonb_agg(v.value ORDER BY v.created_at DESC) FROM (SELECT n.created_at,jsonb_build_object('id',n.id,'purpose',n.purpose,'businessId',n.business_id,'sourceId',CASE WHEN n.purpose='authentication' THEN n.id::text ELSE n.source_id END,'sourceStage',n.source_stage,
           'state',n.state,'stage',(SELECT r.stage FROM public.notification_receipt r WHERE r.account=n.account AND r.provider_id=n.provider_id AND r.recipient_digest=n.recipient_digest AND r.sender_digest=md5(lower(n.binding->>'from')) ORDER BY CASE r.stage WHEN 'complained' THEN 7 WHEN 'bounced' THEN 6 WHEN 'suppressed' THEN 5 WHEN 'failed' THEN 4 WHEN 'delivered' THEN 3 WHEN 'delivery_delayed' THEN 2 ELSE 1 END DESC,r.occurred_at DESC LIMIT 1),'providerId',n.provider_id,'createdAt',n.created_at,'expiresAt',n.expires_at,'firstAttemptAt',n.first_attempt_at,'retryUntil',n.retry_until,'nextAttemptAt',n.next_attempt_at,'reason',n.reason,
           'authorityCurrent',public.notification_source(n.purpose,n.source_id,n.authority,n.actor_id,n.business_id) IS NOT NULL AND (n.auth_user_id IS NULL OR EXISTS(SELECT 1 FROM public."user" u WHERE u.id=n.auth_user_id AND md5(lower(u.email))=n.recipient_digest)),
@@ -274,14 +283,15 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
       IF NOT FOUND OR EXISTS(SELECT 1 FROM public.notification_preference newer WHERE newer.account=p.account AND newer.actor_id=p.actor_id AND newer.business_id IS NOT DISTINCT FROM p.business_id AND newer.purpose=p.purpose AND newer.version>p.version) THEN RETURN false; END IF;
       IF nullif(current_setting('app.business_id',true),'') IS NOT NULL AND p.business_id::text IS DISTINCT FROM current_setting('app.business_id',true) THEN RETURN false; END IF;
       IF NOT EXISTS(SELECT 1 FROM public."user" u WHERE u.id=p.actor_id AND u.email_verified) THEN RETURN false; END IF;
-      IF p.business_id IS NULL THEN RETURN EXISTS(SELECT 1 FROM public.platform_operator o JOIN public."user" u ON u.id=o.user_id AND u.two_factor_enabled WHERE o.user_id=p.actor_id AND o.notifications AND CASE WHEN p.purpose='operations' THEN (o.operations OR o.sender_health) ELSE o.reconciliation END AND EXISTS(SELECT 1 FROM public.two_factor f WHERE f.user_id=u.id AND f.verified)); END IF;
+      IF p.business_id IS NULL THEN RETURN EXISTS(SELECT 1 FROM public.platform_operator o JOIN public."user" u ON u.id=o.user_id AND u.two_factor_enabled WHERE o.user_id=p.actor_id AND (o.notifications OR p.purpose='tax_period' AND o.tax) AND CASE WHEN p.purpose='operations' THEN (o.operations OR o.sender_health) WHEN p.purpose='tax_period' THEN o.tax ELSE o.reconciliation END AND EXISTS(SELECT 1 FROM public.two_factor f WHERE f.user_id=u.id AND f.verified)); END IF;
       RETURN EXISTS(SELECT 1 FROM public.membership m JOIN public."user" u ON u.id=m.user_id WHERE m.business_id=p.business_id AND m.user_id=p.actor_id AND (p.purpose='operations' OR m.role IN ('owner','admin')) AND (m.role='salesperson' OR u.two_factor_enabled AND EXISTS(SELECT 1 FROM public.two_factor f WHERE f.user_id=u.id AND f.verified)));
     END $$;
     CREATE OR REPLACE FUNCTION public.notification_set_preference(account_ref text,tenant uuid,choice jsonb) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE previous integer; actor text:=current_setting('app.actor_id',true); BEGIN
-      IF choice->>'purpose' NOT IN ('operations','subscription') THEN RETURN false; END IF;
+      IF choice->>'purpose' NOT IN ('operations','subscription','tax_period') THEN RETURN false; END IF;
+      IF choice->>'purpose'='tax_period' AND (tenant IS NOT NULL OR NOT public.tax_reporting_operator()) THEN RETURN false; END IF;
       IF tenant IS NULL THEN
-        IF NOT public.notification_operator() OR (choice->>'enabled'='true' AND NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=actor AND CASE WHEN choice->>'purpose'='operations' THEN (o.operations OR o.sender_health) ELSE o.reconciliation END)) THEN RETURN false; END IF;
+        IF NOT (public.notification_operator() OR choice->>'purpose'='tax_period' AND public.tax_reporting_operator()) OR (choice->>'enabled'='true' AND NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=actor AND CASE WHEN choice->>'purpose'='operations' THEN (o.operations OR o.sender_health) WHEN choice->>'purpose'='tax_period' THEN o.tax ELSE o.reconciliation END)) THEN RETURN false; END IF;
       ELSE IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL OR choice->>'enabled'='true' AND choice->>'purpose'='subscription' AND public.current_business_role() NOT IN ('owner','admin') THEN RETURN false; END IF; END IF;
       PERFORM pg_advisory_xact_lock(hashtextextended('notification-policy:'||account_ref||':'||actor||':'||coalesce(tenant::text,'')||':'||(choice->>'purpose'),0));
       SELECT coalesce(max(p.version),0) INTO previous FROM public.notification_preference p WHERE p.account=account_ref AND p.actor_id=actor AND p.business_id IS NOT DISTINCT FROM tenant AND p.purpose=choice->>'purpose';
@@ -290,9 +300,9 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
     END $$;
     CREATE OR REPLACE FUNCTION public.notification_preferences(account_ref text,tenant uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
-      IF tenant IS NULL THEN IF NOT public.notification_operator() THEN RETURN NULL; END IF;
+      IF tenant IS NULL THEN IF NOT (public.notification_operator() OR public.tax_reporting_operator()) THEN RETURN NULL; END IF;
       ELSE IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR public.current_business_role() IS NULL THEN RETURN NULL; END IF; END IF;
-      RETURN coalesce((SELECT jsonb_agg(jsonb_build_object('purpose',p.purpose,'enabled',p.enabled,'version',p.version)) FROM (SELECT DISTINCT ON (x.purpose) * FROM public.notification_preference x WHERE x.account=account_ref AND x.actor_id=current_setting('app.actor_id',true) AND x.business_id IS NOT DISTINCT FROM tenant ORDER BY x.purpose,x.version DESC) p),'[]'::jsonb);
+      RETURN coalesce((SELECT jsonb_agg(jsonb_build_object('purpose',p.purpose,'enabled',p.enabled,'version',p.version)) FROM (SELECT DISTINCT ON (x.purpose) * FROM public.notification_preference x WHERE x.account=account_ref AND x.actor_id=current_setting('app.actor_id',true) AND x.business_id IS NOT DISTINCT FROM tenant AND (tenant IS NOT NULL OR public.notification_operator() OR x.purpose='tax_period') ORDER BY x.purpose,x.version DESC) p),'[]'::jsonb);
     END $$;
     CREATE OR REPLACE FUNCTION public.notification_candidates(account_ref text) RETURNS TABLE(draft jsonb)
     LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
@@ -315,6 +325,10 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
           JOIN public.financial_case c ON c.id=e.case_id AND c.business_id=e.business_id
           WHERE p.account=account_ref AND p.purpose='subscription' AND p.business_id IS NOT NULL AND public.notification_preference_current(p.id)
             AND e.position=(SELECT max(latest.position) FROM public.financial_case_event latest WHERE latest.case_id=e.case_id AND latest.detail->>'message' IS NOT NULL)
+        UNION ALL
+        SELECT jsonb_build_object('id',gen_random_uuid(),'purpose','tax_period','sourceId',e.id::text||':'||p.actor_id||':tax_operator','businessId',NULL,'actorId',p.actor_id,'authority',p.id::text||':'||e.id::text,'sourceStage',e.stage) candidate
+          FROM public.notification_preference p JOIN public.tax_period_reminder e ON p.business_id IS NULL
+          WHERE p.account=account_ref AND p.purpose='tax_period' AND public.notification_preference_current(p.id) AND public.tax_reminder_current(e.id)
       ) v WHERE public.notification_source(v.candidate->>'purpose',v.candidate->>'sourceId',v.candidate->>'authority',v.candidate->>'actorId',(v.candidate->>'businessId')::uuid) IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.notification_notice n WHERE n.account=account_ref AND n.purpose=v.candidate->>'purpose' AND n.source_id=v.candidate->>'sourceId') LIMIT 100;
     END $$;
     CREATE OR REPLACE FUNCTION public.notification_begin_maintenance_setup(deployment jsonb) RETURNS jsonb
