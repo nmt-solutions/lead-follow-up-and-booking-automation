@@ -18,6 +18,41 @@ describe("UPI immutable persistence and restricted runtime", () => {
     f = await fundedUpiFixture(h);
   });
   afterEach(async () => h?.close());
+  it("requires the operator MFA lifetime for a raw reconciliation attempt rather than the longer Business-manager lifetime", async () => {
+    const credentials = await h.signIn("upi-stale-operator@example.com");
+    await h.provisionOperator(credentials, {
+      reconciliation: true,
+      tax: false,
+    });
+    const actor = await h.access.authenticatePlatformForWork(credentials);
+    await h.admin.query("UPDATE session SET mfa_verified_at=$1 WHERE id=$2", [
+      new Date(h.clock.now().getTime() - 16 * 60 * 1000),
+      actor.sessionId,
+    ]);
+    const client = await h.runtime.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true),set_config('app.upi_actor_session',$3,true),set_config('app.upi_at',$4,true)",
+        [
+          actor.userId,
+          f.business.id,
+          actor.sessionId,
+          h.clock.now().toISOString(),
+        ],
+      );
+      await expect(
+        client.query(
+          'INSERT INTO reach_change_event(id,business_id,change_id,key,actor_id,at,fact) VALUES(gen_random_uuid(),$1,$2,\'stale-operator-attempt\',$3,clock_timestamp(),\'{"kind":"attempt","stage":"order","body":{}}\')',
+          [f.business.id, f.change.id, actor.userId],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    expect(f.mutations).toHaveLength(3);
+  });
   it.each(["missing", "null"])(
     "rejects a raw UPI approval disguised by a %s agreement instead of treating it as a legacy card row",
     async (shape) => {
