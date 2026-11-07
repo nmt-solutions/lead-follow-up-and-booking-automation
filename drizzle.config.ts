@@ -7,6 +7,10 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "reconciliation_evidence",
+    "reconciliation_record",
+    "reconciliation_review",
+    "reconciliation_access",
     "tax_obligation_revision",
     "tax_obligation_decision",
     "tax_reporting_period",

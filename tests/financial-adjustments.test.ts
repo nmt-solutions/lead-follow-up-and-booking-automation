@@ -9,6 +9,8 @@ import { createSubscriptionPaymentRepository } from "../src/db/subscription-paym
 import { runtimeDatabase } from "../src/db/runtime";
 import { createFinancialAdjustmentApplication } from "../src/application/financial-adjustments";
 import { createFinancialAdjustmentRepository } from "../src/db/financial-adjustment-repository";
+import { createReconciliationApplication } from "../src/application/reconciliation";
+import { createReconciliationRepository } from "../src/db/reconciliation-repository";
 import { configuredFinancialAdjustments } from "../src/financial-adjustments/configuration";
 import { createSellerDocumentApplication } from "../src/application/seller-documents";
 import { createSellerDocumentRepository } from "../src/db/seller-document-repository";
@@ -404,6 +406,30 @@ describe("Refunds and disputes at the public application seam", () => {
         },
       },
     ]);
+    const bank = createReconciliationApplication({
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+    });
+    const report = await bank.workspace(f.op, {
+      from: "2026-11-01T00:00:00.000Z",
+      until: "2026-12-01T00:00:00.000Z",
+    });
+    expect(report.expected).toMatchObject([
+      {
+        grossMinor: "11006",
+        refundCashMinor: "0",
+        disputeDeductionMinor: "1100",
+        creditGrossMinor: "1100",
+        creditTaxMinor: "100",
+      },
+    ]);
+    expect(report.sources[0].effects[0]).toMatchObject({
+      source: "dispute",
+      actualMinor: "1100",
+      nativeId: "disp_fixture1",
+    });
+    expect(report.settlements).toHaveLength(0);
   });
   it("durably authenticates native receipts before deferred reconciliation and rejects conflicting duplicate identities", async () => {
     const f = await purchase(),

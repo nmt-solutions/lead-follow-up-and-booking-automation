@@ -20,6 +20,8 @@ export async function subscriptionFixture(
     automationUnit?: string;
     term?: "monthly" | "paid_pilot";
     mode?: "fixture" | "live";
+    catalogVersion?: number;
+    ruleKey?: string;
   } = {},
 ) {
   const database = runtimeDatabase(h.runtime);
@@ -155,7 +157,7 @@ export async function subscriptionFixture(
     [actor.userId],
   );
   const rules = await tax.saveRule(f.operator, {
-    key: "fixture",
+    key: options.ruleKey ?? "fixture",
     expectedVersion: 0,
     note: "Synthetic fixture only",
     rule: {
@@ -165,7 +167,9 @@ export async function subscriptionFixture(
     },
   });
   await tax.decideRule(f.operator, {
-    revisionId: rules.revisions[0].id,
+    revisionId: rules.revisions.find(
+      (r) => r.key === (options.ruleKey ?? "fixture"),
+    )!.id,
     expectedDecisionVersion: 0,
     outcome: "approved",
     note: "Synthetic fixture approval",
@@ -175,7 +179,7 @@ export async function subscriptionFixture(
     repository: createSubscriptionQuoteRepository(database),
   });
   await quotes.configure(f.operator, {
-    expectedVersion: 0,
+    expectedVersion: options.catalogVersion ?? 0,
     effectiveFrom: null,
     note: "Explicit synthetic commercial inputs",
     offers: [
@@ -210,7 +214,7 @@ export async function subscriptionFixture(
     offerId: "fixture",
     reservedCapacityId: null,
     term: options.term ?? "monthly",
-    expectedCatalogVersion: 1,
+    expectedCatalogVersion: (options.catalogVersion ?? 0) + 1,
     expectedBillingVersion: 1,
     expectedReviewVersion: 1,
     requestKey: randomUUID(),
