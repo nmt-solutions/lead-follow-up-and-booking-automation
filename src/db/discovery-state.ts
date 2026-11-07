@@ -1,3 +1,4 @@
+import { requireCapacityBindingCurrent } from "./discovery-capacity-repository";
 import { and, eq, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type { Transaction } from "./scope";
@@ -91,7 +92,9 @@ export async function settings(tx: Transaction, businessId: string, at: Date) {
   };
 }
 
-export async function checkCurrent(
+// Explicit budget approval/resume validates current scope without treating an
+// obsolete execution's actor or capacity binding as authority for new work.
+export async function checkCurrentScope(
   tx: Transaction,
   run: DiscoveryRun,
   at: Date,
@@ -110,6 +113,15 @@ export async function checkCurrent(
     )
   )
     throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+}
+
+export async function checkCurrent(
+  tx: Transaction,
+  run: DiscoveryRun,
+  at: Date,
+) {
+  await checkCurrentScope(tx, run, at);
+  await requireCapacityBindingCurrent(tx, run);
 }
 
 export async function requireDiscoveryAvailable(

@@ -1,4 +1,4 @@
-import { defineConfig } from "drizzle-kit";
+﻿import { defineConfig } from "drizzle-kit";
 import { databaseAdminUrl } from "./scripts/database-environment";
 
 export default defineConfig({
@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "discovery_capacity_policy",
+    "discovery_capacity_binding",
     "tax_filing_export",
     "tax_filing_policy",
     "tax_filing_policy_decision",

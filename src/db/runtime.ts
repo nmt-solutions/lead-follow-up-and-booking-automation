@@ -1,3 +1,4 @@
+import { verifyDiscoveryCapacity } from "./discovery-capacity-security";
 import { verifyRecoverySecurity } from "./recovery-security";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { verifyTaxPeriods } from "./tax-period-security";
@@ -33,6 +34,7 @@ export async function verifyRuntimeRole(
   }
   if (!(await verifyRecoverySecurity(pool)))
     throw new ApplicationError("SETUP_REQUIRED");
+  await verifyDiscoveryCapacity(pool);
   await verifyReconciliationRuntime(pool);
   await verifyDataGovernance(pool);
   await verifyTaxPeriods(pool);

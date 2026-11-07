@@ -330,6 +330,14 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
         Created {new Date(run.createdAt).toLocaleString()} ·{" "}
         {run.brief.markets.join("; ")}
       </p>
+      {run.executionCapacity && (
+        <p className="text-sm text-muted-foreground">
+          Execution allowance:{" "}
+          {run.executionCapacity.mode === "reserved" ? "Reserved" : "Pooled"} ·{" "}
+          {run.executionCapacity.slots} concurrent discovery runs · approval
+          revision {run.executionCapacity.policyVersion}.
+        </p>
+      )}
       {run.scheduledFor && (
         <p className="text-sm text-muted-foreground">
           Scheduled occurrence: {new Date(run.scheduledFor).toLocaleString()}.
@@ -695,6 +703,56 @@ export function DiscoveryManager({
               </>
             )}
           </p>
+        )}
+        {state.capacity && (
+          <section
+            className="space-y-2 rounded-xl border border-border bg-muted p-4"
+            aria-label="Execution capacity"
+          >
+            <h3 className="font-medium">
+              {state.capacity.mode === "reserved"
+                ? "Reserved discovery capacity"
+                : state.capacity.mode === "pooled"
+                  ? "Pooled discovery capacity"
+                  : "Discovery capacity setup required"}
+            </h3>
+            <p className="text-sm">
+              {
+                {
+                  available: "Available",
+                  busy: "Busy — queued work waits for capacity",
+                  setup_required:
+                    "Current paid entitlement, approved allocation and worker deployment are required",
+                  unavailable:
+                    "Provider capacity could not be verified — queued work waits",
+                  stale:
+                    "Provider observation is stale — refresh to check again",
+                  entitlement_changed:
+                    "Entitlement changed — review configuration before resuming",
+                }[state.capacity.status]
+              }
+            </p>
+            {state.capacity.mode && (
+              <p className="text-sm">
+                {state.capacity.slots} concurrent discovery runs allocated.{" "}
+                {state.capacity.running !== null
+                  ? `${state.capacity.running} running · ${state.capacity.queued} queued in this lane.`
+                  : "Current running and queued counts are unknown."}
+              </p>
+            )}
+            {state.capacity.observedAt && (
+              <p className="text-xs text-muted-foreground">
+                Observed {new Date(state.capacity.observedAt).toLocaleString()}.
+                Refresh runs for a current observation.
+              </p>
+            )}
+            <p className="text-sm text-muted-foreground">
+              Capacity does not guarantee leads or throughput. Privacy, source
+              permissions and approved budgets apply in both modes. Reserved
+              work waits in its approved lane; it never silently moves to pooled
+              execution.
+            </p>
+          </section>
         )}
         {!state.canRun ? (
           <p className="text-sm text-muted-foreground">
