@@ -214,7 +214,14 @@ describe("Approved reach changes at the public application seam", () => {
           throw new Error("Lost update acknowledgement");
         return Response.json(sub);
       }
-      return request(input, init);
+      const response = await request(input, init);
+      if (
+        native.loseCancellation &&
+        init?.method === "POST" &&
+        url.pathname.endsWith("/cancel")
+      )
+        throw new Error("Lost cancellation acknowledgement");
+      return response;
     };
     const database = runtimeDatabase(h.runtime);
     const gateway = configuredPayments(native.configuration);
@@ -470,6 +477,16 @@ describe("Approved reach changes at the public application seam", () => {
   });
   it("requires explicit approval and actual corresponding capture; lost acknowledgement never repeats the upgrade", async () => {
     const f = await setup();
+    await campaignFixture(h, {
+      at: h.clock.now().toISOString(),
+      businessContext: { owner: f.owner, business: f.business },
+      market: "United States",
+      discoveryUnit: "research units",
+    });
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).allowances
+        ?.discovery,
+    ).toMatchObject({ included: 100, reserved: 2, remaining: 98 });
     const preview = await f.changes.preview(f.owner, f.business.id, {
       periodId: f.original.id,
       quoteId: f.target.id,
@@ -512,6 +529,12 @@ describe("Approved reach changes at the public application seam", () => {
     );
     const workspace = await f.payments.workspace(f.owner, f.business.id);
     expect(workspace.allowances?.discovery.included).toBe(150);
+    expect(preview.snapshot.consumed.discovery).toBe(2);
+    expect(workspace.allowances?.discovery).toMatchObject({
+      included: 150,
+      reserved: 2,
+      remaining: 148,
+    });
     expect(workspace.effectiveContract).toMatchObject({
       periodId: f.original.id,
       changeId: preview.id,
