@@ -360,6 +360,13 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
                 independent resolution.
               </p>
             )}
+            {period.unconfirmedWorkCount > 0 && (
+              <p className="font-medium text-warning">
+                {period.unconfirmedWorkCount} manual work orders still need
+                conclusive filing or payment evidence, even if the reported
+                liability is already paid.
+              </p>
+            )}
             <p className="text-sm">
               Report {report?.id ?? "not prepared"} · revision{" "}
               {report?.revision ?? "—"} · {report?.digest}

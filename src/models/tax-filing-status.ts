@@ -17,5 +17,6 @@ export const taxFilingStatusSchema = z.object({
   overpaidMinor: minor,
   correctionRequired: z.boolean(),
   unresolvedEvidenceCount: z.number().int().nonnegative(),
+  unconfirmedWorkCount: z.number().int().nonnegative(),
 });
 export type TaxFilingStatus = z.infer<typeof taxFilingStatusSchema>;

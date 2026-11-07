@@ -55,7 +55,7 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
     CREATE OR REPLACE FUNCTION public.tax_filing_fulfillment(period_ref uuid) RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
     DECLARE p record; o record; d record; r record; a record; c record; cd record; configured boolean:=false; current_report boolean:=false;
-      filed boolean:=false; current_filed boolean:=false; paid boolean:=false; fulfilled boolean:=false; liability numeric; allocated numeric:=0; historical numeric:=0; unresolved integer:=0;
+      filed boolean:=false; current_filed boolean:=false; paid boolean:=false; fulfilled boolean:=false; liability numeric; allocated numeric:=0; historical numeric:=0; unresolved integer:=0; unconfirmed integer:=0;
     BEGIN
       SELECT * INTO p FROM public.tax_reporting_period WHERE id=period_ref;
       SELECT * INTO o FROM public.tax_obligation_revision WHERE key=p.definition->>'obligationKey' ORDER BY version DESC LIMIT 1;
@@ -83,15 +83,21 @@ export async function secureTaxFilings(pool: Pool | PoolClient) {
         WHERE i.target->>'obligationKey'=p.definition->>'obligationKey' AND i.target->>'start'=p.definition->>'start' AND i.target->>'end'=p.definition->>'end'
           AND (e.kind='acknowledge' AND (e.detail->>'matches'='false' OR e.detail->>'contradiction'='true') OR e.kind='raise_issue')
           AND NOT EXISTS(SELECT 1 FROM public.tax_filing_event resolved WHERE resolved.intent_id=i.id AND resolved.kind='resolve_issue' AND resolved.detail->>'issueId'=e.id::text);
+      SELECT count(*)::integer INTO unconfirmed FROM public.tax_filing_intent i
+        WHERE i.target->>'obligationKey'=p.definition->>'obligationKey' AND i.target->>'start'=p.definition->>'start' AND i.target->>'end'=p.definition->>'end'
+          AND NOT EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND e.kind='confirm')
+          AND EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND (e.kind='attempt' OR e.kind='acknowledge' AND e.detail->>'matches'='true'))
+          AND (NOT EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND e.kind='supersede')
+            OR EXISTS(SELECT 1 FROM public.tax_filing_event e WHERE e.intent_id=i.id AND e.kind='acknowledge' AND e.detail->>'matches'='true' AND e.detail->>'result' IN('filed','settled')));
       liability:=CASE WHEN r.snapshot->>'totalsKnown'='true' THEN (r.snapshot->'totals'->>'taxMinor')::numeric ELSE NULL END;
       paid:=coalesce(allocated>0 AND liability>=0 AND allocated>=liability,false);
-      fulfilled:=coalesce(configured AND current_report AND unresolved=0 AND historical=allocated AND allocated<=greatest(liability,0)
+      fulfilled:=coalesce(configured AND current_report AND unresolved=0 AND unconfirmed=0 AND historical=allocated AND allocated<=greatest(liability,0)
         AND (c.definition->>'filingRequired'='false' OR current_filed) AND (c.definition->>'paymentRequired'='false' OR paid),false);
       RETURN jsonb_build_object('configured',configured,'reportId',r.id,'filed',filed,'currentRevisionFiled',current_filed,'paid',paid,'fulfilled',fulfilled,
         'filingRequired',CASE WHEN configured THEN (c.definition->>'filingRequired')::boolean ELSE NULL END,'paymentRequired',CASE WHEN configured THEN (c.definition->>'paymentRequired')::boolean ELSE NULL END,
         'liabilityMinor',liability::text,'confirmedPaidMinor',allocated::text,'historicalPaidMinor',historical::text,'unallocatedPaidMinor',(historical-allocated)::text,
         'remainingMinor',CASE WHEN liability IS NULL THEN NULL ELSE greatest(liability-allocated,0)::text END,'overpaidMinor',CASE WHEN liability IS NULL THEN '0' ELSE greatest(allocated-greatest(liability,0),0)::text END,
-        'correctionRequired',filed AND (NOT current_report OR NOT current_filed),'unresolvedEvidenceCount',unresolved);
+        'correctionRequired',filed AND (NOT current_report OR NOT current_filed),'unresolvedEvidenceCount',unresolved,'unconfirmedWorkCount',unconfirmed);
     END $$;
     CREATE OR REPLACE FUNCTION public.tax_filing_status(period_ref uuid) RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$ BEGIN

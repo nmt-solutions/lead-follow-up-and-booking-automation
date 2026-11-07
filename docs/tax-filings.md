@@ -118,6 +118,9 @@ and current-source guards. Partial remittance leaves requirements due. Completed
 configured requirements suppress current reminders and typed #59 mail sources.
 Required unresolved issues on an earlier report for the same obligation and
 coverage keep those requirements due after amendment or payment carry-forward.
+Unconfirmed attempted or acknowledged work is counted separately. Even a fully
+paid liability stays due for reconciliation while another manual transfer has an
+uncertain result. A generic failure does not prove no effect or authorize a repeat.
 Mail acceptance/delivery remain separate from in-app and filing/payment truth;
 current verified self-preferences and tax audience rights still apply. Tax authority
 does not grant notification administration.
@@ -160,6 +163,12 @@ backups must retain the original byte ledger, metadata, approvals, allocation an
 replay/lineage history with the report/tax sources. Restored work stays quarantined
 under that workflow; old sessions/grants are not renewed. Current authority and
 fresh actor-bound access are required after recovery.
+The native restore and reviewed full-schema repair fixtures populate all ten
+private ledgers, retain expired access tombstones, verify original bytes/hashes
+and current source-tax revocation, and preserve independent original-payment
+allocations. The fixed selected-Business recovery projection excludes global tax
+records. The managed source bundle also freezes the filing application, models,
+original validation and shared canonical digest; it does not enable a live adapter.
 
 Manual evidence and its bytes commit atomically; there is no external filing or
 bank job to retry automatically. Factual recovery can use a new current authorized
@@ -187,3 +196,5 @@ The user validates rendering, keyboard/focus, compact/wide layouts, enlarged tex
 appearances, accessible feedback and MFA/session recovery. Actual legal scope,
 external filing/payment execution, independent review, actual-target application,
 deployment/Trigger cadence and live acceptance remain explicit parent/user work.
+Original downloads show errors in the current form, preserving edits if MFA or
+authority expires; no failed download needs to replace the page.

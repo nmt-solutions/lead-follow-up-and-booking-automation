@@ -26,6 +26,7 @@ import { configuredFinancialAdjustments } from "../src/financial-adjustments/con
 import { createFileApplication } from "../src/application/files";
 import { createFileRepository } from "../src/db/file-repository";
 import { recoveryReconciliationFixture } from "./support/recovery-reconciliation";
+import { recoveryTaxFilingFixture } from "./support/recovery-tax-filings";
 
 describe("Populated native PostgreSQL infrastructure drill", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
@@ -34,7 +35,8 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
     pending: { id: string },
     owner: Headers,
     unretainedId: string,
-    reconciliation: Awaited<ReturnType<typeof recoveryReconciliationFixture>>;
+    reconciliation: Awaited<ReturnType<typeof recoveryReconciliationFixture>>,
+    filings: Awaited<ReturnType<typeof recoveryTaxFilingFixture>>;
   beforeAll(async () => {
     h = await createHarness();
   });
@@ -152,6 +154,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
     }));
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
     reconciliation = await recoveryReconciliationFixture(h, f);
+    filings = await recoveryTaxFilingFixture(h, f);
     owner = await h.signIn(`recovery-${randomUUID()}@example.com`);
     r = await recoveryFixture(h, owner, f.business.id, copies);
   });
@@ -279,6 +282,82 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       accounting.evidence.find((row) => row.id === reconciliation.evidence.id)
         ?.storageIdentity,
     ).toBe(reconciliation.evidence.storageIdentity);
+    const filingTables = [
+      "tax_filing_export",
+      "tax_filing_policy",
+      "tax_filing_policy_decision",
+      "tax_filing_intent",
+      "tax_filing_event",
+      "tax_filing_evidence",
+      "tax_filing_bytes",
+      "tax_filing_access",
+      "tax_remittance_allocation",
+      "tax_remittance_review",
+    ];
+    for (const table of filingTables)
+      expect(
+        BigInt(
+          r.archive.manifest.tables.find((row) => row.table === table)!.count,
+        ),
+        table,
+      ).toBeGreaterThan(0n);
+    const targetFilings = filings.application(
+      runtimeDatabase(r.target.runtime),
+    ).filings;
+    const tax = await targetFilings.workspace(filings.operator);
+    expect(
+      tax.intents.find((i) => i.id === filings.filing.intent.id)?.report,
+    ).toEqual(filings.originalReport);
+    expect(
+      tax.intents.some(
+        (i) => i.amendmentOf === filings.filing.intent.id && i.filed,
+      ),
+    ).toBe(true);
+    expect(tax.intents.find((i) => i.id === filings.unknown.id)?.status).toBe(
+      "superseded",
+    );
+    expect(
+      tax.intents.find((i) => i.id === filings.replacement.id)?.status,
+    ).toBe("failed");
+    expect(tax.allocationReviews).toHaveLength(2);
+    expect(tax.periods[0]).toMatchObject({
+      filed: true,
+      paid: true,
+      fulfilled: false,
+      confirmedPaidMinor: "901",
+      unconfirmedWorkCount: 1,
+    });
+    const originalBytes = (
+      await r.target.admin.query<{ body: string }>(
+        "SELECT body FROM tax_filing_bytes WHERE id=$1",
+        [filings.filing.artifact.id],
+      )
+    ).rows[0].body;
+    expect(Buffer.from(originalBytes, "base64")).toEqual(filings.filing.bytes);
+    expect(
+      tax.evidence.find((e) => e.id === filings.filing.artifact.id)?.sha256,
+    ).toBe(filings.filing.artifact.sha256);
+    await expect(
+      filings.readExpiredOriginal(runtimeDatabase(r.target.runtime)),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(JSON.stringify(recovered)).not.toContain(filings.marker);
+    expect(
+      recovered.records.some((row) => filingTables.includes(row.table)),
+    ).toBe(false);
+    await h.admin.query(
+      "UPDATE platform_operator SET tax=false WHERE user_id=$1",
+      [filings.actor.userId],
+    );
+    await expect(
+      targetFilings.workspace(filings.operator),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      filings.readExpiredOriginal(runtimeDatabase(r.target.runtime)),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await h.admin.query(
+      "UPDATE platform_operator SET tax=true WHERE user_id=$1",
+      [filings.actor.userId],
+    );
     expect(JSON.stringify(recovered)).not.toContain(
       reconciliation.bytes.toString(),
     );
@@ -375,6 +454,20 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
               correctionId: reconciliation.corrected.id,
               reviewId: reconciliation.review.id,
               currentSourceRevocationDenied: true,
+            },
+            taxFilings: {
+              tables: filingTables,
+              evidenceId: filings.filing.artifact.id,
+              sha256: filings.filing.artifact.sha256,
+              bytes: filings.filing.bytes.length,
+              originalReportId: filings.originalReport.id,
+              currentReportId: filings.currentReport.id,
+              allocations: tax.allocations.length,
+              reviews: tax.allocationReviews.length,
+              expiredOriginalGrantDenied: true,
+              currentSourceRevocationDenied: true,
+              selectedBusinessProjectionExcluded: true,
+              newFilingOrPaymentEffects: 0,
             },
             productionVerified: false,
           },

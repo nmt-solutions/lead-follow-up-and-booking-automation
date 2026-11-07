@@ -418,6 +418,12 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
                     amendment lineage.
                   </p>
                 )}
+                {confirmation.unconfirmedWorkCount > 0 && (
+                  <p className="text-warning">
+                    {confirmation.unconfirmedWorkCount} manual work orders still
+                    need conclusive evidence.
+                  </p>
+                )}
                 <Link
                   href="/platform/tax/filings"
                   className="inline-flex min-h-11 items-center text-primary underline"

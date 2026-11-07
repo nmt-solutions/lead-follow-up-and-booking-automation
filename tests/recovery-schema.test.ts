@@ -5,12 +5,17 @@ import { recoveryFixture } from "./support/recovery";
 import { prepareDatabaseRole } from "../src/db/setup";
 import { verifyRuntimeRole } from "../src/db/runtime";
 import { recoverySchemaDefinitionHash } from "../src/recovery/postgres";
+import { financialExportFixture } from "./support/governance-financial";
+import { createMemoryStorage } from "./support/storage";
+import { recoveryTaxFilingFixture } from "./support/recovery-tax-filings";
+import { runtimeDatabase } from "../src/db/runtime";
 
 describe("Populated managed recovery schema reapplication", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
     f: Awaited<ReturnType<typeof recoveryFixture>>,
     owner: Headers,
-    operationId: string;
+    operationId: string,
+    filings: Awaited<ReturnType<typeof recoveryTaxFilingFixture>>;
   beforeAll(async () => {
     h = await createHarness();
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
@@ -21,12 +26,31 @@ describe("Populated managed recovery schema reapplication", () => {
       homeMarket: "US",
       website: "",
     });
+    const storage = createMemoryStorage();
+    h.clock.set("2026-11-05T09:00:00Z");
+    const financial = await financialExportFixture(
+      h,
+      storage,
+      "fixture:recovery-schema-tax-files",
+      true,
+    );
+    h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
+    filings = await recoveryTaxFilingFixture(h, financial);
     const reviewedDefinition = await recoverySchemaDefinitionHash(h.admin);
     // A genuine legacy schema snapshot, with existing public records, predates this reviewed constraint repair.
     await h.admin.query(
       "ALTER TABLE public.business DROP CONSTRAINT business_name_length",
     );
-    f = await recoveryFixture(h, owner, business.id);
+    f = await recoveryFixture(
+      h,
+      owner,
+      business.id,
+      [...storage.objects.values()].map((object) => ({
+        id: object.metadata.fileId,
+        bytes: Buffer.from(object.bytes),
+        retained: true,
+      })),
+    );
     Object.assign(f.plan, { appliedSchemaHash: reviewedDefinition });
     const op = await f.request();
     operationId = op.id;
@@ -148,6 +172,65 @@ describe("Populated managed recovery schema reapplication", () => {
       ).toEqual([{ convalidated: true }]);
       expect(actual.facts).toEqual(
         expect.arrayContaining(f.archive.manifest.facts),
+      );
+      for (const table of [
+        "tax_filing_export",
+        "tax_filing_policy",
+        "tax_filing_policy_decision",
+        "tax_filing_intent",
+        "tax_filing_event",
+        "tax_filing_evidence",
+        "tax_filing_bytes",
+        "tax_filing_access",
+        "tax_remittance_allocation",
+        "tax_remittance_review",
+      ])
+        expect(
+          BigInt(
+            f.archive.manifest.tables.find((row) => row.table === table)!.count,
+          ),
+          table,
+        ).toBeGreaterThan(0n);
+      const targetFilings = filings.application(
+        runtimeDatabase(f.target.runtime),
+      ).filings;
+      const retained = await targetFilings.workspace(filings.operator);
+      expect(
+        retained.intents.find((i) => i.id === filings.filing.intent.id)?.report,
+      ).toEqual(filings.originalReport);
+      expect(retained.allocationReviews).toHaveLength(2);
+      expect(
+        retained.intents.some(
+          (i) => i.amendmentOf === filings.filing.intent.id && i.filed,
+        ),
+      ).toBe(true);
+      expect(retained.periods[0]).toMatchObject({
+        filed: true,
+        paid: true,
+        fulfilled: false,
+        unconfirmedWorkCount: 1,
+      });
+      const original = (
+        await f.target.admin.query<{ body: string }>(
+          "SELECT body FROM tax_filing_bytes WHERE id=$1",
+          [filings.filing.artifact.id],
+        )
+      ).rows[0].body;
+      expect(Buffer.from(original, "base64")).toEqual(filings.filing.bytes);
+      await expect(
+        filings.readExpiredOriginal(runtimeDatabase(f.target.runtime)),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(JSON.stringify(actual)).not.toContain(filings.marker);
+      await h.admin.query(
+        "UPDATE platform_operator SET tax=false WHERE user_id=$1",
+        [filings.actor.userId],
+      );
+      await expect(
+        targetFilings.workspace(filings.operator),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await h.admin.query(
+        "UPDATE platform_operator SET tax=true WHERE user_id=$1",
+        [filings.actor.userId],
       );
       await expect(verifyRuntimeRole(f.target.runtime)).rejects.toMatchObject({
         code: "SETUP_REQUIRED",

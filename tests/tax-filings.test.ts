@@ -1531,6 +1531,51 @@ describe("Tax filing confirmations at the public application seam", () => {
     expect(completed.paid).toBe(true);
     expect((await app.workspace(f.operator)).allocations).toHaveLength(1);
   });
+  it("keeps an additional uncertain remittance due even after the reported liability was paid", async () => {
+    const f = await approvedPeriod(),
+      policy = await manualPolicy(f);
+    await confirmed(f, policy, "submission", "901");
+    await confirmed(f, policy, "remittance", "901");
+    expect((await app.workspace(f.operator)).periods[0].fulfilled).toBe(true);
+    const extra = await app.prepare(f.operator, {
+      ...identity(f.report),
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      kind: "remittance",
+      amountMinor: "100",
+      amendmentOf: null,
+      note: "Separately reviewed extra manual transfer",
+    });
+    await app.act(f.reviewer, {
+      requestKey: randomUUID(),
+      intentId: extra.id,
+      expectedVersion: 0,
+      kind: "approve",
+      note: "Explicit extra transfer review",
+    });
+    await app.act(f.operator, {
+      requestKey: randomUUID(),
+      intentId: extra.id,
+      expectedVersion: 1,
+      kind: "attempt",
+      outcome: "unknown",
+      reference: "extra-uncertain-transfer",
+      occurredAt: h.clock.now().toISOString(),
+      note: "Uncertain extra transfer is not a conclusive no-effect fact",
+    });
+    expect((await app.workspace(f.operator)).periods[0]).toMatchObject({
+      filed: true,
+      paid: true,
+      fulfilled: false,
+      confirmedPaidMinor: "901",
+      remainingMinor: "0",
+      unconfirmedWorkCount: 1,
+    });
+    await periods.evaluateReminders(f.operator);
+    expect(
+      (await periods.workspace(f.operator)).reminders.some((r) => r.current),
+    ).toBe(true);
+  });
   it("keeps a required historical filing issue due after a reviewed amendment and payment carry-forward", async () => {
     const f = await approvedPeriod(),
       policy = await manualPolicy(f);
