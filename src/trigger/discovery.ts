@@ -1,11 +1,25 @@
-import { AbortTaskRunError, task, schedules } from "@trigger.dev/sdk";
+import { capacityDeployment, capacityLimits } from "../discovery/capacity";
+import {
+  AbortTaskRunError,
+  task,
+  schedules,
+  concurrencyLimit,
+} from "@trigger.dev/sdk";
 import { withDiscoveryWorker } from "../discovery/worker";
 import { scheduleWorkSchema } from "../models/discovery-schedules";
 import { workSchema } from "../models/discovery";
 
+const capacity = capacityDeployment(process.env);
+// SDK 4.8.3 registers all named partitions during deployment. A named limit
+// does not buy compute: the reviewed finite provider allocation is required too.
+const limits = capacity
+  ? capacityLimits(capacity).map((limit) => concurrencyLimit(limit))
+  : [];
 export const boundedDiscovery = task({
   id: "bounded-prospect-discovery",
-  queue: { concurrencyLimit: 4 },
+  // Inline TOTAL remains enforced even when trigger-time named limits replace
+  // the task's defaults. Every application enqueue supplies global AND lane.
+  concurrency: [{ total: capacity?.policy.total ?? 1 }, ...limits.slice(0, 2)],
   // Infrastructure retries re-enter persisted checkpoints under the SAME attempt
   // allowance/deadline. An ambiguous reservation stops; it never repeats a call.
   retry: { maxAttempts: 3 },

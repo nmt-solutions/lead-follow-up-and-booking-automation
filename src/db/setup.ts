@@ -1,3 +1,8 @@
+import {
+  prepareDiscoveryCapacity,
+  secureDiscoveryCapacity,
+} from "./discovery-capacity-security";
+import { discoveryCapacityBinding, discoveryCapacityPolicy } from "./schema";
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import {
   prepareReconciliationSecurity,
@@ -260,6 +265,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await pool.query(
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
+  await prepareDiscoveryCapacity(pool);
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
   await prepareReachSecurity(pool);
@@ -906,6 +912,8 @@ export async function secureDatabase(pool: Pool) {
       invitation,
       teamAudit,
       platformOperator,
+      discoveryCapacityPolicy,
+      discoveryCapacityBinding,
       operationEvent,
       operationRetention,
       operationDetail,
@@ -1457,6 +1465,7 @@ export async function secureDatabase(pool: Pool) {
     await secureOperations(client);
     await secureDataGovernance(client);
     await secureTaxPeriods(client);
+    await secureDiscoveryCapacity(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");

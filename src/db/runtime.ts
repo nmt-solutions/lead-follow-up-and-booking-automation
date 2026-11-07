@@ -1,3 +1,4 @@
+import { verifyDiscoveryCapacity } from "./discovery-capacity-security";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { verifyTaxPeriods } from "./tax-period-security";
 import type { Pool, PoolClient } from "pg";
@@ -21,6 +22,7 @@ export type Database = ReturnType<typeof runtimeDatabase>;
 export async function verifyRuntimeRole(
   pool: Pool | PoolClient,
 ): Promise<void> {
+  await verifyDiscoveryCapacity(pool);
   await verifyReconciliationRuntime(pool);
   await verifyDataGovernance(pool);
   await verifyTaxPeriods(pool);

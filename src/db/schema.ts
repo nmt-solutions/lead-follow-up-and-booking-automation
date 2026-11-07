@@ -1,3 +1,5 @@
+import type { CapacityRoute } from "../models/discovery-capacity";
+import type { CapacityPolicy } from "../models/discovery-capacity";
 import type { MailAcceptance } from "../models/mail-dispatch";
 import type { ReconciliationEntry } from "../models/reconciliation";
 import type {
@@ -2427,6 +2429,34 @@ const discoveryScope = sql`business_id = nullif(current_setting('app.business_id
 const discoveryWrite = sql`(${discoveryScope}) and public.current_business_role() in ('owner', 'admin')`;
 const discoveryOwner = sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.discovery_run'::regclass)`;
 
+const capacityOperator = sql`coalesce(current_setting('app.business_id',true),'')='' and exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.discovery)`;
+export const discoveryCapacityPolicy = pgTable(
+  "discovery_capacity_policy",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull().unique(),
+    requestKey: uuid("request_key").notNull().unique(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    policy: jsonb("policy").$type<CapacityPolicy>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("discovery_capacity_policy_read", {
+      for: "select",
+      to: appRuntime,
+      using: capacityOperator,
+    }),
+    pgPolicy("discovery_capacity_policy_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: capacityOperator,
+    }),
+  ],
+).enableRLS();
+
 export const discoveryConfiguration = pgTable(
   "discovery_configuration",
   {
@@ -2513,6 +2543,36 @@ export const discoveryRun = pgTable(
       to: "public",
       using: discoveryOwner,
       withCheck: discoveryOwner,
+    }),
+  ],
+).enableRLS();
+
+export const discoveryCapacityBinding = pgTable(
+  "discovery_capacity_binding",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => discoveryRun.id),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => discoveryCapacityPolicy.id),
+    route: jsonb("route").$type<CapacityRoute>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("discovery_capacity_binding_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_capacity_binding_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: discoveryWrite,
     }),
   ],
 ).enableRLS();

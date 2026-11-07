@@ -1,3 +1,4 @@
+import { requireCapacityBindingCurrent } from "./discovery-capacity-repository";
 import { and, eq, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type { Transaction } from "./scope";
@@ -97,6 +98,7 @@ export async function checkCurrent(
   at: Date,
 ) {
   await requireDiscoveryAvailable(tx, run.businessId);
+  await requireCapacityBindingCurrent(tx, run);
   const { profile, policy } = await settings(tx, run.businessId, at);
   if (
     !policy ||

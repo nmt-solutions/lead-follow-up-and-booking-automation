@@ -1,3 +1,4 @@
+import { createDiscoveryCapacityRepository } from "../db/discovery-capacity-repository";
 import { Pool } from "pg";
 import { createDiscoveryApplication } from "../application/discovery";
 import { createDiscoveryRepository } from "../db/discovery-repository";
@@ -63,7 +64,11 @@ export async function withDiscoveryWorker<T>(
           ai,
           configuredExaRetrieval(process.env),
         ),
-        queue: configuredDiscoveryQueue(process.env),
+        queue: configuredDiscoveryQueue(
+          process.env,
+          createDiscoveryCapacityRepository(runtimeDatabase(pool)),
+        ),
+        requireCapacity: true,
         reportFailure: (diagnostic) =>
           console.error(
             JSON.stringify({ event: "discovery_failed", ...diagnostic }),

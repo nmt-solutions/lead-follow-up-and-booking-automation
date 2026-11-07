@@ -10,6 +10,7 @@ import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import {
   discoveryRun,
+  discoveryCapacityBinding,
   discoveryDispatch,
   discoverySchedule,
   discoveryProspect,
@@ -232,7 +233,23 @@ export function createDiscoveryRepository(
             clock.now(),
             checks.filter((c) => c.runId === row.id),
           );
+          const [capacityBinding] = await tx
+            .select()
+            .from(discoveryCapacityBinding)
+            .where(
+              and(
+                eq(discoveryCapacityBinding.id, row.executionId),
+                eq(discoveryCapacityBinding.businessId, businessId),
+              ),
+            );
           runs.push({
+            executionCapacity: capacityBinding
+              ? {
+                  mode: capacityBinding.route.mode,
+                  slots: capacityBinding.route.slots,
+                  policyVersion: capacityBinding.route.version,
+                }
+              : null,
             id: row.id,
             businessId,
             queueState:

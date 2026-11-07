@@ -1,3 +1,6 @@
+import { createDiscoveryCapacityApplication } from "../application/discovery-capacity";
+import { createDiscoveryCapacityHttp } from "../http/discovery-capacity";
+import { createDiscoveryCapacityRepository } from "../db/discovery-capacity-repository";
 import { createFinancialAdjustmentApplication } from "../application/financial-adjustments";
 import { createReconciliationApplication } from "../application/reconciliation";
 import { createReconciliationRepository } from "../db/reconciliation-repository";
@@ -454,6 +457,10 @@ async function composeServices() {
     clock: { now: () => new Date() },
     ...configuredAi(process.env),
   });
+  const discoveryCapacity = createDiscoveryCapacityApplication({
+    authenticate: access.authenticateForWork,
+    repository: createDiscoveryCapacityRepository(runtimeDatabase(pool)),
+  });
   const discovery = createDiscoveryApplication({
     authenticate,
     authenticateForWork: access.authenticateForWork,
@@ -466,7 +473,11 @@ async function composeServices() {
       ai,
       configuredExaRetrieval(process.env),
     ),
-    queue: configuredDiscoveryQueue(process.env),
+    queue: configuredDiscoveryQueue(
+      process.env,
+      createDiscoveryCapacityRepository(runtimeDatabase(pool)),
+    ),
+    requireCapacity: true,
     reportFailure: ({ businessId, runId, code }) =>
       console.error(
         JSON.stringify({ event: "discovery_failed", businessId, runId, code }),
@@ -897,6 +908,12 @@ async function composeServices() {
     ai,
     aiHttp: createAiHttp({
       application: ai,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
+    discoveryCapacity,
+    discoveryCapacityHttp: createDiscoveryCapacityHttp({
+      application: discoveryCapacity,
       origin: new URL(environment.BETTER_AUTH_URL).origin,
       reportFailure,
     }),

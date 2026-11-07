@@ -7,6 +7,8 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "discovery_capacity_policy",
+    "discovery_capacity_binding",
     "reconciliation_evidence",
     "reconciliation_record",
     "reconciliation_review",

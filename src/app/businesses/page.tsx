@@ -204,11 +204,29 @@ export default async function BusinessesPage() {
       return null;
     }
   })();
+  const capacityLink = await (async () => {
+    try {
+      await (
+        await getServices()
+      ).discoveryCapacity.configuration(await headers());
+      return (
+        <Link
+          href="/platform/discovery-capacity"
+          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Configure discovery capacity
+        </Link>
+      );
+    } catch {
+      return null;
+    }
+  })();
   if (!businesses.length)
     return (
       <div className="mx-auto max-w-2xl space-y-8">
         {billingReviewLink}
         {pricingLink}
+        {capacityLink}
         {refundsLink}
         {paymentsLink}
         {documentsLink}
@@ -237,6 +255,7 @@ export default async function BusinessesPage() {
       {operationsLink}
       {billingReviewLink}
       {pricingLink}
+      {capacityLink}
       {refundsLink}
       {paymentsLink}
       {documentsLink}

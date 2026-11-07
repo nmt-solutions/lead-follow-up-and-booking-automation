@@ -1,3 +1,4 @@
+import { bindDiscoveryCapacity } from "./discovery-capacity-repository";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -32,6 +33,8 @@ export async function persistDispatch(
   payload: Dispatch,
   at: Date,
 ) {
+  if (payload.kind === "discovery")
+    await bindDiscoveryCapacity(tx, payload.work);
   await tx.insert(discoveryDispatch).values({
     id: randomUUID(),
     businessId: payload.work.businessId,

@@ -118,7 +118,9 @@ export function SubscriptionQuoteSummary({ review }: { review: QuoteReview }) {
         {reserved
           ? `${reserved.label} — ${reserved.capacity.quantity} ${reserved.capacity.unit}`
           : "Pooled discovery; no reserved capacity charge"}
-        . Privacy and Business permissions apply in either mode.
+        . Privacy and Business permissions apply in either mode. Reserved
+        capacity requires a confirmed payment and an available approved
+        allocation; it does not guarantee leads or throughput.
       </p>
       <div className="grid gap-6 sm:grid-cols-2">
         <section className="space-y-3" aria-label="Initial platform charges">
