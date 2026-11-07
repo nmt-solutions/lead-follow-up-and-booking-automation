@@ -70,6 +70,8 @@ export function ReachChangeManager({
     : `/api/businesses/${businessId}/reach-changes`;
   const currentPeriod =
     state.currentPeriodId === undefined ? periodId : state.currentPeriodId;
+  const stopped =
+    state.configuration?.reasons.includes("business_offboarding_stop") === true;
   async function reload() {
     setState(
       await readCommercialResponse(
@@ -167,16 +169,31 @@ export function ReachChangeManager({
       {!operator && (
         <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
           <h2 className="text-xl font-semibold">Preview a reach change</h2>
-          {state.configuration && !state.configuration.ready && (
-            <p className="rounded-lg bg-muted p-4">
-              An operator must configure effective reach/proration and
-              campaign-disposition terms, a reviewed card account and matching
-              target plans.{" "}
-              {state.configuration.reasons
-                .map((r) => r.replaceAll("_", " "))
-                .join("; ")}
-              .
+          {stopped ? (
+            <p role="status" className="rounded-lg bg-muted p-4">
+              This Business is stopped. Reopen it through{" "}
+              <Link
+                href={`/businesses/${businessId}/data`}
+                className="text-primary underline"
+              >
+                Data export and offboarding
+              </Link>{" "}
+              before approving or continuing a reach change. Captured payments
+              and financial history remain available.
             </p>
+          ) : (
+            state.configuration &&
+            !state.configuration.ready && (
+              <p className="rounded-lg bg-muted p-4">
+                An operator must configure effective reach/proration and
+                campaign-disposition terms, a reviewed card account and matching
+                target plans.{" "}
+                {state.configuration.reasons
+                  .map((r) => r.replaceAll("_", " "))
+                  .join("; ")}
+                .
+              </p>
+            )
           )}
           {!currentPeriod ? (
             <p>
@@ -360,7 +377,7 @@ export function ReachChangeManager({
               {!operator && !approved && c.state !== "withdrawn" && (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button disabled={busy || !c.reviewHash}>
+                    <Button disabled={busy || stopped || !c.reviewHash}>
                       Review approval
                     </Button>
                   </AlertDialogTrigger>
@@ -400,7 +417,7 @@ export function ReachChangeManager({
               )}
               {approved && c.state !== "applied" && (
                 <Button
-                  disabled={busy}
+                  disabled={busy || stopped}
                   onClick={() => void act(() => command(c, "execute"))}
                 >
                   Continue approved change
@@ -422,7 +439,7 @@ export function ReachChangeManager({
                 !native.mandateReady && (
                   <Button
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || stopped}
                     onClick={() => void act(() => checkout(c, "mandate"))}
                   >
                     Authorize replacement card mandate
@@ -430,7 +447,7 @@ export function ReachChangeManager({
                 )}
               {!operator && approved && native?.orderId && !captured && (
                 <Button
-                  disabled={busy}
+                  disabled={busy || stopped}
                   onClick={() => void act(() => checkout(c, "delta"))}
                 >
                   Pay exact prorated amount

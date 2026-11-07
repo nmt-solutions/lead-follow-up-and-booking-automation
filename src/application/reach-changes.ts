@@ -164,6 +164,7 @@ export function createReachChangeApplication<C>(d: {
       const p = d.policy,
         at = d.clock.now();
       const reasons = [
+        ...(state.stopped ? ["business_offboarding_stop"] : []),
         ...(!d.gateway.reach ? ["native_card_adapter_required"] : []),
         ...(!p ? ["reviewed_reach_policy_required"] : []),
         ...(p?.inFlightUnengaged === "unknown"

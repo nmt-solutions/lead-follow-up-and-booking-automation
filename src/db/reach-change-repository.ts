@@ -155,6 +155,15 @@ async function targetQuote(
 const round = (value: bigint, numerator: bigint, denominator: bigint) =>
   (value * numerator * 2n + denominator) / (denominator * 2n);
 export function createReachChangeRepository(database: Database) {
+  async function stopped(tx: Transaction, businessId: string) {
+    const result = await tx.execute<{ stopped: boolean }>(
+      sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
+    );
+    return result.rows[0]?.stopped === true;
+  }
+  async function requireRunning(tx: Transaction, businessId: string) {
+    if (await stopped(tx, businessId)) throw new ApplicationError("FORBIDDEN");
+  }
   async function find(tx: Transaction, businessId: string, id: string) {
     const [row] = await tx
       .select()
@@ -217,6 +226,7 @@ export function createReachChangeRepository(database: Database) {
     policy?: ReachPolicy,
     renewal = false,
   ) {
+    await requireRunning(tx, row.businessId);
     if (
       !isDeepStrictEqual(
         policyAt(policy, gateway.mode, at),
@@ -453,7 +463,11 @@ export function createReachChangeRepository(database: Database) {
         const current = await tx.execute<{ id: string }>(
           sql`select id from public.current_paid_scope(${businessId}::uuid,${at.toISOString()}::timestamptz)`,
         );
-        return { changes, currentPeriodId: current.rows[0]?.id ?? null };
+        return {
+          changes,
+          currentPeriodId: current.rows[0]?.id ?? null,
+          stopped: await stopped(tx, businessId),
+        };
       });
     },
     queue(actor: Actor) {
@@ -585,10 +599,7 @@ export function createReachChangeRepository(database: Database) {
           const change = await view(tx, row);
           if (change.state === "withdrawn")
             throw new ApplicationError("CONFLICT");
-          if (
-            action === "execute" &&
-            !change.events.some((e) => e.fact.kind === "attempt")
-          ) {
+          if (action === "execute" && reachUnsent(change)) {
             const valid = (
               await tx.execute<{ valid: boolean }>(
                 sql`select ${row.expiresAt.toISOString()}::timestamptz>statement_timestamp() as valid`,
@@ -696,7 +707,9 @@ export function createReachChangeRepository(database: Database) {
           const events = (await view(tx, row)).events,
             native = events.filter((e) => e.fact.native).at(-1)?.fact.native;
           if (
-            events.filter((e) => e.fact.kind === "attempt").length === 1 &&
+            events.filter((e) => e.fact.kind === "attempt").length ===
+              events.filter((e) => e.fact.kind === "preflight_stopped").length +
+                1 &&
             !native?.oldStopped &&
             !native?.updated
           ) {
@@ -1005,6 +1018,7 @@ export function createReachChangeRepository(database: Database) {
         businessId,
         async (tx) => {
           await requireCapability(tx, actor, businessId, "billing.manage");
+          await requireRunning(tx, businessId);
           const [previous] = await tx
             .select()
             .from(reachChange)

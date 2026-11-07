@@ -15,6 +15,8 @@ Configure the existing reviewed Razorpay card account and exact monthly target-p
 
 Never replace a policy or account-review version with different contents. Create a new version and obtain fresh approval. Missing, expired or contradictory configuration produces an actionable setup/review state. Native exact-price changes after preview require a fresh preview; a proven unsent approval can be withdrawn without erasing its history. An ambiguous attempted effect cannot be withdrawn or blindly repeated.
 
+A proven-unsent preflight does not extend approval expiry. A retry checks the original database deadline again, including after slow native reads; once expired, withdraw the unused approval and obtain a fresh preview. Already attempted ambiguous effects and incurred money retain their original identity for reconciliation.
+
 Proration uses the original actual UTC period boundaries, including short February periods. Used/reserved units remain on the original period; only the prorated difference is added. No universal thirty-day period or allowance conversion is assumed. Mixed price/market/allowance directions and negative line deltas require a separately reviewed commercial choice rather than an inferred credit.
 
 ## Native execution and recovery
@@ -28,6 +30,8 @@ The replacement's reviewed target-plan collection count is displayed and frozen 
 There is no invented monetary-preview API, universal update idempotency header or deprecated add-on collection. Each exact mutation body and attempt is durable before I/O. Unknown outcomes are reconciled using saved native identity/notes/receipt, without another mutation. A final authority check follows external reads immediately before every mutation. The current actor, Business permission/MFA, account review, pricing, tax, policy and paid source are rechecked. Another current operator can execute an existing intent using a new attributable action; request UUIDs remain bound to their original actor and payload.
 
 The existing Trigger subscription recovery task performs factual reach recovery before and after ordinary payment reconciliation. It never needs the initiating browser session and does not issue new native mutations. Provider/account review changes can gate activation while already incurred factual money remains durable. Configure the existing recovery schedule, authenticated webhook and certificate-verifying restricted database connection. Effect remains limited to discovery orchestration.
+
+The persisted Business offboarding stop gates new previews, approval, secure checkout, every native mutation after preflight reads, and entitlement activation. Reconciliation can still retain a delta captured before or during the stop, with its original financial identity. It cannot grant expanded reach, create a replacement mandate/order or revive stopped acquisition. Reopen through **Data export and offboarding** before continuing an approved change; current account, policy, tax and payment checks still apply.
 
 ## Canonical financial and access contract
 
@@ -51,6 +55,7 @@ Actual merchant activation, commercial/legal/tax review, card eligibility and cu
 4. Approve a reduced target. Expect unchanged current reach, then reduced future discovery/new-prospect reach after the eligible captured renewal. Test a saved search and queued acquisition outside that reach: they pause/block. Retained prospects, evidence, incoming and engaged conversations remain visible.
 5. Issue the delta seller invoice and exercise a separately approved refund through Financial adjustments. Expect exact original delta tax and credit/cash history; configured blocking retracts only expansion. Original documents and payment history remain unchanged.
 6. Review keyboard/focus, errors/MFA recovery, compact and desktop layouts, enlarged text, light/dark appearance and accessibility preferences. Browser/UI validation and user acceptance are pending.
+7. Stop the Business through **Data export and offboarding**, including while a change is pending. Expect a visible stopped state, no new reach approval/mandate/order/update or entitlement activation, retained capture and document history, and permitted financial exports with original cash, original-tax credit and residual facts. Reconciliation cannot restart stopped acquisition or sender approvals.
 
 ## Primary provider references
 

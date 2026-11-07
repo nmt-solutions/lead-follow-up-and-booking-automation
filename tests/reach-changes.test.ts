@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { randomUUID, createHmac } from "node:crypto";
 import { createHarness } from "./support/harness";
 import { subscriptionFixture } from "./support/subscription";
@@ -18,10 +19,13 @@ import { createReachChangeApplication } from "../src/application/reach-changes";
 import { createReachChangeRepository } from "../src/db/reach-change-repository";
 import type { ReachPolicy } from "../src/models/reach-changes";
 import { verifyRuntimeRole } from "../src/db/runtime";
-import { secureDatabase } from "../src/db/setup";
+import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 import { reachFunctions } from "../src/db/reach-change-security";
 import { createReachChangeHttp } from "../src/http/reach-changes";
 import { campaignFixture } from "./support/campaigns";
+import { createDataGovernanceApplication } from "../src/application/data-governance";
+import { createDataGovernanceRepository } from "../src/db/data-governance-repository";
+import type { DataPolicy } from "../src/models/data-governance";
 
 const reachPolicy: ReachPolicy = {
   id: "synthetic-reach-policy",
@@ -104,6 +108,7 @@ describe("Approved reach changes at the public application seam", () => {
       paymentReads: number;
       beforeEffect?: () => Promise<void>;
       afterMutation?: () => Promise<void>;
+      afterOldStop?: () => Promise<void>;
     } = { loseUpdate: false, failUpdate: false, paymentReads: 0 };
     const orders = new Map<string, Record<string, unknown>>();
     native.configuration.fetch = async (input, init) => {
@@ -219,6 +224,8 @@ describe("Approved reach changes at the public application seam", () => {
         return Response.json(sub);
       }
       const response = await request(input, init);
+      if (init?.method === "POST" && url.pathname.endsWith("/cancel"))
+        await conditions.afterOldStop?.();
       if (
         native.loseCancellation &&
         init?.method === "POST" &&
@@ -429,6 +436,418 @@ describe("Approved reach changes at the public application seam", () => {
       orders,
     };
   }
+  function governance(f: Awaited<ReturnType<typeof setup>>) {
+    const policy: DataPolicy = {
+      id: "fixture-reach-offboarding",
+      version: 1,
+      businessIds: [f.business.id],
+      mode: "test",
+      reviewedBy: "fixture legal reviewer",
+      evidence: ["fixture executed retention agreement"],
+      effectiveFrom: "2026-11-01T00:00:00.000Z",
+      effectiveUntil: "2027-11-01T00:00:00.000Z",
+      access: "owner_admin",
+      afterCancellation: true,
+      preserveFinancial: true,
+      retention: {
+        retainedRecords: "source_contract",
+        financialEvidenceUntil: "2027-11-01T00:00:00.000Z",
+        evidence: "fixture preservation review",
+      },
+      exportSeconds: 3600,
+      grantSeconds: 60,
+      maxBytes: 2_000_000,
+      maxRows: 200,
+      storageScope: "fixture-private-bucket",
+      sourceRights: [],
+      deletion: null,
+      nativeRevocation: false,
+      maxAttempts: 3,
+      retrySeconds: 1,
+    };
+    const app = createDataGovernanceApplication({
+      authenticate: h.access.authenticatePrivileged,
+      repository: createDataGovernanceRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      storage: createMemoryStorage(),
+      storageScope: policy.storageScope,
+      policy: () => policy,
+      revoke: async () => "manual_required",
+    });
+    return {
+      app,
+      stop: () =>
+        app.offboard(f.owner, f.business.id, {
+          requestKey: randomUUID(),
+          policyId: policy.id,
+          policyVersion: policy.version,
+          confirmStop: true,
+          deleteGeneralFiles: false,
+          cancellation: null,
+        }),
+    };
+  }
+  it.each([
+    "before_preview",
+    "during_preview",
+    "before_approval",
+    "during_preflight",
+  ] as const)(
+    "honors the persisted Business stop %s without a new reach mutation",
+    async (stage) => {
+      const f = await setup(),
+        data = governance(f);
+      if (stage === "before_preview") await data.stop();
+      if (stage === "during_preview") {
+        f.conditions.paymentReads = 1;
+        f.conditions.beforeEffect = async () => {
+          await data.stop();
+        };
+      }
+      const preview = () =>
+        f.changes.preview(f.owner, f.business.id, {
+          periodId: f.original.id,
+          quoteId: f.target.id,
+          requestKey: randomUUID(),
+        });
+      if (stage === "before_preview" || stage === "during_preview")
+        await expect(preview()).rejects.toMatchObject({ code: "FORBIDDEN" });
+      else {
+        const change = await preview();
+        if (stage === "before_approval") await data.stop();
+        const approve = () =>
+          f.changes.approve(f.owner, f.business.id, {
+            changeId: change.id,
+            requestKey: randomUUID(),
+            accept: true,
+            reviewHash: change.reviewHash,
+          });
+        if (stage === "before_approval")
+          await expect(approve()).rejects.toMatchObject({ code: "FORBIDDEN" });
+        else {
+          await approve();
+          f.conditions.paymentReads = 0;
+          f.conditions.beforeEffect = async () => {
+            await data.stop();
+          };
+          await f.changes.execute(f.owner, f.business.id, {
+            changeId: change.id,
+            requestKey: randomUUID(),
+          });
+          await f.changes.recover();
+        }
+      }
+      expect(f.effects).toHaveLength(0);
+      expect((await data.app.workspace(f.owner, f.business.id)).stopped).toBe(
+        true,
+      );
+      expect(
+        (await f.changes.workspace(f.owner, f.business.id)).configuration,
+      ).toMatchObject({
+        ready: false,
+        reasons: expect.arrayContaining(["business_offboarding_stop"]),
+      });
+      expect(
+        (await f.payments.workspace(f.owner, f.business.id)).periods,
+      ).toEqual([f.original]);
+    },
+  );
+  it("retains captured delta money after a Business stop during native mutation without activating expanded reach", async () => {
+    const f = await setup(),
+      data = governance(f);
+    const change = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: change.reviewHash,
+    });
+    f.conditions.afterMutation = async () => {
+      await data.stop();
+      f.captureDelta();
+    };
+    await f.changes.execute(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.recover();
+    const state = await f.payments.workspace(f.owner, f.business.id);
+    expect(state.allowances?.discovery.included).toBe(100);
+    expect(
+      state.periods.find((p) => p.paymentId === "pay_delta")?.charge
+        ?.amountMinor,
+    ).toBe("1375");
+    expect(state.periods.find((p) => p.id === f.original.id)).toEqual(
+      f.original,
+    );
+    expect(
+      (
+        await f.changes.workspace(f.owner, f.business.id)
+      ).changes[0].events.some((e) => e.fact.kind === "applied"),
+    ).toBe(false);
+    expect(f.effects).toHaveLength(1);
+  });
+  it("stops domestic replacement creation when the Business stops after its old-renewal cancellation acknowledgement", async () => {
+    const f = await setup("IN"),
+      data = governance(f);
+    const change = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: change.reviewHash,
+    });
+    f.conditions.afterOldStop = async () => {
+      await data.stop();
+    };
+    await expect(
+      f.changes.execute(f.owner, f.business.id, {
+        changeId: change.id,
+        requestKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await f.changes.recover();
+    expect(
+      f.native.requests.filter(
+        (r) => r.method === "POST" && r.path.endsWith("/cancel"),
+      ),
+    ).toHaveLength(1);
+    expect(f.effects).toHaveLength(0);
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).periods,
+    ).toEqual([f.original]);
+  });
+  it("stops the separate domestic order when offboarding wins during the final native preflight", async () => {
+    const f = await setup("IN"),
+      data = governance(f);
+    const change = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: change.reviewHash,
+    });
+    await f.changes.execute(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+    });
+    await f.authenticateReplacement();
+    f.conditions.paymentReads = 0;
+    f.conditions.beforeEffect = async () => {
+      await data.stop();
+    };
+    await f.changes.execute(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.recover();
+    expect(
+      f.effects.filter((e) => e.path === "/v1/subscriptions"),
+    ).toHaveLength(1);
+    expect(f.effects.filter((e) => e.path === "/v1/orders")).toHaveLength(0);
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).periods,
+    ).toEqual([f.original]);
+  });
+  it("exports the original delta, native refund cash, original-tax credit and residual after offboarding without private authority", async () => {
+    const f = await setup(),
+      data = governance(f);
+    const change = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: change.reviewHash,
+    });
+    await f.changes.execute(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+    });
+    f.captureDelta();
+    await f.changes.refresh(f.owner, f.business.id, {
+      changeId: change.id,
+      requestKey: randomUUID(),
+    });
+    const delta = (
+      await f.payments.workspace(f.owner, f.business.id)
+    ).periods.find((p) => p.paymentId === "pay_delta")!;
+    const op = await h.signIn("delta-export-operator@example.com");
+    const actor = await h.authenticate(op);
+    await h.admin.query(
+      "insert into platform_operator(user_id,refunds,documents) values($1,true,true)",
+      [actor.userId],
+    );
+    const documents = createSellerDocumentApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createSellerDocumentRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      storage: createMemoryStorage(),
+      mode: "fixture",
+      policy: {
+        accountScope: "fixture",
+        maxBytes: 1000000,
+        accessTtlSeconds: 60,
+        recoveryLeaseSeconds: 60,
+      },
+    });
+    const issuer = await documents.saveIssuer(op, {
+      expectedVersion: 0,
+      note: "Synthetic USD delta issuer",
+      configuration: {
+        ...fixtureIssuer,
+        currencies: [{ ...fixtureIssuer.currencies[0], currency: "USD" }],
+      },
+    });
+    await documents.decideIssuer(op, {
+      revisionId: issuer.revisions[0].id,
+      expectedVersion: 0,
+      outcome: "approved",
+      note: "Synthetic reviewed issuer",
+    });
+    const originalInvoice = await documents.issue(f.owner, f.business.id, {
+      periodId: f.original.id,
+      requestKey: randomUUID(),
+    });
+    const invoice = await documents.issue(f.owner, f.business.id, {
+      periodId: delta.id,
+      requestKey: randomUUID(),
+    });
+    const adjustments = createFinancialAdjustmentApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createFinancialAdjustmentRepository(
+        runtimeDatabase(h.runtime),
+      ),
+      clock: h.clock,
+      gateway: configuredFinancialAdjustments(f.native.configuration),
+      documents,
+    });
+    const refund = await adjustments.review(op, f.business.id, {
+      kind: "refund",
+      invoiceId: invoice.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "1000" }],
+      reason: "private delta refund reason",
+      evidence: ["private delta refund evidence"],
+    });
+    await adjustments.execute(op, f.business.id, { caseId: refund.id });
+    f.native.refunds[0].status = "processed";
+    await adjustments.recover();
+    await adjustments.reviewCredit(op, f.business.id, {
+      caseId: refund.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "999" }],
+      reason: "private delta credit reason",
+      evidence: ["private delta credit evidence"],
+    });
+    const credited = await adjustments.credit(op, f.business.id, {
+      caseId: refund.id,
+    });
+    await data.stop();
+    const exported = await data.app.export(f.owner, f.business.id, {
+      requestKey: randomUUID(),
+    });
+    const grant = await data.app.access(f.owner, f.business.id, exported.id);
+    const download = await data.app.download(
+      f.owner,
+      f.business.id,
+      exported.id,
+      grant.token,
+    );
+    const text = new TextDecoder().decode(download.bytes);
+    const bundle = z
+      .object({
+        records: z.record(
+          z.string(),
+          z.array(z.record(z.string(), z.unknown())),
+        ),
+      })
+      .parse(JSON.parse(text));
+    expect(bundle.records.subscription_period).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: f.original.id,
+          payment_id: "pay_original",
+        }),
+        expect.objectContaining({
+          id: delta.id,
+          payment_id: "pay_delta",
+          snapshot: expect.objectContaining({
+            adjustment: expect.objectContaining({
+              kind: "reach_delta",
+              originalPeriodId: f.original.id,
+            }),
+            tax: expect.objectContaining({
+              totals: { netMinor: "1250", taxMinor: "125", totalMinor: "1375" },
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(bundle.records.financial_case_event).toMatchObject([
+      {
+        caseId: refund.id,
+        effect: {
+          paymentId: "pay_delta",
+          invoiceId: invoice.id,
+          periodId: delta.id,
+          currency: "USD",
+          actualMinor: "1100",
+          allocation: {
+            totals: { netMinor: "1000", taxMinor: "100", totalMinor: "1100" },
+          },
+        },
+        approvedCredit: {
+          actualMinor: "1100",
+          allocation: {
+            totals: { netMinor: "999", taxMinor: "100", totalMinor: "1099" },
+          },
+          uncreditedDifferenceMinor: "1",
+        },
+        creditDocumentId: credited.creditDocumentId,
+      },
+    ]);
+    expect(bundle.records.seller_document).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: originalInvoice.id }),
+        expect.objectContaining({ id: invoice.id }),
+        expect.objectContaining({
+          id: credited.creditDocumentId,
+          original_id: invoice.id,
+        }),
+      ]),
+    );
+    expect(text).not.toContain(actor.userId);
+    expect(text).not.toContain((await h.authenticate(f.owner)).userId);
+    expect(text).not.toContain("private delta");
+    expect(text).not.toMatch(
+      /"(?:recoveryKey|recovery_key|lease|authContext|payloadHash)"\s*:/,
+    );
+    expect(text).not.toMatch(/maxChargeMinor|native_proration_reviewed/);
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).periods.find(
+        (p) => p.id === delta.id,
+      ),
+    ).toEqual(delta);
+    expect(f.native.refundPosts).toHaveLength(1);
+  });
   it("freezes the exact approved calendar proration, tax and effective scope without granting reach", async () => {
     const f = await setup();
     const preview = await f.changes.preview(f.owner, f.business.id, {
@@ -1104,11 +1523,12 @@ describe("Approved reach changes at the public application seam", () => {
     expect(renewed.allowances?.discovery.included).toBe(200);
   });
   it.each([
-    ["approved boundary", 1796461200, true],
-    ["unapproved early end", 1796461199, false],
+    ["approved boundary", 1796461200, true, false],
+    ["unapproved early end", 1796461199, false, false],
+    ["approved boundary while offboarded", 1796461200, false, true],
   ] as const)(
     "applies a captured domestic reduction renewal only for its own old stop at the %s",
-    async (_reason, endedAt, eligible) => {
+    async (_reason, endedAt, eligible, offboarded) => {
       const f = await setup("IN", true);
       f.gateway.lifecyclePolicy = {
         id: "synthetic-lifecycle-policy",
@@ -1157,6 +1577,7 @@ describe("Approved reach changes at the public application seam", () => {
         actionId: f.action.id,
       });
       expect(stopped.lifecycle?.state).toBe("cancelled");
+      if (offboarded) await governance({ ...f, owner }).stop();
       Object.assign(f.native.subscriptions.get("sub_replacement")!, {
         status: "active",
         current_start: 1796461200,
@@ -1597,6 +2018,71 @@ describe("Approved reach changes at the public application seam", () => {
       (await f.payments.workspace(f.owner, f.business.id)).periods,
     ).toEqual([f.original]);
   });
+  it.each(["before_retry", "during_retry_read"] as const)(
+    "keeps a proven-unsent approval subject to database expiry %s",
+    async (stage) => {
+      const f = await setup();
+      const preview = await f.changes.preview(f.owner, f.business.id, {
+        periodId: f.original.id,
+        quoteId: f.target.id,
+        requestKey: randomUUID(),
+      });
+      await f.changes.approve(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+        accept: true,
+        reviewHash: preview.reviewHash,
+      });
+      const actor = await h.authenticate(f.owner);
+      f.conditions.beforeEffect = async () => {
+        await h.admin.query(
+          "UPDATE membership SET role='salesperson' WHERE user_id=$1 AND business_id=$2",
+          [actor.userId, f.business.id],
+        );
+      };
+      await expect(
+        f.changes.execute(f.owner, f.business.id, {
+          changeId: preview.id,
+          requestKey: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(f.effects).toHaveLength(0);
+      await h.admin.query(
+        "UPDATE membership SET role='owner' WHERE user_id=$1 AND business_id=$2",
+        [actor.userId, f.business.id],
+      );
+      const expire = async () => {
+        await h.admin.query(
+          "UPDATE reach_change SET expires_at=statement_timestamp()-interval '1 second' WHERE id=$1",
+          [preview.id],
+        );
+      };
+      f.conditions.paymentReads = 0;
+      f.conditions.beforeEffect =
+        stage === "during_retry_read" ? expire : undefined;
+      if (stage === "before_retry") await expire();
+      const retry = () =>
+        f.changes.execute(f.owner, f.business.id, {
+          changeId: preview.id,
+          requestKey: randomUUID(),
+        });
+      if (stage === "before_retry")
+        await expect(retry()).rejects.toMatchObject({ code: "CONFLICT" });
+      else await retry();
+      expect(f.effects).toHaveLength(0);
+      expect(
+        (await f.payments.workspace(f.owner, f.business.id)).periods,
+      ).toEqual([f.original]);
+      expect(
+        (
+          await f.changes.withdraw(f.owner, f.business.id, {
+            changeId: preview.id,
+            requestKey: randomUUID(),
+          })
+        ).state,
+      ).toBe("withdrawn");
+    },
+  );
   it("rechecks current Business authority after native reads and allows a different operator to resume the proven unsent stage", async () => {
     const f = await setup(),
       preview = await f.changes.preview(f.owner, f.business.id, {
@@ -1905,6 +2391,21 @@ describe("Approved reach changes at the public application seam", () => {
     await f.changes.recover();
     const before = await f.payments.workspace(f.owner, f.business.id),
       changes = await f.changes.workspace(f.owner, f.business.id);
+    await prepareDatabaseRole(h.admin);
+    await expect(
+      h.runtime.query("SELECT * FROM reach_change"),
+    ).rejects.toMatchObject({ code: "42501" });
+    // Exercise owner replacement of all referenced scope UNIQUE constraints while writes are paused.
+    await h.admin.query(`
+      ALTER TABLE subscription_payment DROP CONSTRAINT subscription_payment_scope;
+      ALTER TABLE subscription_payment ADD CONSTRAINT subscription_payment_scope UNIQUE(id,business_id);
+      ALTER TABLE subscription_period DROP CONSTRAINT subscription_period_scope;
+      ALTER TABLE subscription_period ADD CONSTRAINT subscription_period_scope UNIQUE(id,business_id);
+      ALTER TABLE subscription_quote DROP CONSTRAINT subscription_quote_scope;
+      ALTER TABLE subscription_quote ADD CONSTRAINT subscription_quote_scope UNIQUE(id,business_id);
+      ALTER TABLE reach_change DROP CONSTRAINT reach_change_scope;
+      ALTER TABLE reach_change ADD CONSTRAINT reach_change_scope UNIQUE(id,business_id);
+    `);
     await h.reapplySchema();
     await verifyRuntimeRole(h.runtime);
     expect(await f.payments.workspace(f.owner, f.business.id)).toEqual(before);
