@@ -698,6 +698,7 @@ function IntentPanel({
 }) {
   const [kind, setKind] = useState("approve"),
     [reading, setReading] = useState(false),
+    [downloadingId, setDownloadingId] = useState<string | null>(null),
     id = useId();
   const artifacts = workspace.evidence.filter(
     (e) => e.reportId === intent.target.reportId,
@@ -719,6 +720,36 @@ function IntentPanel({
     intent.status === "approved" &&
     !intent.reviewRequired &&
     intent.authorizationCurrent;
+  async function downloadOriginal(evidenceId: string, name: string) {
+    setDownloadingId(evidenceId);
+    onError("");
+    try {
+      const response = await fetch(
+        `${endpoint}/evidence/${evidenceId}/content`,
+        {
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        await readTaxResponse(response, z.unknown());
+        return;
+      }
+      const url = URL.createObjectURL(await response.blob()),
+        link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      onError(
+        cause instanceof Error
+          ? cause.message
+          : "Unable to download the original. Your form edits remain available.",
+      );
+    } finally {
+      setDownloadingId(null);
+    }
+  }
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const f = new FormData(event.currentTarget),
@@ -763,7 +794,10 @@ function IntentPanel({
     }
   }
   return (
-    <section className="space-y-4 rounded-2xl border border-border bg-card p-6 wrap-anywhere">
+    <section
+      className="space-y-4 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+      aria-busy={busy || reading || downloadingId !== null}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">
           {intent.kind === "submission"
@@ -1037,12 +1071,20 @@ function IntentPanel({
       <ul className="space-y-3">
         {artifacts.map((a) => (
           <li key={a.id} className="space-y-1 text-sm">
-            <a
-              href={`${endpoint}/evidence/${a.id}/content`}
-              className="inline-flex min-h-11 items-center text-primary underline"
+            <Button
+              variant="outline"
+              disabled={busy || downloadingId !== null}
+              onClick={() => void downloadOriginal(a.id, a.name)}
             >
-              Download original {a.name}
-            </a>
+              {downloadingId === a.id
+                ? "Downloading original…"
+                : `Download original ${a.name}`}
+            </Button>
+            {downloadingId === a.id && (
+              <p role="status">
+                Downloading the original file. Your form edits remain available.
+              </p>
+            )}
             <p>
               {a.reference} · {a.verification} · {a.actorName} · {a.occurredAt}
             </p>
