@@ -8,6 +8,7 @@ export const noticePurposeSchema = z.enum([
   "handoff",
   "operations",
   "subscription",
+  "tax_period",
 ]);
 export type NoticePurpose = z.infer<typeof noticePurposeSchema>;
 export const noticeStateSchema = z.enum([
@@ -138,7 +139,9 @@ export const noticeViewSchema = z.object({
 export type NoticeView = z.infer<typeof noticeViewSchema>;
 export const notificationWorkspaceSchema = z.object({
   bootstrapAuthOnly: z.boolean(),
-  allowedPreferences: z.array(z.enum(["operations", "subscription"])),
+  allowedPreferences: z.array(
+    z.enum(["operations", "subscription", "tax_period"]),
+  ),
   deployment: z.object({
     account: z.boolean(),
     domain: z.boolean(),
@@ -180,12 +183,12 @@ export type NoticeDraft = {
   sourceStage: string;
 };
 export const notificationPreferenceSchema = z.strictObject({
-  purpose: z.enum(["operations", "subscription"]),
+  purpose: z.enum(["operations", "subscription", "tax_period"]),
   enabled: z.boolean(),
   expectedVersion: z.number().int().nonnegative(),
 });
 export const notificationPreferenceViewSchema = z.object({
-  purpose: z.enum(["operations", "subscription"]),
+  purpose: z.enum(["operations", "subscription", "tax_period"]),
   enabled: z.boolean(),
   version: z.number().int().positive(),
 });

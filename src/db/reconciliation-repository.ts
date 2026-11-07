@@ -110,7 +110,10 @@ export function createReconciliationRepository(database: Database) {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended('reconciliation',0))`,
       );
-      return op(tx);
+      await authorize(tx, actor);
+      const result = await op(tx);
+      await authorize(tx, actor);
+      return result;
     });
   return {
     authorize: (actor: Actor) =>

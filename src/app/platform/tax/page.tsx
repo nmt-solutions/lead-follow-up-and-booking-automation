@@ -33,6 +33,12 @@ export default async function TaxReviewQueue() {
         >
           Manage tax rules and approvals
         </Link>
+        <Link
+          href="/platform/tax/periods"
+          className="ml-4 mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+        >
+          Prepare tax periods and review liability
+        </Link>
       </header>
       {!queue.length && (
         <p className="rounded-2xl border border-border bg-card p-6">
