@@ -96,9 +96,13 @@ export function createRecoveryRepository(database: Database, clock: Clock) {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`recovery:${requestKey}`},0))`,
         );
-        const prior = (await read(tx, plan.businessId)).find(
-          (r) => r.requestKey === requestKey,
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`recovery-plan:${plan.id}`},0))`,
         );
+        const existing = await read(tx, plan.businessId);
+        const prior =
+          existing.find((r) => r.requestKey === requestKey) ??
+          existing.find((r) => r.plan.id === plan.id);
         if (prior) {
           if (
             prior.actorId !== actor.userId ||
@@ -109,18 +113,16 @@ export function createRecoveryRepository(database: Database, clock: Clock) {
           return prior;
         }
         const id = randomUUID();
-        await tx
-          .insert(infrastructureRecovery)
-          .values({
-            id,
-            businessId: plan.businessId,
-            actorId: actor.userId,
-            sessionId: actor.sessionId,
-            authorizedSessionId: actor.sessionId,
-            requestKey,
-            plan,
-            planHash: sql`encode(sha256(convert_to(${JSON.stringify(plan)}::jsonb::text,'UTF8')),'hex')`,
-          });
+        await tx.insert(infrastructureRecovery).values({
+          id,
+          businessId: plan.businessId,
+          actorId: actor.userId,
+          sessionId: actor.sessionId,
+          authorizedSessionId: actor.sessionId,
+          requestKey,
+          plan,
+          planHash: sql`encode(sha256(convert_to(${JSON.stringify(plan)}::jsonb::text,'UTF8')),'hex')`,
+        });
         return (await read(tx, plan.businessId)).find((r) => r.id === id)!;
       });
     },

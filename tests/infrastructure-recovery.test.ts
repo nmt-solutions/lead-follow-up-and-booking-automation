@@ -72,6 +72,9 @@ describe("Isolated infrastructure recovery at the application seam", () => {
         /sessionId|recovery_session|lease/,
       );
       expect((await app.request(owner, request)).id).toBe(op.id);
+      expect(
+        (await app.request(owner, { ...request, requestKey: randomUUID() })).id,
+      ).toBe(op.id);
       await f.advance(op.id, 7);
       const recovered = await app.inspect(owner, {
         businessId: business.id,
@@ -91,12 +94,13 @@ describe("Isolated infrastructure recovery at the application seam", () => {
         events: expect.arrayContaining([
           expect.objectContaining({
             stage: "reconciled",
-            evidence: {
+            evidence: expect.objectContaining({
               native: [],
+              assurance: expect.objectContaining({ actorId: op.actorId }),
               unresolved: expect.arrayContaining([
                 "Current control-plane authorization unavailable",
               ]),
-            },
+            }),
           }),
         ]),
       });

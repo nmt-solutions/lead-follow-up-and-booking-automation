@@ -50,14 +50,20 @@ export function createRecoveryApplication<C>(d: {
     await d.repository.authorize(a);
     return a;
   }
+  async function disclose<T>(c: C, value: T, userId: string) {
+    const current = await actor(c);
+    if (current.userId !== userId) throw new ApplicationError("FORBIDDEN");
+    return value;
+  }
   return {
     async reconcileCosts(c: C, input: unknown) {
-      await actor(c);
+      const a = await actor(c);
       const parsed = z.strictObject({ planId: z.uuid() }).safeParse(input);
       if (!parsed.success) throw new ApplicationError("INVALID_INPUT");
       const plan = d.plans.find((p) => p.id === parsed.data.planId);
       if (!plan || !d.costs) throw new ApplicationError("SETUP_REQUIRED");
       for (const cost of plan.costs) {
+        await disclose(c, null, a.userId);
         const sourceId = `evidence:recovery:${cost.id}`,
           source = recoveryCostSource(plan, cost),
           state = await d.costs.workspace(c, source.month),
@@ -87,7 +93,7 @@ export function createRecoveryApplication<C>(d: {
             throw error;
         }
       }
-      return { reconciled: plan.costs.length };
+      return disclose(c, { reconciled: plan.costs.length }, a.userId);
     },
     async workspace(c: C) {
       const a = await actor(c);
@@ -98,7 +104,7 @@ export function createRecoveryApplication<C>(d: {
         d.plans.some((p) => isDeepStrictEqual(p, o.plan)),
       );
       const readiness = d.readiness?.() ?? [];
-      return {
+      const result = {
         configured: Boolean((d.adapter || d.queue) && d.plans.length),
         productionVerified: false as const,
         setupIssues: d.setupIssues ?? [],
@@ -144,6 +150,13 @@ export function createRecoveryApplication<C>(d: {
           mode: p.mode,
           reviewedId: p.reviewedId,
           cutoff: p.cutoff,
+          schemaHash: p.schemaHash,
+          appliedSchemaHash: p.appliedSchemaHash,
+          backupHash: p.backupHash,
+          inventoryHash: p.inventoryHash,
+          backupId: p.backupId,
+          source: p.source,
+          target: p.target,
           objectives: p.objectives,
           limits: p.limits,
           regions: p.regions,
@@ -152,6 +165,7 @@ export function createRecoveryApplication<C>(d: {
         })),
         operations: operations.map(publicOperation),
       };
+      return disclose(c, result, a.userId);
     },
     async request(c: C, input: unknown) {
       const a = await actor(c),
@@ -166,7 +180,7 @@ export function createRecoveryApplication<C>(d: {
         v.data.requestKey,
       );
       await d.queue?.enqueue(saved.id);
-      return publicOperation(saved);
+      return disclose(c, publicOperation(saved), a.userId);
     },
     async run(c: C, input: unknown) {
       const v = z
@@ -187,11 +201,12 @@ export function createRecoveryApplication<C>(d: {
       if (!d.adapter) {
         await d.repository.delegate(a, r.businessId, r.id);
         await d.queue!.enqueue(r.id);
-        return publicOperation(r);
+        return disclose(c, publicOperation(r), a.userId);
       }
-      if (r.stage === "inspection_ready") return publicOperation(r);
+      if (r.stage === "inspection_ready")
+        return disclose(c, publicOperation(r), a.userId);
       const key = await d.repository.claim(a, r.businessId, r.id);
-      if (!key) return publicOperation(r);
+      if (!key) return disclose(c, publicOperation(r), a.userId);
       r = await d.repository.get(a, r.businessId, r.id);
       const stage = recoveryStages[recoveryStages.indexOf(r.stage) + 1];
       if (!stage) throw new ApplicationError("CONFLICT");
@@ -228,7 +243,7 @@ export function createRecoveryApplication<C>(d: {
         throw new ApplicationError("PROVIDER_UNAVAILABLE");
       }
       r = await d.repository.get(a, r.businessId, r.id);
-      return publicOperation(r);
+      return disclose(c, publicOperation(r), a.userId);
     },
     async inspect(c: C, input: unknown) {
       const v = z
@@ -241,7 +256,7 @@ export function createRecoveryApplication<C>(d: {
         throw new ApplicationError("CONFLICT");
       const result = await d.adapter.inspect(r.plan, r.id);
       await d.repository.authorize(a, r.businessId);
-      return result;
+      return disclose(c, result, a.userId);
     },
   };
 }

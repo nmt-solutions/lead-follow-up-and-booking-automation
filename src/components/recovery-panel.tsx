@@ -208,9 +208,58 @@ export function RecoveryPanel({
               establishes an observed result. R2 is selected for the US
               jurisdiction; its location hint does not establish a state.
             </p>
+            <details>
+              <summary className="cursor-pointer font-medium">
+                Reviewed source, target and bundle
+              </summary>
+              <dl className="mt-3 space-y-3 break-all text-sm">
+                <div>
+                  <dt className="font-medium">Source</dt>
+                  <dd>
+                    {plan.source.project} / {plan.source.branch} /{" "}
+                    {plan.source.database}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-medium">Disposable target</dt>
+                  <dd>
+                    {plan.target.project} / {plan.target.branch} /{" "}
+                    {plan.target.database}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-medium">Backup identity and SHA-256</dt>
+                  <dd>
+                    {plan.backupId} · {plan.backupHash}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-medium">
+                    Reviewed schema/recovery bundle
+                  </dt>
+                  <dd>{plan.schemaHash}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium">Reviewed target schema shape</dt>
+                  <dd>{plan.appliedSchemaHash}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium">
+                    Frozen environment observation
+                  </dt>
+                  <dd>{plan.inventoryHash}</dd>
+                </div>
+              </dl>
+            </details>
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button disabled={busy || !state.configured}>
+                <Button
+                  disabled={
+                    busy ||
+                    !state.configured ||
+                    state.operations.some((op) => op.plan.id === plan.id)
+                  }
+                >
                   Start isolated recovery
                 </Button>
               </AlertDialogTrigger>
@@ -263,6 +312,13 @@ export function RecoveryPanel({
                 Shared commitments, observed requests and billed charges retain
                 separate stable identities and original currencies.
               </p>
+
+              {state.operations.some((op) => op.plan.id === plan.id) && (
+                <p className="text-sm text-muted-foreground">
+                  This reviewed plan already has a saved operation. Resume it in
+                  the history below.
+                </p>
+              )}
               {canReconcileCosts && (
                 <Button
                   className="mt-3"

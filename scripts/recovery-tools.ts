@@ -9,7 +9,11 @@ import {
   archiveHash,
   provisionRecoveryTarget,
 } from "../src/recovery/postgres";
-import { writeRecoveryArchive } from "../src/recovery/archive-store";
+import {
+  writeRecoveryArchive,
+  readRecoveryArchive,
+} from "../src/recovery/archive-store";
+import { createRecoveryArchiveStorage } from "../src/recovery/r2-archives";
 import {
   requireRecoveryBundle,
   recoverySchemaBundle,
@@ -77,9 +81,35 @@ try {
             backupHash: archiveHash(archive),
             cutoff: archive.manifest.cutoff,
             schemaHash: archive.manifest.schemaHash,
+            snapshotSchemaHash: archive.manifest.nativeSchemaHash,
             bytes: archive.ciphertext.length,
             next: "Review the exact output and retained file manifest; freeze a new approved registry hash before requesting recovery.",
           }),
+        );
+      } else if (action === "upload-backup") {
+        const archive = await readRecoveryArchive(
+          required("RECOVERY_ARCHIVE_DIRECTORY"),
+          plan.backupId,
+          plan.limits.backupBytes,
+        );
+        if (
+          archiveHash(archive) !== plan.backupHash ||
+          archive.manifest.cutoff !== plan.cutoff ||
+          archive.manifest.schemaHash !== plan.schemaHash
+        )
+          throw Error();
+        const archives = createRecoveryArchiveStorage({
+          accountId: inventory.storage.account,
+          bucket: inventory.storage.backupBucket,
+          accessKeyId: required("RECOVERY_ARCHIVE_WRITE_R2_ACCESS_KEY_ID"),
+          secretAccessKey: required(
+            "RECOVERY_ARCHIVE_WRITE_R2_SECRET_ACCESS_KEY",
+          ),
+          maxBytes: plan.limits.backupBytes,
+        });
+        await archives.put(archive);
+        console.log(
+          "Reviewed encrypted backup uploaded under its immutable identity. Recovery has not been verified.",
         );
       } else if (action === "provision-target" && target) {
         if (

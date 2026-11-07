@@ -21,7 +21,7 @@ import {
   observeRecoveryIdentities,
 } from "./configuration";
 import { createPostgresRecoveryAdapter, type NativeDatabase } from "./postgres";
-import { readRecoveryArchive } from "./archive-store";
+import { createRecoveryArchiveStorage } from "./r2-archives";
 import { requireRecoveryBundle } from "./bundle";
 import { createRecoveryReconciler } from "./reconciliation";
 
@@ -154,6 +154,16 @@ export async function configuredRecoveryNative(
         inventory.storage.targetBucket,
         "RECOVERY_TARGET_R2",
       );
+    const archives = createRecoveryArchiveStorage({
+      accountId: inventory.storage.account,
+      bucket: inventory.storage.backupBucket,
+      accessKeyId: required(env, "RECOVERY_ARCHIVE_READ_R2_ACCESS_KEY_ID"),
+      secretAccessKey: required(
+        env,
+        "RECOVERY_ARCHIVE_READ_R2_SECRET_ACCESS_KEY",
+      ),
+      maxBytes: plan.limits.backupBytes,
+    });
     const object = async (id: string) => {
       const f = plan.files.find((f) => f.id === id),
         m = objects.find((o) => o.id === id);
@@ -213,12 +223,7 @@ export async function configuredRecoveryNative(
         targetSeal: required(env, "RECOVERY_TARGET_SEAL"),
         pgRestore: required(env, "RECOVERY_PG_RESTORE"),
         key,
-        archive: (id) =>
-          readRecoveryArchive(
-            required(env, "RECOVERY_ARCHIVE_DIRECTORY"),
-            id,
-            plan.limits.backupBytes,
-          ),
+        archive: (id) => archives.get(id),
         reviewedSchema: {
           hash: plan.schemaHash,
           async apply(pool) {

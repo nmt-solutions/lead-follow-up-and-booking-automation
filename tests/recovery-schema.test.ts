@@ -4,6 +4,7 @@ import { createHarness } from "./support/harness";
 import { recoveryFixture } from "./support/recovery";
 import { prepareDatabaseRole } from "../src/db/setup";
 import { verifyRuntimeRole } from "../src/db/runtime";
+import { recoverySchemaDefinitionHash } from "../src/recovery/postgres";
 
 describe("Populated managed recovery schema reapplication", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
@@ -20,7 +21,13 @@ describe("Populated managed recovery schema reapplication", () => {
       homeMarket: "US",
       website: "",
     });
+    const reviewedDefinition = await recoverySchemaDefinitionHash(h.admin);
+    // A genuine legacy schema snapshot, with existing public records, predates this reviewed constraint repair.
+    await h.admin.query(
+      "ALTER TABLE public.business DROP CONSTRAINT business_name_length",
+    );
     f = await recoveryFixture(h, owner, business.id);
+    Object.assign(f.plan, { appliedSchemaHash: reviewedDefinition });
     const op = await f.request();
     operationId = op.id;
     await f.advance(op.id, 1);
@@ -89,12 +96,26 @@ describe("Populated managed recovery schema reapplication", () => {
         f.target.reapplySchema({ allowQuarantined: true });
     });
     it("applies the reviewed full schema through real Drizzle to the recovered backing store, then verifies actual restricted target records", async () => {
+      expect(
+        (
+          await f.target.admin.query(
+            "SELECT count(*)::int AS count FROM pg_constraint WHERE conname='business_name_length' AND conrelid='public.business'::regclass",
+          )
+        ).rows[0].count,
+      ).toBe(0);
       await f.advance(operationId, 2);
       await verifyRuntimeRole(f.target.runtime, { allowQuarantined: true });
       const actual = await f
         .application()
         .inspect(owner, { businessId: f.plan.businessId, operationId });
       expect(actual.business.name).toBe("Preserved recovery journal");
+      expect(
+        (
+          await f.target.admin.query(
+            "SELECT convalidated FROM pg_constraint WHERE conname='business_name_length' AND conrelid='public.business'::regclass",
+          )
+        ).rows,
+      ).toEqual([{ convalidated: true }]);
       expect(actual.facts).toEqual(
         expect.arrayContaining(f.archive.manifest.facts),
       );

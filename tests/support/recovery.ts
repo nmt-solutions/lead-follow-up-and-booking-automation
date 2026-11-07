@@ -17,6 +17,10 @@ import {
   type RecoveryPlan,
 } from "../../src/models/infrastructure-recovery";
 import { recoverySchemaBundle } from "../../src/recovery/bundle";
+import {
+  encodeRecoveryArchive,
+  decodeRecoveryArchive,
+} from "../../src/recovery/archive-store";
 import { prepareDatabaseRole } from "../../src/db/setup";
 import { createRecoveryApplication } from "../../src/application/infrastructure-recovery";
 import { createRecoveryRepository } from "../../src/db/recovery-repository";
@@ -96,6 +100,8 @@ export async function recoveryFixture(
       reviewedId: "review-58",
       reviewedBy: "fixture-reviewer",
       schemaHash,
+      inventoryHash: recoveryDigest("fixture-reviewed-inventory"),
+      appliedSchemaHash: archive.manifest.nativeSchemaHash,
       backupId: archive.manifest.id,
       backupHash: archiveHash(archive),
       source,
@@ -150,7 +156,10 @@ export async function recoveryFixture(
       observedSource: source,
       observedTarget: destination,
       expiresAt: future,
-      archive: archive as RecoveryArchive,
+      archive: (await decodeRecoveryArchive(
+        encodeRecoveryArchive(archive),
+        100000000,
+      )) as RecoveryArchive,
       failSchema: false,
       schemaRunner: null as null | (() => Promise<void>),
       failAfterRestore: false,

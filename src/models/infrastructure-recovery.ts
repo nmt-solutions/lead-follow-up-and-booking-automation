@@ -22,6 +22,8 @@ export const recoveryPlanSchema = z
     reviewedId: identity,
     reviewedBy: identity,
     schemaHash: recoveryHash,
+    appliedSchemaHash: recoveryHash,
+    inventoryHash: recoveryHash,
     backupId: identity,
     backupHash: recoveryHash,
     source: z.strictObject({

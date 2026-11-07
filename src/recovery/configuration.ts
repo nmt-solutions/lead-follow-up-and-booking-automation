@@ -89,6 +89,7 @@ export async function observeRecoveryIdentities(d: {
   const { plan, inventory } = d;
   if (
     inventory.planId !== plan.id ||
+    recoveryDigest(JSON.stringify(inventory)) !== plan.inventoryHash ||
     inventory.configurationHash !== recoveryConfigurationHash(plan) ||
     new Date(inventory.expiresAt) <= d.now() ||
     inventory.storage.sourceBucket !== plan.source.bucket ||
@@ -155,6 +156,7 @@ export async function observeRecoveryIdentities(d: {
     source: plan.source,
     target: plan.target,
     expiresAt: inventory.expiresAt,
+    nativeVerified: true as const,
   };
 }
 export function recoveryReadiness(
@@ -167,6 +169,7 @@ export function recoveryReadiness(
     const inventory = inventories.find(
       (i) =>
         i.planId === plan.id &&
+        recoveryDigest(JSON.stringify(i)) === plan.inventoryHash &&
         i.configurationHash === recoveryConfigurationHash(plan),
     );
     const fresh = Boolean(

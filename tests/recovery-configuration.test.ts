@@ -9,7 +9,10 @@ import {
   observeRecoveryIdentities,
   recoveryReadiness,
 } from "../src/recovery/configuration";
-import { recoveryDigest } from "../src/recovery/postgres";
+import {
+  captureRecoveryArchive,
+  recoveryDigest,
+} from "../src/recovery/postgres";
 import { recoveryPlanSchema } from "../src/models/infrastructure-recovery";
 import { recoveryDatabase } from "../src/recovery/native-configuration";
 
@@ -35,7 +38,7 @@ describe("Configured native recovery contracts", () => {
     await h?.close();
   });
   function inventory() {
-    return recoveryInventorySchema.parse({
+    const result = recoveryInventorySchema.parse({
       planId: f.plan.id,
       configurationHash: recoveryConfigurationHash(f.plan),
       expiresAt: f.plan.observationExpiresAt,
@@ -67,6 +70,8 @@ describe("Configured native recovery contracts", () => {
       isolationEvidence: "fixture:separate-auth-webhooks-keys",
       commercialApproval: "fixture:actual-terms-required",
     });
+    f.plan.inventoryHash = recoveryDigest(JSON.stringify(result));
+    return result;
   }
   it("requires the immutable server registry and refuses production, same-source or arbitrary privileged substitutions", () => {
     const raw = JSON.stringify([f.plan]);
@@ -143,6 +148,7 @@ describe("Configured native recovery contracts", () => {
       source: f.plan.source,
       target: f.plan.target,
       expiresAt: f.plan.observationExpiresAt,
+      nativeVerified: true,
     });
     expect(requests).toHaveLength(4);
     const wrongRegion: typeof fetch = async () =>
@@ -223,5 +229,23 @@ describe("Configured native recovery contracts", () => {
         "postgresql://app_runtime:fixture-password@ep-other-pooler.us-east-1.aws.neon.tech/neondb",
       ),
     ).toThrowError("SETUP_REQUIRED");
+  });
+  it("refuses to label bytes from a foreign real source as the approved backup provenance", async () => {
+    await expect(
+      captureRecoveryArchive({
+        source: {
+          admin: h.admin,
+          runtime: h.runtime,
+          environment: h.nativeEnvironment,
+        },
+        sourceIdentity: f.plan.target,
+        businessId: f.plan.businessId,
+        schemaHash: f.plan.schemaHash,
+        id: "foreign-provenance",
+        key: Buffer.alloc(32, 1),
+        pgDump: "must-not-launch-a-native-export",
+        maxBytes: 100000000,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

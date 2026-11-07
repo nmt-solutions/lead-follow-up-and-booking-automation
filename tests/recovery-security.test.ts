@@ -118,6 +118,35 @@ describe("Recovery authority, replay and database security", () => {
       await r.close();
     }
   });
+  it("rechecks current recovery authority before returning sensitive workspace state", async () => {
+    const { owner, r } = await fixture();
+    try {
+      const identity = await h.authenticate(owner);
+      let calls = 0;
+      const app = createRecoveryApplication({
+        authenticate: async (credentials: Headers) => {
+          calls++;
+          if (calls === 2)
+            await h.admin.query(
+              "UPDATE platform_operator SET recovery=false WHERE user_id=$1",
+              [identity.userId],
+            );
+          return h.access.authenticateForWork(credentials);
+        },
+        repository: createRecoveryRepository(
+          runtimeDatabase(h.runtime),
+          h.clock,
+        ),
+        plans: [r.plan],
+        adapter: r.adapter(),
+      });
+      await expect(app.workspace(owner)).rejects.toMatchObject({
+        code: "FORBIDDEN",
+      });
+    } finally {
+      await r.close();
+    }
+  });
   it("denies substituted source/target/production identities and stale observations without advancing verification, then restarts the same operation", async () => {
     const { owner, business, r } = await fixture();
     try {

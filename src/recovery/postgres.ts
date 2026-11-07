@@ -69,6 +69,7 @@ const representative = [
   "subscription_payment",
   "subscription_period",
   "seller_document",
+  "business_file",
   "financial_case",
   "financial_case_event",
   "financial_receipt",
@@ -93,6 +94,7 @@ async function nativeSchemaHash(client: Pool | PoolClient) {
   ).rows;
   return recoveryDigest(JSON.stringify(definitions));
 }
+export const recoverySchemaDefinitionHash = nativeSchemaHash;
 async function inventory(client: Pool | PoolClient) {
   const tables = (
     await client.query<{ name: string }>(
@@ -203,6 +205,25 @@ export async function captureRecoveryArchive(d: {
   maxBytes: number;
 }): Promise<RecoveryArchive> {
   if (d.key.length !== 32) throw new ApplicationError("SETUP_REQUIRED");
+  const configured = d.source.admin.options.connectionString
+    ? new URL(d.source.admin.options.connectionString)
+    : null;
+  const host = configured?.hostname ?? d.source.admin.options.host,
+    port = configured?.port || d.source.admin.options.port || 5432,
+    name = configured
+      ? decodeURIComponent(configured.pathname.slice(1))
+      : d.source.admin.options.database;
+  const nativeHost = d.source.environment.PGHOST?.endsWith(".neon.tech")
+    ? d.source.environment.PGHOST
+    : `${d.source.environment.PGHOST}:${d.source.environment.PGPORT}`;
+  if (
+    host !== d.source.environment.PGHOST ||
+    String(port) !== d.source.environment.PGPORT ||
+    name !== d.source.environment.PGDATABASE ||
+    name !== d.sourceIdentity.database ||
+    nativeHost !== d.sourceIdentity.host
+  )
+    throw new ApplicationError("FORBIDDEN");
   const client = await d.source.admin.connect(),
     directory = await mkdtemp(join(tmpdir(), "recovery-backup-"));
   try {
@@ -213,10 +234,13 @@ export async function captureRecoveryArchive(d: {
         cutoff: Date;
         transaction: string;
         wal_lsn: string;
+        database: string;
       }>(
-        "SELECT pg_export_snapshot() AS snapshot,statement_timestamp() AS cutoff,pg_current_snapshot()::text AS transaction,pg_current_wal_lsn()::text AS wal_lsn",
+        "SELECT pg_export_snapshot() AS snapshot,statement_timestamp() AS cutoff,pg_current_snapshot()::text AS transaction,pg_current_wal_lsn()::text AS wal_lsn,current_database() AS database",
       )
     ).rows[0];
+    if (snapshot.database !== d.sourceIdentity.database)
+      throw new ApplicationError("FORBIDDEN");
     const manifest: RecoveryManifest = {
       version: 1,
       id: d.id,
@@ -294,6 +318,7 @@ export function createPostgresRecoveryAdapter(d: {
     source: RecoveryPlan["source"];
     target: RecoveryPlan["target"];
     expiresAt: string;
+    nativeVerified?: boolean;
   }>;
   files: {
     readRetained(id: string): Promise<Buffer | null>;
@@ -315,6 +340,7 @@ export function createPostgresRecoveryAdapter(d: {
       JSON.stringify(observation.target) !== JSON.stringify(plan.target) ||
       new Date(observation.expiresAt) <= now ||
       new Date(plan.observationExpiresAt) <= now ||
+      (plan.mode === "configured" && observation.nativeVerified !== true) ||
       d.reviewedSchema.hash !== plan.schemaHash
     )
       throw new ApplicationError("SETUP_REQUIRED");
@@ -382,7 +408,10 @@ export function createPostgresRecoveryAdapter(d: {
     if (
       source.database !== plan.source.database ||
       target.database !== plan.target.database ||
-      JSON.stringify(source) === JSON.stringify(target)
+      // Managed endpoints may reuse private socket addresses across projects.
+      // Only authenticated native endpoint evidence can replace the local socket distinction.
+      (JSON.stringify(source) === JSON.stringify(target) &&
+        observation.nativeVerified !== true)
     )
       throw new ApplicationError("FORBIDDEN");
     const seal = (
@@ -418,13 +447,20 @@ export function createPostgresRecoveryAdapter(d: {
       )
     ).rows[0];
   }
-  async function verify(plan: RecoveryPlan) {
+  async function verify(
+    plan: RecoveryPlan,
+    shape: "snapshot" | "reviewed" | "records" = "snapshot",
+  ) {
     const a = await artifact(plan);
     // The source recovery journal advances AFTER the snapshot; compare against the frozen archive, not today's source.
     const found = await inventory(d.target.admin);
     if (
       JSON.stringify(found) !== JSON.stringify(a.manifest.tables) ||
-      (await nativeSchemaHash(d.target.admin)) !== a.manifest.nativeSchemaHash
+      (shape !== "records" &&
+        (await nativeSchemaHash(d.target.admin)) !==
+          (shape === "snapshot"
+            ? a.manifest.nativeSchemaHash
+            : plan.appliedSchemaHash))
     )
       throw new ApplicationError("CONFLICT");
     return a;
@@ -563,10 +599,13 @@ export function createPostgresRecoveryAdapter(d: {
         return { physicalTarget };
       }
       if (stage === "secured") {
-        await verify(plan);
+        // Restore already proved the snapshot shape. A restarted, reviewed schema
+        // application may have committed DDL before its acknowledgement was lost.
+        await verify(plan, "records");
         await authorize();
         await d.reviewedSchema.apply(d.target.admin);
         await secureDatabase(d.target.admin, { allowQuarantined: true });
+        await verify(plan, "reviewed");
         await verifyRuntimeRole(d.target.runtime, { allowQuarantined: true });
         // Authentication keys, callbacks and workers are never copied into target configuration. All runtime writes are additionally fenced in PostgreSQL.
         await d.target.admin.query(
@@ -575,7 +614,7 @@ export function createPostgresRecoveryAdapter(d: {
         return { security: "restricted-verified", physicalTarget };
       }
       if (stage === "verified") {
-        await verify(plan);
+        await verify(plan, "reviewed");
         await verifyRuntimeRole(d.target.runtime, { allowQuarantined: true });
         return {
           facts: (await secureInspection(plan, id)).facts,

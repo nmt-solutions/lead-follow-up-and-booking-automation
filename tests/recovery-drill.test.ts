@@ -9,6 +9,7 @@ import {
   vi,
 } from "vitest";
 import { randomUUID, createHmac } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { createHarness } from "./support/harness";
 import { recoveryFixture } from "./support/recovery";
 import { financialExportFixture } from "./support/governance-financial";
@@ -22,13 +23,16 @@ import { createFinancialAdjustmentApplication } from "../src/application/financi
 import { createFinancialAdjustmentRepository } from "../src/db/financial-adjustment-repository";
 import { createRecoveryReconciler } from "../src/recovery/reconciliation";
 import { configuredFinancialAdjustments } from "../src/financial-adjustments/configuration";
+import { createFileApplication } from "../src/application/files";
+import { createFileRepository } from "../src/db/file-repository";
 
 describe("Populated native PostgreSQL infrastructure drill", () => {
   let h: Awaited<ReturnType<typeof createHarness>>,
     f: Awaited<ReturnType<typeof financialExportFixture>>,
     r: Awaited<ReturnType<typeof recoveryFixture>>,
     pending: { id: string },
-    owner: Headers;
+    owner: Headers,
+    unretainedId: string;
   beforeAll(async () => {
     h = await createHarness();
   });
@@ -105,16 +109,45 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       reason: "Fixture reviewed pending refund",
       evidence: ["fixture:reviewed-refund"],
     });
-    const copies = [...storage.objects.values()].map((object, i) => ({
-      id: `artifact-${i}`,
-      bytes: Buffer.from(object.bytes),
-      retained: true,
-    }));
-    copies.push({
-      id: "unretained-old-upload",
-      bytes: Buffer.from("deleted source bytes without retained copy"),
-      retained: false,
+    const files = createFileApplication({
+      authenticate: h.authenticate,
+      repository: createFileRepository(runtimeDatabase(h.runtime)),
+      storage,
+      clock: h.clock,
+      policy: {
+        maxBytes: 1024,
+        allowedTypes: ["text/plain"],
+        uploadTtlSeconds: 60,
+        accessTtlSeconds: 30,
+        retentionSeconds: 3600,
+        operationTimeoutSeconds: 5,
+        cleanupGraceSeconds: 60,
+        recordRetentionSeconds: 3600,
+        accountScope: "fixture:recovery-files",
+      },
     });
+    const missing = Buffer.from(
+        "Billing support without a retained object copy",
+      ),
+      upload = await files.beginUpload(f.owner, f.business.id, {
+        name: "billing-support.txt",
+        purpose: "billing",
+        contentType: "text/plain",
+        size: missing.length,
+      });
+    await files.completeUpload(
+      f.owner,
+      f.business.id,
+      upload.file.id,
+      upload.token,
+      missing,
+    );
+    unretainedId = upload.file.id;
+    const copies = [...storage.objects.values()].map((object) => ({
+      id: object.metadata.fileId,
+      bytes: Buffer.from(object.bytes),
+      retained: object.metadata.fileId !== unretainedId,
+    }));
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
     owner = await h.signIn(`recovery-${randomUUID()}@example.com`);
     r = await recoveryFixture(h, owner, f.business.id, copies);
@@ -188,6 +221,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       "financial_case",
       "financial_case_event",
       "financial_receipt",
+      "business_file",
     ]) {
       expect(
         recovered.facts.filter((f) => f.table === table).length,
@@ -204,7 +238,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
         (e) => e.stage === "quarantined" && e.outcome === "completed",
       )?.evidence.files,
     ).toContainEqual({
-      id: "unretained-old-upload",
+      id: unretainedId,
       hash: r.plan.files.at(-1)!.hash,
       bytes: r.plan.files.at(-1)!.bytes,
       status: "omitted",
@@ -243,5 +277,38 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
     ).rejects.toBeDefined();
     expect(f.native.refundPosts).toHaveLength(2);
     expect(r.controls.targetFiles.size).toBe(r.plan.files.length - 1);
+    if (process.env.RECOVERY_TEST_EVIDENCE_PATH)
+      await writeFile(
+        process.env.RECOVERY_TEST_EVIDENCE_PATH,
+        JSON.stringify(
+          {
+            fixtureOnly: true,
+            operationId: op.id,
+            businessId: f.business.id,
+            backupId: r.plan.backupId,
+            backupHash: r.plan.backupHash,
+            cutoff: r.plan.cutoff,
+            snapshot: r.archive.manifest.snapshot,
+            schemaBundleHash: r.plan.schemaHash,
+            appliedSchemaHash: r.plan.appliedSchemaHash,
+            tables: r.archive.manifest.tables,
+            restrictedTargetFacts: recovered.facts,
+            files: saved.events.find(
+              (e) => e.stage === "quarantined" && e.outcome === "completed",
+            )?.evidence.files,
+            physicalTarget: saved.events.find(
+              (e) => e.stage === "verified" && e.outcome === "completed",
+            )?.evidence.physicalTarget,
+            native: saved.events.find(
+              (e) => e.stage === "reconciled" && e.outcome === "completed",
+            )?.evidence.native,
+            nativeRefundPostsBeforeAndAfterRestoredExecution: 2,
+            productionVerified: false,
+          },
+          null,
+          2,
+        ),
+        { mode: 0o600 },
+      );
   });
 });

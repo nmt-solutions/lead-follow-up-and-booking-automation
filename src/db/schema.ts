@@ -5894,6 +5894,7 @@ export const infrastructureRecovery = pgTable(
   (t) => [
     unique("recovery_business_scope").on(t.id, t.businessId),
     unique("recovery_request_once").on(t.requestKey),
+    uniqueIndex("recovery_plan_once").on(sql`(${t.plan}->>'id')`),
     check(
       "recovery_plan_scope",
       sql`${t.plan}->>'businessId'=${t.businessId}::text and ${t.planHash}=encode(sha256(convert_to(${t.plan}::text,'UTF8')),'hex')`,
