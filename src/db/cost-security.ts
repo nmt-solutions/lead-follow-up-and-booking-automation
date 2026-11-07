@@ -1,5 +1,95 @@
 import type { Pool, PoolClient } from "pg";
 
+/** Shared canonical native evidence. Callers must retain their own authorization boundary. */
+export const nativeCostSourcesSql = `        SELECT 'native:ai:'||a.id,'ai',a.business_id,u.run_id,a.at,
+          jsonb_build_object('route',a.route,'outcome',a.outcome,'funding',a.funding_source,
+            'inputTokens',a.metrics->'inputTokens','outputTokens',a.metrics->'outputTokens',
+            'providerCostUsd',a.metrics->'providerCostUsd','gatewayCostUsd',a.metrics->'gatewayCostUsd',
+            'model',a.metrics->'model','credentialSource',a.metrics->'credentialSource')
+        FROM public.ai_attempt a JOIN public.ai_execution x ON x.id=a.execution_id AND x.business_id=a.business_id
+        LEFT JOIN public.discovery_usage u ON u.id=x.request_key AND u.business_id=a.business_id AND u.kind='review'
+        WHERE to_char(a.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:discovery:'||u.id,'discovery',u.business_id,u.run_id,u.at,
+          jsonb_build_object('kind',u.kind,'allowanceUnits',u.units,'outcome',u.outcome,'returnedResults',u.returned_results,
+            'adapter',CASE WHEN r.policy->'exa' IS NOT NULL THEN 'exa' ELSE r.policy->>'adapterId' END,
+            'estimatedUsd',u.provider_cost->'estimatedUsd','requestId',u.provider_cost->'requestId')
+        FROM public.discovery_usage u JOIN public.discovery_run r ON r.id=u.run_id AND r.business_id=u.business_id
+        WHERE to_char(u.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:file:'||u.id,'storage',u.business_id,NULL::uuid,u.at,
+          jsonb_build_object('action',u.action,'outcome',u.outcome)
+        FROM public.file_usage u WHERE to_char(u.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:mailbox-job:'||j.id,'mailbox_job',j.business_id,NULL::uuid,j.created_at,
+          jsonb_build_object('state',j.state->>'phase')
+        FROM public.mailbox_job j WHERE to_char(j.created_at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:native-mail:'||m.id,'native_mail',m.business_id,NULL::uuid,m.at,
+          jsonb_build_object('provider',c.provider,'duplicateOf',coalesce(
+            (SELECT 'native:opportunity-mail:'||a.id FROM public.opportunity_due_action a WHERE a.business_id=m.business_id
+              AND a.email->'result'->'receipt'->>'messageRef'=m.message_ref AND a.email->'envelope'->>'connectionId'=c.connection_id::text LIMIT 1),
+            (SELECT 'native:sequence-mail:'||(a.receipt->>'attemptId') FROM public.email_sequence_action a WHERE a.business_id=m.business_id
+              AND a.receipt->>'messageRef'=m.message_ref AND a.receipt->>'connectionId'=c.connection_id::text LIMIT 1)))
+        FROM public.mailbox_app_message m JOIN public.mailbox_policy c ON c.id=m.mailbox_id AND c.business_id=m.business_id
+        WHERE to_char(m.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:opportunity-mail:'||a.id,'ordinary_mail',a.business_id,NULL::uuid,(a.email->'envelope'->>'reservedAt')::timestamptz,
+          jsonb_build_object('provider',a.email->'envelope'->>'adapterKey','mode',a.email->'envelope'->>'adapterMode',
+            'outcome',coalesce(a.email->'result'->>'status','uncertain'))
+        FROM public.opportunity_due_action a WHERE a.email->'envelope' IS NOT NULL
+          AND to_char((a.email->'envelope'->>'reservedAt')::timestamptz AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:sequence-mail:'||e.attempt_id,'sequence_mail',e.business_id,e.run_id,e.at,
+          jsonb_build_object('provider',e.envelope->>'adapterKey','mode',e.envelope->>'adapterMode','outcome',coalesce(l.kind,'attempt_reserved'))
+        FROM public.email_sequence_event e LEFT JOIN LATERAL(
+          SELECT n.kind FROM public.email_sequence_event n WHERE n.business_id=e.business_id AND n.attempt_id=e.attempt_id
+          AND n.kind IN ('provider_accepted','provider_accepted_identity_pending','not_accepted','acceptance_unknown','dispatch_boundary') ORDER BY n.at DESC,n.id DESC LIMIT 1
+        ) l ON true WHERE e.kind='attempt_reserved' AND e.attempt_id IS NOT NULL
+        AND to_char(e.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:meta:'||md5(r.connection_id::text||':'||r.message_ref),'meta',r.business_id,NULL::uuid,min(r.at),
+          jsonb_build_object('billable',bool_or((r.status_evidence->'pricing'->>'billable')::boolean),'customerPaid',true)
+        FROM public.whatsapp_receipt r WHERE r.kind='status' AND r.message_ref IS NOT NULL
+        GROUP BY r.connection_id,r.message_ref,r.business_id HAVING to_char(min(r.at) AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:notification:'||n.id,'transactional',n.business_id,NULL::uuid,n.first_attempt_at,
+          jsonb_build_object('provider','resend','purpose',n.purpose,'mode',n.binding->>'mode','outcome',n.state,'acceptanceUncertain',n.uncertain,
+            'funding',CASE WHEN n.terms->>'kind' IN ('free','selected_paid') THEN 'existing_subscription' ELSE 'unknown' END,
+            'selectedTerms',n.terms->>'reference','termsKind',n.terms->>'kind')
+        FROM public.notification_notice n WHERE n.first_attempt_at IS NOT NULL AND EXISTS(SELECT 1 FROM public.notification_event e WHERE e.notice_id=n.id AND e.kind='dispatch_boundary')
+          AND to_char(n.first_attempt_at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:payment:'||p.id,'payment',p.business_id,NULL::uuid,coalesce((p.charge->>'paidAt')::timestamptz,p.start),
+          jsonb_build_object('provider',p.provider,'feeMinor',coalesce(e.observation->'charge'->'feeMinor',p.charge->'charge'->'feeMinor'),
+            'feeTaxMinor',coalesce(e.observation->'charge'->'feeTaxMinor',p.charge->'charge'->'feeTaxMinor'),
+            'baseAmountMinor',coalesce(e.observation->'charge'->'baseAmountMinor',p.charge->'charge'->'baseAmountMinor'),
+            'baseCurrency',coalesce(e.observation->'charge'->'baseCurrency',p.charge->'charge'->'baseCurrency'),
+            'mode',p.snapshot->'provider'->>'mode')
+        FROM public.subscription_period p LEFT JOIN LATERAL(
+          SELECT v.observation FROM (
+            SELECT e.observation,e.at,e.id FROM public.subscription_payment_event e WHERE e.provider=p.provider AND e.account=p.account AND e.business_id=p.business_id AND e.action_id=p.action_id
+            UNION ALL
+            SELECT h.detail->'observation',h.at,h.id FROM public.subscription_payment_history h WHERE h.business_id=p.business_id AND h.action_id=p.action_id
+          ) v
+          WHERE v.observation->>'provider'=p.provider AND v.observation->>'account'=p.account AND v.observation->>'paymentId'=p.payment_id
+          AND (v.observation->'charge'->>'invoiceId') IS NOT DISTINCT FROM (p.charge->'charge'->>'invoiceId')
+          AND v.observation->'charge'->>'orderId'=p.charge->'charge'->>'orderId'
+          AND v.observation->'charge'->>'planId'=p.charge->'charge'->>'planId'
+          AND (v.observation->>'subscriptionId') IS NOT DISTINCT FROM (p.charge->>'subscriptionId')
+          AND v.observation->>'customerId'=p.charge->>'customerId'
+          AND v.observation->>'periodStart'=p.charge->>'periodStart' AND v.observation->>'periodEnd'=p.charge->>'periodEnd'
+          AND v.observation->>'status'='confirmed' AND v.observation->>'currency'=p.charge->>'currency'
+          AND v.observation->>'amountMinor'=p.charge->>'amountMinor' AND v.observation->'charge'->>'feeMinor' IS NOT NULL
+          ORDER BY v.at DESC,v.id DESC LIMIT 1
+        ) e ON true
+        WHERE to_char(coalesce((p.charge->>'paidAt')::timestamptz,p.start) AT TIME ZONE 'UTC','YYYY-MM')=cost_month
+      UNION ALL
+        SELECT 'native:pilot-effort:'||e.id,'pilot_effort',e.business_id,NULL::uuid,coalesce(nullif(e.data->>'occurredAt','')::timestamptz,e.at),
+          jsonb_build_object('kind',e.data->>'kind','seconds',e.data->'seconds','spendMinor',e.data->>'spendMinor','cashMinor',e.data->>'cashMinor','currency',p.snapshot->'plan'->>'currency','measurement',e.data->>'measurement')
+        FROM public.pilot_event e JOIN public.pilot_record p ON p.id=e.pilot_id AND p.business_id=e.business_id
+        WHERE e.kind='effort' AND to_char(coalesce(nullif(e.data->>'occurredAt','')::timestamptz,e.at) AT TIME ZONE 'UTC','YYYY-MM')=cost_month`;
+
 /** Only minimal usage/charge observations cross this global operator boundary. */
 export async function prepareCostSecurity(pool: Pool | PoolClient) {
   await pool.query(`
@@ -99,86 +189,7 @@ export async function prepareCostSecurity(pool: Pool | PoolClient) {
       )) OR public.cost_worker_authorized(cost_month)) THEN RETURN; END IF;
       IF cost_month !~ '^20[0-9]{2}-(0[1-9]|1[0-2])$' THEN RETURN; END IF;
       RETURN QUERY
-        SELECT 'native:ai:'||a.id,'ai',a.business_id,u.run_id,a.at,
-          jsonb_build_object('route',a.route,'outcome',a.outcome,'funding',a.funding_source,
-            'inputTokens',a.metrics->'inputTokens','outputTokens',a.metrics->'outputTokens',
-            'providerCostUsd',a.metrics->'providerCostUsd','gatewayCostUsd',a.metrics->'gatewayCostUsd',
-            'model',a.metrics->'model','credentialSource',a.metrics->'credentialSource')
-        FROM public.ai_attempt a JOIN public.ai_execution x ON x.id=a.execution_id AND x.business_id=a.business_id
-        LEFT JOIN public.discovery_usage u ON u.id=x.request_key AND u.business_id=a.business_id AND u.kind='review'
-        WHERE to_char(a.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:discovery:'||u.id,'discovery',u.business_id,u.run_id,u.at,
-          jsonb_build_object('kind',u.kind,'allowanceUnits',u.units,'outcome',u.outcome,'returnedResults',u.returned_results,
-            'adapter',CASE WHEN r.policy->'exa' IS NOT NULL THEN 'exa' ELSE r.policy->>'adapterId' END,
-            'estimatedUsd',u.provider_cost->'estimatedUsd','requestId',u.provider_cost->'requestId')
-        FROM public.discovery_usage u JOIN public.discovery_run r ON r.id=u.run_id AND r.business_id=u.business_id
-        WHERE to_char(u.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:file:'||u.id,'storage',u.business_id,NULL::uuid,u.at,
-          jsonb_build_object('action',u.action,'outcome',u.outcome)
-        FROM public.file_usage u WHERE to_char(u.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:mailbox-job:'||j.id,'mailbox_job',j.business_id,NULL::uuid,j.created_at,
-          jsonb_build_object('state',j.state->>'phase')
-        FROM public.mailbox_job j WHERE to_char(j.created_at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:native-mail:'||m.id,'native_mail',m.business_id,NULL::uuid,m.at,
-          jsonb_build_object('provider',c.provider,'duplicateOf',coalesce(
-            (SELECT 'native:opportunity-mail:'||a.id FROM public.opportunity_due_action a WHERE a.business_id=m.business_id
-              AND a.email->'result'->'receipt'->>'messageRef'=m.message_ref AND a.email->'envelope'->>'connectionId'=c.connection_id::text LIMIT 1),
-            (SELECT 'native:sequence-mail:'||(a.receipt->>'attemptId') FROM public.email_sequence_action a WHERE a.business_id=m.business_id
-              AND a.receipt->>'messageRef'=m.message_ref AND a.receipt->>'connectionId'=c.connection_id::text LIMIT 1)))
-        FROM public.mailbox_app_message m JOIN public.mailbox_policy c ON c.id=m.mailbox_id AND c.business_id=m.business_id
-        WHERE to_char(m.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:opportunity-mail:'||a.id,'ordinary_mail',a.business_id,NULL::uuid,(a.email->'envelope'->>'reservedAt')::timestamptz,
-          jsonb_build_object('provider',a.email->'envelope'->>'adapterKey','mode',a.email->'envelope'->>'adapterMode',
-            'outcome',coalesce(a.email->'result'->>'status','uncertain'))
-        FROM public.opportunity_due_action a WHERE a.email->'envelope' IS NOT NULL
-          AND to_char((a.email->'envelope'->>'reservedAt')::timestamptz AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:sequence-mail:'||e.attempt_id,'sequence_mail',e.business_id,e.run_id,e.at,
-          jsonb_build_object('provider',e.envelope->>'adapterKey','mode',e.envelope->>'adapterMode','outcome',coalesce(l.kind,'attempt_reserved'))
-        FROM public.email_sequence_event e LEFT JOIN LATERAL(
-          SELECT n.kind FROM public.email_sequence_event n WHERE n.business_id=e.business_id AND n.attempt_id=e.attempt_id
-          AND n.kind IN ('provider_accepted','provider_accepted_identity_pending','not_accepted','acceptance_unknown','dispatch_boundary') ORDER BY n.at DESC,n.id DESC LIMIT 1
-        ) l ON true WHERE e.kind='attempt_reserved' AND e.attempt_id IS NOT NULL
-        AND to_char(e.at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:meta:'||md5(r.connection_id::text||':'||r.message_ref),'meta',r.business_id,NULL::uuid,min(r.at),
-          jsonb_build_object('billable',bool_or((r.status_evidence->'pricing'->>'billable')::boolean),'customerPaid',true)
-        FROM public.whatsapp_receipt r WHERE r.kind='status' AND r.message_ref IS NOT NULL
-        GROUP BY r.connection_id,r.message_ref,r.business_id HAVING to_char(min(r.at) AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:notification:'||n.id,'transactional',n.business_id,NULL::uuid,n.first_attempt_at,
-          jsonb_build_object('provider','resend','purpose',n.purpose,'mode',n.binding->>'mode','outcome',n.state,'acceptanceUncertain',n.uncertain,
-            'funding',CASE WHEN n.terms->>'kind' IN ('free','selected_paid') THEN 'existing_subscription' ELSE 'unknown' END,
-            'selectedTerms',n.terms->>'reference','termsKind',n.terms->>'kind')
-        FROM public.notification_notice n WHERE n.first_attempt_at IS NOT NULL AND EXISTS(SELECT 1 FROM public.notification_event e WHERE e.notice_id=n.id AND e.kind='dispatch_boundary')
-          AND to_char(n.first_attempt_at AT TIME ZONE 'UTC','YYYY-MM')=cost_month
-      UNION ALL
-        SELECT 'native:payment:'||p.id,'payment',p.business_id,NULL::uuid,coalesce((p.charge->>'paidAt')::timestamptz,p.start),
-          jsonb_build_object('provider',p.provider,'feeMinor',coalesce(e.observation->'charge'->'feeMinor',p.charge->'charge'->'feeMinor'),
-            'feeTaxMinor',coalesce(e.observation->'charge'->'feeTaxMinor',p.charge->'charge'->'feeTaxMinor'),
-            'baseAmountMinor',coalesce(e.observation->'charge'->'baseAmountMinor',p.charge->'charge'->'baseAmountMinor'),
-            'baseCurrency',coalesce(e.observation->'charge'->'baseCurrency',p.charge->'charge'->'baseCurrency'),
-            'mode',p.snapshot->'provider'->>'mode')
-        FROM public.subscription_period p LEFT JOIN LATERAL(
-          SELECT v.observation FROM public.subscription_payment_event v
-          WHERE v.provider=p.provider AND v.account=p.account AND v.observation->>'paymentId'=p.payment_id
-          AND v.business_id=p.business_id AND v.action_id=p.action_id
-          AND v.observation->'charge'->>'invoiceId'=p.charge->'charge'->>'invoiceId'
-          AND v.observation->'charge'->>'orderId'=p.charge->'charge'->>'orderId'
-          AND v.observation->'charge'->>'planId'=p.charge->'charge'->>'planId'
-          AND v.observation->>'subscriptionId'=p.charge->>'subscriptionId'
-          AND v.observation->>'customerId'=p.charge->>'customerId'
-          AND v.observation->>'periodStart'=p.charge->>'periodStart' AND v.observation->>'periodEnd'=p.charge->>'periodEnd'
-          AND v.observation->>'status'='confirmed' AND v.observation->>'currency'=p.charge->>'currency'
-          AND v.observation->>'amountMinor'=p.charge->>'amountMinor' AND v.observation->'charge'->>'feeMinor' IS NOT NULL
-          ORDER BY v.at DESC,v.id DESC LIMIT 1
-        ) e ON true
-        WHERE to_char(coalesce((p.charge->>'paidAt')::timestamptz,p.start) AT TIME ZONE 'UTC','YYYY-MM')=cost_month;
+${nativeCostSourcesSql};
     END $$;
     REVOKE ALL ON FUNCTION public.operator_cost_native(text) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.operator_cost_native(text) TO app_runtime;

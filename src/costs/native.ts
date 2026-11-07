@@ -14,6 +14,7 @@ export const nativeCostRowSchema = z.object({
     "meta",
     "payment",
     "transactional",
+    "pilot_effort",
   ]),
   business_id: z.uuid().nullable(),
   run_id: z.uuid().nullable(),
@@ -64,6 +65,33 @@ export function nativeCost(
       base.amount = {
         currency: "USD",
         micros: Math.round(dollars * 1_000_000).toString(),
+      };
+      base.status = "observed_not_settled";
+    }
+  } else if (row.kind === "pilot_effort") {
+    base.provider = "pilot_effort";
+    base.category = [
+      "setup",
+      "support",
+      "sales",
+      "billing_tax",
+      "maintenance",
+    ].includes(String(d.kind))
+      ? costSourceSchema.shape.category.parse(d.kind)
+      : "tools";
+    base.unit = "operator_recorded_second";
+    base.quantity = typeof d.seconds === "number" ? d.seconds : null;
+    base.allocation =
+      "Attributable recorded human effort expense; not a fabricated hourly rate, provider expense or bank settlement";
+    if (
+      d.measurement === "attributed_actual_input" &&
+      (d.currency === "INR" || d.currency === "USD") &&
+      typeof d.spendMinor === "string" &&
+      /^\d{1,15}$/.test(d.spendMinor)
+    ) {
+      base.amount = {
+        currency: d.currency,
+        micros: (BigInt(d.spendMinor) * 10000n).toString(),
       };
       base.status = "observed_not_settled";
     }

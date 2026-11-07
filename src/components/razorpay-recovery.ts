@@ -1,15 +1,18 @@
 import type { z } from "zod";
 import { recoveryCheckoutSchema } from "@/models/subscription-lifecycle";
 import type { ReachCheckout } from "@/models/reach-changes";
+import type { CheckoutReference } from "@/models/subscription-payments";
 
 type Recovery = z.infer<typeof recoveryCheckoutSchema>;
 declare global {
   interface Window {
     Razorpay?: new (
       options: (
-        Omit<Recovery, "script"> | Omit<ReachCheckout, "script" | "kind">
+        | Omit<Recovery, "script">
+        | Omit<ReachCheckout, "script" | "kind">
+        | Omit<NonNullable<CheckoutReference["standard"]>, "script">
       ) & {
-        handler(): void;
+        handler(value: unknown): void;
         modal: { ondismiss(): void };
       },
     ) => { open(): void };

@@ -1,3 +1,4 @@
+import { pilotPathAllowed } from "./pilot-limits";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -717,6 +718,15 @@ export function createOpportunityRepository(
           }
           if (!provider.channels.includes("whatsapp"))
             throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+          if (
+            !(await pilotPathAllowed(tx, businessId, "whatsapp", {
+              connectionId: meta.intent.connectionId,
+            }))
+          )
+            return {
+              action: await cancel(tx, "pilot_scope_changed"),
+              failure: null,
+            };
           const dispatch: OpportunityDispatch = {
             actionId: action.id,
             businessId,
@@ -725,6 +735,15 @@ export function createOpportunityRepository(
             channel: "whatsapp",
             evaluation: action.evaluation,
           };
+          if (
+            !(await pilotPathAllowed(tx, businessId, "whatsapp", {
+              connectionId: meta.intent.connectionId,
+            }))
+          )
+            return {
+              action: await cancel(tx, "pilot_scope_changed"),
+              failure: null,
+            };
           return { action, failure: null, dispatch, metaIntent: meta.intent };
         }
         const ctx = await messageContext(
@@ -803,6 +822,18 @@ export function createOpportunityRepository(
         if (sender?.reason)
           return { action: await cancel(tx, sender.reason), failure: null };
         if (
+          ctx.connection.channel === "email" &&
+          !(await pilotPathAllowed(tx, businessId, "inquiry_email", {
+            senderId: sender?.sender?.identityId,
+            mailboxId: ctx.connection.id,
+            action: { kind: "opportunity", id: action.id },
+          }))
+        )
+          return {
+            action: await cancel(tx, "pilot_scope_changed"),
+            failure: null,
+          };
+        if (
           sender?.sender &&
           (sender.sender.adapterKey !==
             (provider.selectEmail?.(sender.sender.adapterKey) ?? provider)
@@ -856,6 +887,15 @@ export function createOpportunityRepository(
                 tx,
                 meta.reason ?? "whatsapp_intent_required",
               ),
+              failure: null,
+            };
+          if (
+            !(await pilotPathAllowed(tx, businessId, "whatsapp", {
+              connectionId: meta.intent.connectionId,
+            }))
+          )
+            return {
+              action: await cancel(tx, "pilot_scope_changed"),
               failure: null,
             };
           return { action, failure: null, dispatch, metaIntent: meta.intent };

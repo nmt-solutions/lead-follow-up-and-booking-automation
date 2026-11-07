@@ -1,3 +1,4 @@
+import { publicPaymentSnapshot } from "../subscription-payments/projection";
 import { z } from "zod";
 import type { Actor, Clock } from "../models/business";
 import { businessIdSchema } from "../models/business";
@@ -27,8 +28,7 @@ function parse<T>(schema: z.ZodType<T>, input: unknown) {
   return result.data;
 }
 function publicFinancial(snapshot: PaymentSnapshot): PaymentSnapshot {
-  const { key, account, mode } = snapshot.provider;
-  return { ...snapshot, provider: { key, account, mode } };
+  return publicPaymentSnapshot(snapshot);
 }
 /** Public agreement copies omit deployment reviews; persisted work and its hash stay full. */
 function publicChange(change: ReachChange): ReachChange {

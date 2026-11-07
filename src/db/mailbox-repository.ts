@@ -1,3 +1,4 @@
+import { reservePilotEffect, requirePilotPath } from "./pilot-limits";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, count, sql } from "drizzle-orm";
@@ -628,11 +629,43 @@ export function createMailboxRepository(
         return next;
       });
     },
+    authorizeCall(work, checkpoint, phase, payload) {
+      return access(work.identity, work.businessId, true, async (tx) => {
+        const { policy, job } = await loadWork(tx, work);
+        if (
+          job.state.checkpoint !== checkpoint ||
+          job.state.status === "completed"
+        )
+          throw new ApplicationError("CONFLICT");
+        await requirePilotPath(tx, work.businessId, "mailbox", {
+          mailboxId: policy.id,
+        });
+        await reservePilotEffect(
+          tx,
+          work.businessId,
+          "mailbox",
+          `${job.id}:${checkpoint}:${phase}:${randomUUID()}`,
+          1,
+          { jobId: job.id, checkpoint, phase, mailboxId: policy.id, payload },
+        );
+        const role = await requireCapability(
+          tx,
+          work.identity,
+          work.businessId,
+          "integrations.manage",
+        );
+        await requireSalesSession(tx, work.identity, clock.now(), role);
+      });
+    },
     prepare(work) {
       return access(work.identity, work.businessId, true, async (tx) => {
         const { policy, job, oauth } = await loadWork(tx, work);
         if (job.state.status === "completed") return null;
         if (job.state.reason === "limit_reached") return null;
+        await requirePilotPath(tx, work.businessId, "mailbox", {
+          mailboxId: policy.id,
+        });
+
         const conversations = await tx
           .select({ ref: inboxConversation.providerRef })
           .from(inboxConversation)

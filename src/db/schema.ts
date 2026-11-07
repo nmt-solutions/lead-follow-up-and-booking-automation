@@ -1253,6 +1253,7 @@ export const platformOperator = pgTable(
     documents: boolean("documents").notNull().default(false),
     operations: boolean("operations").notNull().default(false),
     recovery: boolean("recovery").notNull().default(false),
+    pilots: boolean("pilots").notNull().default(false),
     costs: boolean("costs").notNull().default(false),
     notifications: boolean("notifications").notNull().default(false),
   },
@@ -6254,5 +6255,125 @@ export const reconciliationAccess = pgTable(
       sql`${t.expiresAt}>${t.at} and ${t.expiresAt}<=${t.at}+interval '60 seconds'`,
     ),
     ...reconciliationPolicies("reconciliation_access"),
+  ],
+).enableRLS();
+
+// Pilot inputs and history are immutable; effect reservations are private append-only facts.
+const pilotScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.pilot_authorized()`;
+export const pilotRecord = pgTable(
+  "pilot_record",
+  {
+    id: uuid("id").notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    snapshot: jsonb("snapshot").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "pilot_record_pkey", columns: [t.id, t.businessId] }),
+    uniqueIndex("pilot_request_once").on(t.businessId, t.requestKey),
+    check(
+      "pilot_snapshot_scope",
+      sql`${t.snapshot}->'payment'->'quote'->>'businessId'=${t.businessId}::text and ${t.snapshot}->'plan'->>'paymentActionId' is not null`,
+    ),
+    pgPolicy("pilot_read", {
+      for: "select",
+      to: appRuntime,
+      using: pilotScope,
+    }),
+    pgPolicy("pilot_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${pilotScope} and public.pilot_operator() and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const pilotEvent = pgTable(
+  "pilot_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    pilotId: uuid("pilot_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    kind: text("kind").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    data: jsonb("data").notNull(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "pilot_event_scope",
+      columns: [t.pilotId, t.businessId],
+      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
+    }),
+    check(
+      "pilot_event_kind",
+      sql`${t.kind} in ('prepared','approved','activated','effort','results','renewal','reuse','stopped')`,
+    ),
+    uniqueIndex("pilot_event_request_once").on(t.businessId, t.requestKey),
+    pgPolicy("pilot_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: pilotScope,
+    }),
+    pgPolicy("pilot_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${pilotScope} and actor_id=current_setting('app.actor_id',true) and (kind='approved' or public.pilot_operator()) and exists(select 1 from public.pilot_record p where p.id=pilot_event.pilot_id and p.business_id=pilot_event.business_id) and (kind<>'reuse' or exists(select 1 from public.membership m where m.business_id::text=pilot_event.data->>'secondBusinessId' and m.user_id=current_setting('app.actor_id',true) and m.role in ('owner','admin')))`,
+    }),
+  ],
+).enableRLS();
+export const pilotEffect = pgTable(
+  "pilot_effect",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    pilotId: uuid("pilot_id").notNull(),
+    kind: text("kind").notNull(),
+    operationId: text("operation_id").notNull(),
+    quantity: integer("quantity").notNull(),
+    cashMinor: bigint("cash_minor", { mode: "bigint" }).notNull(),
+    spendMinor: bigint("spend_minor", { mode: "bigint" }).notNull(),
+    globalInrMicros: bigint("global_inr_micros", { mode: "bigint" }).notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    intent: jsonb("intent").$type<Record<string, unknown>>().notNull(),
+    seconds: integer("seconds").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "pilot_effect_scope",
+      columns: [t.pilotId, t.businessId],
+      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
+    }),
+    uniqueIndex("pilot_effect_once").on(t.businessId, t.kind, t.operationId),
+    check(
+      "pilot_effect_nonnegative",
+      sql`${t.quantity}>0 and ${t.cashMinor}>=0 and ${t.spendMinor}>=0 and ${t.globalInrMicros}>=0 and ${t.seconds}>0`,
+    ),
+    pgPolicy("pilot_effect_read", {
+      for: "select",
+      to: appRuntime,
+      using: pilotScope,
+    }),
+    pgPolicy("pilot_effect_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`false`,
+    }),
   ],
 ).enableRLS();

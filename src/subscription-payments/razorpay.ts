@@ -14,6 +14,7 @@ import { ApplicationError } from "../models/application-error";
 import { PaymentCreationNotAttempted } from "../models/subscription-payments";
 import { lifecycleObservationSchema } from "../models/subscription-lifecycle";
 import { createRazorpayReachGateway } from "./reach-razorpay";
+import { createNativePilotOrders } from "./pilot-razorpay";
 
 const id = (prefix: string) =>
   z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9]+$`));
@@ -130,7 +131,8 @@ export function createRazorpayGateway(d: {
     );
     if (
       !s.tax.totals ||
-      s.quote.initial.subtotalMinor !== s.quote.renewal.subtotalMinor ||
+      (!s.pilotContinuation &&
+        s.quote.initial.subtotalMinor !== s.quote.renewal.subtotalMinor) ||
       BigInt(s.tax.totals.totalMinor) > maximum ||
       (s.quote.currency === "INR" && BigInt(s.tax.totals.totalMinor) > 1500000n)
     )
@@ -238,7 +240,12 @@ export function createRazorpayGateway(d: {
       sub.notes.action_id === action.id &&
       sub.notes.business_id === action.businessId &&
       sub.notes.financial_hash === financialHash(s) &&
-      sub.notes.account_review === s.provider.review?.id
+      sub.notes.account_review === s.provider.review?.id &&
+      (!s.pilotContinuation ||
+        (sub.start_at ===
+          Math.floor(new Date(s.pilotContinuation.startAt).getTime() / 1000) &&
+          (!sub.customer_id ||
+            sub.customer_id === s.pilotContinuation.customerId)))
     );
   }
   function lifecycle(
@@ -353,6 +360,51 @@ export function createRazorpayGateway(d: {
     if (page.count !== page.items.length)
       throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
     const observations: PaymentObservation[] = [];
+    // Re-read exact original captures independently of current plan changes.
+    // Invoice pagination remains coordinated with #47 and never reallocates them.
+    for (const original of action.snapshot.pilotContinuation
+      ? (action.settledCaptures ?? [])
+      : []) {
+      if (
+        !original.paymentId ||
+        !original.charge ||
+        original.provider !== "razorpay" ||
+        original.account !== account ||
+        original.operationKey !== action.operationKey ||
+        original.subscriptionId !== sub.id
+      )
+        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      const p = paymentSchema.parse(
+        await request(`payments/${id("pay").parse(original.paymentId)}`),
+      );
+      if (
+        p.id !== original.paymentId ||
+        p.invoice_id !== original.charge.invoiceId ||
+        p.order_id !== original.charge.orderId ||
+        p.customer_id !== original.customerId ||
+        String(p.amount) !== original.amountMinor ||
+        p.currency !== original.currency ||
+        p.method !== "card" ||
+        p.international !== original.charge.international ||
+        !p.captured ||
+        !["captured", "refunded"].includes(p.status) ||
+        p.amount_refunded > p.amount
+      )
+        throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      observations.push({
+        ...original,
+        charge: {
+          ...original.charge,
+          ...(p.amount_refunded > 0
+            ? { refundedMinor: String(p.amount_refunded) }
+            : {}),
+          feeMinor: p.fee == null ? null : String(p.fee),
+          feeTaxMinor: p.tax == null ? null : String(p.tax),
+          baseAmountMinor: p.base_amount == null ? null : String(p.base_amount),
+          baseCurrency: p.base_currency === "INR" ? "INR" : null,
+        },
+      });
+    }
     const unpaid = page.items
       .filter(
         (i) =>
@@ -397,11 +449,12 @@ export function createRazorpayGateway(d: {
         p.customer_id === invoice.customer_id &&
         p.customer_id === sub.customer_id &&
         invoice.subscription_id === sub.id &&
-        p.status === "captured" &&
+        (p.status === "captured" ||
+          (p.status === "refunded" && p.amount_refunded > 0)) &&
         p.captured &&
         p.method === "card" &&
         sub.start_at != null &&
-        p.amount_refunded === 0 &&
+        p.amount_refunded <= p.amount &&
         p.amount === invoice.amount &&
         invoice.amount_paid === invoice.amount &&
         invoice.amount_due === 0 &&
@@ -413,11 +466,14 @@ export function createRazorpayGateway(d: {
         invoice.line_items[0].amount === invoice.amount &&
         invoice.line_items[0].currency === invoice.currency &&
         p.international === (invoice.currency === "USD");
+      const customerValid =
+        !action.snapshot.pilotContinuation ||
+        p.customer_id === action.snapshot.pilotContinuation.customerId;
       observations.push({
         provider: "razorpay",
         account,
         operationKey: action.operationKey,
-        status: valid ? "confirmed" : "unknown",
+        status: valid && customerValid ? "confirmed" : "unknown",
         customerId: invoice.customer_id,
         checkoutId: sub.id,
         subscriptionId: sub.id,
@@ -428,7 +484,7 @@ export function createRazorpayGateway(d: {
         periodStart: epoch(invoice.billing_start),
         periodEnd: epoch(invoice.billing_end),
         checkout: hosted,
-        ...(valid
+        ...(valid && customerValid
           ? {
               charge: {
                 kind:
@@ -436,6 +492,9 @@ export function createRazorpayGateway(d: {
                     ? ("initial" as const)
                     : ("renewal" as const),
                 invoiceId: invoice.id,
+                ...(p.amount_refunded > 0
+                  ? { refundedMinor: String(p.amount_refunded) }
+                  : {}),
                 orderId: invoice.order_id!,
                 planId: sub.plan_id,
                 method: "card" as const,
@@ -477,6 +536,13 @@ export function createRazorpayGateway(d: {
   const unavailable = async (): Promise<never> => {
     throw new ApplicationError("PROVIDER_UNAVAILABLE");
   };
+  const pilot = createNativePilotOrders({
+    review,
+    keyId: d.keyId,
+    secret: d.secret,
+    request,
+    ready: readiness,
+  });
   return {
     reach: createRazorpayReachGateway({
       review,
@@ -492,16 +558,19 @@ export function createRazorpayGateway(d: {
     readiness,
     supports,
     reviewSnapshot(snapshot) {
+      if (snapshot.term.kind === "days") return pilot.review(snapshot);
       try {
         planFor(snapshot);
         return [];
       } catch {
-        return snapshot.term.kind === "days"
-          ? ["native_paid_pilot_mapping_unverified"]
-          : ["native_plan_or_capability_review_required"];
+        return ["native_plan_or_capability_review_required"];
       }
     },
-    poll,
+    poll: (input) =>
+      input.action.snapshot.term.kind === "days"
+        ? pilot.poll(input.action)
+        : poll(input),
+    verifyPilotSignature: pilot.signature,
     async updatePayment(action) {
       if (readiness().length) throw new ApplicationError("SETUP_REQUIRED");
       const sub = await currentSubscription(action);
@@ -546,6 +615,7 @@ export function createRazorpayGateway(d: {
     },
     deferEvents: true,
     async create(input) {
+      if (input.snapshot.term.kind === "days") return pilot.create(input);
       let mapping;
       try {
         mapping = await verifyPlan(input.snapshot);
@@ -559,12 +629,30 @@ export function createRazorpayGateway(d: {
         financial_hash: financialHash(input.snapshot),
         account_review: review.id,
       };
+      try {
+        await input.authorize?.();
+      } catch {
+        throw new PaymentCreationNotAttempted();
+      }
       const sub = subscriptionSchema.parse(
         await request("subscriptions", {
           plan_id: mapping.planId,
           quantity: 1,
           total_count: mapping.totalCount,
           customer_notify: true,
+          ...(input.snapshot.pilotContinuation
+            ? {
+                start_at: Math.floor(
+                  new Date(input.snapshot.pilotContinuation.startAt).getTime() /
+                    1000,
+                ),
+                expire_by: Math.floor(
+                  new Date(
+                    input.snapshot.pilotContinuation.approvalExpiresAt,
+                  ).getTime() / 1000,
+                ),
+              }
+            : {}),
           notes,
         }),
       );
@@ -572,6 +660,12 @@ export function createRazorpayGateway(d: {
         sub.plan_id !== mapping.planId ||
         sub.quantity !== 1 ||
         sub.total_count !== mapping.totalCount ||
+        (input.snapshot.pilotContinuation &&
+          sub.start_at !==
+            Math.floor(
+              new Date(input.snapshot.pilotContinuation.startAt).getTime() /
+                1000,
+            )) ||
         Object.entries(notes).some(([key, value]) => sub.notes[key] !== value)
       )
         throw new ApplicationError("INVALID_PROVIDER_RESPONSE");

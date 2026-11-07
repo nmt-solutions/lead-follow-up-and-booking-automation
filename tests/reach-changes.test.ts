@@ -958,14 +958,21 @@ describe("Approved reach changes at the public application seam", () => {
     expect(financial.periods.find((p) => p.id === f.original.id)).toEqual(
       f.original,
     );
+    // Public DTOs now omit deployment-wide reviews. The canonical immutable
+    // source still retains the exact original review for financial recovery.
+    safe(financial);
     expect(
       financial.periods.find((p) => p.paymentId === "pay_delta")?.snapshot
         .provider.review,
-    ).toEqual(f.gateway.review);
-    expect(
-      financial.periods.find((p) => p.paymentId === "pay_delta")?.snapshot
-        .provider.review?.terms.activation,
-    ).toBe("private merchant activation marker");
+    ).toBeUndefined();
+    const retained = await h.admin.query(
+      "select snapshot from subscription_period where business_id=$1 and payment_id='pay_delta'",
+      [f.business.id],
+    );
+    expect(retained.rows[0].snapshot.provider.review).toEqual(f.gateway.review);
+    expect(retained.rows[0].snapshot.provider.review.terms.activation).toBe(
+      "private merchant activation marker",
+    );
     expect(f.effects).toHaveLength(1);
   });
   it("freezes the exact approved calendar proration, tax and effective scope without granting reach", async () => {

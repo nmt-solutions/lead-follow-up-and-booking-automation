@@ -5,6 +5,7 @@ import { lockBusiness } from "./scope";
 import { subscriptionUsage } from "./schema";
 import { ApplicationError } from "../models/application-error";
 import { paidContractSchema } from "../models/subscription-payments";
+import { reservePilotEffect, pilotEffectCurrent } from "./pilot-limits";
 
 export async function readPaidContract(
   tx: Transaction,
@@ -64,6 +65,7 @@ export async function reservePaidUsage(
   at: Date,
 ) {
   await lockBusiness(tx, businessId);
+  await reservePilotEffect(tx, businessId, kind, operationId, quantity);
   const current = await paidAllowance(tx, businessId, kind, at);
   if (!current || current.allowance.unit !== unit)
     throw new ApplicationError("PAID_ACCESS_REQUIRED");
@@ -106,6 +108,8 @@ export async function paidReservationCurrent(
   operationId: string,
   at: Date,
 ) {
+  if (!(await pilotEffectCurrent(tx, businessId, kind, operationId)))
+    return false;
   const current = await paidAllowance(tx, businessId, kind, at);
   if (!current) return false;
   const [usage] = await tx

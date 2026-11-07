@@ -41,6 +41,24 @@ export const razorpayAccountReviewSchema = z.strictObject({
     "new_mandate",
     "native_proration_reviewed",
   ]),
+  pilotOrders: z
+    .strictObject({
+      evidence,
+      customers: z
+        .array(
+          z.strictObject({
+            businessId: z.uuid(),
+            customerId: z.string().regex(/^cust_[A-Za-z0-9]+$/),
+            evidence,
+          }),
+        )
+        .min(1)
+        .max(100)
+        .refine(
+          (rows) => new Set(rows.map((r) => r.businessId)).size === rows.length,
+        ),
+    })
+    .optional(),
   plans: z
     .array(
       z.strictObject({

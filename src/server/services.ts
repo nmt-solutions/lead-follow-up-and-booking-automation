@@ -1,3 +1,7 @@
+import { createPilotApplication } from "../application/pilots";
+import { createPilotRepository } from "../db/pilot-repository";
+import { createPilotInspector } from "../pilots/preflight";
+import { createPilotHttp } from "../http/pilots";
 import { createRecoveryApplication } from "../application/infrastructure-recovery";
 import { createRecoveryRepository } from "../db/recovery-repository";
 import { createRecoveryHttp } from "../http/infrastructure-recovery";
@@ -387,6 +391,7 @@ async function composeServices() {
   });
   const subscriptionPayments = createSubscriptionPaymentApplication({
     authenticate,
+    authenticateForWork: access.authenticateForWork,
     authenticatePlatform,
     repository: createSubscriptionPaymentRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
@@ -682,7 +687,37 @@ async function composeServices() {
     ),
     clock: googleOptions.clock,
   });
+  const pilots = createPilotApplication({
+    authenticate: access.authenticateForWork,
+    repository: createPilotRepository(
+      runtimeDatabase(pool),
+      googleOptions.clock,
+    ),
+    reporting: createReportingRepository(
+      runtimeDatabase(pool),
+      googleOptions.clock,
+    ),
+    clock: googleOptions.clock,
+    inspect: createPilotInspector({
+      clock: googleOptions.clock,
+      discovery,
+      senders,
+      mailboxes,
+      whatsapp,
+      googleCalendar,
+      microsoftCalendar,
+      data: dataGovernance,
+      email: emailEligibility,
+      authority: commercialAuthority,
+    }),
+  });
   return {
+    pilots,
+    pilotsHttp: createPilotHttp({
+      application: pilots,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     reporting,
     reportingHttp: createReportingHttp({
       application: reporting,

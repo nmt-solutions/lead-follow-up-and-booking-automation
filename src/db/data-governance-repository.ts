@@ -1,3 +1,5 @@
+import { publicTaxCalculation } from "../subscription-payments/projection";
+import { taxCalculationSchema } from "../models/tax";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -133,19 +135,24 @@ export function customerText(value: unknown): unknown {
       );
   if (Array.isArray(value)) return value.map(customerText);
   if (value && typeof value === "object") {
+    const tax =
+      "configuration" in value && "billing" in value && "lines" in value
+        ? taxCalculationSchema.safeParse(value)
+        : null;
+    const record = tax?.success ? publicTaxCalculation(tax.data) : value;
     // Merchant reviews contain deployment-wide terms, evidence and plan mappings.
     // Keep the original transaction identity and omit only its operator review.
     const paymentProvider =
-      "key" in value &&
-      typeof value.key === "string" &&
-      "account" in value &&
-      typeof value.account === "string" &&
-      "mode" in value &&
-      (value.mode === "fixture" ||
-        value.mode === "test" ||
-        value.mode === "live");
+      "key" in record &&
+      typeof record.key === "string" &&
+      "account" in record &&
+      typeof record.account === "string" &&
+      "mode" in record &&
+      (record.mode === "fixture" ||
+        record.mode === "test" ||
+        record.mode === "live");
     return Object.fromEntries(
-      Object.entries(value)
+      Object.entries(record)
         .filter(
           ([k]) =>
             !(paymentProvider && k === "review") &&

@@ -25,6 +25,14 @@ export const preparePaymentSchema = z.strictObject({
   requestKey: z.uuid(),
 });
 export const paymentCommandSchema = z.strictObject({ actionId: z.uuid() });
+export const pilotRenewalSchema = z.strictObject({
+  originalActionId: z.uuid(),
+  originalPeriodId: z.uuid(),
+  requestKey: z.uuid(),
+  startAt: z.iso.datetime(),
+  approvalExpiresAt: z.iso.datetime(),
+  agreeSeparateMandate: z.literal(true),
+});
 export const paymentTermSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("calendar_month"),
@@ -83,6 +91,17 @@ export function monthlyPeriodMatches(
   );
 }
 export const paymentSnapshotSchema = z.object({
+  pilotContinuation: z
+    .object({
+      originalActionId: z.uuid(),
+      originalPeriodId: z.uuid(),
+      customerId: ref,
+      originalEnd: z.iso.datetime(),
+      startAt: z.iso.datetime(),
+      approvalExpiresAt: z.iso.datetime(),
+      disclosure: z.string(),
+    })
+    .optional(),
   /** A separate immutable captured adjustment; never an ordinary renewable paid term. */
   adjustment: z
     .object({
@@ -150,6 +169,16 @@ export const paymentSnapshotSchema = z.object({
 });
 export type PaymentSnapshot = z.infer<typeof paymentSnapshotSchema>;
 export const checkoutReferenceSchema = z.strictObject({
+  standard: z
+    .strictObject({
+      script: z.literal("https://checkout.razorpay.com/v1/checkout.js"),
+      key: ref,
+      order_id: ref,
+      customer_id: ref,
+      amount: z.number().int().positive().safe(),
+      currency: z.enum(["INR", "USD"]),
+    })
+    .optional(),
   customerId: ref.nullable(),
   planId: ref.optional(),
   checkoutId: ref,
@@ -198,6 +227,7 @@ export const paymentObservationSchema = z.strictObject({
     .strictObject({
       kind: z.enum(["initial", "renewal", "reach_delta"]).optional(),
       invoiceId: ref.nullable(),
+      refundedMinor: z.string().regex(/^\d+$/).optional(),
       orderId: ref,
       planId: ref,
       method: z.literal("card"),
@@ -220,6 +250,9 @@ export type AuthenticatedPaymentEvent = z.infer<
   typeof authenticatedPaymentEventSchema
 >;
 export const paymentActionSchema = z.object({
+  nativeTerms: z
+    .object({ planId: ref, totalCount: z.number().int().positive() })
+    .optional(),
   reachRenewals: z
     .array(
       z.object({
@@ -237,6 +270,7 @@ export const paymentActionSchema = z.object({
     )
     .optional(),
   settledPaymentIds: z.array(z.string()).optional(),
+  settledCaptures: z.array(paymentObservationSchema).optional(),
   id: z.uuid(),
   businessId: z.uuid(),
   requestKey: z.uuid(),
@@ -259,6 +293,7 @@ export const paymentActionSchema = z.object({
     .object({
       subscriptionSkip: z.number().int().nonnegative(),
       creationAt: z.iso.datetime().optional(),
+      creationLeaseUntil: z.iso.datetime().optional(),
       candidateId: ref.nullable(),
       ambiguous: z.boolean(),
       invoiceSkip: z.number().int().nonnegative(),
@@ -378,6 +413,10 @@ export class PaymentCreationNotAttempted extends Error {
  * Creation must use this exact persisted operation key. A timeout must NEVER be retried as a new charge.
  * #45 implements this contract with native Razorpay, without browser/session authority. */
 export type PaymentGateway = {
+  verifyPilotSignature?(
+    action: PaymentAction,
+    input: { orderId: string; paymentId: string; signature: string },
+  ): boolean;
   reach?: ReachGateway;
   lifecyclePolicy?: LifecyclePolicy;
   updatePayment?(
@@ -407,6 +446,7 @@ export type PaymentGateway = {
     actionId: string;
     businessId: string;
     snapshot: PaymentSnapshot;
+    authorize?: () => Promise<void>;
   }): Promise<CheckoutReference>;
   authenticateEvent(input: {
     body: Uint8Array;

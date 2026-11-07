@@ -77,6 +77,14 @@ export default async function BusinessPage({
       >
         Action history and recovery
       </Link>
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/pilots`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Paid pilot preparation and evidence
+        </Link>
+      )}
       <Link
         href={`/businesses/${businessId}/reports`}
         className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"

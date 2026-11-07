@@ -1,4 +1,6 @@
 "use client";
+import { openPilotCheckout } from "./razorpay-pilot-checkout";
+import { Input } from "./ui/input";
 import Link from "next/link";
 import { SubscriptionLifecyclePanel } from "./subscription-lifecycle-panel";
 import { openCardRecovery } from "./razorpay-recovery";
@@ -32,8 +34,8 @@ const states: Record<PaymentAction["state"], string> = {
 const reasons: Record<string, string> = {
   native_preflight_rejected:
     "The native plan or card availability could not be verified before creation. No subscription creation was attempted. Ask the operator to review account and plan setup, then prepare a new checkout review.",
-  native_paid_pilot_mapping_unverified:
-    "Paid pilot checkout is unavailable for this card configuration. Choose a supported monthly quote or ask the operator about paid-pilot payment options.",
+  pilot_order_customer_and_card_path_review_required:
+    "Ask the deployment operator to review this Business?s exact native customer, one-time card order path and separate monthly mandate terms.",
   native_plan_or_capability_review_required:
     "The native plan, amount limit or approved card capability does not match this quote. Ask the operator to review the account and plan mapping.",
   creation_lookup_ambiguous:
@@ -70,12 +72,14 @@ function paymentTime(value: string | null | undefined) {
 function PaymentDetail({ action: a }: { action: PaymentAction }) {
   const q = a.snapshot.quote,
     t = a.snapshot.tax;
-  const nativePlan = a.snapshot.provider.review?.plans.find(
-    (p) =>
-      p.offerId === q.selection.offerId &&
-      p.reservedCapacityId === q.selection.reservedCapacityId &&
-      p.currency === q.currency,
-  );
+  const nativePlan =
+    a.nativeTerms ??
+    a.snapshot.provider.review?.plans.find(
+      (p) =>
+        p.offerId === q.selection.offerId &&
+        p.reservedCapacityId === q.selection.reservedCapacityId &&
+        p.currency === q.currency,
+    );
   return (
     <div className="space-y-4 wrap-anywhere">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -91,11 +95,13 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
       </div>
       <p>
         {q.currency} ·{" "}
-        {q.initial.kind === "paid_pilot"
-          ? `${q.initial.days} day paid pilot`
-          : a.snapshot.adjustment
-            ? `Prorated reach adjustment: ${paymentTime(a.snapshot.adjustment.start)} to ${paymentTime(a.snapshot.adjustment.end)}`
-            : "One calendar month, UTC"}
+        {a.snapshot.pilotContinuation
+          ? "Separately approved monthly continuation, UTC"
+          : q.initial.kind === "paid_pilot"
+            ? `${q.initial.days} day paid pilot`
+            : a.snapshot.adjustment
+              ? `Prorated reach adjustment: ${paymentTime(a.snapshot.adjustment.start)} to ${paymentTime(a.snapshot.adjustment.end)}`
+              : "One calendar month, UTC"}
       </p>
       <dl className="grid gap-3 sm:grid-cols-3">
         <div>
@@ -132,9 +138,10 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
         </p>
       ) : (
         <p className="text-sm">
-          Discovery: {q.initial.discovery.quantity} {q.initial.discovery.unit}.
-          Automation: {q.initial.automation.quantity}{" "}
-          {q.initial.automation.unit}. Reach:{" "}
+          Discovery: {(a.snapshot.basis ?? q.initial).discovery.quantity}{" "}
+          {(a.snapshot.basis ?? q.initial).discovery.unit}. Automation:{" "}
+          {(a.snapshot.basis ?? q.initial).automation.quantity}{" "}
+          {(a.snapshot.basis ?? q.initial).automation.unit}. Reach:{" "}
           {q.pricing.offer.markets.join(", ")}.
         </p>
       )}
@@ -142,19 +149,26 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
         <p className="text-sm text-muted-foreground">
           Renewal terms: {q.renewal.terms} Monthly renewal before tax:{" "}
           {formatTaxMoney(String(q.renewal.subtotalMinor), q.currency)}.{" "}
-          {a.snapshot.provider.review
+          {nativePlan && a.snapshot.term.kind === "calendar_month"
             ? "Hosted checkout authorizes recurring card collection for the reviewed native plan. Each captured cycle requires independent payment and invoice reconciliation before access is extended."
             : "This purchase authorizes the initial period."}
         </p>
       )}
-      {nativePlan && !a.snapshot.adjustment && (
+      {a.snapshot.term.kind === "days" && (
         <p className="text-sm">
-          Hosted mandate: up to {nativePlan.totalCount} monthly collections on
-          the reviewed plan. Account terms version{" "}
-          {a.snapshot.provider.review?.version}. Review the hosted mandate
-          before authorizing.
+          This is a separate one-time pilot payment. Monthly collection needs a
+          later explicit mandate approval; completing this checkout does not
+          authorize that mandate.
         </p>
       )}
+      {nativePlan &&
+        a.snapshot.term.kind === "calendar_month" &&
+        !a.snapshot.adjustment && (
+          <p className="text-sm">
+            Hosted mandate: up to {nativePlan.totalCount} monthly collections on
+            the reviewed plan. Review the hosted mandate before authorizing.
+          </p>
+        )}
       {a.reason && (
         <p className="rounded-xl bg-muted p-4">
           {reasons[a.reason] ??
@@ -266,6 +280,58 @@ export function SubscriptionPaymentManager({
     );
     await refresh();
     setMessage("Saved payment status refreshed.");
+  }
+  async function pilotCheckout(a: PaymentAction) {
+    if (!a.checkout) return;
+    await openPilotCheckout(
+      a.checkout,
+      (proof) => {
+        void run(async () => {
+          await readCommercialResponse(
+            await fetch(`${base}/pilot-callback`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ actionId: a.id, ...proof }),
+            }),
+            paymentActionSchema,
+          );
+          await refresh();
+          setMessage(
+            "Signed checkout result checked against native capture. Review the recorded payment outcome.",
+          );
+        });
+      },
+      () =>
+        setMessage(
+          "Checkout closed. Refresh payment status to reconcile any capture.",
+        ),
+    );
+  }
+  async function prepareMonthly(a: PaymentAction, form: HTMLFormElement) {
+    const data = new FormData(form),
+      period = state.periods.find((p) => p.actionId === a.id);
+    if (!period) throw new Error("A captured pilot period is required.");
+    await readCommercialResponse(
+      await fetch(`${base}/pilot-renewal`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          originalActionId: a.id,
+          originalPeriodId: period.id,
+          requestKey: crypto.randomUUID(),
+          startAt: new Date(String(data.get("startAt"))).toISOString(),
+          approvalExpiresAt: new Date(
+            String(data.get("expiresAt")),
+          ).toISOString(),
+          agreeSeparateMandate: data.get("agree") === "on",
+        }),
+      }),
+      paymentActionSchema,
+    );
+    await refresh();
+    setMessage(
+      "Separate monthly mandate terms saved for review. Create its checkout only after reviewing the exact monthly tax total and schedule.",
+    );
   }
   async function lifecycleCommand(
     kind: "cancel" | "update-payment",
@@ -591,6 +657,66 @@ export function SubscriptionPaymentManager({
             className="space-y-4 rounded-2xl border border-border bg-card p-6"
           >
             <PaymentDetail action={a} />
+            {a.snapshot.term.kind === "days" && a.state === "confirmed" && (
+              <details className="rounded-xl border border-border p-4">
+                <summary className="min-h-11 cursor-pointer font-medium">
+                  Approve a separate monthly mandate
+                </summary>
+                <p className="my-3">
+                  The pilot is a one-time payment. Monthly continuation needs a
+                  separate card mandate and explicit approval. The original
+                  agreed monthly price is{" "}
+                  {formatTaxMoney(
+                    String(a.snapshot.quote.renewal.subtotalMinor),
+                    a.snapshot.quote.currency,
+                  )}{" "}
+                  before current tax. Original pilot days and allowances stay
+                  unchanged. Select a future start; starting after the original
+                  paid end leaves a gap. Authorization alone is not paid
+                  renewal.
+                </p>
+                <form
+                  className="space-y-4"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    void run(() => prepareMonthly(a, form));
+                  }}
+                >
+                  <Label htmlFor={`monthly-start-${a.id}`}>
+                    Monthly start (your local time)
+                  </Label>
+                  <Input
+                    id={`monthly-start-${a.id}`}
+                    name="startAt"
+                    type="datetime-local"
+                    required
+                  />
+                  <Label htmlFor={`monthly-expiry-${a.id}`}>
+                    Approval expiry before monthly start (your local time)
+                  </Label>
+                  <Input
+                    id={`monthly-expiry-${a.id}`}
+                    name="expiresAt"
+                    type="datetime-local"
+                    required
+                  />
+                  <label className="flex min-h-11 items-center gap-3">
+                    <input
+                      type="checkbox"
+                      name="agree"
+                      required
+                      className="size-5"
+                    />
+                    I approve this separate mandate for the original agreed
+                    monthly price and allowances at the selected start.
+                  </label>
+                  <Button disabled={busy}>
+                    Prepare monthly mandate review
+                  </Button>
+                </form>
+              </details>
+            )}
             <SubscriptionLifecyclePanel
               action={a}
               busy={busy}
@@ -608,7 +734,15 @@ export function SubscriptionPaymentManager({
                   {busy ? "Working…" : "Create hosted checkout"}
                 </Button>
               )}
-              {a.checkout && a.state === "checkout" && (
+              {a.checkout?.standard && (
+                <Button
+                  disabled={busy}
+                  onClick={() => run(() => pilotCheckout(a))}
+                >
+                  Pay the one-time pilot
+                </Button>
+              )}
+              {a.checkout && !a.checkout.standard && a.state === "checkout" && (
                 <Button asChild>
                   <a href={a.checkout.url} rel="noreferrer">
                     Continue to secure checkout

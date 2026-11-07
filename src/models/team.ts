@@ -46,6 +46,7 @@ export const platformCapabilitySchema = z.enum([
   "notifications.manage",
   "operations.manage",
   "recovery.manage",
+  "pilots.manage",
   "costs.manage",
   "documents.manage",
   "sender-health.manage",

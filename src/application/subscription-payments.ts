@@ -1,9 +1,14 @@
+import {
+  publicPaymentAction,
+  publicPaymentWorkspace,
+} from "../subscription-payments/projection";
 import { z } from "zod";
 import {
   lifecycleObservationSchema,
   lifecycleCommandSchema,
   recoveryCheckoutSchema,
 } from "../models/subscription-lifecycle";
+import type { WorkIdentity } from "../models/discovery";
 import type { Actor, Clock } from "../models/business";
 import { businessIdSchema } from "../models/business";
 import {
@@ -14,6 +19,7 @@ import {
   authenticatedPaymentEventSchema,
   paymentActionSchema,
   PaymentCreationNotAttempted,
+  pilotRenewalSchema,
   type PaymentGateway,
 } from "../models/subscription-payments";
 import { ApplicationError } from "../models/application-error";
@@ -26,6 +32,7 @@ function parse<T>(schema: z.ZodType<T>, value: unknown) {
 }
 export function createSubscriptionPaymentApplication<Credentials>(d: {
   authenticate(credentials: Credentials): Promise<Actor>;
+  authenticateForWork?(credentials: Credentials): Promise<WorkIdentity>;
   authenticatePlatform(credentials: Credentials): Promise<Actor>;
   repository: ReturnType<typeof createSubscriptionPaymentRepository>;
   gateway: PaymentGateway;
@@ -97,6 +104,54 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
     return d.repository.readWork(work);
   }
   return {
+    async preparePilotRenewal(
+      credentials: Credentials,
+      businessId: unknown,
+      value: unknown,
+    ) {
+      return publicPaymentAction(
+        await d.repository.preparePilotRenewal(
+          await d.authenticate(credentials),
+          parse(businessIdSchema, businessId),
+          parse(pilotRenewalSchema, value),
+          d.clock.now(),
+          d.gateway,
+        ),
+      );
+    },
+    async confirmPilotCheckout(
+      credentials: Credentials,
+      businessId: unknown,
+      value: unknown,
+    ) {
+      const id = parse(businessIdSchema, businessId),
+        input = parse(
+          z.strictObject({
+            actionId: z.uuid(),
+            orderId: z.string(),
+            paymentId: z.string(),
+            signature: z.string(),
+          }),
+          value,
+        );
+      const work = await d.repository.authorizeWork(
+        await d.authenticate(credentials),
+        id,
+        input.actionId,
+        d.clock.now(),
+      );
+      const action = await d.repository.readWork(work);
+      if (!d.gateway.verifyPilotSignature?.(action, input))
+        throw new ApplicationError("FORBIDDEN");
+      await reconcile(work);
+      return publicPaymentAction(
+        await d.repository.readAuthorizedAction(
+          await d.authenticate(credentials),
+          id,
+          input.actionId,
+        ),
+      );
+    },
     async updatePayment(
       credentials: Credentials,
       businessId: unknown,
@@ -150,7 +205,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         d.clock.now(),
         d.gateway,
       );
-      if (!result.work) return result.action;
+      if (!result.work) return publicPaymentAction(result.action);
       try {
         const observation = parse(
           lifecycleObservationSchema,
@@ -176,10 +231,12 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       } catch {
         /* Persisted intent remains unconfirmed. Recovery only polls; it NEVER repeats cancel. */
       }
-      return d.repository.readAuthorizedAction(
-        await d.authenticate(credentials),
-        id,
-        input.actionId,
+      return publicPaymentAction(
+        await d.repository.readAuthorizedAction(
+          await d.authenticate(credentials),
+          id,
+          input.actionId,
+        ),
       );
     },
     async prepare(
@@ -187,20 +244,24 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       businessId: unknown,
       value: unknown,
     ) {
-      return d.repository.prepare(
-        await d.authenticate(credentials),
-        parse(businessIdSchema, businessId),
-        parse(preparePaymentSchema, value),
-        d.clock.now(),
-        d.gateway,
+      return publicPaymentAction(
+        await d.repository.prepare(
+          await d.authenticate(credentials),
+          parse(businessIdSchema, businessId),
+          parse(preparePaymentSchema, value),
+          d.clock.now(),
+          d.gateway,
+        ),
       );
     },
     async workspace(credentials: Credentials, businessId: unknown) {
-      return d.repository.workspace(
-        await d.authenticate(credentials),
-        parse(businessIdSchema, businessId),
-        d.clock.now(),
-        d.gateway,
+      return publicPaymentWorkspace(
+        await d.repository.workspace(
+          await d.authenticate(credentials),
+          parse(businessIdSchema, businessId),
+          d.clock.now(),
+          d.gateway,
+        ),
       );
     },
     async start(credentials: Credentials, businessId: unknown, value: unknown) {
@@ -211,7 +272,7 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         d.clock.now(),
         d.gateway,
       );
-      if (!result.work) return result.action;
+      if (!result.work) return publicPaymentAction(result.action);
       let checkout = null;
       try {
         checkout = parse(
@@ -221,14 +282,39 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
             actionId: result.action.id,
             businessId: result.action.businessId,
             snapshot: result.action.snapshot,
+            authorize: async () => {
+              await d.repository.authorizeCreation(
+                d.authenticateForWork
+                  ? await d.authenticateForWork(credentials)
+                  : await d.authenticate(credentials),
+                result.work!,
+                d.clock.now(),
+                d.gateway,
+              );
+            },
           }),
         );
       } catch (error: unknown) {
-        if (error instanceof PaymentCreationNotAttempted)
-          return d.repository.creationRejected(result.work, d.clock.now());
+        if (error instanceof PaymentCreationNotAttempted) {
+          await d.repository.creationRejected(result.work, d.clock.now());
+          return publicPaymentAction(
+            await d.repository.readAuthorizedAction(
+              await d.authenticate(credentials),
+              result.action.businessId,
+              result.action.id,
+            ),
+          );
+        }
         /* The persisted intent owns this operation, including a crash before/after I/O. */
       }
-      return d.repository.creation(result.work, checkout, d.clock.now());
+      await d.repository.creation(result.work, checkout, d.clock.now());
+      return publicPaymentAction(
+        await d.repository.readAuthorizedAction(
+          await d.authenticate(credentials),
+          result.action.businessId,
+          result.action.id,
+        ),
+      );
     },
     async refresh(
       credentials: Credentials,
@@ -244,10 +330,12 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         d.clock.now(),
       );
       await reconcile(work);
-      return d.repository.readAuthorizedAction(
-        await d.authenticate(credentials),
-        id,
-        actionId,
+      return publicPaymentAction(
+        await d.repository.readAuthorizedAction(
+          await d.authenticate(credentials),
+          id,
+          actionId,
+        ),
       );
     },
     async event(input: { body: Uint8Array; headers: Headers }) {
@@ -308,11 +396,13 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
           true,
         ),
       );
-      return d.repository.readAuthorizedAction(
-        await d.authenticatePlatform(credentials),
-        id,
-        actionId,
-        true,
+      return publicPaymentAction(
+        await d.repository.readAuthorizedAction(
+          await d.authenticatePlatform(credentials),
+          id,
+          actionId,
+          true,
+        ),
       );
     },
   };

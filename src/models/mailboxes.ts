@@ -231,6 +231,12 @@ export type MailboxRepository = {
     mode: "incremental" | "history",
   ): Promise<MailboxWork>;
   prepare(work: MailboxWork): Promise<MailboxSnapshot | null>;
+  authorizeCall(
+    work: MailboxWork,
+    checkpoint: number,
+    phase: string,
+    payload: Record<string, unknown>,
+  ): Promise<void>;
   repeat(work: MailboxWork): Promise<MailboxWork | null>;
   commit(batch: MailboxBatch): Promise<MailboxJobState>;
   stop(

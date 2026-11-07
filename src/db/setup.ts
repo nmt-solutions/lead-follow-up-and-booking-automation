@@ -1,3 +1,4 @@
+import { preparePilotSecurity, securePilots } from "./pilot-security";
 import { prepareRecoverySecurity, secureRecovery } from "./recovery-security";
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import {
@@ -286,6 +287,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
   await prepareRecoverySecurity(pool);
+  await preparePilotSecurity(pool);
   await prepareDataGovernance(pool);
   await prepareCostSecurity(pool);
   await prepareNotificationSecurity(pool);
@@ -1461,6 +1463,7 @@ export async function secureDatabase(
     `);
     await secureOperations(client);
     await secureRecovery(client);
+    await securePilots(client);
     await secureDataGovernance(client);
     await secureTaxPeriods(client);
     await client.query("SET LOCAL ROLE app_runtime");

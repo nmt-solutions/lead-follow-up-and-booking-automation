@@ -498,11 +498,11 @@ describe("Native recurring cards at the public application seam", () => {
     await limited.start(f.owner, f.business.id, { actionId: restricted.id });
     expect(native.creations).toHaveLength(0);
   });
-  it("keeps a native paid pilot visibly blocked instead of granting days from an authentication token or deprecated add-on", async () => {
+  it("keeps a native pilot without reviewed order/customer evidence blocked instead of granting days from an authentication token or deprecated add-on", async () => {
     const { f, native, app, action } = await checkout("IN", "paid_pilot");
     expect(action).toMatchObject({
       state: "review_required",
-      reason: "native_paid_pilot_mapping_unverified",
+      reason: "pilot_order_customer_and_card_path_review_required",
     });
     expect(native.creations).toHaveLength(0);
     expect((await app.workspace(f.owner, f.business.id)).access.active).toBe(

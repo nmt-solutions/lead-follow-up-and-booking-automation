@@ -1,3 +1,5 @@
+import { publicPaymentSnapshot } from "../subscription-payments/projection";
+import type { SellerDocument } from "../models/seller-documents";
 import type { Actor, Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import {
@@ -22,6 +24,15 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   const result = schema.safeParse(input);
   if (!result.success) throw new ApplicationError("INVALID_INPUT");
   return result.data;
+}
+export function publicDocument(document: SellerDocument): SellerDocument {
+  return {
+    ...document,
+    snapshot: {
+      ...document.snapshot,
+      financial: publicPaymentSnapshot(document.snapshot.financial),
+    },
+  };
 }
 const hash = (value: string | Uint8Array) =>
   createHash("sha256").update(value).digest("hex");
@@ -187,8 +198,14 @@ export function createSellerDocumentApplication<Credentials>(dependencies: {
       operator = false,
     ) {
       const ctx = await context(credentials, businessId, operator);
+      const state = await repository.workspace(
+        ctx.actor,
+        ctx.businessId,
+        operator,
+      );
       return {
-        ...(await repository.workspace(ctx.actor, ctx.businessId, operator)),
+        ...state,
+        documents: state.documents.map(publicDocument),
         storageReady: !!dependencies.storage && !!dependencies.policy,
       };
     },
@@ -216,7 +233,7 @@ export function createSellerDocumentApplication<Credentials>(dependencies: {
         ctx.businessId,
         operator,
       );
-      return state.documents.find((d) => d.id === document.id)!;
+      return publicDocument(state.documents.find((d) => d.id === document.id)!);
     },
     async recover(
       credentials: Credentials,
@@ -225,9 +242,11 @@ export function createSellerDocumentApplication<Credentials>(dependencies: {
       operator = false,
     ) {
       const data = parse(recoverDocumentSchema, input);
-      return materialize(
-        { credentials, businessId, operator },
-        data.documentId,
+      return publicDocument(
+        await materialize(
+          { credentials, businessId, operator },
+          data.documentId,
+        ),
       );
     },
     async adjust(
@@ -246,9 +265,11 @@ export function createSellerDocumentApplication<Credentials>(dependencies: {
         dependencies.mode,
         policy,
       );
-      return materialize(
-        { credentials, businessId, operator: true },
-        document.id,
+      return publicDocument(
+        await materialize(
+          { credentials, businessId, operator: true },
+          document.id,
+        ),
       );
     },
     async recoverPending() {

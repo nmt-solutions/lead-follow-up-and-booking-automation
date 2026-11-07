@@ -1,3 +1,4 @@
+import { hasMfa, businessMfaLifetime } from "../auth/access";
 import { randomUUID } from "node:crypto";
 import {
   reconcileLifecycle,
@@ -30,6 +31,7 @@ import {
   subscriptionPaymentHistory,
   subscriptionLifecycleEvent,
   platformOperator,
+  session,
 } from "./schema";
 import {
   subscriptionQuoteSchema,
@@ -45,6 +47,7 @@ import {
   type PaymentObservation,
   type AuthenticatedPaymentEvent,
   type PaymentAction,
+  type pilotRenewalSchema,
 } from "../models/subscription-payments";
 import { ApplicationError } from "../models/application-error";
 import type { Actor } from "../models/business";
@@ -373,6 +376,316 @@ export function createSubscriptionPaymentRepository(database: Database) {
     });
   }
   return {
+    preparePilotRenewal(
+      actor: Actor,
+      businessId: string,
+      input: z.infer<typeof pilotRenewalSchema>,
+      at: Date,
+      gateway: PaymentGateway,
+    ) {
+      return scoped(database, actor, businessId, async (tx) => {
+        await lockBusiness(tx, businessId);
+        await requireCapability(tx, actor, businessId, "billing.manage");
+        const [prior] = await tx
+          .select()
+          .from(subscriptionPayment)
+          .where(
+            and(
+              eq(subscriptionPayment.businessId, businessId),
+              eq(subscriptionPayment.requestKey, input.requestKey),
+            ),
+          );
+        if (prior) {
+          if (
+            prior.snapshot.pilotContinuation?.originalActionId !==
+              input.originalActionId ||
+            prior.snapshot.pilotContinuation?.originalPeriodId !==
+              input.originalPeriodId ||
+            prior.snapshot.pilotContinuation?.startAt !== input.startAt ||
+            prior.snapshot.pilotContinuation?.approvalExpiresAt !==
+              input.approvalExpiresAt
+          )
+            throw new ApplicationError("CONFLICT");
+          return paymentView(prior);
+        }
+        const [original] = await tx
+          .select()
+          .from(subscriptionPayment)
+          .where(
+            and(
+              eq(subscriptionPayment.id, input.originalActionId),
+              eq(subscriptionPayment.businessId, businessId),
+            ),
+          );
+        const [period] = await tx
+          .select()
+          .from(subscriptionPeriod)
+          .where(
+            and(
+              eq(subscriptionPeriod.id, input.originalPeriodId),
+              eq(subscriptionPeriod.businessId, businessId),
+              eq(subscriptionPeriod.actionId, input.originalActionId),
+            ),
+          );
+        if (
+          !original ||
+          !period ||
+          original.snapshot.term.kind !== "days" ||
+          !original.checkout?.customerId ||
+          original.state !== "confirmed" ||
+          !period.charge?.paymentId ||
+          !period.charge.charge ||
+          new Date(input.startAt) < period.end ||
+          new Date(input.startAt) <= at ||
+          new Date(input.approvalExpiresAt) <= at ||
+          new Date(input.approvalExpiresAt) >= new Date(input.startAt)
+        )
+          throw new ApplicationError("INVALID_INPUT");
+        const existing = await tx
+          .select()
+          .from(subscriptionPayment)
+          .where(eq(subscriptionPayment.businessId, businessId));
+        if (
+          existing.some(
+            (a) =>
+              a.snapshot.pilotContinuation?.originalActionId === original.id &&
+              a.state !== "failed",
+          )
+        )
+          throw new ApplicationError("CONFLICT");
+        const q = original.snapshot.quote,
+          billing = await readBillingWorkspace(tx, businessId, at);
+        const tax = await appendTaxCalculation(
+          tx,
+          actor,
+          businessId,
+          {
+            requestKey: randomUUID(),
+            expectedProfileVersion: billing.version,
+            expectedReviewVersion: billing.reviewVersion,
+            currency: q.currency,
+            lines: q.renewal.lines.map((line) => ({
+              id: line.kind,
+              productCode: line.kind,
+              description: line.label,
+              quantity: 1,
+              unitAmountMinor: String(line.amountMinor),
+            })),
+            note: `Explicit separate monthly continuation of ${original.id}`,
+          },
+          at,
+          gateway.mode === "test"
+            ? "fixture"
+            : gateway.mode === "unconfigured"
+              ? "fixture"
+              : gateway.mode,
+        );
+        if (tax.status !== "calculated")
+          throw new ApplicationError("SETUP_REQUIRED");
+        const snapshot: PaymentSnapshot = {
+          ...original.snapshot,
+          tax,
+          term: { kind: "calendar_month", timeZone: "UTC" },
+          basis: {
+            kind: "renewal",
+            discovery: q.renewal.discovery,
+            automation: q.renewal.automation,
+          },
+          provider: {
+            key: gateway.key,
+            account: gateway.account,
+            mode: gateway.mode === "unconfigured" ? "fixture" : gateway.mode,
+            ...(gateway.review ? { review: gateway.review } : {}),
+          },
+          pilotContinuation: {
+            originalActionId: original.id,
+            originalPeriodId: period.id,
+            customerId: original.checkout.customerId,
+            originalEnd: period.end.toISOString(),
+            startAt: input.startAt,
+            approvalExpiresAt: input.approvalExpiresAt,
+            disclosure:
+              "The pilot is a separate one-time card payment. This approval creates a separate monthly mandate for the original agreed monthly price and allowances. A mandate authorization is not paid renewal. Access follows verified captured monthly payment only; a later selected start leaves a service gap.",
+          },
+        };
+        if (
+          gateway.mode === "unconfigured" ||
+          gateway.reviewSnapshot?.(snapshot).length
+        )
+          throw new ApplicationError("SETUP_REQUIRED");
+        const [row] = await tx
+          .insert(subscriptionPayment)
+          .values({
+            id: randomUUID(),
+            businessId,
+            requestKey: input.requestKey,
+            operationKey: randomUUID(),
+            recoveryKey: randomUUID(),
+            quoteId: original.quoteId,
+            snapshot,
+            actorId: actor.userId,
+            at,
+            state: "reviewed",
+          })
+          .returning();
+        return paymentView(row);
+      });
+    },
+    authorizeCreation(
+      actor: Actor & { sessionId?: string },
+      work: Work,
+      at: Date,
+      gateway: PaymentGateway,
+    ) {
+      return scoped(database, actor, work.business_id, async (tx) => {
+        await lockBusiness(tx, work.business_id);
+        await requireCapability(tx, actor, work.business_id, "billing.manage");
+        const [row] = await tx
+          .select()
+          .from(subscriptionPayment)
+          .where(
+            and(
+              eq(subscriptionPayment.id, work.id),
+              eq(subscriptionPayment.businessId, work.business_id),
+            ),
+          );
+        if (
+          !row ||
+          row.recoveryKey !== work.recovery_key ||
+          row.actorId !== actor.userId ||
+          !row.started ||
+          row.state !== "pending" ||
+          row.reason !== "creation_pending" ||
+          row.checkout ||
+          gateway.reviewSnapshot?.(row.snapshot).length
+        )
+          throw new ApplicationError("FORBIDDEN");
+        if (
+          row.snapshot.term.kind === "days" ||
+          row.snapshot.pilotContinuation
+        ) {
+          const [proof] = await tx
+            .select()
+            .from(session)
+            .where(
+              and(
+                eq(session.id, actor.sessionId ?? ""),
+                eq(session.userId, actor.userId),
+              ),
+            );
+          const now = await tx.execute<{ now: string }>(
+            sql`select clock_timestamp() as now`,
+          );
+          if (
+            !proof ||
+            !(await hasMfa(
+              tx,
+              proof.token,
+              new Date(now.rows[0].now),
+              businessMfaLifetime,
+            ))
+          )
+            throw new ApplicationError("MFA_REQUIRED");
+        }
+        const stopped = await tx.execute<{ stopped: boolean }>(
+          sql`select public.business_data_stopped(${work.business_id}::uuid) as stopped`,
+        );
+        if (stopped.rows[0]?.stopped) throw new ApplicationError("FORBIDDEN");
+        const deadline = await tx.execute<{ current: boolean }>(
+          sql`select ${row.recovery?.creationLeaseUntil ?? null}::timestamptz>clock_timestamp() as current`,
+        );
+        if (!deadline.rows[0]?.current) throw new ApplicationError("FORBIDDEN");
+        if (row.snapshot.pilotContinuation) {
+          if (
+            new Date(row.snapshot.pilotContinuation.approvalExpiresAt) <= at ||
+            new Date(row.snapshot.pilotContinuation.startAt) <= at
+          )
+            throw new ApplicationError("FORBIDDEN");
+        } else await trustedQuote(tx, work.business_id, row.quoteId, at);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended('subscription-tax-rules',0)),set_config('app.tax_calculation','true',true)`,
+        );
+        const tax = evaluateTax(
+          row.snapshot.tax.input,
+          await readBillingWorkspace(tx, work.business_id, at),
+          await readTaxCatalog(tx),
+          at,
+          row.snapshot.provider.mode === "test"
+            ? "fixture"
+            : row.snapshot.provider.mode,
+        );
+        if (
+          tax.status !== "calculated" ||
+          !isDeepStrictEqual(tax.lines, row.snapshot.tax.lines) ||
+          !isDeepStrictEqual(tax.totals, row.snapshot.tax.totals)
+        )
+          throw new ApplicationError("SETUP_REQUIRED");
+        // Tax catalog reads can wait behind a deployment lock. Recheck the original
+        // authority and all deadlines after that wait using the database clock.
+        await requireCapability(tx, actor, work.business_id, "billing.manage");
+        const finalTime = await tx.execute<{ now: string }>(
+          sql`select clock_timestamp() as now`,
+        );
+        const trustedNow = new Date(finalTime.rows[0].now);
+        const currentReview = row.snapshot.provider.review;
+        if (
+          gateway.reviewSnapshot?.(row.snapshot).length ||
+          (currentReview &&
+            (new Date(currentReview.checkedAt) > trustedNow ||
+              new Date(currentReview.effectiveFrom) > trustedNow ||
+              new Date(currentReview.effectiveUntil) <= trustedNow)) ||
+          new Date(row.recovery!.creationLeaseUntil!) <= trustedNow
+        )
+          throw new ApplicationError("FORBIDDEN");
+        const finalTax = evaluateTax(
+          row.snapshot.tax.input,
+          await readBillingWorkspace(tx, work.business_id, trustedNow),
+          await readTaxCatalog(tx),
+          trustedNow,
+          row.snapshot.provider.mode === "test"
+            ? "fixture"
+            : row.snapshot.provider.mode,
+        );
+        if (
+          finalTax.status !== "calculated" ||
+          !isDeepStrictEqual(finalTax.lines, row.snapshot.tax.lines) ||
+          !isDeepStrictEqual(finalTax.totals, row.snapshot.tax.totals)
+        )
+          throw new ApplicationError("SETUP_REQUIRED");
+        const currentStop = await tx.execute<{ stopped: boolean }>(
+          sql`select public.business_data_stopped(${work.business_id}::uuid) stopped`,
+        );
+        if (currentStop.rows[0]?.stopped)
+          throw new ApplicationError("FORBIDDEN");
+        await requireCapability(tx, actor, work.business_id, "billing.manage");
+        if (
+          row.snapshot.term.kind === "days" ||
+          row.snapshot.pilotContinuation
+        ) {
+          const [proof] = await tx
+            .select()
+            .from(session)
+            .where(
+              and(
+                eq(session.id, actor.sessionId ?? ""),
+                eq(session.userId, actor.userId),
+              ),
+            );
+          if (
+            !proof ||
+            !(await hasMfa(tx, proof.token, trustedNow, businessMfaLifetime))
+          )
+            throw new ApplicationError("MFA_REQUIRED");
+          if (
+            row.snapshot.pilotContinuation &&
+            (new Date(row.snapshot.pilotContinuation.startAt) <= trustedNow ||
+              new Date(row.snapshot.pilotContinuation.approvalExpiresAt) <=
+                trustedNow)
+          )
+            throw new ApplicationError("FORBIDDEN");
+        }
+      });
+    },
     prepare(
       actor: Actor,
       businessId: string,
@@ -575,7 +888,8 @@ export function createSubscriptionPaymentRepository(database: Database) {
             throw new ApplicationError("SETUP_REQUIRED");
           let current = true;
           try {
-            await trustedQuote(tx, businessId, row.quoteId, at);
+            if (!row.snapshot.pilotContinuation)
+              await trustedQuote(tx, businessId, row.quoteId, at);
           } catch (error: unknown) {
             if (
               !(error instanceof ApplicationError) ||
@@ -619,7 +933,11 @@ export function createSubscriptionPaymentRepository(database: Database) {
             .where(eq(subscriptionPayment.businessId, businessId));
           const access = await paymentAccess(tx, businessId, at);
           if (
-            access.periods.some((p) => new Date(p.end) > at) ||
+            access.periods.some(
+              (p) =>
+                new Date(p.end) > at &&
+                p.id !== row.snapshot.pilotContinuation?.originalPeriodId,
+            ) ||
             all.some(
               (a) =>
                 a.id !== row.id &&
@@ -629,6 +947,15 @@ export function createSubscriptionPaymentRepository(database: Database) {
             )
           )
             throw new ApplicationError("CONFLICT");
+          if (
+            row.snapshot.pilotContinuation &&
+            (new Date(row.snapshot.pilotContinuation.startAt) <= at ||
+              new Date(row.snapshot.pilotContinuation.approvalExpiresAt) <= at)
+          )
+            throw new ApplicationError("SETUP_REQUIRED");
+          const lease = await tx.execute<{ until: string }>(
+            sql`select to_char((clock_timestamp()+interval '5 minutes') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as until`,
+          );
           const [updated] = await tx
             .update(subscriptionPayment)
             .set({
@@ -637,6 +964,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
               reason: "creation_pending",
               recovery: {
                 creationAt: at.toISOString(),
+                creationLeaseUntil: lease.rows[0].until,
                 subscriptionSkip: 0,
                 candidateId: null,
                 ambiguous: false,
@@ -896,6 +1224,14 @@ export function createSubscriptionPaymentRepository(database: Database) {
               .from(subscriptionPeriod)
               .where(eq(subscriptionPeriod.actionId, row.id))
           ).map((p) => p.id),
+          settledCaptures: row.snapshot.pilotContinuation
+            ? (
+                await tx
+                  .select({ charge: subscriptionPeriod.charge })
+                  .from(subscriptionPeriod)
+                  .where(eq(subscriptionPeriod.actionId, row.id))
+              ).flatMap((p) => (p.charge ? [p.charge] : []))
+            : [],
           reachRenewals: (
             await tx.execute<{ contracts: unknown }>(
               sql`select public.payment_reach_contract(${row.id}::uuid,${row.businessId}::uuid) as contracts`,
@@ -1070,7 +1406,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
             o.amountMinor !== s.tax.totals?.totalMinor) ||
           s.tax.status !== "calculated" ||
           (o.charge &&
-            (!o.subscriptionId ||
+            ((s.term.kind !== "days" && !o.subscriptionId) ||
               !row.checkout?.planId ||
               (o.charge.planId !== row.checkout.planId && !s.reachRenewal)))
         )
@@ -1144,7 +1480,11 @@ export function createSubscriptionPaymentRepository(database: Database) {
           ? periods.some(
               (p) =>
                 p.start.toISOString() === o.charge?.subscriptionStart &&
-                p.snapshot.basis?.kind !== "renewal",
+                (p.snapshot.basis?.kind !== "renewal" ||
+                  (p.actionId === row.id &&
+                    !!p.snapshot.pilotContinuation &&
+                    p.snapshot.pilotContinuation.originalPeriodId ===
+                      row.snapshot.pilotContinuation?.originalPeriodId)),
             )
           : periods.some(
               (p) =>
@@ -1159,13 +1499,16 @@ export function createSubscriptionPaymentRepository(database: Database) {
           !o.paidAt ||
           !o.periodStart ||
           !o.periodEnd ||
-          new Date(o.periodStart) < row.at ||
+          (s.provider.key === "razorpay" && s.term.kind === "days"
+            ? Math.floor(new Date(o.periodStart).getTime() / 1000) <
+              Math.floor(row.at.getTime() / 1000)
+            : new Date(o.periodStart) < row.at) ||
           (!renewal && periods.length > 0) ||
           (renewal && !renewalBasisKnown) ||
           new Date(o.periodStart) > new Date(o.paidAt) ||
           (!nativeRenewal && new Date(o.periodEnd) <= new Date(o.paidAt)) ||
           new Date(o.paidAt) > at ||
-          (o.charge
+          (o.charge && s.term.kind !== "days"
             ? !monthlyPeriodMatches(
                 o.charge.subscriptionStart,
                 o.periodStart,

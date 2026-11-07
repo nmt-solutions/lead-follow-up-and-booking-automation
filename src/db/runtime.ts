@@ -1,3 +1,4 @@
+import { verifyPilots } from "./pilot-security";
 import { verifyRecoverySecurity } from "./recovery-security";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { verifyTaxPeriods } from "./tax-period-security";
@@ -30,6 +31,7 @@ export async function verifyRuntimeRole(
     if (quarantine.rows[0]?.blocked)
       throw new ApplicationError("SETUP_REQUIRED");
   }
+  if (!(await verifyPilots(pool))) throw new ApplicationError("SETUP_REQUIRED");
   if (!(await verifyRecoverySecurity(pool)))
     throw new ApplicationError("SETUP_REQUIRED");
   await verifyReconciliationRuntime(pool);

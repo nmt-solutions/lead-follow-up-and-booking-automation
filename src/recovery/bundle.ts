@@ -12,6 +12,28 @@ export async function recoverySchemaBundle(root = process.cwd()) {
     "scripts/recovery-tools.ts",
     "trigger.recovery.config.ts",
     "src/models/infrastructure-recovery.ts",
+    "src/models/pilots.ts",
+    "src/models/subscription-payments.ts",
+    "src/models/razorpay-account.ts",
+    "src/application/pilots.ts",
+    "src/application/subscription-payments.ts",
+    "src/application/seller-documents.ts",
+    "src/application/financial-adjustments.ts",
+    "src/application/reach-changes.ts",
+    "src/auth/access.ts",
+    "src/models/mailboxes.ts",
+    "src/application/mailboxes.ts",
+    "src/application/appointments.ts",
+    "src/models/team.ts",
+    ...(await readdir(join(root, "src/costs")))
+      .filter((f) => f.endsWith(".ts"))
+      .sort()
+      .map((f) => `src/costs/${f}`),
+    "src/pilots/preflight.ts",
+    ...(await readdir(join(root, "src/subscription-payments")))
+      .filter((f) => f.endsWith(".ts"))
+      .sort()
+      .map((f) => `src/subscription-payments/${f}`),
     "src/application/infrastructure-recovery.ts",
     ...(await readdir(join(root, "src/db")))
       .filter((f) => f.endsWith(".ts"))

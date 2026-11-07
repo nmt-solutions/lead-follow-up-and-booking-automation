@@ -155,12 +155,27 @@ export function createMailboxApplication<Credentials>(dependencies: {
               1000,
           ),
         );
+      async function call<T>(
+        phase: string,
+        payload: Record<string, unknown>,
+        invoke: () => Promise<T>,
+      ) {
+        signal.throwIfAborted();
+        await repository.authorizeCall(
+          work,
+          snapshot!.checkpoint,
+          phase,
+          payload,
+        );
+        signal.throwIfAborted();
+        return invoke();
+      }
       let grant: MailboxGrant | undefined;
       try {
         signal.throwIfAborted();
         grant = parse(
           mailboxGrantSchema,
-          await provider.inspect(snapshot, signal),
+          await call("inspect", {}, () => provider.inspect(snapshot, signal)),
           true,
         );
         if (
@@ -174,7 +189,11 @@ export function createMailboxApplication<Credentials>(dependencies: {
           return await repository.fail(snapshot, "permission_required", grant);
         const page = parse(
           mailboxPageSchema,
-          await provider.list(snapshot, grant, signal),
+          await call(
+            "list",
+            { cursor: snapshot.cursor, limit: snapshot.limit },
+            () => provider.list(snapshot, grant!, signal),
+          ),
           true,
         );
         const remaining =
@@ -226,7 +245,9 @@ export function createMailboxApplication<Credentials>(dependencies: {
             throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
           const event = parse(
             z.union([incomingInquirySchema, mailManualSchema]),
-            await provider.read(snapshot, metadata, signal),
+            await call("read", { messageRef: metadata.messageRef }, () =>
+              provider.read(snapshot, metadata, signal),
+            ),
             true,
           );
           if (
@@ -259,7 +280,9 @@ export function createMailboxApplication<Credentials>(dependencies: {
         signal.throwIfAborted();
         const confirmed = parse(
           mailboxGrantSchema,
-          await provider.inspect(snapshot, signal),
+          await call("confirm_grant", {}, () =>
+            provider.inspect(snapshot, signal),
+          ),
           true,
         );
         if (

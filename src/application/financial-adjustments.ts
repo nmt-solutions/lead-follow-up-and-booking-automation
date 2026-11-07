@@ -1,3 +1,4 @@
+import { publicDocument } from "./seller-documents";
 import { z } from "zod";
 import type { Actor, Clock } from "../models/business";
 import type { createFinancialAdjustmentRepository } from "../db/financial-adjustment-repository";
@@ -221,8 +222,14 @@ export function createFinancialAdjustmentApplication<
       } catch {
         /* The saved history stays available. */
       }
+      const state = await repository.workspace(
+        ctx.actor,
+        ctx.businessId,
+        operator,
+      );
       return {
-        ...(await repository.workspace(ctx.actor, ctx.businessId, operator)),
+        ...state,
+        invoices: state.invoices.map(publicDocument),
         policy: operator ? gateway.policy : null,
         ready,
       };

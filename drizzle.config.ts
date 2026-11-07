@@ -7,6 +7,9 @@ export default defineConfig({
   dbCredentials: { url: databaseAdminUrl() },
   schemaFilter: ["public"],
   tablesFilter: [
+    "pilot_record",
+    "pilot_event",
+    "pilot_effect",
     "infrastructure_recovery",
     "infrastructure_recovery_event",
     "reconciliation_evidence",

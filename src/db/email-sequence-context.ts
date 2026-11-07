@@ -1,3 +1,4 @@
+import { pilotPathAllowed } from "./pilot-limits";
 import { selectSequenceMail } from "../email-sequences/provider";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ApplicationError } from "../models/application-error";
@@ -316,6 +317,20 @@ export function createSequenceGate(d: {
       if (handoffs.some((e) => e.kind !== "prepared"))
         return { reason: "manual_send_review_required" } as const;
     }
+    if (
+      !(await pilotPathAllowed(tx, businessId, "outreach_email", {
+        senderId: r.snapshot.senderIdentityId,
+        mailboxId:
+          r.snapshot.senderContext.replyRoute?.configuration.inboxConnectionId,
+        action: {
+          kind: "campaign",
+          id: r.id,
+          recipientKey: contactId,
+          stepIndex,
+        },
+      }))
+    )
+      return { reason: "pilot_scope_changed" } as const;
     const finalAt = clock.now();
     const finalEligibility = await emailDecisionAtDispatch(
       tx,

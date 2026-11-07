@@ -1,3 +1,4 @@
+import { pilotEffectCurrent } from "./pilot-limits";
 import {
   createDiscoveryScheduleRepository,
   persistDispatch,
@@ -181,6 +182,8 @@ export function createDiscoveryRepository(
         await requireWorkSession(tx, work, at);
         await schedules.checkScheduleForRun(tx, run);
         await checkCurrent(tx, run, clock.now());
+        if (!(await pilotEffectCurrent(tx, work.businessId, "discovery")))
+          throw new ApplicationError("PAID_ACCESS_REQUIRED");
         if (run.status !== "running")
           throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
       });
