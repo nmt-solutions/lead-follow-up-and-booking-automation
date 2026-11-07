@@ -19,7 +19,9 @@ import { Badge } from "./ui/badge";
 type Preference = z.infer<typeof notificationPreferenceViewSchema>;
 const preferencesSchema = z.array(notificationPreferenceViewSchema);
 const businessSchema = z.object({
-  allowedPreferences: z.array(z.enum(["operations", "subscription"])),
+  allowedPreferences: z.array(
+    z.enum(["operations", "subscription", "tax_period"]),
+  ),
   notices: z.array(noticeViewSchema),
   sendingReady: z.boolean(),
   preferences: preferencesSchema,
@@ -244,11 +246,11 @@ function Preferences({
   busy,
   save,
 }: {
-  allowed: ("operations" | "subscription")[];
+  allowed: ("operations" | "subscription" | "tax_period")[];
   values: Preference[];
   busy: boolean;
   save: (input: {
-    purpose: "operations" | "subscription";
+    purpose: "operations" | "subscription" | "tax_period";
     enabled: boolean;
     expectedVersion: number;
   }) => void;
@@ -265,39 +267,48 @@ function Preferences({
         Operator notices cover only sources allowed by their current operations
         or sender-health capability. Changes retain their original history.
       </p>
-      {(["operations", "subscription"] as const).map((p) => {
-        const v = values.find((v) => v.purpose === p);
-        return (
-          <div
-            key={p}
-            className="flex flex-wrap items-center justify-between gap-3"
-          >
-            <span>
-              {p === "operations"
-                ? "Handoffs, sender health and operational exceptions"
-                : "Subscription, refund and dispute status"}
-              : {v?.enabled ? "Email enabled" : "In-app only"}
-            </span>
-            <Button
-              variant="outline"
-              disabled={busy || (!v?.enabled && !allowed.includes(p))}
-              onClick={() =>
-                save({
-                  purpose: p,
-                  enabled: !v?.enabled,
-                  expectedVersion: v?.version ?? 0,
-                })
-              }
+      {(["operations", "subscription", "tax_period"] as const)
+        .filter(
+          (p) =>
+            p !== "tax_period" ||
+            allowed.includes(p) ||
+            values.some((v) => v.purpose === p && v.enabled),
+        )
+        .map((p) => {
+          const v = values.find((v) => v.purpose === p);
+          return (
+            <div
+              key={p}
+              className="flex flex-wrap items-center justify-between gap-3"
             >
-              {v?.enabled
-                ? "Stop email"
-                : allowed.includes(p)
-                  ? "Enable email"
-                  : "Source access required"}
-            </Button>
-          </div>
-        );
-      })}
+              <span>
+                {p === "operations"
+                  ? "Handoffs, sender health and operational exceptions"
+                  : p === "tax_period"
+                    ? "Configured tax-period review reminders"
+                    : "Subscription, refund and dispute status"}
+                : {v?.enabled ? "Email enabled" : "In-app only"}
+              </span>
+              <Button
+                variant="outline"
+                disabled={busy || (!v?.enabled && !allowed.includes(p))}
+                onClick={() =>
+                  save({
+                    purpose: p,
+                    enabled: !v?.enabled,
+                    expectedVersion: v?.version ?? 0,
+                  })
+                }
+              >
+                {v?.enabled
+                  ? "Stop email"
+                  : allowed.includes(p)
+                    ? "Enable email"
+                    : "Source access required"}
+              </Button>
+            </div>
+          );
+        })}
     </section>
   );
 }
