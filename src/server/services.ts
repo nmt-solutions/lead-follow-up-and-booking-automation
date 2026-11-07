@@ -3,6 +3,9 @@ import { createRecoveryRepository } from "../db/recovery-repository";
 import { createRecoveryHttp } from "../http/infrastructure-recovery";
 import { configuredRecoveryWeb } from "./recovery-web";
 import { createFinancialAdjustmentApplication } from "../application/financial-adjustments";
+import { createReconciliationApplication } from "../application/reconciliation";
+import { createReconciliationRepository } from "../db/reconciliation-repository";
+import { createReconciliationHttp } from "../http/reconciliation";
 import { createReportingApplication } from "../application/reporting";
 import { createReportingRepository } from "../db/reporting-repository";
 import { createReportingHttp } from "../http/reporting";
@@ -415,6 +418,11 @@ async function composeServices() {
     clock: { now: () => new Date() },
     gateway: configuredFinancialAdjustments(),
     documents: sellerDocuments,
+  });
+  const reconciliation = createReconciliationApplication({
+    authenticatePlatform,
+    repository: createReconciliationRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
   });
 
   const billingReviewFiles = createFileApplication({
@@ -864,6 +872,12 @@ async function composeServices() {
       reportFailure,
     }),
     financialAdjustments,
+    reconciliation,
+    reconciliationHttp: createReconciliationHttp({
+      application: reconciliation,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     financialAdjustmentsHttp: createFinancialAdjustmentHttp({
       application: financialAdjustments,
       origin: new URL(environment.BETTER_AUTH_URL).origin,

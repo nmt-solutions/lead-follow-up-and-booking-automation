@@ -11,6 +11,7 @@ import {
 import { operationSourceTables } from "./operations-security";
 import { reachFunctions } from "./reach-change-security";
 import { verifyDataGovernance } from "./data-governance-security";
+import { verifyReconciliationRuntime } from "./reconciliation-security";
 
 export function runtimeDatabase(pool: Pool) {
   return drizzle(pool, { schema });
@@ -31,6 +32,7 @@ export async function verifyRuntimeRole(
   }
   if (!(await verifyRecoverySecurity(pool)))
     throw new ApplicationError("SETUP_REQUIRED");
+  await verifyReconciliationRuntime(pool);
   await verifyDataGovernance(pool);
   await verifyTaxPeriods(pool);
   const result = await pool.query<{ safe: boolean }>(`

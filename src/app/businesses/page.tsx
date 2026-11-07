@@ -121,12 +121,20 @@ export default async function BusinessesPage() {
     }
   })();
   const paymentsLink = canReconcile ? (
-    <Link
-      href="/platform/subscription-payments"
-      className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-    >
-      Review subscription payments
-    </Link>
+    <div className="flex flex-wrap gap-4">
+      <Link
+        href="/platform/subscription-payments"
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+      >
+        Review subscription payments
+      </Link>
+      <Link
+        href="/platform/reconciliation"
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+      >
+        Reconcile subscription money
+      </Link>
+    </div>
   ) : null;
   const senderHealthLink = await (async () => {
     try {
