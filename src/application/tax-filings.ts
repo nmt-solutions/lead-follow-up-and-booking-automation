@@ -58,9 +58,9 @@ export function createTaxFilingApplication<Credentials>(d: {
         d.repository.storeEvidence(actor, input, d.clock.now()),
       );
     },
-    downloadEvidence: (credentials: Credentials, value: unknown) => {
+    downloadEvidence: async (credentials: Credentials, value: unknown) => {
       const input = parse(z.strictObject({ evidenceId: z.uuid() }), value);
-      return authorized(credentials, async (actor) => {
+      const completed = await authorized(credentials, async (actor) => {
         const grant = await d.repository.openEvidence(actor, input.evidenceId);
         const bytes = await d.repository.readEvidence(actor, grant);
         const current = await d.authenticatePlatform(credentials);
@@ -74,12 +74,31 @@ export function createTaxFilingApplication<Credentials>(d: {
         )
           throw new ApplicationError("CONFLICT");
         return {
-          bytes: new Uint8Array(bytes),
-          name: grant.evidence.name,
-          contentType: grant.evidence.contentType,
-          sha256: grant.evidence.sha256,
+          bytes,
+          grant,
+          actorId: actor.userId,
         };
       });
+      // The generic final authorization can itself wait. Revalidate this exact grant and original AFTER it.
+      const current = await d.authenticatePlatform(credentials);
+      if (current.userId !== completed.actorId)
+        throw new ApplicationError("FORBIDDEN");
+      const verified = await d.repository.readEvidence(
+        current,
+        completed.grant,
+      );
+      if (
+        !verified.equals(completed.bytes) ||
+        createHash("sha256").update(verified).digest("hex") !==
+          completed.grant.evidence.sha256
+      )
+        throw new ApplicationError("CONFLICT");
+      return {
+        bytes: new Uint8Array(verified),
+        name: completed.grant.evidence.name,
+        contentType: completed.grant.evidence.contentType,
+        sha256: completed.grant.evidence.sha256,
+      };
     },
     savePolicy: (credentials: Credentials, value: unknown) => {
       const input = parse(saveFilingPolicySchema, value);
