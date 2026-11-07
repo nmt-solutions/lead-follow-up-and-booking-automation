@@ -15,13 +15,49 @@ import {
   type ReachStage,
   type ReachChange,
 } from "../models/reach-changes";
-import type { PaymentGateway } from "../models/subscription-payments";
+import type {
+  PaymentGateway,
+  PaymentSnapshot,
+} from "../models/subscription-payments";
 import type { createReachChangeRepository } from "../db/reach-change-repository";
 
 function parse<T>(schema: z.ZodType<T>, input: unknown) {
   const result = schema.safeParse(input);
   if (!result.success) throw new ApplicationError("INVALID_INPUT");
   return result.data;
+}
+function publicFinancial(snapshot: PaymentSnapshot): PaymentSnapshot {
+  const { key, account, mode } = snapshot.provider;
+  return { ...snapshot, provider: { key, account, mode } };
+}
+/** Public agreement copies omit deployment reviews; persisted work and its hash stay full. */
+function publicChange(change: ReachChange): ReachChange {
+  const s = change.snapshot;
+  return {
+    ...change,
+    snapshot: {
+      ...s,
+      currentFinancial: publicFinancial(s.currentFinancial),
+      original: {
+        ...s.original,
+        snapshot: publicFinancial(s.original.snapshot),
+      },
+      action: {
+        ...s.action,
+        snapshot: publicFinancial(s.action.snapshot),
+        ...(s.action.reachRenewals
+          ? {
+              reachRenewals: s.action.reachRenewals.map((r) => ({
+                ...r,
+                target: publicFinancial(r.target),
+              })),
+            }
+          : {}),
+      },
+      target: publicFinancial(s.target),
+      delta: publicFinancial(s.delta),
+    },
+  };
 }
 export function createReachChangeApplication<C>(d: {
   authenticate(credentials: C): Promise<Actor>;
@@ -139,20 +175,24 @@ export function createReachChangeApplication<C>(d: {
         }
         change = await observe(work);
       }
-    return d.repository.read(
-      await authenticate(credentials),
-      id,
-      input.changeId,
-      operator,
+    return publicChange(
+      await d.repository.read(
+        await authenticate(credentials),
+        id,
+        input.changeId,
+        operator,
+      ),
     );
   }
   return {
     async withdraw(credentials: C, businessId: unknown, value: unknown) {
-      return d.repository.withdraw(
-        await d.authenticate(credentials),
-        parse(businessIdSchema, businessId),
-        parse(reachCommandSchema, value),
-        d.clock.now(),
+      return publicChange(
+        await d.repository.withdraw(
+          await d.authenticate(credentials),
+          parse(businessIdSchema, businessId),
+          parse(reachCommandSchema, value),
+          d.clock.now(),
+        ),
       );
     },
     async workspace(credentials: C, businessId: unknown) {
@@ -178,7 +218,11 @@ export function createReachChangeApplication<C>(d: {
           : []),
         ...(d.gateway.readiness?.() ?? []),
       ];
-      return { ...state, configuration: { ready: !reasons.length, reasons } };
+      return {
+        ...state,
+        changes: state.changes.map(publicChange),
+        configuration: { ready: !reasons.length, reasons },
+      };
     },
     async checkout(credentials: C, businessId: unknown, value: unknown) {
       const id = parse(businessIdSchema, businessId),
@@ -212,16 +256,21 @@ export function createReachChangeApplication<C>(d: {
       );
     },
     async queue(credentials: C) {
-      return d.repository.queue(await d.authenticatePlatform(credentials));
+      const state = await d.repository.queue(
+        await d.authenticatePlatform(credentials),
+      );
+      return { ...state, changes: state.changes.map(publicChange) };
     },
     async approve(credentials: C, businessId: unknown, value: unknown) {
-      return d.repository.approve(
-        await d.authenticate(credentials),
-        parse(businessIdSchema, businessId),
-        parse(reachApprovalSchema, value),
-        d.clock.now(),
-        d.gateway,
-        d.policy,
+      return publicChange(
+        await d.repository.approve(
+          await d.authenticate(credentials),
+          parse(businessIdSchema, businessId),
+          parse(reachApprovalSchema, value),
+          d.clock.now(),
+          d.gateway,
+          d.policy,
+        ),
       );
     },
     execute: (credentials: C, businessId: unknown, value: unknown) =>
@@ -247,7 +296,8 @@ export function createReachChangeApplication<C>(d: {
           d.gateway,
           d.policy,
         );
-      if (change.events.some((e) => e.fact.kind === "approved")) return change;
+      if (change.events.some((e) => e.fact.kind === "approved"))
+        return publicChange(change);
       if (!d.gateway.reach) throw new ApplicationError("SETUP_REQUIRED");
       const work = await d.repository.previewWork(
         await d.authenticate(credentials),
@@ -267,10 +317,12 @@ export function createReachChangeApplication<C>(d: {
         d.gateway,
         d.policy,
       );
-      return d.repository.read(
-        await d.authenticate(credentials),
-        id,
-        change.id,
+      return publicChange(
+        await d.repository.read(
+          await d.authenticate(credentials),
+          id,
+          change.id,
+        ),
       );
     },
   };

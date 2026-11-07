@@ -63,7 +63,11 @@ describe("Approved reach changes at the public application seam", () => {
     reduction = false,
     dates?: { start: string; end: string; at: string },
     capacity = false,
-    nativeOptions: { targetCount?: number; replacementUrl?: string } = {},
+    nativeOptions: {
+      targetCount?: number;
+      replacementUrl?: string;
+      merchantMarkers?: boolean;
+    } = {},
   ) {
     const f = await subscriptionFixture(h, { country });
     await h.admin.query(
@@ -97,6 +101,17 @@ describe("Approved reach changes at the public application seam", () => {
       planId: "plan_expandedFurtherUSD",
       totalCount: 12,
     });
+    if (nativeOptions.merchantMarkers) {
+      native.review.terms.activation = "private merchant activation marker";
+      native.review.evidence.push("private merchant evidence marker");
+      native.review.plans.push({
+        offerId: "private-other-offer-marker",
+        reservedCapacityId: null,
+        currency: "USD",
+        planId: "plan_PrivateMerchantOnly",
+        totalCount: 12,
+      });
+    }
     native.configuration.env.RAZORPAY_ACCOUNT_REVIEW = JSON.stringify(
       native.review,
     );
@@ -852,6 +867,102 @@ describe("Approved reach changes at the public application seam", () => {
       ),
     ).toEqual(delta);
     expect(f.native.refundPosts).toHaveLength(1);
+  });
+  it("keeps merchant review and private recovery authority out of new reach responses while preserving exact approval and capture", async () => {
+    const f = await setup("US", false, undefined, false, {
+      merchantMarkers: true,
+    });
+    const input = {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    };
+    const safe = (value: unknown) => {
+      const text = JSON.stringify(value);
+      expect(text).not.toMatch(
+        /private merchant|private-other-offer-marker|plan_PrivateMerchantOnly|"(?:recoveryKey|recovery_key|lease|capability|credentials|secret)"\s*:/i,
+      );
+    };
+    const preview = await f.changes.preview(f.owner, f.business.id, input);
+    safe(preview);
+    expect(preview.snapshot.target.quote.billingReview).toEqual(
+      f.target.billingReview,
+    );
+    expect(preview.snapshot.target.quote.profile).toEqual(f.target.profile);
+    expect(preview.snapshot.original.snapshot.tax).toEqual(
+      f.original.snapshot.tax,
+    );
+    expect(preview.snapshot.delta.tax.totals).toEqual({
+      netMinor: "1250",
+      taxMinor: "125",
+      totalMinor: "1375",
+    });
+    const unused = await f.changes.preview(f.owner, f.business.id, {
+      ...input,
+      requestKey: randomUUID(),
+    });
+    safe(
+      await f.changes.withdraw(f.owner, f.business.id, {
+        changeId: unused.id,
+        requestKey: randomUUID(),
+      }),
+    );
+    const approved = await f.changes.approve(f.owner, f.business.id, {
+      changeId: preview.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: preview.reviewHash,
+    });
+    safe(approved);
+    expect(
+      approved.events.find((e) => e.fact.kind === "approved")?.fact.reviewHash,
+    ).toBe(preview.reviewHash);
+    safe(await f.changes.preview(f.owner, f.business.id, input));
+    safe(
+      await f.changes.execute(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+      }),
+    );
+    expect(
+      (await f.payments.workspace(f.owner, f.business.id)).allowances?.discovery
+        .included,
+    ).toBe(100);
+    f.captureDelta();
+    safe(
+      await f.changes.refresh(f.owner, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+      }),
+    );
+    safe(
+      await f.changes.operatorRefresh(f.operator, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+      }),
+    );
+    safe(
+      await f.changes.operatorExecute(f.operator, f.business.id, {
+        changeId: preview.id,
+        requestKey: randomUUID(),
+      }),
+    );
+    safe(await f.changes.workspace(f.owner, f.business.id));
+    safe(await f.changes.queue(f.operator));
+    const financial = await f.payments.workspace(f.owner, f.business.id);
+    expect(financial.allowances?.discovery.included).toBe(150);
+    expect(financial.periods.find((p) => p.id === f.original.id)).toEqual(
+      f.original,
+    );
+    expect(
+      financial.periods.find((p) => p.paymentId === "pay_delta")?.snapshot
+        .provider.review,
+    ).toEqual(f.gateway.review);
+    expect(
+      financial.periods.find((p) => p.paymentId === "pay_delta")?.snapshot
+        .provider.review?.terms.activation,
+    ).toBe("private merchant activation marker");
+    expect(f.effects).toHaveLength(1);
   });
   it("freezes the exact approved calendar proration, tax and effective scope without granting reach", async () => {
     const f = await setup();
