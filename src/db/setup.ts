@@ -1,6 +1,10 @@
 import { prepareRecoverySecurity, secureRecovery } from "./recovery-security";
 import { prepareFinancialSecurity } from "./financial-adjustment-security";
 import {
+  prepareTaxFilingSecurity,
+  secureTaxFilings,
+} from "./tax-filing-security";
+import {
   prepareReconciliationSecurity,
   secureReconciliationRecords,
 } from "./reconciliation-security";
@@ -106,6 +110,16 @@ import {
   taxLiabilityReport,
   taxReportAction,
   taxPeriodReminder,
+  taxFilingExport,
+  taxFilingPolicy,
+  taxFilingPolicyDecision,
+  taxFilingIntent,
+  taxFilingEvent,
+  taxFilingEvidence,
+  taxFilingBytes,
+  taxFilingAccess,
+  taxRemittanceAllocation,
+  taxRemittanceReview,
   taxScopeForeignKeys,
   subscriptionPricingRevision,
   subscriptionQuote,
@@ -283,6 +297,7 @@ export async function prepareDatabaseRole(pool: Pool) {
     "REVOKE ALL ON FUNCTION public.reconciliation_sources(timestamptz,timestamptz) FROM app_runtime",
   );
   await prepareTaxPeriodSecurity(pool);
+  await prepareTaxFilingSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
   await prepareOperations(pool);
   await prepareRecoverySecurity(pool);
@@ -821,6 +836,9 @@ export async function secureDatabase(
     // Upgrade the original owner-only role check from the schema's definition.
     for (const table of [
       membership,
+      taxFilingExport,
+      taxFilingIntent,
+      taxFilingEvent,
       reconciliationEvidence,
       reconciliationRecord,
       reconciliationReview,
@@ -942,6 +960,16 @@ export async function secureDatabase(
       taxLiabilityReport,
       taxReportAction,
       taxPeriodReminder,
+      taxFilingExport,
+      taxFilingPolicy,
+      taxFilingPolicyDecision,
+      taxFilingIntent,
+      taxFilingEvent,
+      taxFilingEvidence,
+      taxFilingBytes,
+      taxFilingAccess,
+      taxRemittanceAllocation,
+      taxRemittanceReview,
       subscriptionPricingRevision,
       subscriptionQuote,
       subscriptionPayment,
@@ -1463,6 +1491,7 @@ export async function secureDatabase(
     await secureRecovery(client);
     await secureDataGovernance(client);
     await secureTaxPeriods(client);
+    await secureTaxFilings(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client, options);
     await client.query("COMMIT");
