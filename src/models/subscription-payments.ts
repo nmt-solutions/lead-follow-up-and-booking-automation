@@ -33,6 +33,7 @@ export const mandateProofSchema = z.strictObject({
   subscriptionId: z.string().regex(/^sub_[A-Za-z0-9]+$/),
   signature: z.string().regex(/^[a-f0-9]{64}$/),
 });
+export type MandateProof = z.infer<typeof mandateProofSchema>;
 export const paymentTermSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("calendar_month"),

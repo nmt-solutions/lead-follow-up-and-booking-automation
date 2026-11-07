@@ -31,9 +31,14 @@ export async function prepareReachSecurity(
     END $$;
     REVOKE ALL ON FUNCTION public.upi_review_current(uuid,uuid,timestamptz) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.upi_review_current(uuid,uuid,timestamptz) TO app_runtime;
-    CREATE OR REPLACE FUNCTION public.protect_upi_reach_event() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE c record; s record; observed timestamptz; BEGIN
+    CREATE OR REPLACE FUNCTION public.protect_upi_reach_event() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE c record; s record; observed timestamptz; upi_path boolean; BEGIN
       SELECT * INTO c FROM public.reach_change WHERE id=NEW.change_id AND business_id=NEW.business_id;
-      IF c.snapshot->'target'->'upi' IS NULL THEN RETURN NEW; END IF;
+      upi_path:=coalesce(jsonb_typeof(c.snapshot#>'{target,upi}')='object' OR jsonb_typeof(c.snapshot#>'{target,provider,review,upiPath}')='object' OR c.snapshot#>'{target,provider,review,methods,upi}'='true'::jsonb,false);
+      IF NOT upi_path THEN
+        IF NEW.fact->>'kind'='method_review' THEN RAISE EXCEPTION 'UPI agreement required' USING ERRCODE='42501'; END IF;
+        RETURN NEW;
+      END IF;
+      IF jsonb_typeof(c.snapshot#>'{target,upi}') IS DISTINCT FROM 'object' OR c.snapshot#>>'{target,upi,method}' IS DISTINCT FROM 'upi' OR c.snapshot#>>'{target,upi,businessId}' IS DISTINCT FROM c.business_id::text OR c.snapshot#>>'{target,upi,account}' IS DISTINCT FROM c.snapshot#>>'{target,provider,account}' OR c.snapshot#>>'{target,upi,mode}' IS DISTINCT FROM c.snapshot#>>'{target,provider,mode}' OR NEW.fact->>'kind' IS NULL THEN RAISE EXCEPTION 'Exact UPI agreement required' USING ERRCODE='42501'; END IF;
       PERFORM pg_advisory_xact_lock(hashtextextended(NEW.business_id::text,0));
       observed:=nullif(current_setting('app.upi_at',true),'')::timestamptz;
       IF NEW.fact->>'kind'='method_review' THEN
@@ -41,7 +46,7 @@ export async function prepareReachSecurity(
           WHERE se.id=current_setting('app.upi_session',true) AND se.user_id=current_setting('app.actor_id',true) AND se.user_id=NEW.actor_id AND o.reconciliation AND se.expires_at>clock_timestamp() AND se.expires_at>observed AND u.two_factor_enabled AND f.verified
           AND se.mfa_factor_id=f.id AND se.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND se.mfa_verified_at<=observed AND se.mfa_verified_at>observed-interval '15 minutes';
         IF NOT FOUND THEN RAISE EXCEPTION 'UPI validation authority required' USING ERRCODE='42501'; END IF;
-        NEW.fact:=jsonb_build_object('kind','method_review','body',jsonb_build_object('sessionId',s.id,'factorVersion',s.mfa_factor_version,'verifiedAt',s.mfa_verified_at,'dbUntil',least(s.expires_at,clock_timestamp()+interval '15 minutes'),'snapshotHash',encode(sha256(convert_to(c.snapshot::text,'UTF8')),'hex')));
+        NEW.fact:=jsonb_build_object('kind','method_review','body',jsonb_build_object('sessionId',s.id,'factorVersion',s.mfa_factor_version,'verifiedAt',s.mfa_verified_at,'dbUntil',least(s.expires_at,clock_timestamp()+interval '15 minutes'-(observed-s.mfa_verified_at)),'snapshotHash',encode(sha256(convert_to(c.snapshot::text,'UTF8')),'hex')));
       ELSIF NEW.fact->>'kind' IN ('approved','attempt') THEN
         IF observed IS NULL OR NOT public.upi_review_current(c.id,c.business_id,observed) THEN RAISE EXCEPTION 'UPI validation required' USING ERRCODE='42501'; END IF;
         IF NOT EXISTS(SELECT 1 FROM public.session se JOIN public."user" u ON u.id=se.user_id JOIN public.two_factor f ON f.user_id=u.id WHERE se.id=current_setting('app.upi_actor_session',true) AND se.user_id=current_setting('app.actor_id',true) AND se.user_id=NEW.actor_id AND se.expires_at>clock_timestamp() AND se.expires_at>observed AND u.two_factor_enabled AND f.verified AND se.mfa_factor_id=f.id AND se.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND se.mfa_verified_at<=observed AND se.mfa_verified_at>observed-interval '12 hours') THEN RAISE EXCEPTION 'UPI current actor required' USING ERRCODE='42501'; END IF;

@@ -18,6 +18,34 @@ describe("UPI immutable persistence and restricted runtime", () => {
     f = await fundedUpiFixture(h);
   });
   afterEach(async () => h?.close());
+  it.each(["missing", "null"])(
+    "rejects a raw UPI approval disguised by a %s agreement instead of treating it as a legacy card row",
+    async (shape) => {
+      const actor = await h.access.authenticateForWork(f.owner),
+        client = await h.runtime.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true)",
+          [actor.userId, f.business.id],
+        );
+        const result = await client.query(
+          "INSERT INTO reach_change(id,business_id,period_id,action_id,quote_id,request_key,recovery_key,snapshot,actor_id,at,expires_at) SELECT gen_random_uuid(),business_id,period_id,action_id,quote_id,gen_random_uuid(),gen_random_uuid(),CASE WHEN $3='missing' THEN snapshot#-'{target,upi}' ELSE jsonb_set(snapshot,'{target,upi}','null') END,$2,at,expires_at FROM reach_change WHERE id=$1 RETURNING id",
+          [f.change.id, actor.userId, shape],
+        );
+        await expect(
+          client.query(
+            "INSERT INTO reach_change_event(id,business_id,change_id,key,actor_id,at,fact) VALUES(gen_random_uuid(),$1,$2,'forged-approval',$3,clock_timestamp(),'{\"kind\":\"approved\"}')",
+            [f.business.id, result.rows[0].id, actor.userId],
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+      expect(f.mutations).toHaveLength(3);
+    },
+  );
   it.each(["reach", "payment"])(
     "refuses %s private reads after genuine session expiry during database serialization even with a frozen application clock",
     async (surface) => {

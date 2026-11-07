@@ -34,6 +34,8 @@ Sandbox records distinguish `deterministic_fixture` from `native_sandbox`. Fixtu
 
 Keep account support, sandbox provenance and controlled evidence references separate from the in-app validation. An enabled flag alone is insufficient. Never put secrets in evidence or terms. A particular unsupported amount/app/MCC/identity arrangement needs a new actual review, not a global readiness override.
 
+The Subscriptions method toggles, merchant category, PSP/app limits, customer-to-Business mapping and relationship between test credentials and the declared merchant remain attributed deployment review inputs. The native `/methods` read corroborates general merchant method availability; it does not independently prove the Dashboard's Subscriptions toggles or account approval. Isolating a UPI merchant is an application strategy conditional on provider approval, not a promised provider feature. Native sandbox verification corroborates the listed test resources and quantity-one billing, including consistent authorization refund state; deterministic HTTP fixtures are a separate evidence kind and cannot establish performed sandbox or live validation.
+
 ## Customer and operator workflow
 
 1. The Owner/Admin chooses a trusted target quote and **UPI AutoPay** in Reach changes. The server freezes quote, taxes, amount, currency, plan/count, effective/renewal dates, commercial terms, original and new native account/mode/customer, method, path and explicit app identity mapping. Original card actions, periods and document sources stay immutable.
@@ -49,6 +51,8 @@ Keep account support, sandbox provenance and controlled evidence references sepa
 ## Persistence, recovery and checks
 
 No tables, columns, constraints or raw writable financial ledgers are added. Exact UPI agreements, immutable attempts, private validations, checkout-proof identities, captures and cancellation history use the existing scoped payment/reach/lifecycle ledgers and their required managed uniqueness/FKs. New `upi_review_current` is a scoped operational boolean helper; `protect_upi_reach_event` is a private insert-trigger function with no runtime/PUBLIC execution. Both have empty search paths and explicit ACLs. Managed prepare atomically pauses reach table/helper access until full schema/secure reapplication. Runtime startup checks include both helpers and the trigger binding.
+
+The validation's trusted database lease is capped by the operator's remaining MFA lifetime. Missing or null UPI agreement data cannot disguise an UPI merchant snapshot as a legacy card event. Checkout intents retain the original actor, UUID, complete signed payload and hash before native reads. Recovery verifies that retained proof with the original account and server-saved subscription, records only authenticated reconciliation hints and performs no new native mutation. Private signatures are omitted from public payment history and customer packages; original archive/restore history remains intact.
 
 The source-owned #58 bundle includes the new adapter/models/application/helper code. Native physical recovery and reviewed schema repair retain original UPI mappings, account/method/money, proof replay identity, private approval history and #52 private filing history. Restored queues remain quarantined. Inspection and domain operations use independent **current source** authority; restored grants and capabilities do not activate collection. A snapshot cannot undo later native cancellation.
 

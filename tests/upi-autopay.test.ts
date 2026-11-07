@@ -35,6 +35,31 @@ describe("Separate UPI AutoPay at the public application seam", () => {
 
   const eligible = () => upiFixture(h);
 
+  it("expires exact operator validation at the remaining MFA boundary using database time while the application clock is frozen", async () => {
+    const f = await eligible(),
+      c = await f.preview();
+    const actor = await h.access.authenticatePlatformForWork(f.operator);
+    await h.admin.query("UPDATE session SET mfa_verified_at=$1 WHERE id=$2", [
+      new Date(h.clock.now().getTime() - 15 * 60 * 1000 + 200),
+      actor.sessionId,
+    ]);
+    const validation = await f.changes.validateMethod(
+      f.operator,
+      f.business.id,
+      { changeId: c.id, requestKey: randomUUID() },
+    );
+    await h.admin.query("SELECT pg_sleep(0.3)");
+    await expect(
+      f.changes.approve(f.owner, f.business.id, {
+        changeId: c.id,
+        requestKey: randomUUID(),
+        accept: true,
+        reviewHash: validation.reviewHash,
+      }),
+    ).rejects.toMatchObject({ code: "SETUP_REQUIRED" });
+    expect(f.mutations).toEqual([]);
+  });
+
   it("previews a separate UPI account and exact distinct native customer without changing the original card agreement", async () => {
     const f = await eligible();
     const change = await f.preview();
@@ -123,7 +148,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
       },
     };
     const requests: string[] = [],
-      control = { incomplete: true };
+      control = { incomplete: true, quantity: 1, refundedAuthorization: 500 };
     const fetch: typeof globalThis.fetch = async (input, init) => {
       if (
         new Headers(init?.headers).get("authorization") !==
@@ -141,6 +166,7 @@ describe("Separate UPI AutoPay at the public application seam", () => {
           plan_id: "plan_validation",
           customer_id: "cust_validation",
           status: "cancelled",
+          quantity: control.quantity,
           start_at: 1757062800,
           ended_at: 1762333200,
         });
@@ -168,7 +194,11 @@ describe("Separate UPI AutoPay at the public application seam", () => {
               ? "captured"
               : "refunded",
           captured: !id.includes("failed"),
-          amount_refunded: id.includes("failed") ? 0 : paid ? 0 : 500,
+          amount_refunded: id.includes("failed")
+            ? 0
+            : paid
+              ? 0
+              : control.refundedAuthorization,
           invoice_id: paid
             ? id.includes("initial")
               ? "inv_initialValidation"
@@ -235,6 +265,18 @@ describe("Separate UPI AutoPay at the public application seam", () => {
       app.preview(f.owner, f.business.id, input),
     ).rejects.toMatchObject({ code: "SETUP_REQUIRED" });
     control.incomplete = false;
+    for (const invalid of ["quantity", "authorization_refund"] as const) {
+      control.quantity = invalid === "quantity" ? 2 : 1;
+      control.refundedAuthorization =
+        invalid === "authorization_refund" ? 1 : 500;
+      await expect(
+        app.preview(f.owner, f.business.id, {
+          ...input,
+          requestKey: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "SETUP_REQUIRED" });
+    }
+    control.refundedAuthorization = 500;
     const c = await app.preview(f.owner, f.business.id, {
       ...input,
       requestKey: randomUUID(),
@@ -720,6 +762,33 @@ describe("Separate UPI AutoPay at the public application seam", () => {
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const signed = { ...input, requestKey: randomUUID() };
+    let savedProof: unknown;
+    f.condition.beforeRead = async () => {
+      savedProof = (
+        await h.admin.query(
+          "SELECT detail->'checkoutProof' proof FROM subscription_payment_history WHERE id=$1",
+          [signed.requestKey],
+        )
+      ).rows[0]?.proof;
+      throw new Error("native read interrupted after persisted proof intent");
+    };
+    await expect(
+      f.payments.confirmMandate(f.owner, f.business.id, signed),
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    expect(savedProof).toEqual(signed);
+    f.condition.beforeRead = undefined;
+    await f.payments.recover();
+    const recovered = await f.changes.refresh(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+    });
+    expect(
+      recovered.events.filter((e) => e.fact.native).at(-1)?.fact.native
+        ?.mandateReady,
+    ).toBe(true);
+    expect(
+      JSON.stringify(await f.payments.workspace(f.owner, f.business.id)),
+    ).not.toContain(signed.signature);
     await f.payments.confirmMandate(f.owner, f.business.id, signed);
     await f.payments.confirmMandate(f.owner, f.business.id, signed);
     await expect(

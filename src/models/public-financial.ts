@@ -17,7 +17,8 @@ export function publicFinancialValue(value: unknown): unknown {
       .filter(
         ([k]) =>
           !(paymentProvider && k === "review") &&
-          !(methodReview && k === "body"),
+          !(methodReview && k === "body") &&
+          k !== "checkoutProof",
       )
       .map(([k, v]) => [k, publicFinancialValue(v)]),
   );

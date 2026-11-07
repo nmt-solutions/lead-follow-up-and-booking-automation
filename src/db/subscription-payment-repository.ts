@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import {
   reconcileLifecycle,
   appendLifecycleEvent,
@@ -37,6 +37,8 @@ import {
 } from "../models/subscription-quotes";
 import {
   paymentActionSchema,
+  mandateProofSchema,
+  type MandateProof,
   periodEnd,
   monthlyPeriodMatches,
   type PaymentGateway,
@@ -431,7 +433,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
     checkoutProofIntent(
       actor: Actor,
       businessId: string,
-      input: { actionId: string; requestKey: string; payloadHash: string },
+      input: MandateProof & { payloadHash: string },
       at: Date,
     ) {
       return authorizedAction(
@@ -470,11 +472,44 @@ export function createSubscriptionPaymentRepository(database: Database) {
               state: row.state,
               reason: row.reason,
               observation: row.observation,
+              checkoutProof: mandateProofSchema.strip().parse(input),
             },
           });
           return workFor(row);
         },
       );
+    },
+    checkoutProofs(work: Work) {
+      return worker(work, async (tx, row) => {
+        if (!row.snapshot.upi) return [];
+        const rows = await tx
+          .select()
+          .from(subscriptionPaymentHistory)
+          .where(
+            and(
+              eq(subscriptionPaymentHistory.actionId, row.id),
+              sql`${subscriptionPaymentHistory.kind} like 'checkout_proof:%'`,
+              sql`not exists(select 1 from public.subscription_payment_event e where e.action_id=${row.id} and e.event_id='checkout:'||${row.id}::text||':'||(${subscriptionPaymentHistory.detail}->'checkoutProof'->>'paymentId'))`,
+            ),
+          )
+          .orderBy(
+            asc(subscriptionPaymentHistory.at),
+            asc(subscriptionPaymentHistory.id),
+          )
+          .limit(100);
+        return rows.flatMap((r) => {
+          const proof = mandateProofSchema.safeParse(r.detail.checkoutProof);
+          if (
+            !proof.success ||
+            proof.data.actionId !== row.id ||
+            proof.data.requestKey !== r.id ||
+            r.kind !==
+              `checkout_proof:${createHash("sha256").update(JSON.stringify(proof.data)).digest("hex")}`
+          )
+            return [];
+          return [proof.data];
+        });
+      });
     },
     prepare(
       actor: Actor,

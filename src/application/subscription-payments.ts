@@ -51,6 +51,19 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       action.snapshot.provider.mode !== gateway.mode
     )
       throw new ApplicationError("SETUP_REQUIRED");
+    if (gateway.authenticateCheckout)
+      for (const proof of await d.repository.checkoutProofs(work)) {
+        try {
+          const event = parse(
+            authenticatedPaymentEventSchema,
+            await gateway.authenticateCheckout({ action, ...proof }),
+          );
+          await d.repository.receive(event, d.clock.now());
+        } catch {
+          // A retained callback is only a hint. Keep it for original-identity
+          // recovery; no proof outcome authorizes another native mutation.
+        }
+      }
     if (gateway.poll) {
       let result;
       try {

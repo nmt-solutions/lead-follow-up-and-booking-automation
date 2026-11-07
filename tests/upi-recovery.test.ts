@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { createHarness } from "./support/harness";
 import { fundedUpiFixture, upiFixturePolicy } from "./support/upi";
 import { recoveryFixture } from "./support/recovery";
@@ -77,6 +78,14 @@ describe.each(["physical", "reviewed_schema_repair"] as const)(
     beforeAll(async () => {
       h = await createHarness();
       f = await fundedUpiFixture(h);
+      expect(
+        (
+          await h.admin.query(
+            "SELECT count(*)::int n FROM subscription_payment_history WHERE business_id=$1 AND detail->'checkoutProof'->>'signature' ~ '^[a-f0-9]{64}$'",
+            [f.business.id],
+          )
+        ).rows[0].n,
+      ).toBeGreaterThan(0);
       const actor = await h.authenticate(f.operator);
       await h.admin.query(
         "UPDATE platform_operator SET documents=true WHERE user_id=$1",
@@ -302,6 +311,35 @@ describe.each(["physical", "reviewed_schema_repair"] as const)(
         );
         expect(current.lifecycle?.state).toBe("cancelled");
         expect(f.mutations).toHaveLength(4);
+        if (process.env.RECOVERY_TEST_EVIDENCE_PATH)
+          await writeFile(
+            `${process.env.RECOVERY_TEST_EVIDENCE_PATH}.${mode}.json`,
+            JSON.stringify(
+              {
+                fixtureOnly: true,
+                productionVerified: false,
+                mode,
+                operationId,
+                businessId: f.business.id,
+                backupId: r.plan.backupId,
+                backupHash: r.plan.backupHash,
+                cutoff: r.plan.cutoff,
+                snapshot: r.archive.manifest.snapshot,
+                schemaBundleHash: r.plan.schemaHash,
+                appliedSchemaHash: r.plan.appliedSchemaHash,
+                tables: r.archive.manifest.tables,
+                originalUpiHistoryPreserved: true,
+                originalSignedProofPreserved: true,
+                allTenPrivateFilingLedgersPreserved: true,
+                privateFilingBytes: filings.filing.bytes.length,
+                originalCapacityPoliciesAndBindingsPreserved: true,
+                currentSourceAuthorityAndQuarantineEnforced: true,
+                nativeMutationAttempts: f.mutations.length,
+              },
+              null,
+              2,
+            ),
+          );
       });
     });
   },

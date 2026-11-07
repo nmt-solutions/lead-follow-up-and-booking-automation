@@ -59,6 +59,7 @@ export function upiSandboxVerifier(d: {
         customer_id: z.string(),
         plan_id: z.string(),
         status: z.literal("cancelled"),
+        quantity: z.literal(1),
         start_at: z.number().int(),
         ended_at: z.number().int(),
       })
@@ -121,7 +122,13 @@ export function upiSandboxVerifier(d: {
       payments[0].status !== "failed" ||
       payments[0].captured ||
       payments[0].amount_refunded !== 0 ||
-      !["authorized", "captured", "refunded"].includes(payments[1].status)
+      !["authorized", "captured", "refunded"].includes(payments[1].status) ||
+      (payments[1].status === "authorized"
+        ? payments[1].captured || payments[1].amount_refunded !== 0
+        : !payments[1].captured ||
+          (payments[1].status === "refunded"
+            ? payments[1].amount_refunded !== payments[1].amount
+            : payments[1].amount_refunded !== 0))
     )
       throw new ApplicationError("SETUP_REQUIRED");
     const periods = [];
@@ -188,7 +195,7 @@ export function upiSandboxVerifier(d: {
     if (
       periods[0].billing_start !== sub.start_at ||
       periods[1].billing_start !== periods[0].billing_end ||
-      sub.ended_at < periods[1].billing_start
+      sub.ended_at < Math.max(periods[0].paid_at, periods[1].paid_at)
     )
       throw new ApplicationError("SETUP_REQUIRED");
   }
