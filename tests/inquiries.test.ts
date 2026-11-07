@@ -1,4 +1,5 @@
 import { persistPaidSubscription } from "./support/paid-subscription";
+import { reporting } from "./support/reporting";
 import { createOperationsApplication } from "../src/application/operations";
 import { createOperationsRepository } from "../src/db/operations-repository";
 import { readOperatorCosts } from "./support/costs";
@@ -1511,6 +1512,26 @@ describe("Inquiry handling at the persisted application seam", () => {
       },
     ]);
     expect(f.calls[1].model).toBe("openai/fixture-model");
+    const report = await reporting(h).read(f.credentials, f.business.id, {});
+    expect(
+      Object.fromEntries(report.metrics.map((m) => [m.id, m.value])),
+    ).toMatchObject({
+      direct_engagement: 1,
+      engaged_buyers: 1,
+      email_incoming: 1,
+      whatsapp_incoming: 1,
+      qualification_coverage: 1,
+      qualified: 1,
+      confirmed_sale: 0,
+    });
+    expect(
+      report.details.items.some(
+        (row) =>
+          row.kind === "qualification_assessment" &&
+          row.sourceIds.includes(result.id) &&
+          row.state === "current_ready_qualified",
+      ),
+    ).toBe(true);
     expect(
       (await f.ai.current(f.credentials, f.business.id))?.profile.limits
         .allowanceAttempts,

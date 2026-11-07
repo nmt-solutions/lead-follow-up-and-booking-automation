@@ -77,6 +77,12 @@ export default async function BusinessPage({
       >
         Action history and recovery
       </Link>
+      <Link
+        href={`/businesses/${businessId}/reports`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Discovery quality and sales outcomes
+      </Link>
       {access.role !== "salesperson" && (
         <Link
           href={`/businesses/${businessId}/whatsapp`}
