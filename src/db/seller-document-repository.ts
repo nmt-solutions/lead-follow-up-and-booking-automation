@@ -483,6 +483,11 @@ export function createSellerDocumentRepository(database: Database) {
               rows.filter((d) => d.originalId === original.id).map(view),
               input,
             );
+            const nativeAllocation = await tx.execute<{ allowed: boolean }>(
+              sql`select public.financial_credit_allowed(${JSON.stringify({ ...input, allocation: allocated })}::jsonb) as allowed`,
+            );
+            if (!nativeAllocation.rows[0]?.allowed)
+              throw new ApplicationError("CONFLICT");
             const series = configuration.series.credit_note,
               allocation = await tx.execute<{ ordinal: string }>(
                 sql`select public.seller_next_number(${businessId}::uuid,${series.key},${series.first}::bigint)::text as ordinal`,

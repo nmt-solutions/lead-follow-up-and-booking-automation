@@ -692,6 +692,10 @@ describe("Refunds and disputes at the public application seam", () => {
           app.review(colleague, f.business.id, input),
         ).rejects.toMatchObject({ code: "CONFLICT" });
         expect(await app.review(f.op, f.business.id, input)).toEqual(original);
+        expect(
+          await app.execute(colleague, f.business.id, { caseId: original.id }),
+        ).toMatchObject({ state: "pending" });
+        expect(f.native.refundPosts).toHaveLength(1);
         return;
       }
       if (command === "credit review") {
@@ -1296,6 +1300,121 @@ describe("Refunds and disputes at the public application seam", () => {
       app.refresh(f.op, f.business.id, { caseId: c.id }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(f.native.refundPosts).toHaveLength(1);
+  });
+  it("requires a fresh credit basis before numbering when an earlier withdrawn reservation changes original-tax rounding", async () => {
+    const f = await purchase(),
+      app = f.compose(),
+      earlier = await app.review(f.op, f.business.id, f.input("5")),
+      later = await app.review(f.op, f.business.id, f.input("5"));
+    expect(earlier.amountMinor).toBe("6");
+    expect(later.amountMinor).toBe("5");
+    await app.withdraw(f.op, f.business.id, { caseId: earlier.id });
+    await app.execute(f.op, f.business.id, { caseId: later.id });
+    f.native.refunds[0].status = "processed";
+    await app.refresh(f.op, f.business.id, { caseId: later.id });
+    await expect(
+      app.credit(f.op, f.business.id, { caseId: later.id }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(
+      (await f.documents.workspace(f.owner, f.business.id)).documents,
+    ).toHaveLength(1);
+    expect(await app.financialFeed(f.operator)).toEqual([
+      expect.objectContaining({
+        effect: expect.objectContaining({ actualMinor: "5" }),
+      }),
+    ]);
+    await app.reviewCredit(f.op, f.business.id, {
+      caseId: later.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "4" }],
+      reason: "Review the changed original tax rounding after withdrawal",
+      evidence: ["fixture:reviewed-one-subunit-uncredited-difference"],
+    });
+    await app.credit(f.op, f.business.id, { caseId: later.id });
+    const note = (
+      await f.documents.workspace(f.owner, f.business.id)
+    ).documents.find((d) => d.kind === "credit_note");
+    expect(note).toMatchObject({
+      number: "TEST-C-0001",
+      snapshot: { totals: { netMinor: "4", taxMinor: "0", totalMinor: "4" } },
+    });
+    expect(await app.financialFeed(f.operator)).toEqual([
+      expect.objectContaining({
+        effect: expect.objectContaining({ actualMinor: "5" }),
+        approvedCredit: expect.objectContaining({
+          actualMinor: "5",
+          uncreditedDifferenceMinor: "1",
+        }),
+      }),
+    ]);
+    expect(f.native.refundPosts).toHaveLength(1);
+  });
+  it("reviews a credit against its actual earlier allocation while retaining a later native refund and its residual", async () => {
+    const f = await purchase(),
+      app = f.compose(),
+      earlier = await app.review(f.op, f.business.id, f.input("5")),
+      later = await app.review(f.op, f.business.id, f.input("5"));
+    await app.execute(f.op, f.business.id, { caseId: earlier.id });
+    f.native.refunds[0].status = "processed";
+    await app.refresh(f.op, f.business.id, { caseId: earlier.id });
+    const basis = await app.reviewCredit(f.op, f.business.id, {
+      caseId: earlier.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "4" }],
+      reason: "Approve the first credit before the later reservation",
+      evidence: ["fixture:earlier-credit-with-explicit-residual"],
+    });
+    expect(basis.creditAmountMinor).toBe("4");
+    await app.credit(f.op, f.business.id, { caseId: earlier.id });
+    await app.execute(f.op, f.business.id, { caseId: later.id });
+    f.native.refunds[1].status = "processed";
+    await app.refresh(f.op, f.business.id, { caseId: later.id });
+    await expect(
+      app.credit(f.op, f.business.id, { caseId: later.id }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(
+      (await f.documents.workspace(f.owner, f.business.id)).documents,
+    ).toHaveLength(2);
+    await app.reviewCredit(f.op, f.business.id, {
+      caseId: later.id,
+      requestKey: randomUUID(),
+      lines: [{ lineId: "subscription", netMinor: "4" }],
+      reason: "Review the later credit against the issued original components",
+      evidence: ["fixture:later-original-component-review"],
+    });
+    await app.credit(f.op, f.business.id, { caseId: later.id });
+    const notes = (
+      await f.documents.workspace(f.owner, f.business.id)
+    ).documents
+      .filter((d) => d.kind === "credit_note")
+      .sort((a, b) => a.number.localeCompare(b.number));
+    expect(
+      notes.map((d) => ({ number: d.number, totals: d.snapshot.totals })),
+    ).toEqual([
+      {
+        number: "TEST-C-0001",
+        totals: { netMinor: "4", taxMinor: "0", totalMinor: "4" },
+      },
+      {
+        number: "TEST-C-0002",
+        totals: { netMinor: "4", taxMinor: "1", totalMinor: "5" },
+      },
+    ]);
+    expect(await app.financialFeed(f.operator)).toEqual([
+      expect.objectContaining({
+        effect: expect.objectContaining({ actualMinor: "6" }),
+        approvedCredit: expect.objectContaining({
+          uncreditedDifferenceMinor: "2",
+        }),
+      }),
+      expect.objectContaining({
+        effect: expect.objectContaining({ actualMinor: "5" }),
+        approvedCredit: expect.objectContaining({
+          uncreditedDifferenceMinor: "0",
+        }),
+      }),
+    ]);
+    expect(f.native.refundPosts).toHaveLength(2);
   });
   it("composes actual opt-in customer financial emails through the final notification seam without repeating money", async () => {
     const f = await purchase(),

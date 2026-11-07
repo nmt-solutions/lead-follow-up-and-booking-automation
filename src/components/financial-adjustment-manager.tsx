@@ -56,7 +56,7 @@ async function response<T>(r: Response, schema: z.ZodType<T>): Promise<T> {
             )
           ? "Current access does not allow this action. Sign in or ask the responsible operator. Your edits remain here."
           : code.success && code.data.code === "CONFLICT"
-            ? "The current native status, deadline, reserved amount or saved action prevents this change. Refresh status and review the original request before continuing."
+            ? "The current native status, deadline, reserved amount or saved credit allocation prevents this change. Refresh status and review the original request and credit basis before continuing."
             : "The action could not be confirmed. Check the selected evidence and approved configuration, then refresh status.",
     );
   }

@@ -514,7 +514,8 @@ export function createFinancialAdjustmentRepository(database: Database) {
           ).map(document);
           if (docs.some((d) => d.snapshot.adjustment?.adjustmentId === row.id))
             throw new ApplicationError("CONFLICT");
-          const reservations = [];
+          const reservations = [],
+            earlierReservations = [];
           const siblings = await tx
             .select()
             .from(financialCase)
@@ -529,7 +530,7 @@ export function createFinancialAdjustmentRepository(database: Database) {
               !released(sibling, await events(tx, sibling.id))
             ) {
               const basis = creditBasis(await events(tx, sibling.id));
-              reservations.push({
+              const reservation = {
                 ...row.intent.invoice,
                 snapshot: {
                   ...row.intent.invoice.snapshot,
@@ -539,11 +540,28 @@ export function createFinancialAdjustmentRepository(database: Database) {
                     basis?.allocation.totals ??
                     sibling.intent.allocation.totals,
                 },
-              });
+              };
+              reservations.push(reservation);
+              if (sibling.position < row.position)
+                earlierReservations.push(reservation);
             }
+          for (const requested of input.lines) {
+            const line = row.intent.invoice.snapshot.lines.find(
+              (l) => l.input.id === requested.lineId,
+            );
+            const reservedNet = [...docs, ...reservations]
+              .flatMap((d) => d.snapshot.lines)
+              .filter((l) => l.input.id === requested.lineId)
+              .reduce((sum, l) => sum + BigInt(l.netMinor), 0n);
+            if (
+              !line ||
+              reservedNet + BigInt(requested.netMinor) > BigInt(line.netMinor)
+            )
+              throw new ApplicationError("CONFLICT");
+          }
           const allocation = allocateCredit(
             row.intent.invoice,
-            [...docs, ...reservations],
+            [...docs, ...earlierReservations],
             {
               invoiceId: row.invoiceId,
               periodId: row.periodId,

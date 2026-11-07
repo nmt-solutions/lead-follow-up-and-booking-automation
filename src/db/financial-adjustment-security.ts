@@ -88,6 +88,7 @@ export async function prepareFinancialSecurity(pool: Pool | PoolClient) {
       RETURN coalesce(outcome IS NOT NULL AND input->>'invoiceId'=original.invoice_id::text AND input->>'periodId'=original.period_id::text
         AND input->>'paymentId'=original.intent->'period'->>'paymentId' AND input->>'requestKey'=original.intent->>'key'
         AND input->'lines'=coalesce(basis->'input'->'lines',original.intent->'input'->'lines') AND input->'source'->>'kind'=original.kind AND input->'source'->>'reference'=outcome->>'nativeId'
+        AND (NOT (input ? 'allocation') OR input->'allocation'=coalesce(basis->'allocation',original.intent->'allocation'))
         AND input->>'reason'='Provider-confirmed '||original.kind||' adjustment' AND input->'evidence'=jsonb_build_array('razorpay:'||(outcome->>'nativeId'))
         AND (basis IS NULL OR ((basis->'allocation'->'totals'->>'totalMinor')::numeric>0 AND (basis->'allocation'->'totals'->>'totalMinor')::numeric<=(CASE WHEN outcome->>'status'='processed' THEN outcome->>'amountMinor' ELSE outcome->>'deductedMinor' END)::numeric AND basis->>'actualMinor'=CASE WHEN outcome->>'status'='processed' THEN outcome->>'amountMinor' ELSE outcome->>'deductedMinor' END))
         AND (outcome->>'status'='processed' OR (outcome->>'status'='lost' AND original.intent->'policy'->>'disputeLostCredit'='true' AND ((basis IS NOT NULL AND basis->>'actualMinor'=outcome->>'deductedMinor') OR outcome->>'deductedMinor'=original.intent->'allocation'->'totals'->>'totalMinor'))),false);
