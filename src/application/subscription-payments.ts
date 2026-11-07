@@ -28,6 +28,7 @@ import {
   paymentActionSchema,
   PaymentCreationNotAttempted,
   pilotRenewalSchema,
+  pilotCheckoutProofSchema,
   type PaymentGateway,
 } from "../models/subscription-payments";
 import { ApplicationError } from "../models/application-error";
@@ -143,24 +144,26 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
       value: unknown,
     ) {
       const id = parse(businessIdSchema, businessId),
-        input = parse(
-          z.strictObject({
-            actionId: z.uuid(),
-            orderId: z.string(),
-            paymentId: z.string(),
-            signature: z.string(),
-          }),
-          value,
-        );
+        input = parse(pilotCheckoutProofSchema, value),
+        actor = d.authenticateForWork
+          ? await d.authenticateForWork(credentials)
+          : await d.authenticate(credentials);
       const work = await d.repository.authorizeWork(
-        await d.authenticate(credentials),
+        actor,
         id,
         input.actionId,
         d.clock.now(),
       );
       const action = await d.repository.readWork(work);
-      if (!d.gateway.verifyPilotSignature?.(action, input))
+      const gateway = paymentAccount(d.gateway, action.snapshot.provider);
+      if (!gateway.verifyPilotSignature?.(action, input))
         throw new ApplicationError("FORBIDDEN");
+      await d.repository.retainPilotCheckoutProof(
+        actor,
+        id,
+        input,
+        d.clock.now(),
+      );
       await reconcile(work);
       return publicPaymentAction(
         await d.repository.readAuthorizedAction(

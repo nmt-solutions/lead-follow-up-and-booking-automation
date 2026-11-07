@@ -384,6 +384,7 @@ export function createPilotRepository(database: Database, clock: Clock) {
             );
           if (previous) {
             if (
+              previous.actorId !== actor.userId ||
               !isDeepStrictEqual(
                 snapshotSchema.parse(previous.snapshot).plan,
                 plan,

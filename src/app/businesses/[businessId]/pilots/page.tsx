@@ -56,7 +56,7 @@ export default async function PilotPage({
             .map((a) => ({
               id: a.id,
               currency: a.snapshot.quote.currency,
-              label: `${a.snapshot.term.kind === "days" ? "Pilot" : "Bounded monthly continuation"} ? ${a.snapshot.quote.pricing.offer.label}: ${a.snapshot.quote.currency} ${a.snapshot.quote.initial.subtotalMinor} minor units / ${a.snapshot.quote.initial.days} days; monthly ${a.snapshot.quote.renewal.subtotalMinor} before tax (${a.state})`,
+              label: `${a.snapshot.term.kind === "days" ? "Pilot" : "Bounded monthly continuation"}: ${a.snapshot.quote.pricing.offer.label}; original pilot ${a.snapshot.quote.currency} ${a.snapshot.quote.initial.subtotalMinor} minor units / ${a.snapshot.quote.initial.days} days; monthly ${a.snapshot.quote.renewal.subtotalMinor} before tax (${a.state})`,
             }))
         : [],
     senders:
@@ -123,7 +123,7 @@ export default async function PilotPage({
         ? email.value.actions.map((a) => ({
             id: JSON.stringify(a.action),
             action: a.action,
-            label: `${a.description} ? ${a.recipient}`,
+            label: `${a.description}: ${a.recipient}`,
           }))
         : [],
   };

@@ -28,6 +28,7 @@ export async function nativePilotFixture(
   let lostOrder = false;
   let afterCustomer: (() => Promise<void>) | undefined;
   let orderPage: ((skip: number) => unknown) | undefined;
+  let beforeRead: ((path: string) => Promise<void>) | undefined;
   const review = {
     ...native.review,
     pilotOrders: {
@@ -51,6 +52,7 @@ export async function nativePilotFixture(
       typeof input === "string" || input instanceof URL ? input : input.url,
     );
     const method = init?.method ?? "GET";
+    if (method === "GET") await beforeRead?.(url.pathname);
     if (!["GET", "HEAD"].includes(method))
       mutations.push({
         path: url.pathname,
@@ -162,6 +164,9 @@ export async function nativePilotFixture(
     },
     orderPage: (fn: (skip: number) => unknown) => {
       orderPage = fn;
+    },
+    beforeRead: (fn?: (path: string) => Promise<void>) => {
+      beforeRead = fn;
     },
   };
 }

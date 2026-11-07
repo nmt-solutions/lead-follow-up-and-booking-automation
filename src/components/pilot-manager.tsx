@@ -108,8 +108,9 @@ export function PilotManager({
     [message, setMessage] = useState(""),
     [criteriaCount, setCriteriaCount] = useState(1),
     [baselineCount, setBaselineCount] = useState(1),
-    [otherPilots, setOtherPilots] = useState<PilotView[]>([]);
+    [otherPilots, setOtherPilots] = useState<Record<string, PilotView[]>>({});
   const commandKeys = useRef(new Map<string, string>());
+  const selectedBusinesses = useRef(new Map<string, string>());
   const pending = useRef(false),
     key = useRef(crypto.randomUUID());
   const base = `/api/businesses/${businessId}/pilots`;
@@ -407,6 +408,7 @@ export function PilotManager({
                   />
                   <Choice
                     name={`criterion-comparison-${i}`}
+                    required
                     label="Comparison"
                     options={[
                       { id: "at_least", label: "At least" },
@@ -882,21 +884,27 @@ export function PilotManager({
                 </Label>
                 <NativeSelect
                   name="second-business"
+                  disabled={busy}
+                  required
                   id={`second-business-${p.id}`}
                   onChange={(e) => {
                     const id = e.target.value;
-                    void run(async () =>
-                      setOtherPilots(
-                        (
-                          await readCommercialResponse(
-                            await fetch(`/api/businesses/${id}/pilots`, {
-                              cache: "no-store",
-                            }),
-                            pilotWorkspaceSchema,
-                          )
-                        ).pilots,
-                      ),
-                    );
+                    selectedBusinesses.current.set(p.id, id);
+                    setOtherPilots((prior) => ({ ...prior, [p.id]: [] }));
+                    if (!id) return;
+                    void run(async () => {
+                      const selected = await readCommercialResponse(
+                        await fetch(`/api/businesses/${id}/pilots`, {
+                          cache: "no-store",
+                        }),
+                        pilotWorkspaceSchema,
+                      );
+                      if (selectedBusinesses.current.get(p.id) !== id) return;
+                      setOtherPilots((prior) => ({
+                        ...prior,
+                        [p.id]: selected.pilots,
+                      }));
+                    });
                   }}
                 >
                   <option value="">Choose the other configured Business</option>
@@ -910,8 +918,9 @@ export function PilotManager({
                 </NativeSelect>
                 <Choice
                   name="second-pilot"
+                  required
                   label="Actual second pilot"
-                  options={otherPilots.map((s) => ({
+                  options={(otherPilots[p.id] ?? []).map((s) => ({
                     id: s.id,
                     label: s.plan.goal,
                   }))}
@@ -922,6 +931,7 @@ export function PilotManager({
                 />
                 <Choice
                   name="first-field"
+                  required
                   label="Original configuration to compare"
                   options={[
                     "scope",
@@ -933,6 +943,7 @@ export function PilotManager({
                 />
                 <Choice
                   name="second-field"
+                  required
                   label="Second configuration to compare"
                   options={[
                     "scope",
@@ -969,7 +980,7 @@ export function PilotManager({
                   className="space-y-2 border-b border-border py-4"
                 >
                   <p className="font-medium">
-                    {e.kind.replaceAll("_", " ")} ?{" "}
+                    {e.kind.replaceAll("_", " ")}:{" "}
                     {new Date(e.at).toLocaleString()}
                   </p>
                   <EventEvidence data={e.data} />
@@ -1072,7 +1083,7 @@ function EventEvidence({ data }: { data: Record<string, unknown> }) {
           <p>{reuse.data.adaptations}</p>
           {reuse.data.configuration.map((c, i) => (
             <p key={i}>
-              {c.first} ? {c.second}:{" "}
+              {c.first} to {c.second}:{" "}
               {c.equal
                 ? "same recorded configuration"
                 : "adapted configuration"}

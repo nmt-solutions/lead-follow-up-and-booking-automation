@@ -187,8 +187,8 @@ export function createNativePilotOrders(d: {
       try {
         payload = body(a);
         await customer(a.snapshot);
-        await a.authorize?.();
         binding(a.snapshot, true);
+        await a.authorize?.();
       } catch {
         throw new PaymentCreationNotAttempted();
       }
@@ -278,11 +278,11 @@ export function createNativePilotOrders(d: {
         response.items.length === 100
       )
         throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+      // Every captured entry must be fully understood before one capture can
+      // establish money. Incomplete failed attempts do not establish a charge.
       const captures = response.items
-        .map((p) => paymentSchema.safeParse(p))
-        .filter((p) => p.success)
-        .map((p) => p.data)
-        .filter((p) => p.captured);
+        .filter((p) => z.object({ captured: z.boolean() }).parse(p).captured)
+        .map((p) => paymentSchema.parse(p));
       if (captures.length > 1)
         throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
       const observations: PaymentObservation[] = [];

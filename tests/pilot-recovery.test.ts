@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { createHarness } from "./support/harness";
 import { pilotFixture } from "./support/pilot";
 import { recoveryFixture } from "./support/recovery";
@@ -12,10 +13,50 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
     r: Awaited<ReturnType<typeof recoveryFixture>>,
     operationId: string;
   const ledgerRows = new Map<string, unknown[]>();
+  async function evidence(mode: string) {
+    if (!process.env.PILOT_RECOVERY_EVIDENCE_PATH) return;
+    await writeFile(
+      `${process.env.PILOT_RECOVERY_EVIDENCE_PATH}.${mode}.json`,
+      JSON.stringify(
+        {
+          mode,
+          bundleHash: r.archive.manifest.schemaHash,
+          nativeSchemaHash: r.archive.manifest.nativeSchemaHash,
+          archiveHash: createHash("sha256")
+            .update(r.archive.ciphertext)
+            .digest("hex"),
+          ledgers: Object.fromEntries(
+            [...ledgerRows].map(([table, rows]) => [
+              table,
+              {
+                count: rows.length,
+                sha256: createHash("sha256")
+                  .update(JSON.stringify(rows))
+                  .digest("hex"),
+              },
+            ]),
+          ),
+          restoreCalls: r.controls.restoreCalls,
+          nativeMutations: s.mutations.length,
+          ordinaryStartupRejected: true,
+        },
+        null,
+        2,
+      ),
+    );
+  }
   beforeAll(async () => {
     h = await createHarness();
     h.clock.set(new Date(vi.getRealSystemTime()).toISOString());
     s = await pilotFixture(h);
+    await s.app.confirmPilotCheckout(s.f.owner, s.f.business.id, {
+      actionId: s.action.id,
+      orderId: "order_pilot",
+      paymentId: "pay_pilot",
+      signature: createHmac("sha256", "fixture-api-secret")
+        .update("order_pilot|pay_pilot")
+        .digest("hex"),
+    });
     await s.pilots.activate(s.f.owner, s.f.business.id, {
       pilotId: s.pilot.id,
       requestKey: randomUUID(),
@@ -47,6 +88,7 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
       "pilot_effect",
       "subscription_payment",
       "subscription_period",
+      "subscription_payment_history",
     ])
       ledgerRows.set(
         table,
@@ -56,6 +98,13 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
           )
         ).rows,
       );
+    expect(
+      JSON.stringify(ledgerRows.get("subscription_payment_history")),
+    ).toContain(
+      createHmac("sha256", "fixture-api-secret")
+        .update("order_pilot|pay_pilot")
+        .digest("hex"),
+    );
     const reviewedDefinition = await recoverySchemaDefinitionHash(h.admin);
     await h.admin.query(
       "alter table public.business drop constraint business_name_length",
@@ -91,6 +140,7 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
       code: "SETUP_REQUIRED",
     });
     expect(s.mutations).toHaveLength(2);
+    await evidence("physical");
   });
   describe("reviewed full schema repair", () => {
     beforeAll(async () => {
@@ -128,6 +178,7 @@ describe("Populated pilot archive restore and reviewed schema repair", () => {
         code: "SETUP_REQUIRED",
       });
       expect(s.mutations).toHaveLength(2);
+      await evidence("reviewed_schema_repair");
     });
   });
 });

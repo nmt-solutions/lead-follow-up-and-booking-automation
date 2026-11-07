@@ -20,6 +20,214 @@ describe("Native paid pilots through public application commands", () => {
   });
   afterEach(async () => h?.close());
 
+  it("holds every malformed captured entry in the native order payment list instead of discarding conflicting unknown money", async () => {
+    const s = await nativePilotFixture(h),
+      b = s.f.business.id,
+      c = s.f.owner;
+    await s.app.start(c, b, { actionId: s.action.id });
+    s.capture();
+    s.native.payments.set("pay_partial_unknown", {
+      id: "pay_partial_unknown",
+      captured: true,
+      status: "captured",
+    });
+    await s.app.refresh(c, b, { actionId: s.action.id });
+    expect((await s.app.workspace(c, b)).periods).toHaveLength(0);
+    s.native.payments.delete("pay_partial_unknown");
+    s.native.payments.set("pay_failed", {
+      id: "pay_failed",
+      captured: false,
+      status: "failed",
+    });
+    await s.app.refresh(c, b, { actionId: s.action.id });
+    expect(
+      (await s.app.workspace(c, b)).periods.map((p) => p.paymentId),
+    ).toEqual(["pay_pilot"]);
+    expect(s.mutations).toHaveLength(1);
+  });
+
+  it("privately retains the original signed pilot proof before any native read and recovers the same capture after interruption", async () => {
+    const s = await nativePilotFixture(h),
+      b = s.f.business.id,
+      c = s.f.owner;
+    await s.app.start(c, b, { actionId: s.action.id });
+    s.capture();
+    const proof = {
+      actionId: s.action.id,
+      orderId: "order_pilot",
+      paymentId: "pay_pilot",
+      signature: createHmac("sha256", "fixture-api-secret")
+        .update("order_pilot|pay_pilot")
+        .digest("hex"),
+    };
+    let inspected = false;
+    s.beforeRead(async () => {
+      inspected = true;
+      const rows = (
+        await h.admin.query(
+          "select detail->'checkoutProof' proof from subscription_payment_history where action_id=$1 and kind like 'pilot_checkout_proof:%'",
+          [s.action.id],
+        )
+      ).rows;
+      expect(rows).toEqual([{ proof }]);
+      throw Error(
+        "Controlled native interruption after durable original proof",
+      );
+    });
+    await s.app.confirmPilotCheckout(c, b, proof);
+    expect(inspected).toBe(true);
+    expect(
+      (
+        await h.admin.query(
+          "select count(*)::int count from subscription_payment_history where action_id=$1 and kind like 'pilot_checkout_proof:%'",
+          [s.action.id],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
+    s.beforeRead();
+    await s.app.recover();
+    const view = await s.app.workspace(c, b);
+    expect(view.periods.map((p) => p.paymentId)).toEqual(["pay_pilot"]);
+    expect(JSON.stringify(view)).not.toContain(proof.signature);
+    await s.app.confirmPilotCheckout(c, b, proof);
+    expect(
+      (
+        await h.admin.query(
+          "select count(*)::int count from subscription_payment_history where action_id=$1 and kind like 'pilot_checkout_proof:%'",
+          [s.action.id],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
+    expect(s.mutations).toHaveLength(1);
+  });
+
+  it("denies native creation when the original billing evidence expires during the final billing read even with a frozen application clock", async () => {
+    const s = await nativePilotFixture(h);
+    await h.admin
+      .query(`create function public.pilot_review_billing_wait() returns boolean language plpgsql volatile security definer set search_path='' as $$
+      declare reads integer:=coalesce(nullif(current_setting('app.pilot_review_reads',true),''),'0')::integer+1;
+      begin perform set_config('app.pilot_review_reads',reads::text,true);
+        if reads=3 then perform pg_sleep(0.4); end if; return true; end $$;
+      grant execute on function public.pilot_review_billing_wait() to app_runtime;
+      create policy pilot_review_wait on public.billing_profile_revision as restrictive for select to app_runtime using(public.pilot_review_billing_wait());`);
+    s.afterCustomer(async () => {
+      await h.admin.query(
+        "update business_file set retention_until=clock_timestamp()+interval '250 milliseconds' where id=$1",
+        [s.f.fileId],
+      );
+    });
+    await s.app
+      .start(s.f.owner, s.f.business.id, { actionId: s.action.id })
+      .catch(() => {});
+    expect(s.mutations).toHaveLength(0);
+  });
+
+  it("denies native creation when the original MFA expires during the final billing read even with a frozen application clock", async () => {
+    const s = await nativePilotFixture(h),
+      actor = await h.access.authenticateForWork(s.f.owner);
+    await h.admin
+      .query(`create function public.pilot_review_billing_wait() returns boolean language plpgsql volatile security definer set search_path='' as $$
+      declare reads integer:=coalesce(nullif(current_setting('app.pilot_review_reads',true),''),'0')::integer+1;
+      begin perform set_config('app.pilot_review_reads',reads::text,true);
+        if reads=3 then perform pg_sleep(0.4); end if; return true; end $$;
+      grant execute on function public.pilot_review_billing_wait() to app_runtime;
+      create policy pilot_review_wait on public.billing_profile_revision as restrictive for select to app_runtime using(public.pilot_review_billing_wait());`);
+    s.afterCustomer(async () => {
+      await h.admin.query(
+        "update session set mfa_verified_at=clock_timestamp()-interval '12 hours'+interval '250 milliseconds' where id=$1",
+        [actor.sessionId],
+      );
+    });
+    await s.app
+      .start(s.f.owner, s.f.business.id, { actionId: s.action.id })
+      .catch(() => {});
+    expect(s.mutations).toHaveLength(0);
+  });
+
+  it("does not accept a forged no-attempt history fact after the original monthly mandate creation boundary", async () => {
+    const s = await nativePilotFixture(h),
+      b = s.f.business.id,
+      c = s.f.owner;
+    await s.app.start(c, b, { actionId: s.action.id });
+    s.capture();
+    await s.app.refresh(c, b, { actionId: s.action.id });
+    const period = (await s.app.workspace(c, b)).periods[0],
+      input = {
+        originalActionId: s.action.id,
+        originalPeriodId: period.id,
+        requestKey: randomUUID(),
+        startAt: period.end,
+        approvalExpiresAt: new Date(
+          h.clock.now().getTime() + 600000,
+        ).toISOString(),
+        agreeSeparateMandate: true,
+      },
+      monthly = await s.app.preparePilotRenewal(c, b, input);
+    s.native.loseCreation = true;
+    await s.app.start(c, b, { actionId: monthly.id });
+    const actor = await h.access.authenticateForWork(c),
+      client = await h.runtime.connect();
+    try {
+      await client.query("begin");
+      const target = (
+        await client.query(
+          "select * from public.subscription_payment_target('razorpay',$1,$2::uuid)",
+          [monthly.snapshot.provider.account, monthly.operationKey],
+        )
+      ).rows[0];
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true),set_config('app.payment_action',$3,true),set_config('app.payment_capability',$4,true)",
+        [actor.userId, b, monthly.id, target.recovery_key],
+      );
+      await client.query(
+        "update subscription_payment set state='failed',reason='native_preflight_rejected',checkout=null,observation=null,reconciliation_pending=false where id=$1",
+        [monthly.id],
+      );
+      await client.query("savepoint forged_history");
+      await expect(
+        client.query(
+          "insert into subscription_payment_history(id,business_id,action_id,kind,actor_id,detail,at) values($1,$2,$3,'creation_not_attempted',$4,$5,clock_timestamp())",
+          [
+            randomUUID(),
+            b,
+            monthly.id,
+            actor.userId,
+            {
+              state: "failed",
+              reason: "native_preflight_rejected",
+              observation: null,
+            },
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await client.query("rollback to savepoint forged_history");
+      await client.query("commit");
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+    // Even an administratively imported old false assertion cannot erase the
+    // retained original creation boundary at the public command.
+    await h.admin.query(
+      "insert into subscription_payment_history(id,business_id,action_id,kind,actor_id,detail,at) values($1,$2,$3,'creation_not_attempted',$4,$5,clock_timestamp())",
+      [
+        randomUUID(),
+        b,
+        monthly.id,
+        actor.userId,
+        {
+          state: "failed",
+          reason: "native_preflight_rejected",
+          observation: null,
+        },
+      ],
+    );
+    await expect(
+      s.app.preparePilotRenewal(c, b, { ...input, requestKey: randomUUID() }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(s.mutations).toHaveLength(2);
+  });
+
   it.each(["account", "plan"] as const)(
     "refuses a separate monthly approval that silently changes the original native %s",
     async (change) => {

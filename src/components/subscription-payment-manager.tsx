@@ -36,7 +36,7 @@ const reasons: Record<string, string> = {
   native_preflight_rejected:
     "The native plan or card availability could not be verified before creation. No subscription creation was attempted. Ask the operator to review account and plan setup, then prepare a new checkout review.",
   pilot_order_customer_and_card_path_review_required:
-    "Ask the deployment operator to review this Business?s exact native customer, one-time card order path and separate monthly mandate terms.",
+    "Ask the deployment operator to review this Business's exact native customer, one-time card order path and separate monthly mandate terms.",
   native_plan_or_capability_review_required:
     "The native plan, amount limit or approved card capability does not match this quote. Ask the operator to review the account and plan mapping.",
   creation_lookup_ambiguous:
@@ -162,6 +162,17 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
           authorize that mandate.
         </p>
       )}
+      {a.snapshot.pilotContinuation && (
+        <p className="text-sm">
+          Original pilot ends{" "}
+          {paymentTime(a.snapshot.pilotContinuation.originalEnd)}. Monthly
+          collection starts {paymentTime(a.snapshot.pilotContinuation.startAt)};
+          authorization expires{" "}
+          {paymentTime(a.snapshot.pilotContinuation.approvalExpiresAt)}. Access
+          requires a verified captured monthly payment. Any interval after the
+          pilot ends and before that paid monthly period is a service gap.
+        </p>
+      )}
       {a.reason && (
         <p className="rounded-xl bg-muted p-4">
           {reasons[a.reason] ??
@@ -234,6 +245,7 @@ export function SubscriptionPaymentManager({
     [message, setMessage] = useState("");
   const pending = useRef(false),
     request = useRef<{ quoteId: string; key: string } | null>(null);
+  const monthlyRequests = useRef(new Map<string, string>());
   const base = `/api/businesses/${businessId}/subscription-payments`;
   async function run(task: () => Promise<void>) {
     if (pending.current) return;
@@ -304,24 +316,29 @@ export function SubscriptionPaymentManager({
     const data = new FormData(form),
       period = state.periods.find((p) => p.actionId === a.id);
     if (!period) throw new Error("A captured pilot period is required.");
+    const input = {
+        originalActionId: a.id,
+        originalPeriodId: period.id,
+        startAt: new Date(String(data.get("startAt"))).toISOString(),
+        approvalExpiresAt: new Date(
+          String(data.get("expiresAt")),
+        ).toISOString(),
+        agreeSeparateMandate: data.get("agree") === "on",
+      },
+      fingerprint = JSON.stringify(input),
+      requestKey =
+        monthlyRequests.current.get(fingerprint) ?? crypto.randomUUID();
+    monthlyRequests.current.set(fingerprint, requestKey);
     await readCommercialResponse(
       await fetch(`${base}/pilot-renewal`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          originalActionId: a.id,
-          originalPeriodId: period.id,
-          requestKey: crypto.randomUUID(),
-          startAt: new Date(String(data.get("startAt"))).toISOString(),
-          approvalExpiresAt: new Date(
-            String(data.get("expiresAt")),
-          ).toISOString(),
-          agreeSeparateMandate: data.get("agree") === "on",
-        }),
+        body: JSON.stringify({ ...input, requestKey }),
       }),
       paymentActionSchema,
     );
     await refresh();
+    monthlyRequests.current.delete(fingerprint);
     setMessage(
       "Separate monthly mandate terms saved for review. Create its checkout only after reviewing the exact monthly tax total and schedule.",
     );

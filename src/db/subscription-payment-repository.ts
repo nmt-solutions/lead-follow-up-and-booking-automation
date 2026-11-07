@@ -38,6 +38,7 @@ import {
 import {
   paymentActionSchema,
   mandateProofSchema,
+  type PilotCheckoutProof,
   type MandateProof,
   periodEnd,
   monthlyPeriodMatches,
@@ -431,6 +432,67 @@ export function createSubscriptionPaymentRepository(database: Database) {
     });
   }
   return {
+    retainPilotCheckoutProof(
+      actor: Actor & { sessionId?: string },
+      businessId: string,
+      proof: PilotCheckoutProof,
+      at: Date,
+    ) {
+      return authorizedAction(
+        actor,
+        businessId,
+        proof.actionId,
+        false,
+        async (tx, row) => {
+          if (
+            row.snapshot.term.kind !== "days" ||
+            !row.checkout?.standard ||
+            row.checkout.checkoutId !== proof.orderId
+          )
+            throw new ApplicationError("FORBIDDEN");
+          const kind = `pilot_checkout_proof:${createHash("sha256").update(JSON.stringify(proof)).digest("hex")}`,
+            [prior] = await tx
+              .select()
+              .from(subscriptionPaymentHistory)
+              .where(
+                and(
+                  eq(subscriptionPaymentHistory.actionId, row.id),
+                  eq(subscriptionPaymentHistory.businessId, businessId),
+                  eq(subscriptionPaymentHistory.kind, kind),
+                ),
+              );
+          if (
+            prior &&
+            (prior.actorId !== actor.userId ||
+              !isDeepStrictEqual(prior.detail.checkoutProof, proof))
+          )
+            throw new ApplicationError("CONFLICT");
+          await tx.execute(
+            sql`select set_config('app.payment_action',${row.id},true),set_config('app.payment_capability',${row.recoveryKey},true)`,
+          );
+          if (!prior)
+            await tx.insert(subscriptionPaymentHistory).values({
+              id: randomUUID(),
+              businessId,
+              actionId: row.id,
+              actorId: actor.userId,
+              kind,
+              at,
+              detail: {
+                state: row.state,
+                reason: row.reason,
+                observation: row.observation,
+                checkoutProof: proof,
+              },
+            });
+          const current = await tx.execute<{ allowed: boolean }>(
+            sql`select public.pilot_authorized() allowed`,
+          );
+          if (!current.rows[0]?.allowed)
+            throw new ApplicationError("FORBIDDEN");
+        },
+      );
+    },
     preparePilotRenewal(
       actor: Actor,
       businessId: string,
@@ -452,6 +514,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           );
         if (prior) {
           if (
+            prior.actorId !== actor.userId ||
             prior.snapshot.pilotContinuation?.originalActionId !==
               input.originalActionId ||
             prior.snapshot.pilotContinuation?.originalPeriodId !==
@@ -528,18 +591,29 @@ export function createSubscriptionPaymentRepository(database: Database) {
           .select()
           .from(subscriptionPayment)
           .where(eq(subscriptionPayment.businessId, businessId));
+        const history = await tx
+          .select()
+          .from(subscriptionPaymentHistory)
+          .where(eq(subscriptionPaymentHistory.businessId, businessId));
+        const nativeEvents = await tx
+          .select({ actionId: subscriptionPaymentEvent.actionId })
+          .from(subscriptionPaymentEvent)
+          .where(eq(subscriptionPaymentEvent.businessId, businessId));
         const unsent = new Set(
-          (
-            await tx
-              .select({ actionId: subscriptionPaymentHistory.actionId })
-              .from(subscriptionPaymentHistory)
-              .where(
-                and(
-                  eq(subscriptionPaymentHistory.businessId, businessId),
-                  eq(subscriptionPaymentHistory.kind, "creation_not_attempted"),
-                ),
-              )
-          ).map((h) => h.actionId),
+          history
+            .filter(
+              (h) =>
+                h.kind === "creation_not_attempted" &&
+                !history.some(
+                  (other) =>
+                    other.actionId === h.actionId &&
+                    (other.kind === "creation_authorized" ||
+                      other.kind === "checkout_creation" ||
+                      other.detail.observation !== null),
+                ) &&
+                !nativeEvents.some((e) => e.actionId === h.actionId),
+            )
+            .map((h) => h.actionId),
         );
         if (
           existing.some(
@@ -733,27 +807,22 @@ export function createSubscriptionPaymentRepository(database: Database) {
           new Date(row.recovery!.creationLeaseUntil!) <= trustedNow
         )
           throw new ApplicationError("FORBIDDEN");
-        const finalTax = evaluateTax(
-          row.snapshot.tax.input,
-          await readBillingWorkspace(tx, work.business_id, trustedNow),
-          await readTaxCatalog(tx),
-          trustedNow,
-          row.snapshot.provider.mode === "test"
-            ? "fixture"
-            : row.snapshot.provider.mode,
-        );
-        if (
-          finalTax.status !== "calculated" ||
-          !isDeepStrictEqual(finalTax.lines, row.snapshot.tax.lines) ||
-          !isDeepStrictEqual(finalTax.totals, row.snapshot.tax.totals)
-        )
-          throw new ApplicationError("SETUP_REQUIRED");
+        const finalBilling = await readBillingWorkspace(
+            tx,
+            work.business_id,
+            trustedNow,
+          ),
+          finalCatalog = await readTaxCatalog(tx);
         const currentStop = await tx.execute<{ stopped: boolean }>(
           sql`select public.business_data_stopped(${work.business_id}::uuid) stopped`,
         );
         if (currentStop.rows[0]?.stopped)
           throw new ApplicationError("FORBIDDEN");
         await requireCapability(tx, actor, work.business_id, "billing.manage");
+        // Commit the immutable dispatch boundary before any creation request.
+        // Its presence makes a lost acknowledgement permanently ineligible for
+        // the separately approved, proven-unsent replacement path.
+        await requestAudit(tx, row, actor, "creation_authorized", trustedNow);
         if (
           row.snapshot.term.kind === "days" ||
           row.snapshot.pilotContinuation
@@ -780,6 +849,52 @@ export function createSubscriptionPaymentRepository(database: Database) {
           )
             throw new ApplicationError("FORBIDDEN");
         }
+        const finalAuthority =
+          row.snapshot.term.kind === "days" || row.snapshot.pilotContinuation
+            ? await tx.execute<{ current: boolean }>(sql`select exists(
+          select 1 from public.session s join public."user" u on u.id=s.user_id
+          join public.two_factor f on f.user_id=u.id join public.membership m on m.user_id=s.user_id
+          where s.id=${actor.sessionId ?? ""} and s.user_id=${actor.userId} and m.business_id=${work.business_id}::uuid and m.role in ('owner','admin')
+          and s.expires_at>clock_timestamp() and u.two_factor_enabled and f.verified and s.mfa_factor_id=f.id
+          and s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex')
+          and s.mfa_verified_at<=clock_timestamp() and s.mfa_verified_at>clock_timestamp()-interval '12 hours'
+          and not exists(select 1 from jsonb_array_elements(${JSON.stringify(finalBilling.current?.evidence ?? [])}::jsonb) e
+            left join public.business_file file on file.id::text=e->>'fileId' and file.business_id=${work.business_id}::uuid
+            where file.id is null or file.state<>'ready' or file.retention_until<=clock_timestamp() or file.sha256 is distinct from e->>'sha256')
+        ) current`)
+            : { rows: [{ current: true }] };
+        const dispatchTime = await tx.execute<{ now: string }>(
+            sql`select clock_timestamp() now`,
+          ),
+          dispatchNow = new Date(dispatchTime.rows[0].now),
+          finalTax = evaluateTax(
+            row.snapshot.tax.input,
+            finalBilling,
+            finalCatalog,
+            dispatchNow,
+            row.snapshot.provider.mode === "test"
+              ? "fixture"
+              : row.snapshot.provider.mode,
+          );
+        if (
+          !finalAuthority.rows[0]?.current ||
+          new Date(row.recovery!.creationLeaseUntil!) <= dispatchNow ||
+          (currentReview &&
+            (new Date(currentReview.checkedAt) > dispatchNow ||
+              new Date(currentReview.effectiveFrom) > dispatchNow ||
+              new Date(currentReview.effectiveUntil) <= dispatchNow)) ||
+          (row.snapshot.pilotContinuation &&
+            (new Date(row.snapshot.pilotContinuation.startAt) <= dispatchNow ||
+              new Date(row.snapshot.pilotContinuation.approvalExpiresAt) <=
+                dispatchNow))
+        )
+          throw new ApplicationError("FORBIDDEN");
+        if (
+          finalTax.status !== "calculated" ||
+          !isDeepStrictEqual(finalTax.lines, row.snapshot.tax.lines) ||
+          !isDeepStrictEqual(finalTax.totals, row.snapshot.tax.totals)
+        )
+          throw new ApplicationError("SETUP_REQUIRED");
       });
     },
     checkoutProofIntent(

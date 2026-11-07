@@ -36,6 +36,11 @@ export async function pilotFixture(
     googleCalendar?: ReturnType<typeof createGoogleCalendarApplication>;
     microsoftCalendar?: ReturnType<typeof createMicrosoftCalendarApplication>;
     plan: Partial<PilotPlan>;
+    beforePrepare?(
+      discovery: ReturnType<typeof createDiscoveryApplication<Headers>>,
+      queued: DiscoveryWork[],
+      searches: SearchInput[],
+    ): Promise<void>;
     setupCost?: {
       provider: string;
       category: "workers";
@@ -52,9 +57,6 @@ export async function pilotFixture(
     "INSERT INTO platform_operator(user_id,pilots,costs) VALUES($1,true,true) ON CONFLICT(user_id) DO UPDATE SET pilots=true,costs=true",
     [actor.userId],
   );
-  await s.app.start(s.f.owner, bid, { actionId: s.action.id });
-  s.capture();
-  await s.app.refresh(s.f.owner, bid, { actionId: s.action.id });
   await h.application.saveConfiguration(s.f.owner, bid, {
     offering: "Steel",
     specifications: "Reviewed steel specification",
@@ -186,7 +188,12 @@ export async function pilotFixture(
           }
         : null,
   });
+  // Configure and evidence native paths before collecting a paid pilot. Once
+  // captured, operational calls require its separately approved bounded plan.
   const priorSetup = await bootstrap?.(s);
+  await s.app.start(s.f.owner, bid, { actionId: s.action.id });
+  s.capture();
+  await s.app.refresh(s.f.owner, bid, { actionId: s.action.id });
   const costs = createCostApplication({
     authenticatePlatform: h.access.authenticatePlatform,
     repository: createCostRepository(database),
@@ -336,6 +343,7 @@ export async function pilotFixture(
     ...limits,
     ...priorSetup?.plan,
   };
+  await priorSetup?.beforePrepare?.(discovery, queued, searches);
   const p = await pilots.prepare(s.f.owner, bid, {
     requestKey: randomUUID(),
     plan,
