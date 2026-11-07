@@ -87,8 +87,10 @@ export function BusinessReportPanel({
       const fromDate = new Date(`${from}:00Z`);
       const toDate = to ? new Date(`${to}:00Z`) : null;
       if (
-        !Number.isFinite(fromDate.getTime()) ||
-        (toDate && (!Number.isFinite(toDate.getTime()) || fromDate >= toDate))
+        !paging &&
+        (!Number.isFinite(fromDate.getTime()) ||
+          (toDate &&
+            (!Number.isFinite(toDate.getTime()) || fromDate >= toDate)))
       ) {
         setError("Choose a valid start and a later end in UTC.");
         return;

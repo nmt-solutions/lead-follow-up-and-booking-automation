@@ -203,6 +203,44 @@ describe("WhatsApp sends through current public application commands", () => {
     await f.control.dispatch(f.credentials, f.businessId, action.id);
     expect(f.sent).toHaveLength(1);
   });
+  it("does not count delayed reconciliation of an earlier Meta submission as a response to a later engagement cohort", async () => {
+    const f = await metaSendingFixture(h, "report-response-timing");
+    await f.permission();
+    const action = await f.groundedReply();
+    f.httpState.ambiguous = true;
+    await f.control.dispatch(f.credentials, f.businessId, action.id);
+    h.clock.set("2026-11-05T09:30:00Z");
+    await f.incoming(
+      "wamid.later-inquiry",
+      "Please quote more steel",
+      "wamid.inquiry",
+    );
+    await f.intake.drain();
+    h.clock.set("2026-11-05T10:00:00Z");
+    await f.deliver("messages", {
+      statuses: [
+        {
+          id: "wamid.out-1",
+          status: "delivered",
+          timestamp: String(Date.parse("2026-11-05T09:00:00Z") / 1000),
+          recipient_id: "919876543210",
+          biz_opaque_callback_data: f.sent[0].biz_opaque_callback_data,
+        },
+      ],
+    });
+    await f.intake.drain();
+    await f.app.reconcile(f.credentials, f.businessId, { actionId: action.id });
+    const report = await reporting(h).read(f.credentials, f.businessId, {
+      from: "2026-11-05T09:15:00Z",
+    });
+    expect(
+      report.metrics.find((m) => m.id === "direct_engagement")?.value,
+    ).toBe(1);
+    expect(
+      report.metrics.find((m) => m.id === "response_coverage")?.value,
+    ).toBe(0);
+    expect(f.sent).toHaveLength(1);
+  });
   it("requires an immutable Owner approval, sends its fixed recipient only and durably bounds follow-up timing and attempts", async () => {
     const f = await metaSendingFixture(h, "outreach"),
       o = await f.outreach();

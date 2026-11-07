@@ -296,15 +296,24 @@ export function createReportingRepository(database: Database, clock: Clock) {
           const searchResults = usage.filter(
             (u) => u.kind === "search" && u.returnedResults !== null,
           );
+          const searchOperations = usage.filter((u) => u.kind === "search");
+          const searchCountKnown =
+            searchResults.length > 0 || searchOperations.length === 0;
           metric(
             "raw_search_results",
             "Recorded search results before consolidation",
             "discovery",
-            searchResults.reduce((sum, u) => sum + (u.returnedResults ?? 0), 0),
+            searchCountKnown
+              ? searchResults.reduce(
+                  (sum, u) => sum + (u.returnedResults ?? 0),
+                  0,
+                )
+              : null,
             null,
             `Raw provider search-result appearances across ${searchResults.length} of ${usage.filter((u) => u.kind === "search").length} search operations with a recorded result count. Repeated appearances are not unique prospects; unrecorded counts remain outside this subtotal.`,
             "Search operation-reserved cohort",
             "appearances",
+            searchCountKnown ? "recorded" : "unavailable",
           );
           metric(
             "named_buyer_routes",
@@ -435,6 +444,7 @@ export function createReportingRepository(database: Database, clock: Clock) {
               `Discovery earliest retained check: ${evidence.observations.map((o) => new Date(o.checkedAt).toISOString()).sort()[0] ?? "unavailable (no observations)"}. Inquiry earliest retained occurrence: ${sales.messages.map((m) => new Date(m.message.content.occurredAt).toISOString()).sort()[0] ?? "unavailable (no captured messages)"}. Earliest retained times are not completeness guarantees.`,
               "Retention cutoff: unavailable as a single report-wide measurement. Canonical records follow their source contracts; private artifacts can expire under separate approved policies. Historical absence is not proof that no activity occurred.",
               "Capture coverage includes selected supported or explicitly imported channels only. Ignored, unsupported and uncaptured traffic is outside inquiry counts. Source-observed request status is not a new live source check.",
+              "Response coverage includes only recorded submissions or supported manual replies with established chronology after cohort engagement. Meta uses its original reservation as a conservative timing lower bound, never a later reconciliation time. Excluded uncertain timing does not establish absence of all responses.",
               "Source details reauthorize and regenerate on every page; concurrent corrections can move rows between pages. Current states are not historical snapshots at the interval end.",
               "Reports preserve retained facts independently of current paid discovery reach or cancellation. Exports and offboarding use their own Owner/Admin, current-MFA, policy, source-rights and expiry checks; a report grants no download, cleanup or commercial capability.",
               "Operator setup/support/sales expense is a separate privileged ledger. This report never includes global operator costs or customer-paid Meta in platform spend.",

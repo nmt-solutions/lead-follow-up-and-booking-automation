@@ -128,6 +128,14 @@ describe("Honest Business reports through the public application seam", () => {
       automation: { quantity: 100, unit: "provider calls" },
     });
     const queued: DiscoveryWork[] = [];
+    let announceSearch = () => {};
+    const searchStarted = new Promise<void>((resolve) => {
+      announceSearch = resolve;
+    });
+    let releaseSearch = () => {};
+    const searchReleased = new Promise<void>((resolve) => {
+      releaseSearch = resolve;
+    });
     const discovery = createDiscoveryApplication({
       authenticate: h.authenticate,
       authenticateForWork: h.access.authenticateForWork,
@@ -151,6 +159,8 @@ describe("Honest Business reports through the public application seam", () => {
             estimatedUsd: 0.25,
             requestId: `fixture-${input.operationId}`,
           });
+          announceSearch();
+          await searchReleased;
           return ["open", "unknown", "expired"].map((status, i) => ({
             name: `Factory ${i}`,
             market: "US",
@@ -220,7 +230,24 @@ describe("Honest Business reports through the public application seam", () => {
       };
       await discovery.start(owner, business.id, input);
       await discovery.start(owner, business.id, input);
-      expect(await discovery.execute(queued.at(-1))).toMatchObject({
+      const execution = discovery.execute(queued.at(-1));
+      if (i === 0) {
+        await searchStarted;
+        let pending;
+        try {
+          pending = await application().read(owner, business.id, {});
+        } finally {
+          releaseSearch();
+          await execution;
+        }
+        expect(
+          pending.metrics.find((m) => m.id === "raw_search_results"),
+        ).toMatchObject({
+          value: null,
+          status: "unavailable",
+        });
+      }
+      expect(await execution).toMatchObject({
         outcome: "completed",
       });
       await discovery.execute(queued.at(-1));
@@ -236,6 +263,7 @@ describe("Honest Business reports through the public application seam", () => {
       observed_prospects: 3,
       new_prospects: 3,
       matched_observations: 6,
+      raw_search_results: 6,
       contactable: 2,
       named_roles: 1,
       open_requests: 1,

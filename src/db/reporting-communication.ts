@@ -129,10 +129,18 @@ export async function collectCommunicationReport(
       responded.add(r.opportunityId);
   for (const r of meta)
     if (r.data.kind === "result" && r.data.result.status === "accepted") {
-      const action = actions.find(
-        (a) => a.id === (r.data.kind === "result" ? r.data.actionId : ""),
-      );
-      if (action && afterIncoming(action.opportunityId, r.at))
+      const actionId = r.data.actionId;
+      const action = actions.find((a) => a.id === actionId);
+      const intent = meta.find(
+        (row) =>
+          row.data.kind === "intent" && row.data.intent.actionId === actionId,
+      )?.data;
+      if (
+        action &&
+        intent?.kind === "intent" &&
+        afterIncoming(action.opportunityId, intent.intent.reservedAt) &&
+        r.at <= at
+      )
         responded.add(action.opportunityId);
     }
   metric(
@@ -141,7 +149,7 @@ export async function collectCommunicationReport(
     "communication",
     responded.size,
     sales.cohort.size,
-    "Direct-engagement cohort Opportunities with a later native accepted submission or supported manual reply / the SAME cohort. Acceptance or manual observation does not establish delivery or a sale. User-marked sent and outgoing echo are excluded.",
+    "Direct-engagement cohort Opportunities with a later native accepted submission or supported manual reply / the SAME cohort. Meta requires its original reservation after engagement: a delayed reconciliation cannot move an earlier submission into this cohort. Reservations before engagement with uncertain actual submission timing are conservatively excluded. Acceptance or manual observation does not establish delivery or a sale. User-marked sent and outgoing echo are excluded.",
     "Incoming engagement cohort, responses through report generation",
     "Opportunities",
   );
