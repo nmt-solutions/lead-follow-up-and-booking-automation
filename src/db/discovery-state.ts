@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type { Transaction } from "./scope";
 import { business, discoveryConfiguration, session } from "./schema";
@@ -96,6 +96,7 @@ export async function checkCurrent(
   run: DiscoveryRun,
   at: Date,
 ) {
+  await requireDiscoveryAvailable(tx, run.businessId);
   const { profile, policy } = await settings(tx, run.businessId, at);
   if (
     !policy ||
@@ -109,4 +110,14 @@ export async function checkCurrent(
     )
   )
     throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+}
+
+export async function requireDiscoveryAvailable(
+  tx: Transaction,
+  businessId: string,
+) {
+  const result = await tx.execute<{ stopped: boolean }>(
+    sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
+  );
+  if (result.rows[0]?.stopped) throw new ApplicationError("FORBIDDEN");
 }

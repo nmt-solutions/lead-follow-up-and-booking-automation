@@ -4,6 +4,16 @@ import {
 } from "./application-error";
 
 const failures = {
+  DATA_POLICY_REQUIRED: {
+    status: 409,
+    message:
+      "Data access, source rights or retention policy needs operator review. Affected export or destruction remains blocked.",
+  },
+  EXPORT_LIMIT_REACHED: {
+    status: 409,
+    message:
+      "This export exceeds the configured byte bound. Ask the operator to review a bounded export scope.",
+  },
   SELLER_DOCUMENT_SETUP_REQUIRED: {
     status: 503,
     message:
