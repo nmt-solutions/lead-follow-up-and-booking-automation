@@ -100,9 +100,9 @@ CREATE OR REPLACE FUNCTION public.finish_business_data_cleanup(step uuid,lease_k
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE s public.business_data_step; p jsonb; terminal boolean; stamp timestamptz:=statement_timestamp();
 BEGIN
- IF result NOT IN ('confirmed','subscription_removed','manual_required','shared_identity','unconfirmed') THEN RAISE EXCEPTION 'Invalid cleanup result'; END IF;
+ IF result IS NULL OR result NOT IN ('confirmed','subscription_removed','manual_required','shared_identity','unconfirmed') THEN RAISE EXCEPTION 'Invalid cleanup result'; END IF;
  SELECT * INTO s FROM public.business_data_step WHERE id=step FOR UPDATE;
- IF s.id IS NULL OR s.lease<>lease_key OR s.state<>'working' OR s.due_at<=stamp THEN RETURN; END IF;
+ IF s.id IS NULL OR lease_key IS NULL OR s.lease IS DISTINCT FROM lease_key OR s.state<>'working' OR s.due_at<=stamp THEN RETURN; END IF;
  SELECT policy INTO p FROM public.business_data_request WHERE id=s.request_id AND business_id=s.business_id;
  terminal:=result<>'unconfirmed' OR s.attempts>=(p->>'maxAttempts')::integer;
  IF s.kind='file' AND result='confirmed' THEN

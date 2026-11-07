@@ -169,6 +169,7 @@ export function createDataGovernanceRepository(database: Database) {
       .where(eq(businessDataExport.id, id));
     if (!r || r.actorId !== actor.userId)
       throw new ApplicationError("NOT_FOUND");
+    await assertPolicy(tx, r.policy);
     return r;
   }
   async function assertPolicy(tx: Transaction, policy: DataPolicy) {
@@ -559,6 +560,7 @@ export function createDataGovernanceRepository(database: Database) {
             ],
             omissions: [
               "Credentials, authorization links, private callback/worker/recovery capabilities, raw provider events and unrelated/global operator/auth records are excluded.",
+              "Authentication, invitation and transactional notification ledgers are outside this customer export; their independent global or Business history and payload-retention authority remain unchanged.",
               "Source rights and row/byte limits apply. Missing or unapproved source rights omit affected evidence, including after cancellation.",
               "URLs have no query/fragment; free text is redacted for authorization links. Canonical JSON preserves formula-like text without spreadsheet execution.",
               "Private file bytes use separate current authorized downloads. Issued attachments below are verified against immutable hashes; missing, unsafe or bounded-out attachments have explicit per-document omissions.",

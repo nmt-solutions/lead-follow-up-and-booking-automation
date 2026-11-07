@@ -6,6 +6,13 @@ import { runtimeDatabase } from "../src/db/runtime";
 import { verifyRuntimeRole } from "../src/db/runtime";
 import { createDataGovernanceApplication } from "../src/application/data-governance";
 import { createDataGovernanceRepository } from "../src/db/data-governance-repository";
+import { createNotificationApplication } from "../src/application/notifications";
+import { createNotificationRepository } from "../src/db/notification-repository";
+import { notificationVault } from "../src/notifications/vault";
+import { createAuth } from "../src/auth/auth";
+import { createTeamApplication } from "../src/application/team";
+import { createTeamRepository } from "../src/db/team-repository";
+import { invitationTokens } from "../src/auth/invitation-tokens";
 import type { DataPolicy } from "../src/models/data-governance";
 import { createInboxApplication } from "../src/application/inbox";
 import { createInboxRepository } from "../src/db/inbox-repository";
@@ -210,6 +217,121 @@ describe("Business data export and offboarding at the public application seam", 
       app().download(owner, a.id, created.id, grant.token),
     ).rejects.toMatchObject({ code: "FILE_UNAVAILABLE" });
     expect(storage.effects.map((e) => e.action)).toEqual(["put", "get"]);
+  });
+
+  it("preserves global and multi-Business notification facts while explicitly excluding their private capabilities from customer exports", async () => {
+    h.clock.set(
+      (
+        await h.admin.query("select statement_timestamp() at")
+      ).rows[0].at.toISOString(),
+    );
+    const owner = await h.signIn("data-notification-owner@example.com"),
+      identity = await h.access.primary(owner),
+      database = runtimeDatabase(h.runtime);
+    await h.admin.query(
+      "insert into platform_operator(user_id,notifications) values($1,true)",
+      [identity.user.id],
+    );
+    const configuration = {
+      account: "data-notification-account",
+      mode: "production" as const,
+      from: "auth@platform.example",
+      domainId: randomUUID(),
+      apiKey: "fixture-data-notification-key",
+      origin: "http://localhost:3000",
+    };
+    let nativeCalls = 0;
+    const notifications = createNotificationApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createNotificationRepository(database),
+      configuration,
+      vault: notificationVault({
+        activeKey: "v1",
+        keys: { v1: Buffer.alloc(32, 19) },
+      }),
+      provider: {
+        inspect: async () => {
+          nativeCalls++;
+          throw new Error("fixture setup intentionally unapproved");
+        },
+        send: async () => {
+          nativeCalls++;
+          throw new Error("fixture setup intentionally unapproved");
+        },
+      },
+    });
+    const team = createTeamApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createTeamRepository(database),
+      clock: h.clock,
+      tokens: invitationTokens("data-notification-invitation-fixture"),
+      mailer: notifications.invitationMailer,
+      origin: configuration.origin,
+    });
+    const businesses = [];
+    for (const name of ["Stopped Business", "Continuing Business"]) {
+      const b = await h.application.createBusiness(owner, {
+        name,
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+      businesses.push(b);
+      await team.invite(owner, b.id, {
+        email: `${businesses.length}-private-invite@example.com`,
+        role: "salesperson",
+      });
+    }
+    const auth = createAuth({
+      database,
+      baseURL: configuration.origin,
+      secret: "data-notification-authentication-fixture",
+      mailer: notifications.signInMailer,
+    });
+    await auth.api.signInMagicLink({
+      body: { email: "private-global-auth@example.com" },
+      headers: new Headers({ origin: configuration.origin }),
+    });
+    const before = await notifications.workspace(owner);
+    expect(before.notices).toHaveLength(3);
+    expect(before.notices.filter((n) => n.businessId === null)).toHaveLength(1);
+    const b = businesses[0];
+    policy.businessIds = [b.id];
+    await app().offboard(owner, b.id, {
+      requestKey: randomUUID(),
+      policyId: policy.id,
+      policyVersion: policy.version,
+      confirmStop: true,
+      deleteGeneralFiles: true,
+      cancellation: null,
+    });
+    await app().cleanup();
+    expect(
+      (await notifications.workspace(owner)).notices.map((n) => n.id).sort(),
+    ).toEqual(before.notices.map((n) => n.id).sort());
+    expect(
+      (await notifications.businessWorkspace(owner, businesses[1].id)).notices,
+    ).toHaveLength(1);
+    expect(
+      (await team.getTeam(owner, businesses[1].id)).invitations[0].status,
+    ).toBe("pending");
+    const exported = await app().export(owner, b.id, {
+        requestKey: randomUUID(),
+      }),
+      grant = await app().access(owner, b.id, exported.id),
+      bytes = await app().download(owner, b.id, exported.id, grant.token),
+      text = new TextDecoder().decode(bytes.bytes),
+      bundle = JSON.parse(text);
+    for (const notice of before.notices) expect(text).not.toContain(notice.id);
+    expect(text).not.toContain(businesses[1].id);
+    expect(text).not.toContain("private-global-auth@example.com");
+    expect(text).not.toMatch(/token=|capability|sealed/);
+    expect(bundle.manifest.omissions).toContain(
+      "Authentication, invitation and transactional notification ledgers are outside this customer export; their independent global or Business history and payload-retention authority remain unchanged.",
+    );
+    expect(nativeCalls).toBe(0);
   });
 
   it("fences new intake immediately, retains conversations, cleans only approved general files and can reopen without reviving old connections", async () => {
@@ -583,6 +705,35 @@ describe("Business data export and offboarding at the public application seam", 
     ).rejects.toMatchObject({ code: "FILE_UNAVAILABLE" });
     expect(storage.effects.filter((e) => e.action === "get")).toHaveLength(1);
   });
+  it("denies a policy that expires during storage I/O using database time even when the application clock is stale", async () => {
+    const owner = await h.signIn("expired-policy-export@example.com"),
+      b = await h.application.createBusiness(owner, {
+        name: "Policy expiry",
+        offering: "Steel",
+        homeMarket: "US",
+        website: "",
+      });
+    policy.businessIds = [b.id];
+    const at = (
+      await h.admin.query<{ at: Date }>("select statement_timestamp() at")
+    ).rows[0].at;
+    policy.effectiveUntil = new Date(at.getTime() + 3000).toISOString();
+    const exported = await app().export(owner, b.id, {
+        requestKey: randomUUID(),
+      }),
+      grant = await app().access(owner, b.id, exported.id);
+    storage.afterGet = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3100));
+    };
+    await expect(
+      app().download(owner, b.id, exported.id, grant.token),
+    ).rejects.toMatchObject({ code: "DATA_POLICY_REQUIRED" });
+    expect(storage.effects.filter((e) => e.action === "get")).toHaveLength(1);
+    await expect(app().access(owner, b.id, exported.id)).rejects.toMatchObject({
+      code: "DATA_POLICY_REQUIRED",
+    });
+  });
+
   it("blocks destruction without policy and cannot use an application future clock to bypass deletion dates or holds", async () => {
     const owner = await h.signIn("retention-owner@example.com"),
       b = await h.application.createBusiness(owner, {
@@ -954,7 +1105,7 @@ describe("Business data export and offboarding at the public application seam", 
       request.id,
     );
   });
-  it("keeps lost Google revocation acknowledgement incomplete after bounded retries and wipes the retained token copy", async () => {
+  it("rejects a missing cleanup lease, keeps lost Google revocation acknowledgement incomplete after bounded retries and wipes the retained token copy", async () => {
     const owner = await h.signIn("lost-google@example.com"),
       b = await h.application.createBusiness(owner, {
         name: "Lost acknowledgement",
@@ -979,7 +1130,24 @@ describe("Business data export and offboarding at the public application seam", 
         return Response.json({ error: "invalid_token" }, { status: 400 });
       },
     });
-    await app(revoker).offboard(owner, b.id, {
+    const guardedRevoker = async (target: NativeCleanup) => {
+      for (const invalidLease of [null, randomUUID()])
+        await h.runtime.query(
+          "select public.finish_business_data_cleanup($1,$2,'confirmed')",
+          [target.id, invalidLease],
+        );
+      expect((await app().workspace(owner, b.id)).offboarding[0].steps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: target.id,
+            state: "working",
+            tokenWiped: false,
+          }),
+        ]),
+      );
+      return revoker(target);
+    };
+    await app(guardedRevoker).offboard(owner, b.id, {
       requestKey: randomUUID(),
       policyId: policy.id,
       policyVersion: 1,
@@ -987,9 +1155,9 @@ describe("Business data export and offboarding at the public application seam", 
       deleteGeneralFiles: false,
       cancellation: null,
     });
-    await app(revoker).cleanup();
+    await app(guardedRevoker).cleanup();
     await new Promise((resolve) => setTimeout(resolve, 1100));
-    await app(revoker).cleanup();
+    await app(guardedRevoker).cleanup();
     expect((await app().workspace(owner, b.id)).offboarding[0].steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
