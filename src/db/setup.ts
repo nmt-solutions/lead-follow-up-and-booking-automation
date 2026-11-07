@@ -1,4 +1,8 @@
-import { preparePilotSecurity, securePilots } from "./pilot-security";
+import {
+  preparePilotSecurity,
+  securePilots,
+  pilotScopeForeignKeys,
+} from "./pilot-security";
 import {
   prepareDiscoveryCapacity,
   secureDiscoveryCapacity,
@@ -736,6 +740,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...pilotScopeForeignKeys,
     ...sellerDocumentScopeForeignKeys,
     ...financialCaseScopeForeignKeys,
     ...subscriptionPaymentScopeForeignKeys,
@@ -801,6 +806,7 @@ export async function secureDatabase(
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...pilotScopeForeignKeys,
       ...sellerDocumentScopeForeignKeys,
       ...financialCaseScopeForeignKeys,
       ...subscriptionPaymentScopeForeignKeys,

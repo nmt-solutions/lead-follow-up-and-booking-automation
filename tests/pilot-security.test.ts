@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { createHarness } from "./support/harness";
 import { pilotFixture } from "./support/pilot";
 import { verifyRuntimeRole } from "../src/db/runtime";
-import { prepareDatabaseRole } from "../src/db/setup";
+import { prepareDatabaseRole, secureDatabase } from "../src/db/setup";
 import { pilotFunctions, pilotTables } from "../src/db/pilot-security";
 import { pilotCostReadTables } from "../src/db/pilot-owner-policies";
 
@@ -27,6 +27,49 @@ describe("Pilot restricted-role authorization and populated reapplication", () =
     await s.discovery.execute(s.queued.at(-1));
   });
   afterAll(async () => h?.close());
+  it("pauses scope dependencies before the pinned primary-key replacement and restores validated pilot bindings without changing populated history", async () => {
+    const tables = [
+        ...pilotTables,
+        "subscription_payment",
+        "subscription_payment_history",
+        "subscription_period",
+      ],
+      before = new Map<string, unknown[]>();
+    for (const table of tables)
+      before.set(
+        table,
+        (
+          await h.admin.query(
+            `select to_jsonb(t) value from public.${table} t order by id`,
+          )
+        ).rows,
+      );
+    const mutations = s.mutations.length;
+    await prepareDatabaseRole(h.admin);
+    // This is the exact replacement operation emitted by the pinned Drizzle push.
+    await h.admin.query(
+      "alter table public.pilot_record drop constraint pilot_record_pkey; alter table public.pilot_record add constraint pilot_record_pkey primary key(id,business_id)",
+    );
+    await secureDatabase(h.admin);
+    await verifyRuntimeRole(h.runtime);
+    expect(
+      (
+        await h.admin.query(
+          "select count(*)::int n,bool_and(convalidated) validated from pg_constraint where conname in ('pilot_event_scope','pilot_effect_scope') and contype='f'",
+        )
+      ).rows,
+    ).toEqual([{ n: 2, validated: true }]);
+    for (const [table, rows] of before)
+      expect(
+        (
+          await h.admin.query(
+            `select to_jsonb(t) value from public.${table} t order by id`,
+          )
+        ).rows,
+        table,
+      ).toEqual(rows);
+    expect(s.mutations).toHaveLength(mutations);
+  });
   it("classifies a pilots-only operator in public MFA status and rechecks current capability without granting Business access", async () => {
     const credentials = await h.signIn("pilot-only-operator@example.com"),
       actor = await h.access.authenticateForWork(credentials);
