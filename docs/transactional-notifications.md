@@ -51,6 +51,8 @@ Native payloads are frozen before I/O and sealed with AES-256-GCM, authenticated
 
 First-attempt time and a conservative 23-hour native retry deadline are persisted. Resend guarantees the same key and same payload for 24 hours; the application never extends that external guarantee or creates a replacement key for ambiguous work. Auth expiry can stop retries much earlier. Missing/rotated payload keys, a changed sending credential binding, revoked purpose, expired secrets and expired native guarantees hold/expire work for review. A late actual acceptance is retained against the original recorded dispatch lease even after another lease exists.
 
+Each persisted source also keeps its original configured account. Renaming the account or replacing its credentials cannot create a second attempt for that invitation, budget alert or platform notice: native idempotency does not carry across Resend teams. Resolve the original saved attempt under its original account and retry deadline; deployment changes do not release its uncertainty. A genuinely new authentication request still receives its own source identity.
+
 The bounded web attempt and the Trigger recovery use this same persisted stream. Cost alerts are recovered by their existing cost worker, which composes the common native adapter and acceptance ledger; the general worker cannot initiate a cost send or bypass their lease/budget gate. Known accepted IDs can be reconciled into the original cost ledger after a crash or expired send window without another provider call. A crash after common acceptance but before cost completion returns the original saved native ID on the next authorized cost attempt.
 
 ## Platform producers and status events

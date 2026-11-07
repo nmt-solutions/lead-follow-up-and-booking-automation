@@ -618,7 +618,7 @@ describe("Subscription lifecycle at the public application seam", () => {
     expect(state.schedules).toHaveLength(1);
     expect(r.searches).toHaveLength(0);
   });
-  it("retains immutable scoped lifecycle history through managed unique/FK replacement and checks read and append grants separately", async () => {
+  it("retains immutable scoped lifecycle history through managed unique/FK replacement", async () => {
     const f = await subscriptionFixture(h),
       native = razorpayFixture(h.clock),
       app = compose(native);
@@ -657,7 +657,10 @@ describe("Subscription lifecycle at the public application seam", () => {
     expect(
       (await app.workspace(f.owner, f.business.id)).actions[0].lifecycleEvents,
     ).toEqual(events);
-    for (const privilege of ["SELECT", "INSERT"]) {
+  });
+  it.each(["SELECT", "INSERT"])(
+    "requires lifecycle ledger %s independently",
+    async (privilege) => {
       await h.admin.query(
         `REVOKE ${privilege} ON subscription_lifecycle_event FROM app_runtime`,
       );
@@ -669,8 +672,8 @@ describe("Subscription lifecycle at the public application seam", () => {
         await secureDatabase(h.admin);
       }
       await verifyRuntimeRole(h.runtime);
-    }
-  });
+    },
+  );
   it("rechecks current Business authority and operator MFA/capability for lifecycle commands and the notification seam", async () => {
     const f = await subscriptionFixture(h),
       native = razorpayFixture(h.clock),

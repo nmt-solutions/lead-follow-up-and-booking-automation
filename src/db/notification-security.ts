@@ -118,12 +118,14 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
     CREATE OR REPLACE FUNCTION public.notification_enqueue(draft jsonb,deployment jsonb,sealed text)
     RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ DECLARE source jsonb; n record; BEGIN
       IF nullif(current_setting('app.business_id',true),'') IS NOT NULL THEN RETURN NULL; END IF;
+      PERFORM pg_advisory_xact_lock(hashtextextended('notification-source:'||(draft->>'purpose')||':'||(draft->>'sourceId'),0));
       PERFORM pg_advisory_xact_lock(hashtextextended('notification:'||(deployment->>'account'),0));
       source:=public.notification_source(draft->>'purpose',draft->>'sourceId',draft->>'authority',draft->>'actorId',(draft->>'businessId')::uuid);
       IF source IS NULL THEN RETURN NULL; END IF;
       IF draft->>'purpose' IN ('operations','subscription') AND NOT EXISTS(SELECT 1 FROM public.notification_preference p WHERE p.id::text=split_part(draft->>'authority',':',1) AND p.account=deployment->>'account') THEN RETURN NULL; END IF;
-      SELECT * INTO n FROM public.notification_notice x WHERE x.account=deployment->>'account' AND x.purpose=draft->>'purpose' AND x.source_id=draft->>'sourceId';
+      SELECT * INTO n FROM public.notification_notice x WHERE x.purpose=draft->>'purpose' AND x.source_id=draft->>'sourceId';
       IF FOUND THEN
+        IF n.account<>deployment->>'account' THEN RETURN NULL; END IF;
         IF n.key<>draft->>'key' OR n.provider_id IS NULL AND n.payload_hash<>draft->>'payloadHash' THEN RAISE EXCEPTION 'immutable notification'; END IF;
         IF n.purpose='cost_alert' AND n.provider_id IS NULL THEN UPDATE public.notification_notice SET authority=draft->>'authority' WHERE id=n.id; END IF;
         RETURN jsonb_build_object('id',n.id,'capability',n.capability);
