@@ -1047,6 +1047,38 @@ function IntentPanel({
               SHA-256 {a.sha256} · {a.size} bytes ·{" "}
               {a.retention.policyReference}
             </p>
+            <p>
+              Original source: {readable(a.kind)} · {readable(a.result)} ·{" "}
+              {a.amountMinor} {a.target?.currency ?? "Unknown currency"} minor
+              units
+            </p>
+            <p>Source and provenance: {a.note}</p>
+            <details>
+              <summary className="min-h-11 cursor-pointer py-2 font-medium">
+                Review original evidence scope
+              </summary>
+              {a.target ? (
+                <div className="space-y-2">
+                  <p>
+                    {a.target.jurisdiction} · {a.target.registration} ·{" "}
+                    {a.target.mode} · {a.target.returnType}
+                  </p>
+                  <p>
+                    Authority {a.target.authorityAccount} · Remitting account{" "}
+                    {a.target.fundingAccount}
+                  </p>
+                  <p>
+                    {a.target.start} inclusive to {a.target.end} exclusive ·{" "}
+                    Report {a.target.reportId} revision {a.target.revision}
+                  </p>
+                </div>
+              ) : (
+                <p>
+                  Unknown account, period or revision scope. This original
+                  cannot confirm the displayed work order.
+                </p>
+              )}
+            </details>
             {a.kind === "supporting" && (
               <details>
                 <summary className="cursor-pointer py-2 font-medium">
