@@ -34,6 +34,12 @@ export default async function SubscriptionPaymentReview() {
           Back to Businesses
         </Link>
         <h1 className="page-title">Subscription payment review</h1>
+        <Link
+          href="/platform/reach-changes"
+          className="mt-3 inline-flex min-h-11 items-center text-primary underline"
+        >
+          Review and recover approved reach changes
+        </Link>
       </header>
       <SubscriptionPaymentOperator initial={initial} />
       <section className="space-y-4">

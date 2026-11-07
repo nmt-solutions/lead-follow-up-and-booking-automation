@@ -84,7 +84,11 @@ export async function settings(tx: Transaction, businessId: string, at: Date) {
             : [],
       }
     : null;
-  return { profile, policy: policy?.activeMarkets.length ? policy : null };
+  return {
+    profile,
+    policy: policy?.activeMarkets.length ? policy : null,
+    configuredPolicy: configured,
+  };
 }
 
 export async function checkCurrent(

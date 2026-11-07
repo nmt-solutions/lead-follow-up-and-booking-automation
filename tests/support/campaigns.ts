@@ -17,6 +17,11 @@ import {
   type DiscoveryWork,
 } from "../../src/models/discovery";
 import { readySender } from "./senders";
+import type { ScheduleWork } from "../../src/models/discovery-schedules";
+type Harness = Awaited<ReturnType<typeof createHarness>>;
+type ExistingBusiness = Awaited<
+  ReturnType<Harness["application"]["createBusiness"]>
+>;
 
 export async function campaignFixture(
   h: Awaited<ReturnType<typeof createHarness>>,
@@ -26,16 +31,25 @@ export async function campaignFixture(
     namedGeneral?: boolean;
     mailboxProvider?: "gmail" | "microsoft";
     automationQuantity?: number;
+    businessContext?: { owner: Headers; business: ExistingBusiness };
+    market?: string;
+    discoveryUnit?: string;
   } = {},
 ) {
   h.clock.set(options.at ?? "2026-11-05T09:00:00Z");
-  const owner = await h.signIn(`campaign-${crypto.randomUUID()}@example.com`);
-  const business = await h.application.createBusiness(owner, {
-    name: "Steel supplier",
-    offering: "Steel",
-    homeMarket: "",
-    website: "",
-  });
+  const market = options.market ?? "New Jersey, United States",
+    discoveryUnit = options.discoveryUnit ?? "fixture units";
+  const owner =
+    options.businessContext?.owner ??
+    (await h.signIn(`campaign-${crypto.randomUUID()}@example.com`));
+  const business =
+    options.businessContext?.business ??
+    (await h.application.createBusiness(owner, {
+      name: "Steel supplier",
+      offering: "Steel",
+      homeMarket: "",
+      website: "",
+    }));
   await h.application.saveConfiguration(owner, business.id, {
     offering: "Galvanized steel",
     specifications: "ASTM A653",
@@ -49,7 +63,7 @@ export async function campaignFixture(
       postalCode: "",
       country: "United States",
     },
-    homeMarket: "New Jersey, United States",
+    homeMarket: market,
     homeMarketConfirmed: true,
     additionalMarkets: [],
     buyerCategories: [
@@ -63,19 +77,20 @@ export async function campaignFixture(
     buyersReviewed: true,
     exclusions: [],
   });
-  await persistPaidSubscription(h, owner, business.id, {
-    markets: ["New Jersey, United States"],
-    discovery: { quantity: 100000, unit: "fixture units" },
-    automation: {
-      quantity: options.automationQuantity ?? 10000,
-      unit: "provider calls",
-    },
-  });
+  if (!options.businessContext)
+    await persistPaidSubscription(h, owner, business.id, {
+      markets: [market],
+      discovery: { quantity: 100000, unit: "fixture units" },
+      automation: {
+        quantity: options.automationQuantity ?? 10000,
+        unit: "provider calls",
+      },
+    });
   const policy = discoveryPolicySchema.parse({
     adapterId: "campaign-research-fixture",
-    activeMarkets: ["New Jersey, United States"],
-    coverage: [{ market: "New Jersey, United States", source: "public_web" }],
-    allowanceUnit: "fixture units",
+    activeMarkets: [market],
+    coverage: [{ market, source: "public_web" }],
+    allowanceUnit: discoveryUnit,
     maxRunBudget: 20,
     searchUnits: 1,
     reviewUnits: 1,
@@ -96,7 +111,8 @@ export async function campaignFixture(
     [business.id, policy],
   );
   const database = runtimeDatabase(h.runtime),
-    queued: DiscoveryWork[] = [];
+    queued: DiscoveryWork[] = [],
+    scheduled: ScheduleWork[] = [];
   let address = "purchasing@fabricator.example";
   const addresses = (url: string) =>
     options.multipleSources
@@ -112,8 +128,10 @@ export async function campaignFixture(
     repository: createDiscoveryRepository(database, h.clock),
     clock: h.clock,
     queue: {
-      async schedule() {
-        throw new Error("Unexpected recurring research");
+      async schedule(work) {
+        if (!options.businessContext)
+          throw new Error("Unexpected recurring research");
+        scheduled.push(work);
       },
       async enqueue(work) {
         queued.push(work);
@@ -125,7 +143,7 @@ export async function campaignFixture(
         return (options.multipleSources ? ["about", "team"] : ["about"]).map(
           (path) => ({
             name: "Hudson Fabrication",
-            market: "New Jersey, United States",
+            market,
             url: `https://fabricator.example/${path}`,
             excerpt: `Hudson Fabrication: https://fabricator.example/. We fabricate galvanized steel. ${options.namedGeneral ? "Pat is owner. " : ""}${addresses(
               `https://fabricator.example/${path}`,
@@ -168,7 +186,7 @@ export async function campaignFixture(
   async function discover(nextAddress = address) {
     address = nextAddress;
     await discovery.start(owner, business.id, {
-      markets: ["New Jersey, United States"],
+      markets: [market],
       publicOffering: "Galvanized steel",
       confirmPublicQuery: true,
       budget: 4,
@@ -215,6 +233,8 @@ export async function campaignFixture(
     sender,
     queued,
     inbox,
+    discovery,
+    scheduled,
     discover,
     ref: (r: CampaignRevision) => ({
       revisionId: r.id,

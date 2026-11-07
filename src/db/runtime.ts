@@ -7,6 +7,7 @@ import {
   notificationTables,
 } from "./notification-security";
 import { operationSourceTables } from "./operations-security";
+import { reachFunctions } from "./reach-change-security";
 
 export function runtimeDatabase(pool: Pool) {
   return drizzle(pool, { schema });
@@ -19,6 +20,12 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*)=2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('reach_change','reach_change_event'))
+      AND (SELECT count(*)=4 AND bool_and(CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL ELSE with_check IS NOT NULL END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('reach_change','reach_change_event'))
+      AND has_sequence_privilege(current_user,'public.reach_change_event_position_seq','USAGE')
+      AND (SELECT count(*)=4 AND bool_and(i.indisunique AND i.indisvalid) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('reach_change_scope','reach_change_request','reach_change_event_identity','reach_change_request_identity'))
+      AND (SELECT count(*)=4 AND bool_and(convalidated) FROM pg_constraint WHERE contype='f' AND conname IN ('reach_change_period_scope','reach_change_action_scope','reach_change_quote_scope','reach_change_event_scope'))
+      AND (SELECT count(*)=${reachFunctions.length} AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN (${reachFunctions.map((n) => `'${n}'`).join(",")}))
       AND (SELECT count(*)=${notificationTables.length} AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN (${notificationTables.map((n) => `'${n}'`).join(",")}))
       AND NOT has_column_privilege(current_user,'public.platform_operator','notifications','UPDATE')
       AND (SELECT count(*)=${notificationTables.length * 2} AND bool_and('app_runtime'=ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual='false' ELSE with_check='false' END) FROM pg_policies WHERE schemaname='public' AND tablename IN (${notificationTables.map((n) => `'${n}'`).join(",")}))

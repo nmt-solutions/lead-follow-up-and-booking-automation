@@ -51,6 +51,13 @@ export function renderSellerDocument(document: {
         ]
       : []),
     `Period: ${s.source.start} to ${s.source.end}`,
+    ...(s.financial.adjustment
+      ? [
+          `Charge basis: prorated reach expansion v${s.financial.adjustment.version}; change ${s.financial.adjustment.changeId}; original paid source ${s.financial.adjustment.originalPeriodId}`,
+          `Monthly net basis: ${money(s.financial.adjustment.pricing.fromMonthlyNetMinor)} to ${money(s.financial.adjustment.pricing.toMonthlyNetMinor)}; exact proration ${s.financial.adjustment.proration.numerator}/${s.financial.adjustment.proration.denominator}, ${s.financial.adjustment.proration.basis}, half-up, UTC`,
+          `Approved policy: ${s.financial.adjustment.policy.id} v${s.financial.adjustment.policy.version}; reviewed by ${s.financial.adjustment.policy.reviewedBy}`,
+        ]
+      : []),
     `Billing currency: ${s.currency}; precision: ${s.precision}`,
     ...(s.original
       ? [

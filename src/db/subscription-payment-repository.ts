@@ -210,7 +210,23 @@ export function createSubscriptionPaymentRepository(database: Database) {
       revisions: raw.revisions.map(camel),
       decisions: raw.decisions.map(camel),
     });
-    const s = row.snapshot,
+    const contracts =
+      paymentActionSchema.shape.reachRenewals.parse(
+        (
+          await tx.execute<{ contracts: unknown }>(
+            sql`select public.payment_reach_contract(${row.id}::uuid,${row.businessId}::uuid) as contracts`,
+          )
+        ).rows[0]?.contracts,
+      ) ?? [];
+    const changed = contracts
+      .filter(
+        (c) =>
+          c.native.updated &&
+          c.native.planId === o.charge?.planId &&
+          c.renewalAt <= (o.periodStart ?? ""),
+      )
+      .at(-1);
+    const s = changed?.target ?? row.snapshot,
       q = s.quote;
     const input = {
       requestKey: randomUUID(),
@@ -243,6 +259,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
     });
     return {
       ...s,
+      ...(changed ? { reachRenewal: { changeId: changed.changeId } } : {}),
       tax,
       term: { kind: "calendar_month", timeZone: "UTC" },
       basis: {
@@ -467,6 +484,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           .where(eq(subscriptionPayment.businessId, businessId))
           .orderBy(asc(subscriptionPayment.at), asc(subscriptionPayment.id));
         for (const row of rows) {
+          if (row.snapshot.adjustment) continue;
           await tx.execute(
             sql`select set_config('app.payment_action',${row.id},true),set_config('app.payment_capability',${row.recoveryKey},true)`,
           );
@@ -486,7 +504,20 @@ export function createSubscriptionPaymentRepository(database: Database) {
           remaining: item.remaining,
         });
         return {
-          actions: await Promise.all(rows.map((row) => paymentAudit(tx, row))),
+          actions: await (async () => {
+            const result: PaymentAction[] = [];
+            for (const row of rows) result.push(await paymentAudit(tx, row));
+            return result;
+          })(),
+          effectiveScope:
+            discovery && automation
+              ? {
+                  periodId: discovery.period.id,
+                  markets: discovery.period.markets,
+                  discovery: discovery.allowance,
+                  automation: automation.allowance,
+                }
+              : null,
           ...(await paymentAccess(tx, businessId, at)),
           allowances:
             discovery && automation
@@ -744,6 +775,11 @@ export function createSubscriptionPaymentRepository(database: Database) {
           sql`select set_config('app.payment_action',${row.id},true),set_config('app.payment_capability',${row.recoveryKey},true)`,
         );
         row.lifecycle = await reconcileLifecycle(tx, row, at, policy);
+        const coordinated = await tx.execute<{ blocked: boolean }>(
+          sql`select public.payment_reach_stop_requested(${row.id}::uuid,${businessId}::uuid) as blocked`,
+        );
+        if (coordinated.rows[0]?.blocked)
+          throw new ApplicationError("CONFLICT");
         if (row.lifecycle.cancellation || row.lifecycle.state === "cancelled")
           return { action: paymentView(row), work: null };
         row.lifecycle.cancellation = {
@@ -850,7 +886,22 @@ export function createSubscriptionPaymentRepository(database: Database) {
       );
     },
     readWork(work: Work) {
-      return worker(work, async (_tx, row) => paymentView(row));
+      return worker(work, async (tx, row) =>
+        paymentActionSchema.parse({
+          ...paymentView(row),
+          settledPaymentIds: (
+            await tx
+              .select({ id: subscriptionPeriod.paymentId })
+              .from(subscriptionPeriod)
+              .where(eq(subscriptionPeriod.actionId, row.id))
+          ).map((p) => p.id),
+          reachRenewals: (
+            await tx.execute<{ contracts: unknown }>(
+              sql`select public.payment_reach_contract(${row.id}::uuid,${row.businessId}::uuid) as contracts`,
+            )
+          ).rows[0]?.contracts,
+        }),
+      );
     },
     async receive(event: AuthenticatedPaymentEvent, at: Date) {
       const o = event.observation;
@@ -1020,7 +1071,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           (o.charge &&
             (!o.subscriptionId ||
               !row.checkout?.planId ||
-              o.charge.planId !== row.checkout.planId))
+              (o.charge.planId !== row.checkout.planId && !s.reachRenewal)))
         )
           return record(
             tx,
@@ -1148,6 +1199,12 @@ export function createSubscriptionPaymentRepository(database: Database) {
           allocated.rows[0]?.allocated ||
           existing.some(
             (p) =>
+              !p.snapshot.adjustment &&
+              !(
+                s.replacement &&
+                p.actionId === s.replacement.originalActionId &&
+                p.start >= new Date(s.replacement.start)
+              ) &&
               p.start < new Date(o.periodEnd!) &&
               p.end > new Date(o.periodStart!),
           )

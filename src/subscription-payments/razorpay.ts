@@ -12,6 +12,7 @@ import type { Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import { PaymentCreationNotAttempted } from "../models/subscription-payments";
 import { lifecycleObservationSchema } from "../models/subscription-lifecycle";
+import { createRazorpayReachGateway } from "./reach-razorpay";
 
 const id = (prefix: string) =>
   z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9]+$`));
@@ -135,10 +136,14 @@ export function createRazorpayGateway(d: {
       throw new ApplicationError("SETUP_REQUIRED");
     return plans[0];
   }
-  async function request(path: string, body?: unknown): Promise<unknown> {
+  async function request(
+    path: string,
+    body?: unknown,
+    method?: "POST" | "PATCH",
+  ): Promise<unknown> {
     try {
       const response = await d.fetch(`https://api.razorpay.com/v1/${path}`, {
-        method: body ? "POST" : "GET",
+        method: method ?? (body ? "POST" : "GET"),
         redirect: "error",
         cache: "no-store",
         signal: AbortSignal.timeout(4000),
@@ -228,11 +233,16 @@ export function createRazorpayGateway(d: {
           p.reservedCapacityId === s.quote.selection.reservedCapacityId &&
           p.currency === s.quote.currency,
       );
+    const changed = action.reachRenewals
+      ?.filter((c) => c.native.updated)
+      .at(-1);
     return (
       mapping?.length === 1 &&
-      sub.plan_id === mapping[0].planId &&
+      (sub.plan_id === mapping[0].planId ||
+        sub.plan_id === changed?.native.planId) &&
       sub.quantity === 1 &&
-      sub.total_count === mapping[0].totalCount &&
+      sub.total_count ===
+        (changed?.native.totalCount ?? mapping[0].totalCount) &&
       sub.notes.operation_key === action.operationKey &&
       sub.notes.action_id === action.id &&
       sub.notes.business_id === action.businessId &&
@@ -370,6 +380,20 @@ export function createRazorpayGateway(d: {
       .sort((a, b) => (b.billing_start ?? 0) - (a.billing_start ?? 0))[0];
     for (const invoice of page.items) {
       if (invoice.status !== "paid" || !invoice.payment_id) continue;
+      if (
+        action.settledPaymentIds?.includes(invoice.payment_id) ||
+        action.reachRenewals?.some(
+          (c) =>
+            c.deltaPaymentId === invoice.payment_id ||
+            (invoice.billing_start != null &&
+              invoice.billing_end != null &&
+              new Date(invoice.billing_start * 1000).toISOString() ===
+                c.effectiveAt &&
+              new Date(invoice.billing_end * 1000).toISOString() ===
+                c.renewalAt),
+        )
+      )
+        continue;
       const p = paymentSchema.parse(
         await request(`payments/${invoice.payment_id}`),
       );
@@ -463,6 +487,13 @@ export function createRazorpayGateway(d: {
     throw new ApplicationError("PROVIDER_UNAVAILABLE");
   };
   return {
+    reach: createRazorpayReachGateway({
+      review,
+      keyId: d.keyId,
+      clock: d.clock,
+      request,
+      verifyPlan,
+    }),
     key: "razorpay",
     account,
     mode: review.mode,

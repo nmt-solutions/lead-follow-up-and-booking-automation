@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ReachGateway } from "./reach-changes";
 import {
   lifecycleSchema,
   lifecycleEventSchema,
@@ -81,6 +82,54 @@ export function monthlyPeriodMatches(
   );
 }
 export const paymentSnapshotSchema = z.object({
+  /** A separate immutable captured adjustment; never an ordinary renewable paid term. */
+  adjustment: z
+    .object({
+      kind: z.literal("reach_delta"),
+      version: z.literal(1),
+      changeId: z.uuid(),
+      originalPeriodId: z.uuid(),
+      start: z.iso.datetime(),
+      end: z.iso.datetime(),
+      pricing: z.object({
+        sourceQuoteId: z.uuid(),
+        targetQuoteId: z.uuid(),
+        fromMonthlyNetMinor: z.string(),
+        toMonthlyNetMinor: z.string(),
+      }),
+      proration: z.object({
+        numerator: z.string(),
+        denominator: z.string(),
+        basis: z.enum(["remaining_calendar_seconds", "remaining_utc_days"]),
+        rounding: z.literal("half_up"),
+        timeZone: z.literal("UTC"),
+      }),
+      policy: z.object({
+        id: z.string(),
+        version: z.number().int().positive(),
+        reviewedBy: z.string(),
+        evidence: z.array(z.string()),
+      }),
+      scope: z.object({
+        markets: z.array(z.string()),
+        discovery: allowanceSchema,
+        automation: allowanceSchema,
+      }),
+      consumed: z.object({
+        discovery: z.number().int().nonnegative(),
+        automation: z.number().int().nonnegative(),
+      }),
+    })
+    .optional(),
+  replacement: z
+    .object({
+      changeId: z.uuid(),
+      originalActionId: z.uuid(),
+      start: z.iso.datetime(),
+      customerId: z.string(),
+    })
+    .optional(),
+  reachRenewal: z.object({ changeId: z.uuid() }).optional(),
   quote: subscriptionQuoteSchema,
   tax: z.union([taxCalculationSchema, chargeTaxSchema]),
   basis: z
@@ -146,8 +195,8 @@ export const paymentObservationSchema = z.strictObject({
     .optional(),
   charge: z
     .strictObject({
-      kind: z.enum(["initial", "renewal"]).optional(),
-      invoiceId: ref,
+      kind: z.enum(["initial", "renewal", "reach_delta"]).optional(),
+      invoiceId: ref.nullable(),
       orderId: ref,
       planId: ref,
       method: z.literal("card"),
@@ -170,6 +219,23 @@ export type AuthenticatedPaymentEvent = z.infer<
   typeof authenticatedPaymentEventSchema
 >;
 export const paymentActionSchema = z.object({
+  reachRenewals: z
+    .array(
+      z.object({
+        changeId: z.uuid(),
+        effectiveAt: z.iso.datetime(),
+        renewalAt: z.iso.datetime(),
+        target: paymentSnapshotSchema,
+        native: z.object({
+          planId: z.string(),
+          totalCount: z.number().int(),
+          updated: z.boolean(),
+        }),
+        deltaPaymentId: z.string().nullable(),
+      }),
+    )
+    .optional(),
+  settledPaymentIds: z.array(z.string()).optional(),
   id: z.uuid(),
   businessId: z.uuid(),
   requestKey: z.uuid(),
@@ -247,6 +313,15 @@ export const paidAccessSchema = z.object({
   period: paidPeriodSchema.nullable(),
 });
 export const paymentWorkspaceSchema = z.object({
+  effectiveScope: z
+    .object({
+      periodId: z.uuid(),
+      markets: z.array(z.string()),
+      discovery: allowanceSchema,
+      automation: allowanceSchema,
+    })
+    .nullable()
+    .optional(),
   actions: z.array(paymentActionSchema),
   periods: z.array(paidPeriodSchema),
   access: paidAccessSchema,
@@ -286,6 +361,7 @@ export class PaymentCreationNotAttempted extends Error {
  * Creation must use this exact persisted operation key. A timeout must NEVER be retried as a new charge.
  * #45 implements this contract with native Razorpay, without browser/session authority. */
 export type PaymentGateway = {
+  reach?: ReachGateway;
   lifecyclePolicy?: LifecyclePolicy;
   updatePayment?(
     action: PaymentAction,

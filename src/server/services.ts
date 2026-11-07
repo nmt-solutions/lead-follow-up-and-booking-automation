@@ -1,4 +1,8 @@
 import { routeOpportunityMail } from "../email-sequences/opportunity-provider";
+import { createReachChangeApplication } from "../application/reach-changes";
+import { createReachChangeRepository } from "../db/reach-change-repository";
+import { createReachChangeHttp } from "../http/reach-changes";
+import { configuredReachPolicy } from "../subscription-payments/configuration";
 import { createOperationsApplication } from "../application/operations";
 import { createOperationsRepository } from "../db/operations-repository";
 import { createOperationsHttp } from "../http/operations";
@@ -347,6 +351,14 @@ async function composeServices() {
     clock: { now: () => new Date() },
   });
   const paymentGateway = configuredPayments();
+  const reachChanges = createReachChangeApplication({
+    authenticate,
+    authenticatePlatform,
+    repository: createReachChangeRepository(runtimeDatabase(pool)),
+    gateway: paymentGateway,
+    policy: configuredReachPolicy(),
+    clock: { now: () => new Date() },
+  });
   const subscriptionPayments = createSubscriptionPaymentApplication({
     authenticate,
     authenticatePlatform,
@@ -761,6 +773,12 @@ async function composeServices() {
       reportFailure,
     }),
     subscriptionPayments,
+    reachChanges,
+    reachChangesHttp: createReachChangeHttp({
+      application: reachChanges,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     sellerDocuments,
     sellerDocumentsHttp: createSellerDocumentHttp({
       application: sellerDocuments,
