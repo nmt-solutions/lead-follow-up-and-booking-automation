@@ -40,6 +40,7 @@ const sourceSchema = z.object({
   role: z.string().optional(),
   invitationExpiresAt: z.coerce.date().optional(),
   summary: z.string().optional(),
+  healthOnly: z.boolean().optional(),
   snapshot: operationSnapshotSchema.optional(),
   currentSnapshot: operationSnapshotSchema.optional(),
   outcome: z.string().optional(),
@@ -57,6 +58,7 @@ const claimSchema = workSchema.extend({
   keyRef: z.string(),
 });
 const stateSchema = z.object({
+  bootstrapAuthOnly: z.boolean(),
   allowedPreferences: z.array(z.enum(["operations", "subscription"])),
   setup: notificationSetupSchema.nullable(),
   setupCheckedAt: z.string().nullable(),

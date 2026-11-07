@@ -169,7 +169,8 @@ export function createTeamApplication<Credentials>(dependencies: {
         at,
       );
       await deliver(actor, id, invitationId);
-      const team = await repository.getTeam(actor, id, clock.now());
+      const currentActor = await dependencies.authenticate(credentials);
+      const team = await repository.getTeam(currentActor, id, clock.now());
       const saved = team.invitations.find((x) => x.id === invitationId);
       if (!saved) throw new ApplicationError("CONFLICT");
       return saved;
@@ -246,6 +247,8 @@ export function createTeamApplication<Credentials>(dependencies: {
         id,
         validate(invitationIdSchema, value).invitationId,
       );
+      const currentActor = await dependencies.authenticate(credentials);
+      await repository.authorize(currentActor, id, "team.manage");
     },
     async getAudit(credentials: Credentials, businessId: unknown) {
       const { actor, id } = await context(credentials, businessId);

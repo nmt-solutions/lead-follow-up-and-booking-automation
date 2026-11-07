@@ -1308,6 +1308,7 @@ export const notificationTerms = pgTable(
     actorId: text("actor_id")
       .notNull()
       .references(() => user.id),
+    authBootstrap: boolean("auth_bootstrap").notNull().default(false),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
   () => notificationPolicies("notification_terms"),

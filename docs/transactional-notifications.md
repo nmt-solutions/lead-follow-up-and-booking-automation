@@ -4,7 +4,7 @@ Issue #59 composes Better Auth magic links, the existing Business invitation com
 
 ## Setup and privileges
 
-Provision `platform_operator.notifications` through trusted owner administration. It defaults to false and participates in central privileged-role/MFA classification. Operator commands require current platform MFA and current notification authority. Operations/subscription email preferences additionally require their existing operations/reconciliation capability; they do not grant recovery, financial, document or sender-health repair authority.
+Provision `platform_operator.notifications` through trusted owner administration. It defaults to false and participates in central privileged-role/MFA classification. Operator commands require current platform MFA and current notification authority. Operations/subscription email preferences additionally require their existing operations/reconciliation capability (a sender-health operator may select operations notices but is restricted to the sender-health source); they do not grant recovery, financial, document or sender-health repair authority.
 
 Configure the same deployment-owned credential set on web and Trigger:
 
@@ -22,6 +22,14 @@ Open Businesses → Review transactional notification delivery. Select reviewed 
 Setup observations are fresh for five minutes. A database inspection lease prevents local sends racing the usage snapshot. The durable worker may refresh a stale observation only through the existing approving operator's current notification capability and verified factor enrollment, using the same configured credential binding. Revocation stops that delegation. Live operator changes still require fresh MFA. Provider rate waits also constrain setup reads and subsequent sending.
 
 The operator page shows credential presence, actual native verification, account/mode, usage and independent schedule/webhook presence. Actual native acceptance remains the proof of sending-key access. No fabricated account API, customer self-attestation or permanently unknown quota adapter is used.
+
+### First-login bootstrap
+
+When no notification operator can yet sign in, trusted deployment administration can perform native setup reads without a session. First provision the primary user and its notification operator grant through existing owner administration. Do not invent an MFA factor or mark a session verified. With this checkout's owner `DATABASE_ADMIN_URL` and the deployment configuration above, run `pnpm notifications:bootstrap --operator-user-id <existing-user-id> --terms-file <reviewed-json-file>`. The command requires actual table-owner membership; the application runtime cannot invoke it. It sends no email and grants no account, Business, session or MFA authority.
+
+The reviewed JSON uses the same terms schema as the operator page. For an actually eligible Free account it can be `{"kind":"free","reference":"<reviewed eligibility evidence>","monthlyLimit":3000,"dailyLimit":100,"amount":null}`; choose stricter limits when required. Selected paid terms instead require `"kind":"selected_paid"` and `"amount":{"currency":"USD","micros":"<exact reviewed monthly commitment in millionths>"}` (INR is also supported), with explicit reviewed limits/reference. The command reads the configured native domains and actual team usage, then records auth-only terms. Missing native Free eligibility prevents Free bootstrap. It does not activate a paid plan.
+
+Request the first magic link promptly after successful bootstrap: its native setup observation lasts five minutes, and the auth token lasts ten minutes. Repeating bootstrap refreshes native reads if necessary. Complete normal MFA enrollment, open the operator notification page, save reviewed sending terms from that verified session, and reverify native setup. Bootstrap terms permit only authentication even after MFA enrollment; invitations and platform notices remain held until normal terms supersede them. Sending-key access still requires a real accepted send. This owner command has been tested only against disposable PostgreSQL, not executed against a deployment by this implementation.
 
 ## Commercial and usage boundary
 
@@ -47,7 +55,7 @@ The bounded web attempt and the Trigger recovery use this same persisted stream.
 
 ## Platform producers and status events
 
-Business → Notification preferences and delivery lets a current member choose their own operations email notices. Subscription notices require current Owner/Admin authority. Operator preferences require Notifications plus the respective source capability. Defaults are in-app only. No public form selects another person's email or supplies message content.
+Business → Notification preferences and delivery lets a current member choose their own operations email notices. Subscription notices require current Owner/Admin authority. Operator preferences require Notifications plus the respective source capability. A sender-health-only operator receives only health incidents and a direct health destination; this never grants general operations access. Current Business Owners/Admins may select the corresponding managerial health notices even when an operator recorded the incident. Defaults are in-app only. No public form selects another person's email or supplies message content.
 
 Recovery composes current persisted #55 operations notices/escalations (including assigned handoffs and unresolved sender health), plus #46 lifecycle notices. It preserves the immutable source identity and exact stage and does not rerun a mailbox, inquiry, booking, payment or other source action. Current responsibility, membership, policy version, verified account and original source binding are rechecked; acknowledgement, repair, supersession or revoked preference prevents new effects. Lifecycle comparison ignores observation-only timestamps while preserving substantive payment/cancellation/policy state. Existing in-app facts are not relabeled as sent email.
 

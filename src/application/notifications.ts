@@ -325,9 +325,11 @@ export function createNotificationApplication<C>(d: {
             !needsAttention(source.currentSnapshot))
         )
           continue;
-        const path = candidate.businessId
-          ? `/businesses/${candidate.businessId}/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`
-          : `/platform/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`;
+        const path = source.healthOnly
+          ? "/platform/sender-health"
+          : candidate.businessId
+            ? `/businesses/${candidate.businessId}/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`
+            : `/platform/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`;
         try {
           await produce(
             {

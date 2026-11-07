@@ -1,3 +1,10 @@
+import { bootstrapNotificationSetup } from "../src/application/notification-bootstrap";
+import { readySender } from "./support/senders";
+import { createInboxApplication } from "../src/application/inbox";
+import { createInboxRepository } from "../src/db/inbox-repository";
+import { normalizedInquiryAdapter } from "../src/inbox/adapter";
+import { createSenderHealthApplication } from "../src/application/sender-health";
+import { createSenderHealthRepository } from "../src/db/sender-health-repository";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
@@ -1503,4 +1510,229 @@ describe("Transactional notifications at the public application seam", () => {
       );
     },
   );
+  it("notifies the Business manager and a sender-health-only operator from the current persisted incident", async () => {
+    const { headers, notifications } = await prepared(
+      "notice-health-business@example.com",
+    );
+    const operator = await h.signIn("notice-health-operator@example.com"),
+      actor = await h.access.primary(operator);
+    await h.admin.query(
+      "insert into platform_operator(user_id,sender_health,notifications) values($1,true,true)",
+      [actor.user.id],
+    );
+    const business = await h.application.createBusiness(headers, {
+      name: "Health notice Business",
+      offering: "Steel",
+      homeMarket: "US",
+      website: "",
+    });
+    const database = runtimeDatabase(h.runtime),
+      inbox = createInboxApplication({
+        authenticate: h.authenticate,
+        repository: createInboxRepository(database),
+        adapter: normalizedInquiryAdapter,
+        clock: h.clock,
+      });
+    const connection = await inbox.addConnection(headers, business.id, {
+      label: "Selected sales",
+      channel: "email",
+      conversationRefs: ["sales"],
+      manualRepliesObservable: false,
+    });
+    const sender = await readySender(h, headers, business.id, connection.id);
+    const health = createSenderHealthApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createSenderHealthRepository(database, h.clock),
+    });
+    const rule = { unit: "rate", limit: 0.05, minimumSample: 10 };
+    await health.configure(operator, business.id, sender.identity.id, {
+      expectedVersion: 0,
+      policy: {
+        source: "assisted_review",
+        sourceAuthority:
+          "Fixture provider report reviewed by authorized support",
+        sourceOrigin: "https://evidence.example",
+        population: "Exact sender submissions in the fixture window",
+        windowSeconds: 3600,
+        freshnessSeconds: 3600,
+        maximumLatenessSeconds: 600,
+        retentionDays: 30,
+        thresholds: {
+          spf: rule,
+          dkim: rule,
+          dmarc_alignment: rule,
+          bounces: rule,
+          complaints: rule,
+        },
+      },
+    });
+    await notifications.setPreference(headers, business.id, {
+      purpose: "operations",
+      enabled: true,
+      expectedVersion: 0,
+    });
+    await notifications.setPreference(operator, null, {
+      purpose: "operations",
+      enabled: true,
+      expectedVersion: 0,
+    });
+    const binding = (await health.workspace(operator, business.id, true))
+      .identities[0].binding;
+    await health.ingest(operator, business.id, sender.identity.id, {
+      eventKey: "native-report-fixture",
+      policyVersion: 1,
+      binding,
+      observedAt: h.clock.now().toISOString(),
+      windowStart: new Date(h.clock.now().getTime() - 3600000).toISOString(),
+      windowEnd: h.clock.now().toISOString(),
+      reference: "https://evidence.example/reports/notice",
+      artifactSha256: "a".repeat(64),
+      metrics: {
+        spf: { failed: 0, total: 100 },
+        dkim: { failed: 0, total: 100 },
+        dmarc_alignment: { failed: 0, total: 100 },
+        bounces: { failed: 6, total: 100 },
+        complaints: { failed: 0, total: 100 },
+      },
+      repairs: [],
+    });
+    await notifications.recoverPending();
+    expect(
+      (await notifications.businessWorkspace(headers, business.id)).notices,
+    ).toEqual([
+      expect.objectContaining({ sourceStage: "incident", state: "accepted" }),
+    ]);
+    expect(
+      (await notifications.workspace(operator)).notices.filter(
+        (n) => n.sourceStage === "incident",
+      ),
+    ).toHaveLength(2);
+    expect(accepted.size).toBe(2);
+    expect(JSON.stringify([...accepted.values()])).toContain(
+      "/platform/sender-health",
+    );
+    await notifications.recoverPending();
+    expect(accepted.size).toBe(2);
+  });
+  it("bootstraps native auth-only setup with owner authority without granting MFA or enabling platform sends", async () => {
+    const primary = await h.signIn(
+        "notice-bootstrap-operator@example.com",
+        false,
+      ),
+      actor = await h.access.primary(primary);
+    await h.admin.query(
+      "insert into platform_operator(user_id,notifications) values($1,true)",
+      [actor.user.id],
+    );
+    const terms = {
+      kind: "free" as const,
+      reference: "Explicit deployment-owned auth bootstrap terms",
+      monthlyLimit: 3000,
+      dailyLimit: 100,
+      amount: null,
+    };
+    await expect(
+      bootstrapNotificationSetup({
+        owner: h.runtime,
+        configuration: config,
+        approverId: actor.user.id,
+        terms,
+        provider: createResendProvider(config, nativeFetch),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await bootstrapNotificationSetup({
+      owner: h.admin,
+      configuration: config,
+      approverId: actor.user.id,
+      terms,
+      provider: createResendProvider(config, nativeFetch),
+    });
+    const notifications = app();
+    await requestLink(notifications, "notice-bootstrap-operator@example.com");
+    expect(accepted.size).toBe(1);
+    expect(await h.access.status(primary)).toMatchObject({
+      required: true,
+      readiness: "mfa-incomplete",
+    });
+    await expect(notifications.workspace(primary)).rejects.toMatchObject({
+      code: "MFA_REQUIRED",
+    });
+    const verified = await h.signIn("notice-bootstrap-operator@example.com");
+    expect((await notifications.workspace(verified)).bootstrapAuthOnly).toBe(
+      true,
+    );
+    const business = await h.application.createBusiness(verified, {
+      name: "Bootstrap fence Business",
+      offering: "Steel",
+      homeMarket: "US",
+      website: "",
+    });
+    const team = createTeamApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createTeamRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      tokens: invitationTokens("notification-bootstrap-fixture"),
+      mailer: notifications.invitationMailer,
+      origin: config.origin,
+    });
+    const invitation = await team.invite(verified, business.id, {
+      email: "bootstrap-invitation@example.com",
+      role: "salesperson",
+    });
+    expect(invitation.delivery).toBe("unconfirmed");
+    expect(accepted.size).toBe(1);
+    await notifications.selectTerms(verified, terms);
+    expect((await notifications.workspace(verified)).bootstrapAuthOnly).toBe(
+      false,
+    );
+    const notice = (
+      await notifications.businessWorkspace(verified, business.id)
+    ).notices[0];
+    await notifications.retry(verified, notice.id);
+    expect(
+      (await notifications.businessWorkspace(verified, business.id)).notices[0]
+        .state,
+    ).toBe("accepted");
+    expect(accepted.size).toBe(2);
+  });
+
+  it("rechecks invitation session assurance after native I/O while retaining the incurred provider receipt", async () => {
+    const { headers, notifications } = await prepared(
+        "notice-invitation-assurance@example.com",
+      ),
+      current = h.clock.now();
+    const business = await h.application.createBusiness(headers, {
+      name: "Assurance Business",
+      offering: "Steel",
+      homeMarket: "US",
+      website: "",
+    });
+    const team = createTeamApplication({
+      authenticate: h.authenticate,
+      authenticatePlatform: h.access.authenticatePlatform,
+      repository: createTeamRepository(runtimeDatabase(h.runtime)),
+      clock: h.clock,
+      tokens: invitationTokens("notification-assurance-fixture"),
+      mailer: notifications.invitationMailer,
+      origin: config.origin,
+    });
+    beforeSendResult = async () => {
+      h.clock.set(new Date(current.getTime() + 13 * 3600000).toISOString());
+    };
+    await expect(
+      team.invite(headers, business.id, {
+        email: "assurance-invitation@example.com",
+        role: "salesperson",
+      }),
+    ).rejects.toMatchObject({ code: "MFA_REQUIRED" });
+    h.clock.set(current.toISOString());
+    expect(
+      (await notifications.businessWorkspace(headers, business.id)).notices[0],
+    ).toMatchObject({
+      state: "accepted",
+      providerId: "e2ee4284-d207-42e0-9e0f-4104546bddae",
+    });
+    expect(accepted.size).toBe(1);
+  });
 });

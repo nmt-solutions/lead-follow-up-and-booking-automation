@@ -137,6 +137,7 @@ export const noticeViewSchema = z.object({
 });
 export type NoticeView = z.infer<typeof noticeViewSchema>;
 export const notificationWorkspaceSchema = z.object({
+  bootstrapAuthOnly: z.boolean(),
   allowedPreferences: z.array(z.enum(["operations", "subscription"])),
   deployment: z.object({
     account: z.boolean(),

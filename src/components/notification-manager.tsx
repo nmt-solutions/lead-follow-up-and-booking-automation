@@ -260,9 +260,10 @@ function Preferences({
       </h2>
       <p className="text-sm text-muted-foreground">
         Choose notices for your current verified account. Operations use the
-        current assigned responsibility; subscription notices require billing
-        authority. Operator notices also require their source capability.
-        Changes retain their original history.
+        current assigned responsibility; Business managers also receive
+        sender-health incidents. Subscription notices require billing authority.
+        Operator notices cover only sources allowed by their current operations
+        or sender-health capability. Changes retain their original history.
       </p>
       {(["operations", "subscription"] as const).map((p) => {
         const v = values.find((v) => v.purpose === p);
@@ -504,6 +505,12 @@ export function NotificationManager({
       </section>
       <section className="rounded-2xl border border-border bg-card p-5 sm:p-8">
         <h2 className="text-xl font-semibold">Selected sending terms</h2>
+        {state.bootstrapAuthOnly && (
+          <p className="mt-3 text-sm" role="status">
+            Auth-only bootstrap is active. Save reviewed sending terms from this
+            MFA session to enable invitations and platform notifications.
+          </p>
+        )}
         {state.terms && (
           <p className="mt-3 text-sm">
             Current selection:{" "}
