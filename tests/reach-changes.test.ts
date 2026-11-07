@@ -961,11 +961,20 @@ describe("Approved reach changes at the public application seam", () => {
     expect(
       financial.periods.find((p) => p.paymentId === "pay_delta")?.snapshot
         .provider.review,
-    ).toEqual(f.gateway.review);
-    expect(
-      financial.periods.find((p) => p.paymentId === "pay_delta")?.snapshot
-        .provider.review?.terms.activation,
-    ).toBe("private merchant activation marker");
+    ).toBeUndefined();
+    expect(JSON.stringify(financial)).not.toContain(
+      "private merchant activation marker",
+    );
+    const retained = (
+      await h.admin.query(
+        "SELECT snapshot->'provider'->'review' review FROM subscription_period WHERE business_id=$1 AND payment_id='pay_delta'",
+        [f.business.id],
+      )
+    ).rows[0].review;
+    expect(retained).toEqual(f.gateway.review);
+    expect(retained.terms.activation).toBe(
+      "private merchant activation marker",
+    );
     expect(f.effects).toHaveLength(1);
   });
   it("freezes the exact approved calendar proration, tax and effective scope without granting reach", async () => {
