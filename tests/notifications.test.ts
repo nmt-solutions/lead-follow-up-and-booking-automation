@@ -437,6 +437,63 @@ describe("Transactional notifications at the public application seam", () => {
     ).rejects.toMatchObject({ code: "INVITATION_UNAVAILABLE" });
   });
 
+  it("holds an uncertain invitation under its original account when deployment credentials are rebound", async () => {
+    const { headers, notifications } = await prepared(
+      "notification-account-binding@example.com",
+    );
+    const business = await h.application.createBusiness(headers, {
+      name: "Account-bound Business",
+      offering: "Steel",
+      homeMarket: "",
+      website: "",
+    });
+    const team = (mailer: typeof notifications.invitationMailer) =>
+      createTeamApplication({
+        authenticate: h.authenticate,
+        authenticatePlatform: h.access.authenticatePlatform,
+        repository: createTeamRepository(runtimeDatabase(h.runtime)),
+        clock: h.clock,
+        tokens: invitationTokens("notification-account-binding-secret"),
+        mailer,
+        origin: config.origin,
+      });
+    loseResponse = true;
+    const invitation = await team(notifications.invitationMailer).invite(
+      headers,
+      business.id,
+      { email: "account-bound-invitation@example.com", role: "salesperson" },
+    );
+    expect(invitation.delivery).toBe("unconfirmed");
+    const replacement = app({
+      configuration: {
+        ...config,
+        account: `replacement-${randomUUID()}`,
+        apiKey: "replacement-account-send-key",
+      },
+    });
+    await replacement.selectTerms(headers, {
+      kind: "free",
+      reference: "Explicit replacement-account terms",
+      monthlyLimit: 3000,
+      dailyLimit: 100,
+      amount: null,
+    });
+    await replacement.refreshSetup(headers);
+    loseResponse = false;
+    await team(replacement.invitationMailer).deliverInvitation(
+      headers,
+      business.id,
+      { invitationId: invitation.id },
+    );
+    expect(wire.filter((r) => r.url.endsWith("/emails"))).toHaveLength(1);
+    expect(
+      (await replacement.businessWorkspace(headers, business.id)).notices,
+    ).toEqual([]);
+    expect(
+      (await notifications.businessWorkspace(headers, business.id)).notices[0],
+    ).toMatchObject({ state: "uncertain", providerId: null });
+  });
+
   it("persists exact raw signed native statuses once and keeps complaints across delayed and out-of-order receipts", async () => {
     const { headers, notifications } = await prepared(
       "notification-status-reviewer@example.com",
