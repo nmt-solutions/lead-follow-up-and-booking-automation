@@ -142,6 +142,9 @@ import { createBillingRepository } from "../db/billing-repository";
 import { createBillingHttp } from "../http/billing";
 import { createTaxApplication } from "../application/tax";
 import { createTaxPeriodApplication } from "../application/tax-periods";
+import { createTaxFilingApplication } from "../application/tax-filings";
+import { createTaxFilingRepository } from "../db/tax-filing-repository";
+import { createTaxFilingHttp } from "../http/tax-filings";
 import { createTaxPeriodRepository } from "../db/tax-period-repository";
 import { createTaxPeriodHttp } from "../http/tax-periods";
 import { createTaxRepository } from "../db/tax-repository";
@@ -371,6 +374,14 @@ async function composeServices() {
   const taxPeriods = createTaxPeriodApplication({
     authenticatePlatform,
     repository: createTaxPeriodRepository(runtimeDatabase(pool)),
+    clock: { now: () => new Date() },
+  });
+  const taxFilings = createTaxFilingApplication({
+    authenticatePlatform: access.authenticatePlatformForWork,
+    repository: createTaxFilingRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    periods: taxPeriods,
     clock: { now: () => new Date() },
   });
   const subscriptionQuotes = createSubscriptionQuoteApplication({
@@ -857,6 +868,12 @@ async function composeServices() {
     billing,
     tax,
     taxPeriods,
+    taxFilings,
+    taxFilingsHttp: createTaxFilingHttp({
+      application: taxFilings,
+      origin: environment.BETTER_AUTH_URL,
+      reportFailure,
+    }),
     taxPeriodsHttp: createTaxPeriodHttp({
       application: taxPeriods,
       notifications,

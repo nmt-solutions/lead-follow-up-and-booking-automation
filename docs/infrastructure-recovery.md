@@ -56,6 +56,17 @@ Both snapshot cutoff and observed request-to-verification time are shown; they a
 
 ## Cost reconciliation
 
+Full encrypted database archives include the ten private global tax filing
+ledgers, original filing bytes and hashes, exact frozen reports/procedures,
+approvals, amendments, confirmations, payment allocations and reviews, replay
+identities and expired access tombstones. These records do not enter the fixed
+selected-Business inspection projection. Restoring an old tax grant does not
+establish current source tax authority, renew an expired file grant or authorize
+another filing/payment. Native restore and reviewed full-schema repair fixtures
+exercise populated histories and original bytes under those separate boundaries.
+The managed source bundle freezes the corresponding application/model and
+canonical digest modules as well as the database definitions.
+
 Selected commitments, backup/storage/recovery usage, observed requests and billed charges have stable evidence identities and original currencies. Explicit actual/estimated/unpriced classifications remain distinct. Missing prices stay unpriced. Reconcile selected evidence through the existing #54 cost application; independent current `costs.manage` authority is required in addition to recovery authority. Exact replay does not append another cost. A shared commitment uses its shared identity rather than being repeated per recovery or Business; customer-paid Meta charges are excluded.
 
 ## Local proof and manual acceptance

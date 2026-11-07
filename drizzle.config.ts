@@ -1,4 +1,4 @@
-import { defineConfig } from "drizzle-kit";
+﻿import { defineConfig } from "drizzle-kit";
 import { databaseAdminUrl } from "./scripts/database-environment";
 
 export default defineConfig({
@@ -9,6 +9,16 @@ export default defineConfig({
   tablesFilter: [
     "discovery_capacity_policy",
     "discovery_capacity_binding",
+    "tax_filing_export",
+    "tax_filing_policy",
+    "tax_filing_policy_decision",
+    "tax_filing_intent",
+    "tax_filing_event",
+    "tax_filing_evidence",
+    "tax_filing_bytes",
+    "tax_filing_access",
+    "tax_remittance_allocation",
+    "tax_remittance_review",
     "infrastructure_recovery",
     "infrastructure_recovery_event",
     "reconciliation_evidence",

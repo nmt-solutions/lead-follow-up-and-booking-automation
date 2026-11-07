@@ -74,6 +74,7 @@ export async function prepareTaxPeriodSecurity(pool: Pool | PoolClient) {
       SELECT * INTO r FROM public.tax_period_reminder WHERE id=reminder_ref;
       IF NOT FOUND THEN RETURN false; END IF;
       SELECT * INTO p FROM public.tax_reporting_period WHERE id=r.period_id;
+      IF (public.tax_filing_fulfillment(p.id)->>'fulfilled')::boolean THEN RETURN false; END IF;
       IF EXISTS(SELECT 1 FROM public.tax_reporting_period newer WHERE newer.supersedes_id=p.id) THEN RETURN false; END IF;
       SELECT * INTO o FROM public.tax_obligation_revision WHERE key=p.definition->>'obligationKey' ORDER BY version DESC LIMIT 1;
       SELECT * INTO d FROM public.tax_obligation_decision WHERE revision_id=o.id ORDER BY version DESC LIMIT 1;
@@ -103,11 +104,12 @@ export async function prepareTaxPeriodSecurity(pool: Pool | PoolClient) {
         SELECT * INTO report FROM public.tax_liability_report WHERE period_id=p.id ORDER BY revision DESC LIMIT 1;
         SELECT * INTO action FROM public.tax_report_action WHERE report_id=report.id ORDER BY version DESC LIMIT 1;
         v:=coalesce(action.version,0);
-        IF action.kind='approve' THEN CONTINUE; END IF;
+        IF action.kind='approve' AND NOT EXISTS(SELECT 1 FROM public.tax_filing_policy c WHERE c.obligation_id=o.id) THEN CONTINUE; END IF;
+        IF (public.tax_filing_fulfillment(p.id)->>'fulfilled')::boolean THEN CONTINUE; END IF;
         FOR configured_stage IN SELECT value FROM jsonb_array_elements(p.definition->'reminders') LOOP
           IF (configured_stage->>'at')::timestamptz>least(at_time,statement_timestamp()) THEN CONTINUE; END IF;
           INSERT INTO public.tax_period_reminder(id,period_id,stage,stage_at,source)
-            VALUES(gen_random_uuid(),p.id,configured_stage->>'key',(configured_stage->>'at')::timestamptz,jsonb_build_object('obligationId',o.id,'decisionId',d.id,'reportId',report.id,'reportDigest',report.digest,'actionVersion',v,'status',CASE WHEN report.id IS NULL THEN 'not_prepared' WHEN v=0 THEN 'prepared' WHEN action.kind='invalidated' THEN 'review_required' ELSE 'in_review' END)) ON CONFLICT(period_id,stage) DO NOTHING;
+            VALUES(gen_random_uuid(),p.id,configured_stage->>'key',(configured_stage->>'at')::timestamptz,jsonb_build_object('obligationId',o.id,'decisionId',d.id,'reportId',report.id,'reportDigest',report.digest,'actionVersion',v,'status',CASE WHEN report.id IS NULL THEN 'not_prepared' WHEN v=0 THEN 'prepared' WHEN action.kind='invalidated' THEN 'review_required' WHEN action.kind='approve' THEN 'filing_or_remittance_due' ELSE 'in_review' END)) ON CONFLICT(period_id,stage) DO NOTHING;
           IF FOUND THEN count:=count+1; END IF;
         END LOOP;
       END LOOP;
