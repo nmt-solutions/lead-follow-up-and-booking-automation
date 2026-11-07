@@ -63,7 +63,7 @@ export function createNativePilotOrders(d: {
       review.upiPath ||
       !review.methods.card ||
       review.methods.upi ||
-      review.methods.eMandate ||
+      review.methods.emandate ||
       review.account !== d.review.account ||
       review.mode !== d.review.mode
     )
