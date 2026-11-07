@@ -1,4 +1,8 @@
 import { routeOpportunityMail } from "../email-sequences/opportunity-provider";
+import { createOperationsApplication } from "../application/operations";
+import { createOperationsRepository } from "../db/operations-repository";
+import { createOperationsHttp } from "../http/operations";
+import { configuredOperationLogs } from "../operations/configuration";
 import { createCostApplication } from "../application/costs";
 import { createCostRepository } from "../db/cost-repository";
 import { createCostHttp } from "../http/costs";
@@ -567,7 +571,30 @@ async function composeServices() {
     ...whatsappComposition,
     configuration: configuredMetaWebhook(process.env),
   });
+  const operations = createOperationsApplication({
+    authenticate: access.authenticateForWork,
+    repository: createOperationsRepository(runtimeDatabase(pool), {
+      now: () => new Date(),
+    }),
+    commands: {
+      mailbox: mailboxes,
+      discovery,
+      appointments,
+      inquiries,
+      whatsapp: whatsappSending,
+      sequences: emailSequences,
+      payments: subscriptionPayments,
+      documents: sellerDocuments,
+    },
+    logs: configuredOperationLogs(process.env),
+  });
   return {
+    operations,
+    operationsHttp: createOperationsHttp({
+      application: operations,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
     whatsappSending,
     whatsappSendingHttp: createWhatsAppSendingHttp({
       application: whatsappSending,

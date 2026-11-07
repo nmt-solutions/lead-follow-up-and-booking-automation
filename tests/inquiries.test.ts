@@ -1,4 +1,6 @@
 import { persistPaidSubscription } from "./support/paid-subscription";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { readOperatorCosts } from "./support/costs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -583,6 +585,46 @@ describe("Inquiry handling at the persisted application seam", () => {
       nextAction: "Answer and collect missing requirements",
     });
   }
+  it("retains a successful inquiry reason in history without creating a failure alert", async () => {
+    const f = await fixture("operations-success");
+    await handback(f);
+    const result = await f.app.process(
+      f.credentials,
+      f.business.id,
+      f.need.id,
+      { messageId: f.first.id },
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      reason: "grounded_response",
+    });
+    const operations = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { inquiries: f.restart() },
+    });
+    const state = await operations.workspace(f.credentials, f.business.id);
+    expect(
+      state.resources.find((r) => r.source === "inquiry" && r.id === result.id),
+    ).toMatchObject({
+      status: "ready",
+      reason: "grounded_response",
+    });
+    expect(
+      state.history.some(
+        (e) => e.targetId === result.id && e.reason === "grounded_response",
+      ),
+    ).toBe(true);
+    expect(
+      state.notifications.filter(
+        (n) => n.source === "inquiry" && n.targetId === result.id,
+      ),
+    ).toEqual([]);
+    expect(f.effects).toEqual([]);
+  });
   it("routes an absent shared profile to an accountable setup handoff without inventing a model configuration", async () => {
     const f = await fixture("no-profile", "rfq", false);
     await handback(f);
@@ -1214,6 +1256,24 @@ describe("Inquiry handling at the persisted application seam", () => {
       (await f.app.dispatch(f.credentials, f.business.id, f.need.id, result.id))
         .action?.state,
     ).toBe("committed");
+    const monitoring = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { inquiries: f.restart() },
+    });
+    const committed = (
+      await f.restart().read(f.credentials, f.business.id, f.need.id)
+    ).runs.find((r) => r.id === result.id);
+    expect(
+      (
+        await monitoring.workspace(f.credentials, f.business.id)
+      ).notifications.some(
+        (n) => n.targetId === committed?.action?.id && !n.resolved,
+      ),
+    ).toBe(true);
     await h.reapplySchema();
     expect(
       (
@@ -2046,6 +2106,46 @@ describe("Inquiry handling at the persisted application seam", () => {
         state: "committed",
         email: { result: { status: "unknown" }, sent: null },
       });
+      const operations = createOperationsApplication({
+        authenticate: h.access.authenticateForWork,
+        repository: createOperationsRepository(
+          runtimeDatabase(h.runtime),
+          h.clock,
+        ),
+        commands: { inquiries: f.restart() },
+      });
+      const actionId = result.action!.id;
+      const projection = (
+        await operations.workspace(f.credentials, f.business.id)
+      ).resources.find((r) => r.id === actionId);
+      expect(projection).toMatchObject({
+        source: "action",
+        status: "committed",
+        context: {
+          inquiryRunId: ready.id,
+          acceptance: "unknown",
+          sentObserved: false,
+        },
+      });
+      expect(JSON.stringify(projection)).not.toMatch(
+        /recipient|parent|body|internetMessageId/,
+      );
+      await expect(
+        operations.recover(f.credentials, f.business.id, {
+          source: "action",
+          targetId: actionId,
+          action: "retry",
+          requestKey: crypto.randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(
+        await operations.recover(f.credentials, f.business.id, {
+          source: "action",
+          targetId: actionId,
+          action: "reconcile",
+          requestKey: crypto.randomUUID(),
+        }),
+      ).toEqual({ outcome: "checked" });
       await f
         .restart()
         .dispatch(f.credentials, f.business.id, f.need.id, ready.id);

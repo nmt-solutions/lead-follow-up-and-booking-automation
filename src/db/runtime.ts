@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool, PoolClient } from "pg";
 import { ApplicationError } from "../models/application-error";
 import * as schema from "./schema";
+import { operationSourceTables } from "./operations-security";
 
 export function runtimeDatabase(pool: Pool) {
   return drizzle(pool, { schema });
@@ -14,6 +15,15 @@ export async function verifyRuntimeRole(
 ): Promise<void> {
   const result = await pool.query<{ safe: boolean }>(`
     SELECT NOT (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb)
+      AND (SELECT count(*)=2 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('operation_event','operation_retention'))
+      AND (SELECT count(*)=1 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND NOT has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='operation_detail')
+      AND NOT has_column_privilege(current_user,'public.platform_operator','operations','UPDATE')
+      AND has_sequence_privilege(current_user,'public.operation_event_position_seq','USAGE')
+      AND (SELECT count(*)=5 AND bool_and(p.prosecdef AND p.proconfig=ARRAY['search_path=""'] AND NOT pg_has_role(current_user,p.proowner,'MEMBER') AND has_function_privilege(current_user,p.oid,'EXECUTE') AND NOT EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('operations_operator_authorized','operation_mailbox_work','record_operation_detail','prune_operation_details','maintain_operation_retention'))
+      AND NOT has_function_privilege(current_user,'public.capture_operation()','EXECUTE')
+      AND NOT has_function_privilege(current_user,'public.operation_snapshot(text,jsonb)','EXECUTE')
+      AND (SELECT count(*)=${operationSourceTables.length} AND bool_and(t.tgenabled='O' AND p.prosecdef AND p.proconfig=ARRAY['search_path=""']) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_proc p ON p.oid=t.tgfoid WHERE n.nspname='public' AND t.tgname='capture_operation' AND p.proname='capture_operation' AND c.relname IN (${operationSourceTables.map((table) => `'${table}'`).join(",")}))
+      AND (SELECT count(*)=8 AND bool_and(CASE WHEN policyname LIKE '%_read' OR policyname='operation_retention_system' THEN qual IS NOT NULL WHEN policyname LIKE '%_insert' THEN with_check IS NOT NULL ELSE qual IS NOT NULL AND with_check IS NOT NULL END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('operation_event','operation_retention','operation_detail'))
       AND (SELECT count(*)=6 AND bool_and(c.relrowsecurity AND c.relforcerowsecurity AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AND has_table_privilege(current_user,c.oid,'SELECT') AND has_table_privilege(current_user,c.oid,'INSERT') AND NOT has_table_privilege(current_user,c.oid,'UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,c.oid,'UPDATE')) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('operator_cost_record','operator_cost_planning','operator_cost_scan','operator_cost_budget','operator_cost_alert','operator_cost_notification_event'))
       AND (SELECT count(*)=12 AND bool_and('app_runtime'=ANY(roles) AND CASE WHEN policyname LIKE '%_read' THEN qual IS NOT NULL ELSE with_check IS NOT NULL END) FROM pg_policies WHERE schemaname='public' AND tablename IN ('operator_cost_record','operator_cost_planning','operator_cost_scan','operator_cost_budget','operator_cost_alert','operator_cost_notification_event'))
       AND NOT has_column_privilege(current_user,'public.platform_operator','costs','UPDATE')

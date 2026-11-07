@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { secureOperations, prepareOperations } from "./operations-security";
 import { preparePaymentSecurity } from "./payment-security";
 import { prepareSellerDocumentSecurity } from "./seller-document-security";
 import { prepareCostSecurity } from "./cost-security";
@@ -54,6 +55,9 @@ import {
   invitation,
   teamAudit,
   platformOperator,
+  operationEvent,
+  operationRetention,
+  operationDetail,
   costRecord,
   costPlanningRevision,
   costScan,
@@ -210,6 +214,7 @@ export async function prepareDatabaseRole(pool: Pool) {
   await prepareFileCleanup(pool);
   await preparePaymentSecurity(pool);
   await prepareSellerDocumentSecurity(pool);
+  await prepareOperations(pool);
   await prepareCostSecurity(pool);
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
@@ -808,6 +813,9 @@ export async function secureDatabase(pool: Pool) {
       invitation,
       teamAudit,
       platformOperator,
+      operationEvent,
+      operationRetention,
+      operationDetail,
       costRecord,
       costPlanningRevision,
       costScan,
@@ -1302,6 +1310,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL ON FUNCTION public.pending_meta_outbound() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
     `);
+    await secureOperations(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client);
     await client.query("COMMIT");

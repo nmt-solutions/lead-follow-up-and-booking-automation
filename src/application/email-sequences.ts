@@ -167,9 +167,14 @@ export function createEmailSequenceApplication<Credentials>(d: {
         reason,
       );
     },
-    async recoverDue() {
+    async recoverDue(target?: { businessId: string; runId: string }) {
       if (!d.queue || d.provider.mode === "unconfigured") return { queued: 0 };
-      const work = await d.repository.recoveryWork();
+      const work = (await d.repository.recoveryWork()).filter(
+        (item) =>
+          !target ||
+          (item.businessId === target.businessId &&
+            item.runId === target.runId),
+      );
       let queued = 0;
       for (const item of work) {
         try {

@@ -1,4 +1,6 @@
 import { microsoftFixture } from "./support/microsoft-calendar";
+import { createOperationsApplication } from "../src/application/operations";
+import { createOperationsRepository } from "../src/db/operations-repository";
 import { createMicrosoftCalendarApplication } from "../src/application/microsoft-calendar";
 import { createMicrosoftCalendarRepository } from "../src/db/microsoft-calendar-repository";
 import {
@@ -1054,6 +1056,32 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
       event: null,
     });
     expect(JSON.stringify(state)).not.toContain("private-token");
+    const operations = createOperationsApplication({
+      authenticate: h.access.authenticateForWork,
+      repository: createOperationsRepository(
+        runtimeDatabase(h.runtime),
+        h.clock,
+      ),
+      commands: { appointments: f.application },
+    });
+    expect(
+      (await operations.workspace(f.credentials, f.business.id)).resources.find(
+        (r) => r.id === p.id,
+      ),
+    ).toMatchObject({
+      source: "appointment",
+      status: "ambiguous",
+      opportunityId: f.opportunity.id,
+      context: { policyId: expect.any(String) },
+    });
+    await expect(
+      operations.recover(f.credentials, f.business.id, {
+        source: "appointment",
+        targetId: p.id,
+        action: "retry",
+        requestKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     h.clock.set("2026-11-05T09:03:00Z");
     await h.reverifyAuthenticator(f.credentials);
     expect(
@@ -1062,12 +1090,13 @@ describe("Appointments through the application seam and real PostgreSQL", () => 
     await f.application.book(f.credentials, f.business.id, f.opportunity.id, {
       appointmentId: p.id,
     });
-    state = await f.application.reconcile(
-      f.credentials,
-      f.business.id,
-      f.opportunity.id,
-      { appointmentId: p.id },
-    );
+    await operations.recover(f.credentials, f.business.id, {
+      source: "appointment",
+      targetId: p.id,
+      action: "reconcile",
+      requestKey: randomUUID(),
+    });
+    state = await f.read();
     expect(state.appointments[0]).toMatchObject({
       status: "confirmed",
       phase: "booked",
