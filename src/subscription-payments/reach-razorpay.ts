@@ -622,6 +622,9 @@ export function createRazorpayReachGateway(d: {
       if (!body || !isDeepStrictEqual(body, intent(change, stage)))
         throw new ReachEffectNotAttempted();
       if (stage === "update") {
+        // An earlier or concurrent native update may win during preflight reads.
+        // Reconcile its independent capture instead of mutating the same target again.
+        if (sub.plan_id === mapping(change).planId) return inspect(change);
         await d.request(`subscriptions/${sub.id}`, body, "PATCH");
         return inspect(change);
       }

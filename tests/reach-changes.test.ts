@@ -1381,6 +1381,37 @@ describe("Approved reach changes at the public application seam", () => {
     });
     expect(f.effects).toHaveLength(1);
   });
+  it("reconciles an already changed native target and its exact paid delta during preflight without another PATCH", async () => {
+    const f = await setup();
+    const c = await f.changes.preview(f.owner, f.business.id, {
+      periodId: f.original.id,
+      quoteId: f.target.id,
+      requestKey: randomUUID(),
+    });
+    await f.changes.approve(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+      accept: true,
+      reviewHash: c.reviewHash,
+    });
+    f.conditions.beforeEffect = async () => {
+      Object.assign(f.native.subscriptions.get("sub_fixture1")!, {
+        plan_id: "plan_expandedUSD",
+      });
+      f.captureDelta();
+    };
+    const result = await f.changes.execute(f.owner, f.business.id, {
+      changeId: c.id,
+      requestKey: randomUUID(),
+    });
+    expect(result.state).toBe("applied");
+    expect(f.effects).toHaveLength(0);
+    const paid = await f.payments.workspace(f.owner, f.business.id);
+    expect(
+      paid.periods.filter((p) => p.paymentId === "pay_delta"),
+    ).toHaveLength(1);
+    expect(paid.allowances?.discovery.included).toBe(150);
+  });
   it("rechecks the effective native account review immediately before mutation after external reads", async () => {
     const f = await setup();
     Object.assign(f.gateway.review!, {
