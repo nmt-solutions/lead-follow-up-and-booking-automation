@@ -25,6 +25,7 @@ import { prepareDatabaseRole } from "../../src/db/setup";
 import { createRecoveryApplication } from "../../src/application/infrastructure-recovery";
 import { createRecoveryRepository } from "../../src/db/recovery-repository";
 import { runtimeDatabase } from "../../src/db/runtime";
+import { readRecoveryObject } from "../../src/recovery/files";
 
 export const pgTool = (name: string) =>
   process.env.RECOVERY_TEST_PG_BIN
@@ -118,6 +119,7 @@ export async function recoveryFixture(
       },
       limits: {
         backupBytes: 100000000,
+        restoreSqlBytes: 100000000,
         fileBytes: 1000000,
         totalFileBytes: 10000000,
       },
@@ -164,6 +166,7 @@ export async function recoveryFixture(
       schemaRunner: null as null | (() => Promise<void>),
       failAfterRestore: false,
       restoreCalls: 0,
+      pgRestore: pgTool("pg_restore"),
       evidence: {
         complete: false,
         observedAt: archive.manifest.cutoff,
@@ -176,6 +179,9 @@ export async function recoveryFixture(
       ),
       targetFiles: new Map<string, Buffer>(),
       async onObserve() {},
+      async onRestoreStarted() {},
+      async onRestored() {},
+      async beforeFileRead() {},
       reconcile: null as
         null | ((plan: RecoveryPlan) => Promise<RecoveryControlEvidence>),
     };
@@ -186,16 +192,25 @@ export async function recoveryFixture(
         sourceIdentity: source,
         targetIdentity: destination,
         targetSeal: seal,
-        pgRestore: pgTool("pg_restore"),
+        pgRestore: controls.pgRestore,
+        psql: pgTool("psql"),
         key,
-        restoreArchive: async (path) => {
+        restoreArchive: async (path, authorize, guard) => {
           controls.restoreCalls++;
+          await controls.onRestoreStarted();
           await restoreRecoveryArchive(
             pgTool("pg_restore"),
             path,
             "postgres",
             nativeTarget.environment,
+            {
+              psql: pgTool("psql"),
+              restoreSqlBytes: plan.limits.restoreSqlBytes,
+              authorize,
+              guard,
+            },
           );
+          await controls.onRestored();
           if (controls.failAfterRestore) {
             controls.failAfterRestore = false;
             throw Error("lost native restore acknowledgement");
@@ -220,7 +235,11 @@ export async function recoveryFixture(
           };
         },
         files: {
-          readRetained: async (id) => controls.files.get(id) ?? null,
+          readRetained: (id) =>
+            readRecoveryObject(async () => {
+              await controls.beforeFileRead();
+              return controls.files.get(id) ?? null;
+            }),
           writeTarget: async (id, bytes) => {
             controls.targetFiles.set(id, Buffer.from(bytes));
           },

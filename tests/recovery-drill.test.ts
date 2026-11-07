@@ -156,12 +156,17 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
     await r?.close();
   });
   it("restores exact prospects, evidence, conversations, original cash/tax/credit artifacts and pending work; a post-cutoff native acceptance never repeats", async () => {
+    h.clock.set(new Date(Date.parse(r.plan.cutoff) + 1000).toISOString());
     const operator = await h.signIn("export-documents@example.com");
     f.native.loseRefund = true;
     await f.adjustments.execute(operator, f.business.id, {
       caseId: pending.id,
     });
     expect(f.native.refundPosts).toHaveLength(2);
+    expect(Number(f.native.refunds.at(-1)?.created_at) * 1000).toBeGreaterThan(
+      Date.parse(r.plan.cutoff),
+    );
+    const nativeEffects = structuredClone(f.native.effectRequests);
     f.native.loseRefund = false;
     await f.adjustments.refresh(operator, f.business.id, {
       caseId: pending.id,
@@ -276,6 +281,7 @@ describe("Populated native PostgreSQL infrastructure drill", () => {
       targetFinancial.execute(f.op, f.business.id, { caseId: pending.id }),
     ).rejects.toBeDefined();
     expect(f.native.refundPosts).toHaveLength(2);
+    expect(f.native.effectRequests).toEqual(nativeEffects);
     expect(r.controls.targetFiles.size).toBe(r.plan.files.length - 1);
     if (process.env.RECOVERY_TEST_EVIDENCE_PATH)
       await writeFile(

@@ -11,6 +11,7 @@ import {
   recoveryEvidenceSchema,
   recoveryRequestSchema,
   recoveryStages,
+  RecoveryIncurredError,
   type RecoveryPlan,
   type RecoveryAdapter,
   type RecoveryOperation,
@@ -210,13 +211,24 @@ export function createRecoveryApplication<C>(d: {
       r = await d.repository.get(a, r.businessId, r.id);
       const stage = recoveryStages[recoveryStages.indexOf(r.stage) + 1];
       if (!stage) throw new ApplicationError("CONFLICT");
-      try {
-        const proof = recoveryEvidenceSchema.parse(
-          await d.adapter.advance(plan, r.id, stage, () =>
-            d.repository.authorize(a, r.businessId),
-          ),
+      const attempt = r;
+      const authorizeAttempt = async () => {
+        const approved = recoveryPlanSchema.safeParse(
+          d.plans.find((p) => p.id === attempt.plan.id),
         );
-        await d.repository.authorize(a, r.businessId);
+        if (
+          !approved.success ||
+          !isDeepStrictEqual(approved.data, attempt.plan)
+        )
+          throw new ApplicationError("SETUP_REQUIRED");
+        await d.repository.authorizeAttempt(a, attempt, key);
+      };
+      let proof: RecoveryEvidence | undefined;
+      try {
+        proof = recoveryEvidenceSchema.parse(
+          await d.adapter.advance(plan, r.id, stage, authorizeAttempt),
+        );
+        await authorizeAttempt();
         await d.repository.finish(
           a,
           r.businessId,
@@ -230,15 +242,23 @@ export function createRecoveryApplication<C>(d: {
           },
         );
       } catch (error: unknown) {
-        await d.repository.finish(
-          a,
-          r.businessId,
-          r.id,
-          key,
-          r.stage,
-          "ambiguous",
-          {},
-        );
+        if (error instanceof RecoveryIncurredError || proof) {
+          await d.repository
+            .recordIncurred(a, attempt, key, {
+              ...(error instanceof RecoveryIncurredError
+                ? error.evidence
+                : proof),
+              incurredStage: stage,
+            })
+            .catch(() => {});
+        } else
+          await d.repository
+            .finish(a, r.businessId, r.id, key, r.stage, "ambiguous", {})
+            .catch(() => {});
+        if (error instanceof RecoveryIncurredError) {
+          if (error.cause instanceof ApplicationError) throw error.cause;
+          throw new ApplicationError("PROVIDER_UNAVAILABLE");
+        }
         if (error instanceof ApplicationError) throw error;
         throw new ApplicationError("PROVIDER_UNAVAILABLE");
       }

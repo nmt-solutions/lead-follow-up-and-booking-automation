@@ -82,13 +82,30 @@ export function createRecoveryRepository(database: Database, clock: Clock) {
           stage: recoveryStageSchema.parse(e.stage),
           outcome: recoveryOutcomeSchema.parse(e.outcome),
           at: e.at.toISOString(),
-          evidence: recoveryEvidenceSchema.parse(e.evidence),
+          evidence: recoveryEvidenceSchema.strip().parse(e.evidence),
         })),
     }));
   }
   return {
     authorize: (actor: WorkIdentity, businessId = "") =>
       access(actor, businessId, async () => {}),
+    authorizeAttempt: (
+      actor: WorkIdentity,
+      operation: RecoveryOperation,
+      key: string,
+    ) =>
+      access(actor, operation.businessId, async (tx) => {
+        const result = await tx.execute<{ current: boolean }>(sql`select exists(
+          select 1 from public.infrastructure_recovery r where r.id=${operation.id}::uuid
+          and r.business_id=${operation.businessId}::uuid and r.actor_id=${actor.userId}
+          and r.authorized_session_id=${actor.sessionId} and r.lease=${key}::uuid
+          and r.lease_until>clock_timestamp() and r.stage=${operation.stage}
+          and r.plan=${JSON.stringify(operation.plan)}::jsonb and r.plan_hash=${operation.planHash}
+          and (r.plan->>'retainUntil')::timestamptz>clock_timestamp()
+          and (r.plan->>'observationExpiresAt')::timestamptz>clock_timestamp()
+          and public.recovery_operator_authorized()) as current`);
+        if (!result.rows[0]?.current) throw new ApplicationError("CONFLICT");
+      }),
     list: (actor: WorkIdentity, businessId: string) =>
       access(actor, businessId, (tx) => read(tx, businessId)),
     request(actor: WorkIdentity, plan: RecoveryPlan, requestKey: string) {
@@ -176,6 +193,20 @@ export function createRecoveryRepository(database: Database, clock: Clock) {
       access(actor, businessId, async (tx) => {
         await tx.execute(
           sql`select public.finish_infrastructure_recovery(${id}::uuid,${key}::uuid,${stage},${outcome},${JSON.stringify(evidence)}::jsonb)`,
+        );
+      }),
+    recordIncurred: (
+      actor: WorkIdentity,
+      operation: RecoveryOperation,
+      key: string,
+      evidence: RecoveryEvidence,
+    ) =>
+      scoped(database, actor, operation.businessId, async (tx) => {
+        await tx.execute(
+          sql`select set_config('app.recovery_session',${actor.sessionId},true)`,
+        );
+        await tx.execute(
+          sql`select public.finish_infrastructure_recovery(${operation.id}::uuid,${key}::uuid,${operation.stage},'ambiguous',${JSON.stringify(evidence)}::jsonb)`,
         );
       }),
   };

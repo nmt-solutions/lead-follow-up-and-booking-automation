@@ -21,47 +21,53 @@ export async function secureRecovery(pool: Pool | PoolClient) {
     SELECT EXISTS(SELECT 1 FROM public.platform_operator o JOIN public."user" u ON u.id=o.user_id
       JOIN public.session s ON s.user_id=u.id JOIN public.two_factor f ON f.user_id=u.id
       WHERE o.user_id=current_setting('app.actor_id',true) AND o.recovery AND s.id=current_setting('app.recovery_session',true)
-      AND s.expires_at>statement_timestamp() AND u.two_factor_enabled AND f.verified AND s.mfa_factor_id=f.id
+      AND s.expires_at>clock_timestamp() AND u.two_factor_enabled AND f.verified AND s.mfa_factor_id=f.id
       AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex')
-      AND s.mfa_verified_at<=statement_timestamp() AND s.mfa_verified_at>statement_timestamp()-interval '15 minutes')
+      AND s.mfa_verified_at<=clock_timestamp() AND s.mfa_verified_at>clock_timestamp()-interval '15 minutes')
   $$;
   CREATE OR REPLACE FUNCTION public.claim_infrastructure_recovery(op uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
     DECLARE r public.infrastructure_recovery; k uuid;
     BEGIN
       IF NOT public.recovery_operator_authorized() THEN RAISE EXCEPTION 'forbidden'; END IF;
       SELECT * INTO r FROM public.infrastructure_recovery WHERE id=op FOR UPDATE;
-      IF r.id IS NULL OR r.actor_id<>current_setting('app.actor_id',true) OR r.business_id<>nullif(current_setting('app.business_id',true),'')::uuid
-        OR r.plan->>'retainUntil' IS NULL OR (r.plan->>'retainUntil')::timestamptz<=statement_timestamp()
-        OR (r.plan->>'observationExpiresAt')::timestamptz<=statement_timestamp() THEN RAISE EXCEPTION 'forbidden'; END IF;
-      IF r.stage='inspection_ready' OR r.lease_until>statement_timestamp() THEN RETURN NULL; END IF;
-      k=gen_random_uuid(); UPDATE public.infrastructure_recovery SET lease=k,lease_until=statement_timestamp()+interval '5 minutes' WHERE id=op;
-      INSERT INTO public.infrastructure_recovery_event(id,business_id,operation_id,stage,outcome,evidence) VALUES(gen_random_uuid(),r.business_id,r.id,r.stage,'started',jsonb_build_object('assurance',jsonb_build_object('actorId',current_setting('app.actor_id',true),'verifiedAt',(SELECT s.mfa_verified_at FROM public.session s WHERE s.id=current_setting('app.recovery_session',true))))); RETURN k;
+      IF r.id IS NULL OR NOT public.recovery_operator_authorized() OR r.actor_id<>current_setting('app.actor_id',true) OR r.business_id<>nullif(current_setting('app.business_id',true),'')::uuid
+        OR r.plan->>'retainUntil' IS NULL OR (r.plan->>'retainUntil')::timestamptz<=clock_timestamp()
+        OR (r.plan->>'observationExpiresAt')::timestamptz<=clock_timestamp() THEN RAISE EXCEPTION 'forbidden'; END IF;
+      IF r.stage='inspection_ready' OR r.lease_until>clock_timestamp() THEN RETURN NULL; END IF;
+      k=gen_random_uuid(); UPDATE public.infrastructure_recovery SET lease=k,lease_until=clock_timestamp()+interval '5 minutes',authorized_session_id=current_setting('app.recovery_session',true) WHERE id=op;
+      INSERT INTO public.infrastructure_recovery_event(id,business_id,operation_id,stage,outcome,evidence) VALUES(gen_random_uuid(),r.business_id,r.id,r.stage,'started',jsonb_build_object('attemptHash',encode(sha256(convert_to(k::text,'UTF8')),'hex'),'sessionHash',encode(sha256(convert_to(current_setting('app.recovery_session',true),'UTF8')),'hex'),'assurance',jsonb_build_object('actorId',current_setting('app.actor_id',true),'verifiedAt',(SELECT s.mfa_verified_at FROM public.session s WHERE s.id=current_setting('app.recovery_session',true)),'current',true))); RETURN k;
     END $$;
   CREATE OR REPLACE FUNCTION public.finish_infrastructure_recovery(op uuid,k uuid,next_stage text,result text,proof jsonb) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
-    DECLARE r public.infrastructure_recovery; stages text[]=ARRAY['requested','target_verified','restored','secured','verified','quarantined','reconciled','inspection_ready'];
+    DECLARE r public.infrastructure_recovery; original public.infrastructure_recovery_event; current_authority boolean; late_fact boolean; attempt_hash text; stages text[]=ARRAY['requested','target_verified','restored','secured','verified','quarantined','reconciled','inspection_ready'];
     BEGIN
-      IF NOT public.recovery_operator_authorized() THEN RAISE EXCEPTION 'forbidden'; END IF;
       SELECT * INTO r FROM public.infrastructure_recovery WHERE id=op FOR UPDATE;
-      IF r.id IS NULL OR r.actor_id<>current_setting('app.actor_id',true) OR r.business_id<>nullif(current_setting('app.business_id',true),'')::uuid OR r.lease IS DISTINCT FROM k OR r.lease_until<=statement_timestamp()
+      attempt_hash=encode(sha256(convert_to(k::text,'UTF8')),'hex');
+      SELECT * INTO original FROM public.infrastructure_recovery_event e WHERE e.operation_id=op AND e.outcome='started' AND e.evidence->>'attemptHash'=attempt_hash AND e.evidence->>'sessionHash'=encode(sha256(convert_to(current_setting('app.recovery_session',true),'UTF8')),'hex');
+      current_authority=public.recovery_operator_authorized();
+      late_fact=result='ambiguous' AND proof->>'incurredStage'=stages[array_position(stages,original.stage)+1];
+      IF r.id IS NULL OR original.id IS NULL OR r.actor_id<>current_setting('app.actor_id',true) OR r.business_id<>nullif(current_setting('app.business_id',true),'')::uuid
+        OR (NOT coalesce(late_fact,false) AND (NOT current_authority OR r.lease IS DISTINCT FROM k OR r.lease_until IS NULL OR r.lease_until<=clock_timestamp() OR r.authorized_session_id<>current_setting('app.recovery_session',true) OR (r.plan->>'retainUntil')::timestamptz<=clock_timestamp() OR (r.plan->>'observationExpiresAt')::timestamptz<=clock_timestamp()))
         OR result NOT IN ('completed','failed','ambiguous') OR (result='completed' AND next_stage IS DISTINCT FROM stages[array_position(stages,r.stage)+1])
         OR octet_length(proof::text)>2000000 THEN RAISE EXCEPTION 'forbidden'; END IF;
-      INSERT INTO public.infrastructure_recovery_event(id,business_id,operation_id,stage,outcome,evidence) VALUES(gen_random_uuid(),r.business_id,r.id,CASE WHEN result='completed' THEN next_stage ELSE r.stage END,result,proof||jsonb_build_object('assurance',jsonb_build_object('actorId',current_setting('app.actor_id',true),'verifiedAt',(SELECT s.mfa_verified_at FROM public.session s WHERE s.id=current_setting('app.recovery_session',true)))));
-      UPDATE public.infrastructure_recovery SET stage=CASE WHEN result='completed' THEN next_stage ELSE r.stage END,lease=NULL,lease_until=NULL WHERE id=op;
+      IF EXISTS(SELECT 1 FROM public.infrastructure_recovery_event e WHERE e.operation_id=op AND e.outcome<>'started' AND e.evidence->>'attemptHash'=attempt_hash) THEN RETURN false; END IF;
+      INSERT INTO public.infrastructure_recovery_event(id,business_id,operation_id,stage,outcome,evidence) VALUES(gen_random_uuid(),r.business_id,r.id,CASE WHEN result='completed' THEN next_stage ELSE original.stage END,result,proof||jsonb_build_object('attemptHash',attempt_hash,'assurance',original.evidence->'assurance'||jsonb_build_object('current',coalesce(result='completed' AND current_authority AND r.lease=k AND r.lease_until>clock_timestamp(),false))));
+      UPDATE public.infrastructure_recovery SET stage=CASE WHEN result='completed' THEN next_stage ELSE r.stage END,lease=NULL,lease_until=NULL WHERE id=op AND lease=k;
       RETURN true;
     END $$;
   CREATE OR REPLACE FUNCTION public.delegate_infrastructure_recovery(op uuid) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+    DECLARE r public.infrastructure_recovery;
     BEGIN
-      IF NOT public.recovery_operator_authorized() THEN RAISE EXCEPTION 'forbidden'; END IF;
-      UPDATE public.infrastructure_recovery SET authorized_session_id=current_setting('app.recovery_session',true) WHERE id=op AND actor_id=current_setting('app.actor_id',true) AND business_id=nullif(current_setting('app.business_id',true),'')::uuid;
-      IF NOT FOUND THEN RAISE EXCEPTION 'forbidden'; END IF;
+      SELECT * INTO r FROM public.infrastructure_recovery WHERE id=op FOR UPDATE;
+      IF r.id IS NULL OR NOT public.recovery_operator_authorized() OR r.actor_id<>current_setting('app.actor_id',true) OR r.business_id<>nullif(current_setting('app.business_id',true),'')::uuid OR (r.plan->>'retainUntil')::timestamptz<=clock_timestamp() OR (r.plan->>'observationExpiresAt')::timestamptz<=clock_timestamp() THEN RAISE EXCEPTION 'forbidden'; END IF;
+      UPDATE public.infrastructure_recovery SET authorized_session_id=current_setting('app.recovery_session',true) WHERE id=op;
     END $$;
   CREATE OR REPLACE FUNCTION public.pending_infrastructure_recovery() RETURNS TABLE(id uuid,business_id uuid,actor_id text,session_id text) LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
     SELECT r.id,r.business_id,r.actor_id,r.authorized_session_id FROM public.infrastructure_recovery r
     JOIN public.platform_operator o ON o.user_id=r.actor_id AND o.recovery
     JOIN public.session s ON s.id=r.authorized_session_id AND s.user_id=r.actor_id
     JOIN public."user" u ON u.id=r.actor_id JOIN public.two_factor f ON f.user_id=u.id
-    WHERE r.stage<>'inspection_ready' AND (r.lease_until IS NULL OR r.lease_until<=statement_timestamp()) AND (r.plan->>'retainUntil')::timestamptz>statement_timestamp() AND (r.plan->>'observationExpiresAt')::timestamptz>statement_timestamp()
-    AND s.expires_at>statement_timestamp() AND u.two_factor_enabled AND f.verified AND s.mfa_factor_id=f.id AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND s.mfa_verified_at<=statement_timestamp() AND s.mfa_verified_at>statement_timestamp()-interval '15 minutes'
+    WHERE r.stage<>'inspection_ready' AND (r.lease_until IS NULL OR r.lease_until<=clock_timestamp()) AND (r.plan->>'retainUntil')::timestamptz>clock_timestamp() AND (r.plan->>'observationExpiresAt')::timestamptz>clock_timestamp()
+    AND s.expires_at>clock_timestamp() AND u.two_factor_enabled AND f.verified AND s.mfa_factor_id=f.id AND s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex') AND s.mfa_verified_at<=clock_timestamp() AND s.mfa_verified_at>clock_timestamp()-interval '15 minutes'
     ORDER BY r.at LIMIT 100
   $$;
   REVOKE ALL ON FUNCTION public.delegate_infrastructure_recovery(uuid),public.pending_infrastructure_recovery() FROM PUBLIC;

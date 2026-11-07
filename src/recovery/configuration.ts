@@ -37,6 +37,12 @@ export const recoveryInventorySchema = z.strictObject({
   }),
   isolationEvidence: z.string().min(1).max(150),
   commercialApproval: z.string().min(1).max(150),
+  nativeTools: z.strictObject({
+    postgresMajor: z.number().int().min(14).max(99),
+    pgDumpHash: z.string().regex(/^[a-f0-9]{64}$/),
+    pgRestoreHash: z.string().regex(/^[a-f0-9]{64}$/),
+    psqlHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
 });
 export type RecoveryInventory = z.infer<typeof recoveryInventorySchema>;
 export const recoveryConfigurationHash = (plan: RecoveryPlan) =>

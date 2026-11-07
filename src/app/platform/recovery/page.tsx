@@ -9,14 +9,14 @@ export default async function RecoveryPage() {
   const { state, canReconcileCosts } = await (async () => {
     try {
       const services = await getServices(),
-        credentials = await headers(),
-        state = await services.recovery.workspace(credentials);
+        credentials = await headers();
       const canReconcileCosts = await services.team
         .requirePlatformCapability(credentials, "costs.manage")
         .then(
           () => true,
           () => false,
         );
+      const state = await services.recovery.workspace(credentials);
       return { state, canReconcileCosts };
     } catch (error: unknown) {
       return pageFailure(error);

@@ -53,17 +53,23 @@ export function createRecoveryArchiveStorage(d: {
       );
     },
     async get(id: string) {
+      const abort = AbortSignal.timeout(30000);
       const result = await client.send(
         new GetObjectCommand({ Bucket: d.bucket, Key: key(id) }),
-        { abortSignal: AbortSignal.timeout(30000) },
+        { abortSignal: abort },
       );
       if (!result.Body || result.ContentType !== "application/json")
         throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
       const reader = result.Body.transformToWebStream().getReader(),
         chunks: Uint8Array[] = [];
+      const cancel = () => {
+        void reader.cancel().catch(() => {});
+      };
+      abort.addEventListener("abort", cancel, { once: true });
       let size = 0;
       try {
         for (;;) {
+          abort.throwIfAborted();
           const chunk = await reader.read();
           if (chunk.done) break;
           size += chunk.value.length;
@@ -71,7 +77,9 @@ export function createRecoveryArchiveStorage(d: {
             throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
           chunks.push(chunk.value);
         }
+        abort.throwIfAborted();
       } finally {
+        abort.removeEventListener("abort", cancel);
         await reader.cancel().catch(() => {});
         reader.releaseLock();
       }

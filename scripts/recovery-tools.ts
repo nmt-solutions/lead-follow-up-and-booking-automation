@@ -8,6 +8,7 @@ import {
   captureRecoveryArchive,
   archiveHash,
   provisionRecoveryTarget,
+  verifyRecoveryTool,
 } from "../src/recovery/postgres";
 import {
   writeRecoveryArchive,
@@ -56,10 +57,20 @@ try {
         ? recoveryDatabase(
             required("RECOVERY_TARGET_ADMIN_URL"),
             required("RECOVERY_TARGET_RUNTIME_URL"),
+            source,
           )
         : null;
     try {
       if (action === "backup") {
+        if (
+          (await verifyRecoveryTool(
+            required("RECOVERY_PG_DUMP"),
+            "pg_dump",
+            source,
+            inventory.nativeTools.pgDumpHash,
+          )) !== inventory.nativeTools.postgresMajor
+        )
+          throw Error();
         const archive = await captureRecoveryArchive({
           source,
           sourceIdentity: plan.source,
@@ -68,6 +79,7 @@ try {
           id: plan.backupId,
           key: Buffer.from(required("RECOVERY_BACKUP_KEY"), "base64"),
           pgDump: required("RECOVERY_PG_DUMP"),
+          pgDumpHash: inventory.nativeTools.pgDumpHash,
           maxBytes: plan.limits.backupBytes,
         });
         if (archive.ciphertext.length > plan.limits.backupBytes) throw Error();
@@ -115,6 +127,8 @@ try {
         if (
           target.environment.PGHOST !== plan.target.host ||
           source.environment.PGHOST !== plan.source.host ||
+          target.environment.PGDATABASE !== plan.target.database ||
+          source.environment.PGDATABASE !== plan.source.database ||
           plan.source.project === plan.target.project ||
           plan.source.host === plan.target.host
         )

@@ -68,6 +68,12 @@ describe("Configured native recovery contracts", () => {
         evidence: "fixture:private-jurisdiction",
       },
       isolationEvidence: "fixture:separate-auth-webhooks-keys",
+      nativeTools: {
+        postgresMajor: 17,
+        pgDumpHash: "d".repeat(64),
+        pgRestoreHash: "e".repeat(64),
+        psqlHash: "f".repeat(64),
+      },
       commercialApproval: "fixture:actual-terms-required",
     });
     f.plan.inventoryHash = recoveryDigest(JSON.stringify(result));
@@ -229,6 +235,42 @@ describe("Configured native recovery contracts", () => {
         "postgresql://app_runtime:fixture-password@ep-other-pooler.us-east-1.aws.neon.tech/neondb",
       ),
     ).toThrowError("SETUP_REQUIRED");
+  });
+  it("requires independent database passwords for administration, runtime and source/target realms", async () => {
+    expect(() =>
+      recoveryDatabase(
+        "postgresql://owner:shared-secret@ep-isolated.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+        "postgresql://app_runtime:shared-secret@ep-isolated-pooler.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+      ),
+    ).toThrowError("SETUP_REQUIRED");
+    const source = recoveryDatabase(
+      "postgresql://owner:source-admin@ep-source.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+      "postgresql://app_runtime:source-runtime@ep-source-pooler.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+    );
+    try {
+      expect(() =>
+        recoveryDatabase(
+          "postgresql://owner:source-admin@ep-target.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+          "postgresql://app_runtime:target-runtime@ep-target-pooler.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+          source,
+        ),
+      ).toThrowError("SETUP_REQUIRED");
+      expect(() =>
+        recoveryDatabase(
+          "postgresql://owner:target-admin@ep-target.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+          "postgresql://app_runtime:source-runtime@ep-target-pooler.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+          source,
+        ),
+      ).toThrowError("SETUP_REQUIRED");
+      const target = recoveryDatabase(
+        "postgresql://owner:target-admin@ep-target.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+        "postgresql://app_runtime:target-runtime@ep-target-pooler.us-east-1.aws.neon.tech/neondb?sslmode=verify-full",
+        source,
+      );
+      await Promise.all([target.admin.end(), target.runtime.end()]);
+    } finally {
+      await Promise.all([source.admin.end(), source.runtime.end()]);
+    }
   });
   it("refuses to label bytes from a foreign real source as the approved backup provenance", async () => {
     await expect(

@@ -30,6 +30,7 @@ export function financialNativeFixture(clock: Clock) {
     refundPosts: { key: string | null; body: unknown }[] = [],
     disputes = new Map<string, Record<string, unknown>>();
   const documents = new Map<string, Uint8Array>();
+  const effectRequests: { method: string; path: string }[] = [];
   const disputePosts: {
     path: string;
     method: string;
@@ -43,6 +44,7 @@ export function financialNativeFixture(clock: Clock) {
     disputes,
     documents,
     disputePosts,
+    effectRequests,
     loseRefund: false,
     loseDispute: false,
     beforePost: async () => {},
@@ -67,6 +69,8 @@ export function financialNativeFixture(clock: Clock) {
           `Basic ${Buffer.from("rzp_test_fixture:fixture-api-secret").toString("base64")}`
         )
           throw Error("auth");
+        if (method !== "GET" && method !== "HEAD")
+          effectRequests.push({ method, path: url.pathname });
         if (url.pathname.endsWith("/refund") && method === "POST") {
           await fixture.beforePost();
           const body = JSON.parse(String(init?.body)),

@@ -60,6 +60,7 @@ export const recoveryPlanSchema = z
     }),
     limits: z.strictObject({
       backupBytes: z.number().int().positive().safe(),
+      restoreSqlBytes: z.number().int().positive().max(1_000_000_000),
       fileBytes: z.number().int().positive().safe(),
       totalFileBytes: z.number().int().nonnegative().safe(),
     }),
@@ -149,6 +150,7 @@ export const recoveryEvidenceSchema = z.strictObject({
     .strictObject({
       actorId: z.string().min(1).max(150),
       verifiedAt: z.iso.datetime({ offset: true }),
+      current: z.boolean().optional(),
     })
     .optional(),
   facts: z
@@ -197,6 +199,7 @@ export const recoveryEvidenceSchema = z.strictObject({
     )
     .optional(),
   durationMs: z.number().nonnegative().optional(),
+  incurredStage: recoveryStageSchema.optional(),
   physicalTarget: recoveryHash.optional(),
   security: z.literal("restricted-verified").optional(),
   execution: z
@@ -210,6 +213,14 @@ export const recoveryEvidenceSchema = z.strictObject({
     .optional(),
 });
 export type RecoveryEvidence = z.infer<typeof recoveryEvidenceSchema>;
+export class RecoveryIncurredError extends Error {
+  constructor(
+    readonly evidence: RecoveryEvidence,
+    cause: unknown,
+  ) {
+    super("Recovery effect requires reconciliation", { cause });
+  }
+}
 export const recoveryOutcomeSchema = z.enum([
   "started",
   "completed",

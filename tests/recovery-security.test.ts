@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "./support/harness";
-import { recoveryFixture } from "./support/recovery";
+import { recoveryFixture, pgTool } from "./support/recovery";
 import { runtimeDatabase, verifyRuntimeRole } from "../src/db/runtime";
 import { secureDatabase } from "../src/db/setup";
 import { recoveryFunctions, recoveryTables } from "../src/db/recovery-security";
@@ -232,6 +232,255 @@ describe("Recovery authority, replay and database security", () => {
             .inspect(owner, { businessId: business.id, operationId: op.id })
         ).facts,
       ).toEqual(expect.arrayContaining(r.archive.manifest.facts));
+    } finally {
+      await r.close();
+    }
+  });
+  it.each(["expired", "reclaimed", "missing"])(
+    "leaves the disposable target untouched when its %s lease changes during native identity I/O",
+    async (change) => {
+      const { r } = await fixture();
+      try {
+        const op = await r.request();
+        r.controls.onObserve = async () => {
+          if (change === "expired")
+            await h.admin.query(
+              "UPDATE infrastructure_recovery SET lease_until=statement_timestamp()-interval '1 second' WHERE id=$1",
+              [op.id],
+            );
+          else
+            await h.admin.query(
+              "UPDATE infrastructure_recovery SET lease=$2 WHERE id=$1",
+              [op.id, change === "reclaimed" ? randomUUID() : null],
+            );
+        };
+        await expect(r.advance(op.id, 1)).rejects.toBeDefined();
+        expect(
+          (
+            await r.target.admin.query(
+              "SELECT operation_id FROM recovery_quarantine.target WHERE singleton",
+            )
+          ).rows[0].operation_id,
+        ).toBeNull();
+        expect(r.controls.restoreCalls).toBe(0);
+      } finally {
+        await r.close();
+      }
+    },
+  );
+  it("refuses native restore when the lease is reclaimed during the final target identity read", async () => {
+    const { r } = await fixture();
+    try {
+      const op = await r.request();
+      await r.advance(op.id, 1);
+      let reads = 0;
+      r.controls.onObserve = async () => {
+        if (++reads === 2)
+          await h.admin.query(
+            "UPDATE infrastructure_recovery SET lease=gen_random_uuid() WHERE id=$1",
+            [op.id],
+          );
+      };
+      await expect(r.advance(op.id, 1)).rejects.toBeDefined();
+      expect(r.controls.restoreCalls).toBe(0);
+    } finally {
+      await r.close();
+    }
+  });
+  it("retains verified incurred restore facts after session authority is lost without advancing or exposing inspection", async () => {
+    const { owner, business, r } = await fixture();
+    try {
+      const op = await r.request();
+      await r.advance(op.id, 1);
+      const identity = await h.authenticate(owner);
+      r.controls.onRestored = async () => {
+        await h.admin.query(
+          "UPDATE platform_operator SET recovery=false WHERE user_id=$1",
+          [identity.userId],
+        );
+      };
+      await expect(r.advance(op.id, 1)).rejects.toMatchObject({
+        code: "FORBIDDEN",
+      });
+      await expect(
+        r
+          .application()
+          .inspect(owner, { businessId: business.id, operationId: op.id }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await h.admin.query(
+        "UPDATE platform_operator SET recovery=true WHERE user_id=$1",
+        [identity.userId],
+      );
+      const saved = (await r.application().workspace(owner)).operations.find(
+        (row) => row.id === op.id,
+      )!;
+      expect(saved.stage).toBe("target_verified");
+      expect(saved.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            outcome: "ambiguous",
+            evidence: expect.objectContaining({
+              incurredStage: "restored",
+              physicalTarget: expect.stringMatching(/^[a-f0-9]{64}$/),
+            }),
+          }),
+        ]),
+      );
+      r.controls.onRestored = async () => {};
+      await r.advance(op.id, 1);
+      expect(r.controls.restoreCalls).toBe(1);
+    } finally {
+      await r.close();
+    }
+  });
+  it("does not start a second native restore while a previous expired attempt still owns the disposable target", async () => {
+    const { r } = await fixture();
+    const started = Promise.withResolvers<void>(),
+      release = Promise.withResolvers<void>();
+    let first: Promise<unknown> | undefined;
+    try {
+      const op = await r.request();
+      await r.advance(op.id, 1);
+      r.controls.onRestoreStarted = async () => {
+        if (r.controls.restoreCalls === 1) {
+          started.resolve();
+          await release.promise;
+        }
+      };
+      first = r.advance(op.id, 1).catch((error: unknown) => error);
+      await started.promise;
+      await h.admin.query(
+        "UPDATE infrastructure_recovery SET lease_until=statement_timestamp()-interval '1 second' WHERE id=$1",
+        [op.id],
+      );
+      await expect(r.advance(op.id, 1)).rejects.toMatchObject({
+        code: "CONFLICT",
+      });
+      expect(r.controls.restoreCalls).toBe(1);
+    } finally {
+      release.resolve();
+      await first;
+      await r.close();
+    }
+  });
+  it("rejects an unreviewed target index instead of attesting the intended resulting schema", async () => {
+    const { r } = await fixture();
+    try {
+      const op = await r.request();
+      await r.advance(op.id, 3);
+      await r.target.admin.query(
+        "CREATE INDEX unreviewed_recovery_index ON public.business(name)",
+      );
+      await expect(r.advance(op.id, 1)).rejects.toMatchObject({
+        code: "CONFLICT",
+      });
+    } finally {
+      await r.close();
+    }
+  });
+  it("refuses an incompatible configured native tool before binding or restoring the target", async () => {
+    const { r } = await fixture();
+    try {
+      const op = await r.request();
+      r.controls.pgRestore = pgTool("pg_dump");
+      await expect(r.advance(op.id, 1)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+      expect(
+        (
+          await r.target.admin.query(
+            "SELECT operation_id FROM recovery_quarantine.target WHERE singleton",
+          )
+        ).rows[0].operation_id,
+      ).toBeNull();
+      expect(r.controls.restoreCalls).toBe(0);
+    } finally {
+      await r.close();
+    }
+  });
+  it("keeps unavailable storage unresolved instead of recording a missing retained file", async () => {
+    const { owner, r } = await fixture();
+    try {
+      const op = await r.request();
+      await r.advance(op.id, 4);
+      r.controls.beforeFileRead = async () => {
+        throw Error("fixture storage connection unavailable");
+      };
+      await expect(r.advance(op.id, 1)).rejects.toMatchObject({
+        code: "PROVIDER_UNAVAILABLE",
+      });
+      expect(
+        (await r.application().workspace(owner)).operations.find(
+          (row) => row.id === op.id,
+        )?.stage,
+      ).toBe("verified");
+      expect(r.controls.targetFiles.size).toBe(0);
+    } finally {
+      await r.close();
+    }
+  });
+  it("refuses another restore while a surviving native backend still owns the target transaction guard", async () => {
+    const { r } = await fixture();
+    const backend = await r.target.admin.connect();
+    try {
+      const op = await r.request();
+      await r.advance(op.id, 1);
+      await backend.query("BEGIN");
+      await backend.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('infrastructure-recovery-native',0))",
+      );
+      await expect(r.advance(op.id, 1)).rejects.toMatchObject({
+        code: "CONFLICT",
+      });
+      expect(r.controls.restoreCalls).toBe(0);
+    } finally {
+      await backend.query("ROLLBACK");
+      backend.release();
+      await r.close();
+    }
+  });
+  it("refuses an insufficient reviewed restore size before executing target SQL", async () => {
+    const { r } = await fixture();
+    try {
+      r.plan.limits.restoreSqlBytes = 1;
+      const op = await r.request();
+      await r.advance(op.id, 1);
+      await expect(r.advance(op.id, 1)).rejects.toMatchObject({
+        code: "SETUP_REQUIRED",
+      });
+      expect(
+        (
+          await r.target.admin.query(
+            "SELECT count(*)::integer AS count FROM pg_tables WHERE schemaname='public'",
+          )
+        ).rows[0].count,
+      ).toBe(0);
+    } finally {
+      await r.close();
+    }
+  });
+  it("rechecks the currently approved server registry after native I/O before binding a target", async () => {
+    const { owner, business, r } = await fixture();
+    try {
+      const approved = [r.plan],
+        app = r.application(approved);
+      const op = await app.request(owner, {
+        planId: r.plan.id,
+        requestKey: randomUUID(),
+      });
+      r.controls.onObserve = async () => {
+        approved.length = 0;
+      };
+      await expect(
+        app.run(owner, { businessId: business.id, operationId: op.id }),
+      ).rejects.toMatchObject({ code: "SETUP_REQUIRED" });
+      expect(
+        (
+          await r.target.admin.query(
+            "SELECT operation_id FROM recovery_quarantine.target WHERE singleton",
+          )
+        ).rows[0].operation_id,
+      ).toBeNull();
     } finally {
       await r.close();
     }

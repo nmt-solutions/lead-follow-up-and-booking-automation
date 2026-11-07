@@ -20,10 +20,15 @@ import {
   configuredRecoveryInventories,
   observeRecoveryIdentities,
 } from "./configuration";
-import { createPostgresRecoveryAdapter, type NativeDatabase } from "./postgres";
+import {
+  createPostgresRecoveryAdapter,
+  verifyRecoveryTool,
+  type NativeDatabase,
+} from "./postgres";
 import { createRecoveryArchiveStorage } from "./r2-archives";
 import { requireRecoveryBundle } from "./bundle";
 import { createRecoveryReconciler } from "./reconciliation";
+import { readRecoveryObject } from "./files";
 
 const run = promisify(execFile);
 const required = (env: Record<string, string | undefined>, key: string) => {
@@ -34,6 +39,7 @@ const required = (env: Record<string, string | undefined>, key: string) => {
 export function recoveryDatabase(
   adminValue: string,
   runtimeValue: string,
+  isolateFrom?: NativeDatabase,
 ): NativeDatabase {
   try {
     const admin = new URL(databaseConnectionUrl(adminValue)),
@@ -44,10 +50,30 @@ export function recoveryDatabase(
       !runtime.hostname.includes("-pooler.") ||
       runtime.hostname.replace("-pooler.", ".") !== admin.hostname ||
       runtime.pathname !== admin.pathname ||
+      (runtime.port || "5432") !== (admin.port || "5432") ||
       decodeURIComponent(runtime.username) !== "app_runtime" ||
       decodeURIComponent(admin.username) === "app_runtime"
     )
       throw Error();
+    const passwords = [
+      decodeURIComponent(admin.password),
+      decodeURIComponent(runtime.password),
+    ];
+    if (
+      passwords.some((password) => !password) ||
+      passwords[0] === passwords[1]
+    )
+      throw Error();
+    if (isolateFrom) {
+      const previousRuntime = isolateFrom.runtime.options.connectionString;
+      if (!previousRuntime) throw Error();
+      const previous = [
+        isolateFrom.environment.PGPASSWORD,
+        decodeURIComponent(new URL(previousRuntime).password),
+      ];
+      if (passwords.some((password) => previous.includes(password)))
+        throw Error();
+    }
     const make = (url: URL) => {
       const p = new Pool({
         connectionString: url.toString(),
@@ -93,6 +119,7 @@ export async function configuredRecoveryNative(
     target = recoveryDatabase(
       required(env, "RECOVERY_TARGET_ADMIN_URL"),
       required(env, "RECOVERY_TARGET_RUNTIME_URL"),
+      source,
     );
   async function close() {
     await Promise.allSettled([
@@ -109,15 +136,26 @@ export async function configuredRecoveryNative(
       { now: () => new Date() },
     );
     await repository.authorize(identity, plan.businessId);
-    const observe = () =>
-      observeRecoveryIdentities({
+    const observe = async () => {
+      await requireRecoveryBundle(plan.schemaHash);
+      return observeRecoveryIdentities({
         plan,
         inventory,
         token: required(env, "RECOVERY_NEON_READ_TOKEN"),
         fetch,
         now: () => new Date(),
       });
+    };
     await observe();
+    if (
+      (await verifyRecoveryTool(
+        required(env, "RECOVERY_PG_RESTORE"),
+        "pg_restore",
+        target,
+        inventory.nativeTools.pgRestoreHash,
+      )) !== inventory.nativeTools.postgresMajor
+    )
+      throw new ApplicationError("SETUP_REQUIRED");
     const key = Buffer.from(required(env, "RECOVERY_BACKUP_KEY"), "base64");
     if (key.length !== 32) throw new ApplicationError("SETUP_REQUIRED");
     const objectSchema = z
@@ -222,13 +260,17 @@ export async function configuredRecoveryNative(
         targetIdentity: plan.target,
         targetSeal: required(env, "RECOVERY_TARGET_SEAL"),
         pgRestore: required(env, "RECOVERY_PG_RESTORE"),
+        pgRestoreHash: inventory.nativeTools.pgRestoreHash,
+        psql: required(env, "RECOVERY_PSQL"),
+        psqlHash: inventory.nativeTools.psqlHash,
         key,
         archive: (id) => archives.get(id),
         reviewedSchema: {
           hash: plan.schemaHash,
-          async apply(pool) {
+          async apply(pool, authorize) {
             await requireRecoveryBundle(plan.schemaHash);
             await observe();
+            await authorize();
             await prepareDatabaseRole(pool);
             const cli = join(
               dirname(
@@ -237,6 +279,7 @@ export async function configuredRecoveryNative(
               "bin.cjs",
             );
             try {
+              await authorize();
               const result = await run(process.execPath, [cli, "push"], {
                 env: { ...process.env, DATABASE_ADMIN_URL: directTarget },
                 windowsHide: true,
@@ -260,7 +303,7 @@ export async function configuredRecoveryNative(
         files: {
           async readRetained(id) {
             const { f, m } = await object(id);
-            try {
+            return readRecoveryObject(async () => {
               const stored = await backupStorage.get(m.key, f.bytes);
               if (
                 !isDeepStrictEqual(stored.metadata, m.metadata) ||
@@ -268,13 +311,11 @@ export async function configuredRecoveryNative(
               )
                 throw new ApplicationError("CONFLICT");
               return Buffer.from(stored.bytes);
-            } catch {
-              return null;
-            }
+            });
           },
           async readTarget(id) {
             const { f, m } = await object(id);
-            try {
+            return readRecoveryObject(async () => {
               const stored = await targetStorage.get(m.key, f.bytes);
               if (
                 !isDeepStrictEqual(stored.metadata, m.metadata) ||
@@ -282,9 +323,7 @@ export async function configuredRecoveryNative(
               )
                 throw new ApplicationError("CONFLICT");
               return Buffer.from(stored.bytes);
-            } catch {
-              return null;
-            }
+            });
           },
           async writeTarget(id, bytes) {
             const { m } = await object(id);

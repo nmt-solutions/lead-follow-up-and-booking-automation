@@ -202,6 +202,16 @@ export function RecoveryPanel({
                   bytes per file, {plan.limits.totalFileBytes} bytes total
                 </dd>
               </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">
+                  Backup and temporary restore limits
+                </dt>
+                <dd>
+                  {plan.limits.backupBytes} backup bytes;{" "}
+                  {plan.limits.restoreSqlBytes} bytes for the temporary restore
+                  file
+                </dd>
+              </div>
             </dl>
             <p className="text-sm text-muted-foreground">
               Objectives are reviewed inputs. Only completed stage evidence
@@ -388,6 +398,15 @@ export function RecoveryPanel({
                         {stageLabels[e.stage]} · {e.outcome}
                       </p>
                       <p className="text-sm text-muted-foreground">{e.at}</p>
+                      {e.evidence.incurredStage && (
+                        <p className="text-sm">
+                          Verified incurred result:{" "}
+                          {stageLabels[e.evidence.incurredStage]}. This fact
+                          preserves the original attempt; it does not advance
+                          the operation. Current authority is required to
+                          continue.
+                        </p>
+                      )}
                       {e.evidence.unresolved?.map((u) => (
                         <p key={u} className="text-sm">
                           {u}
