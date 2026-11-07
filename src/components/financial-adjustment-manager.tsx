@@ -28,6 +28,14 @@ import {
 } from "./ui/alert-dialog";
 
 type Workspace = z.infer<typeof adjustmentWorkspaceSchema>;
+type DisputeForm = {
+  summary: string;
+  docId: string;
+  docHash: string;
+  category: z.infer<
+    typeof disputeActionSchema
+  >["documents"][number]["category"];
+};
 async function response<T>(r: Response, schema: z.ZodType<T>): Promise<T> {
   let raw: unknown;
   try {
@@ -246,15 +254,11 @@ export function FinancialAdjustmentManager({
       typeof adjustmentDetailsSchema
     > | null>(null),
     [selectedCase, setSelectedCase] = useState<string | null>(null);
-  const [summary, setSummary] = useState(""),
-    [docId, setDocId] = useState(""),
-    [docHash, setDocHash] = useState(""),
-    [category, setCategory] = useState(
-      disputeActionSchema.shape.documents.unwrap().element.shape.category
-        .options[0],
-    );
+  const [disputeForms, setDisputeForms] = useState<Record<string, DisputeForm>>(
+    {},
+  );
   const reviewKey = useRef<string | null>(null),
-    disputeKey = useRef<string | null>(null);
+    disputeKeys = useRef<Record<string, string>>({});
   const creditKeys = useRef<Record<string, string>>({});
   const [creditForms, setCreditForms] = useState<
     Record<
@@ -262,6 +266,24 @@ export function FinancialAdjustmentManager({
       { lines: Record<string, string>; reason: string; evidence: string }
     >
   >({});
+  function disputeForm(id: string): DisputeForm {
+    return (
+      disputeForms[id] ?? {
+        summary: "",
+        docId: "",
+        docHash: "",
+        category:
+          disputeActionSchema.shape.documents.unwrap().element.shape.category
+            .options[0],
+      }
+    );
+  }
+  function changeDispute(id: string, change: Partial<DisputeForm>) {
+    setDisputeForms((s) => ({
+      ...s,
+      [id]: { ...disputeForm(id), ...s[id], ...change },
+    }));
+  }
   function creditForm(id: string) {
     return creditForms[id] ?? { lines: {}, reason: "", evidence: "" };
   }
@@ -327,12 +349,13 @@ export function FinancialAdjustmentManager({
     c: AdjustmentView,
     action: "accept" | "draft" | "submit",
   ) {
-    disputeKey.current ??= crypto.randomUUID();
+    const { summary, docId, docHash, category } = disputeForm(c.id);
+    disputeKeys.current[c.id] ??= crypto.randomUUID();
     await command(
       "dispute",
       {
         caseId: c.id,
-        requestKey: disputeKey.current,
+        requestKey: disputeKeys.current[c.id],
         action,
         summary: action === "accept" ? "" : summary,
         documents:
@@ -343,7 +366,7 @@ export function FinancialAdjustmentManager({
       adjustmentViewSchema,
     );
     await reload();
-    disputeKey.current = null;
+    delete disputeKeys.current[c.id];
     setNotice(
       "Dispute action saved. Check whether its outcome is confirmed or still unknown.",
     );
@@ -758,8 +781,10 @@ export function FinancialAdjustmentManager({
                   <Label htmlFor={`summary-${c.id}`}>Evidence summary</Label>
                   <Textarea
                     id={`summary-${c.id}`}
-                    value={summary}
-                    onChange={(e) => setSummary(e.target.value)}
+                    value={disputeForm(c.id).summary}
+                    onChange={(e) =>
+                      changeDispute(c.id, { summary: e.target.value })
+                    }
                     required
                     maxLength={1000}
                   />
@@ -768,12 +793,12 @@ export function FinancialAdjustmentManager({
                   <Label htmlFor={`category-${c.id}`}>Evidence type</Label>
                   <NativeSelect
                     id={`category-${c.id}`}
-                    value={category}
+                    value={disputeForm(c.id).category}
                     onChange={(e) => {
                       const r = disputeActionSchema.shape.documents
                         .unwrap()
                         .element.shape.category.safeParse(e.target.value);
-                      if (r.success) setCategory(r.data);
+                      if (r.success) changeDispute(c.id, { category: r.data });
                     }}
                   >
                     {disputeActionSchema.shape.documents
@@ -789,8 +814,10 @@ export function FinancialAdjustmentManager({
                   <Label htmlFor={`doc-${c.id}`}>Native document ID</Label>
                   <Input
                     id={`doc-${c.id}`}
-                    value={docId}
-                    onChange={(e) => setDocId(e.target.value)}
+                    value={disputeForm(c.id).docId}
+                    onChange={(e) =>
+                      changeDispute(c.id, { docId: e.target.value })
+                    }
                     pattern="doc_[A-Za-z0-9]+"
                   />
                 </div>
@@ -798,8 +825,10 @@ export function FinancialAdjustmentManager({
                   <Label htmlFor={`hash-${c.id}`}>Reviewed file SHA-256</Label>
                   <Input
                     id={`hash-${c.id}`}
-                    value={docHash}
-                    onChange={(e) => setDocHash(e.target.value)}
+                    value={disputeForm(c.id).docHash}
+                    onChange={(e) =>
+                      changeDispute(c.id, { docHash: e.target.value })
+                    }
                     pattern="[a-f0-9]{64}"
                   />
                 </div>
@@ -816,9 +845,9 @@ export function FinancialAdjustmentManager({
                     label="Submit evidence for review"
                     disabled={
                       busy ||
-                      !docId ||
-                      !docHash ||
-                      !summary ||
+                      !disputeForm(c.id).docId ||
+                      !disputeForm(c.id).docHash ||
+                      !disputeForm(c.id).summary ||
                       c.actions.some((a) => a.state === "unknown")
                     }
                     description="Submit this exact summary and selected native document to Razorpay. Submission starts review; it does not establish a win."

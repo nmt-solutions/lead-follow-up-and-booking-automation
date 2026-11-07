@@ -617,6 +617,141 @@ describe("Refunds and disputes at the public application seam", () => {
       h.runtime.query("delete from financial_case_event"),
     ).rejects.toBeDefined();
   });
+  it.each(["refund", "dispute"] as const)(
+    "stops a %s when the reviewed merchant account expires during final preflight",
+    async (kind) => {
+      const f = await purchase();
+      const review = JSON.parse(
+        f.native.configuration.env.RAZORPAY_ACCOUNT_REVIEW,
+      );
+      review.effectiveUntil = "2026-11-05T09:01:00.000Z";
+      f.native.configuration.env.RAZORPAY_ACCOUNT_REVIEW =
+        JSON.stringify(review);
+      const app = f.compose();
+      const disputeId = "disp_accountExpiry";
+      f.native.disputes.set(disputeId, {
+        id: disputeId,
+        entity: "dispute",
+        payment_id: "pay_original",
+        amount: 1100,
+        currency: "INR",
+        amount_deducted: 0,
+        status: "open",
+        phase: "chargeback",
+        reason_code: "chargeback",
+        respond_by: Math.floor(
+          new Date("2026-11-06T09:00:00Z").getTime() / 1000,
+        ),
+        created_at: Math.floor(h.clock.now().getTime() / 1000),
+        evidence: { submitted_at: null },
+      });
+      const c = await app.review(f.op, f.business.id, {
+        ...f.input(),
+        kind,
+        ...(kind === "dispute" ? { disputeId } : {}),
+      });
+      let reads = 0;
+      f.native.onPaymentRead = async () => {
+        if (++reads === 2) h.clock.set(review.effectiveUntil);
+      };
+      const result =
+        kind === "refund"
+          ? await app.execute(f.op, f.business.id, { caseId: c.id })
+          : await app.dispute(f.op, f.business.id, {
+              caseId: c.id,
+              requestKey: randomUUID(),
+              action: "accept",
+            });
+      expect(f.native.refundPosts).toHaveLength(0);
+      expect(f.native.disputePosts).toHaveLength(0);
+      expect(result).toMatchObject({ state: "reviewed", started: false });
+      if (kind === "dispute")
+        expect(result.actions).toEqual([
+          expect.objectContaining({ action: "accept", state: "not_attempted" }),
+        ]);
+      expect(
+        (await f.payments.workspace(f.owner, f.business.id)).access.active,
+      ).toBe(true);
+    },
+  );
+  it.each(["review", "credit review", "dispute action"] as const)(
+    "binds an exact %s replay to its original requesting operator",
+    async (command) => {
+      const f = await purchase(),
+        app = f.compose(),
+        colleague = await h.signIn("other-refund-operator@example.com"),
+        actor = await h.authenticate(colleague);
+      await h.admin.query(
+        "insert into platform_operator(user_id,refunds,documents) values($1,true,true)",
+        [actor.userId],
+      );
+      if (command === "review") {
+        const input = f.input(),
+          original = await app.review(f.op, f.business.id, input);
+        await expect(
+          app.review(colleague, f.business.id, input),
+        ).rejects.toMatchObject({ code: "CONFLICT" });
+        expect(await app.review(f.op, f.business.id, input)).toEqual(original);
+        return;
+      }
+      if (command === "credit review") {
+        const c = await app.review(f.op, f.business.id, f.input());
+        await app.execute(f.op, f.business.id, { caseId: c.id });
+        f.native.refunds[0].status = "processed";
+        await app.refresh(f.op, f.business.id, { caseId: c.id });
+        const input = {
+          caseId: c.id,
+          requestKey: randomUUID(),
+          lines: [{ lineId: "subscription", netMinor: "1000" }],
+          reason: "Approved original-tax credit basis",
+          evidence: ["fixture:credit-approval"],
+        };
+        const original = await app.reviewCredit(f.op, f.business.id, input);
+        await expect(
+          app.reviewCredit(colleague, f.business.id, input),
+        ).rejects.toMatchObject({ code: "CONFLICT" });
+        expect(await app.reviewCredit(f.op, f.business.id, input)).toEqual(
+          original,
+        );
+        expect(f.native.refundPosts).toHaveLength(1);
+        return;
+      }
+      const disputeId = "disp_actorBinding";
+      f.native.disputes.set(disputeId, {
+        id: disputeId,
+        entity: "dispute",
+        payment_id: "pay_original",
+        amount: 1100,
+        currency: "INR",
+        amount_deducted: 0,
+        status: "open",
+        phase: "chargeback",
+        reason_code: "chargeback",
+        respond_by: Math.floor(
+          new Date("2026-11-06T09:00:00Z").getTime() / 1000,
+        ),
+        created_at: Math.floor(h.clock.now().getTime() / 1000),
+        evidence: { submitted_at: null },
+      });
+      const c = await app.review(f.op, f.business.id, {
+        ...f.input(),
+        kind: "dispute",
+        disputeId,
+      });
+      const input = {
+        caseId: c.id,
+        requestKey: randomUUID(),
+        action: "draft",
+        summary: "Reviewed service evidence draft",
+      };
+      const original = await app.dispute(f.op, f.business.id, input);
+      await expect(
+        app.dispute(colleague, f.business.id, input),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(await app.dispute(f.op, f.business.id, input)).toEqual(original);
+      expect(f.native.disputePosts).toHaveLength(1);
+    },
+  );
   it.each(
     ["financial_case", "financial_case_event", "financial_receipt"].flatMap(
       (table) =>

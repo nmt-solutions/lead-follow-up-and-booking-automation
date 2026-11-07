@@ -124,7 +124,10 @@ export function createFinancialAdjustmentApplication<
     id: string,
   ) {
     const ctx = await context(credentials, businessId);
-    return repository.read(ctx.actor, ctx.businessId, id);
+    return {
+      ...(await repository.read(ctx.actor, ctx.businessId, id)),
+      actor: ctx.actor,
+    };
   }
   return {
     queue: async (credentials: Credentials) =>
@@ -347,6 +350,7 @@ export function createFinancialAdjustmentApplication<
       );
       if (previous) {
         if (
+          previous.actorId !== saved.actor.userId ||
           !isDeepStrictEqual(
             disputeIntentSchema.parse(previous.detail.command).input,
             data,

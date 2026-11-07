@@ -91,6 +91,15 @@ export function createRazorpayAdjustments(d: {
     )
       throw new ApplicationError("SETUP_REQUIRED");
   }
+  function currentAccountReview() {
+    const at = d.clock.now();
+    if (
+      new Date(d.review.effectiveFrom) > at ||
+      new Date(d.review.effectiveUntil) <= at ||
+      new Date(d.review.checkedAt) > at
+    )
+      throw new ApplicationError("SETUP_REQUIRED");
+  }
   async function validate(intent: AdjustmentIntent) {
     binding(intent);
     const p = intent.period,
@@ -182,6 +191,7 @@ export function createRazorpayAdjustments(d: {
     intent: AdjustmentIntent,
     native: z.infer<typeof nativeDisputeSchema>,
   ) {
+    currentAccountReview();
     const p = currentAdjustmentPolicy(
       d.policy,
       d.clock.now(),
@@ -395,12 +405,7 @@ export function createRazorpayAdjustments(d: {
     async refund(intent, authorize) {
       try {
         binding(intent);
-        if (
-          new Date(d.review.effectiveFrom) > d.clock.now() ||
-          new Date(d.review.effectiveUntil) <= d.clock.now() ||
-          new Date(d.review.checkedAt) > d.clock.now()
-        )
-          throw new ApplicationError("SETUP_REQUIRED");
+        currentAccountReview();
         const p = await validate(intent);
         if (
           BigInt(intent.allocation.totals.totalMinor) +
@@ -409,6 +414,7 @@ export function createRazorpayAdjustments(d: {
         )
           throw new ApplicationError("CONFLICT");
         await authorize();
+        currentAccountReview();
       } catch (error: unknown) {
         throw new FinancialWriteNotAttempted({ cause: error });
       }

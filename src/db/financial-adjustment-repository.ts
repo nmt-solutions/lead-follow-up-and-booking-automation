@@ -320,7 +320,10 @@ export function createFinancialAdjustmentRepository(database: Database) {
             .orderBy(asc(financialCase.position));
           const prior = rows.find((r) => r.requestKey === input.requestKey);
           if (prior) {
-            if (!isDeepStrictEqual(prior.intent.input, input))
+            if (
+              prior.actorId !== actor.userId ||
+              !isDeepStrictEqual(prior.intent.input, input)
+            )
               throw new ApplicationError("CONFLICT");
             return financialView(prior, await events(tx, prior.id));
           }
@@ -479,6 +482,7 @@ export function createFinancialAdjustmentRepository(database: Database) {
           );
           if (prior) {
             if (
+              prior.actorId !== actor.userId ||
               !isDeepStrictEqual(
                 creditBasisSchema.parse(prior.detail.review).input,
                 input,
@@ -704,7 +708,10 @@ export function createFinancialAdjustmentRepository(database: Database) {
             (e) => e.key === `action:${command.input.requestKey}`,
           );
           if (previous) {
-            if (!isDeepStrictEqual(previous.detail.command, command))
+            if (
+              previous.actorId !== actor.userId ||
+              !isDeepStrictEqual(previous.detail.command, command)
+            )
               throw new ApplicationError("CONFLICT");
             return false;
           }
