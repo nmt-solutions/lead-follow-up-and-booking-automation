@@ -8,6 +8,8 @@ import {
   notificationSetupSchema,
   notificationTermsSchema,
   noticeViewSchema,
+  notificationPreferenceSchema,
+  notificationPreferenceViewSchema,
   type NoticeDraft,
   type NoticeWork,
   type NoticeClaim,
@@ -18,6 +20,7 @@ import {
 import type { Database } from "./runtime";
 import { scoped } from "./scope";
 import type { NotificationReceipt } from "../notifications/webhook";
+import { operationSnapshotSchema } from "../models/operations";
 
 export type NotificationBinding = {
   account: string;
@@ -36,6 +39,11 @@ const sourceSchema = z.object({
   businessName: z.string().optional(),
   role: z.string().optional(),
   invitationExpiresAt: z.coerce.date().optional(),
+  summary: z.string().optional(),
+  snapshot: operationSnapshotSchema.optional(),
+  currentSnapshot: operationSnapshotSchema.optional(),
+  outcome: z.string().optional(),
+  sourceStage: z.string().optional(),
 });
 const claimSchema = workSchema.extend({
   lease: z.uuid(),
@@ -49,6 +57,7 @@ const claimSchema = workSchema.extend({
   keyRef: z.string(),
 });
 const stateSchema = z.object({
+  allowedPreferences: z.array(z.enum(["operations", "subscription"])),
   setup: notificationSetupSchema.nullable(),
   setupCheckedAt: z.string().nullable(),
   setupFresh: z.boolean(),
@@ -70,6 +79,60 @@ export function createNotificationRepository(database: Database) {
     });
   }
   return {
+    async syncCosts(account: string) {
+      await database.execute(
+        sql`select public.notification_sync_costs(${account})`,
+      );
+    },
+    async maintenanceSetup(binding: NotificationBinding) {
+      const r = await database.execute(
+        sql`select public.notification_begin_maintenance_setup(${JSON.stringify(binding)}::jsonb) as value`,
+      );
+      return r.rows[0]?.value
+        ? workSchema.extend({ actorId: z.string() }).parse(r.rows[0].value)
+        : null;
+    },
+    async candidates(account: string) {
+      const result = await database.execute(
+        sql`select * from public.notification_candidates(${account})`,
+      );
+      return result.rows.map((row) =>
+        z
+          .object({
+            id: z.uuid(),
+            purpose: z.enum(["operations", "subscription"]),
+            sourceId: z.string(),
+            businessId: z.uuid().nullable(),
+            actorId: z.string(),
+            authority: z.string(),
+            sourceStage: z.string(),
+          })
+          .parse(row.draft),
+      );
+    },
+    setPreference(
+      actor: Actor,
+      account: string,
+      businessId: string | null,
+      choice: z.infer<typeof notificationPreferenceSchema>,
+    ) {
+      return scoped(database, actor, businessId ?? "", async (tx) => {
+        const r = await tx.execute(
+          sql`select public.notification_set_preference(${account},${businessId}::uuid,${JSON.stringify(choice)}::jsonb) as allowed`,
+        );
+        if (r.rows[0]?.allowed !== true)
+          throw new ApplicationError("FORBIDDEN");
+      });
+    },
+    preferences(actor: Actor, account: string, businessId: string | null) {
+      return scoped(database, actor, businessId ?? "", async (tx) => {
+        const r = await tx.execute(
+          sql`select public.notification_preferences(${account},${businessId}::uuid) as value`,
+        );
+        if (!r.rows[0]?.value) throw new ApplicationError("FORBIDDEN");
+        return z.array(notificationPreferenceViewSchema).parse(r.rows[0].value);
+      });
+    },
     retry(actor: Actor, account: string, id: string) {
       return operator(actor, async (tx) => {
         const r = await tx.execute(
@@ -216,11 +279,13 @@ export function createNotificationRepository(database: Database) {
           sql`select public.notification_workspace(${account},${businessId}::uuid) as value`,
         );
         if (!r.rows[0]?.value) throw new ApplicationError("FORBIDDEN");
-        const state = stateSchema.parse(r.rows[0].value);
-        return {
-          notices: state.notices,
-          sendingReady: state.setup?.sendingReady === true && state.setupFresh,
-        };
+        return z
+          .object({
+            notices: z.array(noticeViewSchema),
+            allowedPreferences: z.array(z.enum(["operations", "subscription"])),
+            sendingReady: z.boolean(),
+          })
+          .parse(r.rows[0].value);
       });
     },
   };

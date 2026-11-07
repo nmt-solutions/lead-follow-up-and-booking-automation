@@ -85,6 +85,12 @@ export default async function BusinessPage({
           WhatsApp identity and Meta onboarding
         </Link>
       )}
+      <Link
+        href={`/businesses/${businessId}/notifications`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Notification preferences and delivery
+      </Link>
       {access.role !== "salesperson" && (
         <Link
           href={`/businesses/${businessId}/billing`}

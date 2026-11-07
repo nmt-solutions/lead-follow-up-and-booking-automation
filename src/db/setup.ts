@@ -65,6 +65,7 @@ import {
   operationDetail,
   costRecord,
   notificationTerms,
+  notificationPreference,
   notificationSetup,
   notificationNotice,
   notificationPayload,
@@ -749,6 +750,7 @@ export async function secureDatabase(pool: Pool) {
     for (const table of [
       membership,
       opportunityDueAction,
+      notificationNotice,
       inboxOpportunity,
       senderHealthRecord,
       whatsAppIntake,
@@ -838,6 +840,7 @@ export async function secureDatabase(pool: Pool) {
       operationDetail,
       costRecord,
       notificationTerms,
+      notificationPreference,
       notificationSetup,
       notificationNotice,
       notificationPayload,

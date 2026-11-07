@@ -41,10 +41,50 @@ const domainSchema = z.object({
     z.object({ record: z.string(), type: z.string(), status: z.string() }),
   ),
 });
+function inspectDomain(
+  domain: z.infer<typeof domainSchema>,
+  id: string,
+  from: string,
+) {
+  const sending = domain.records.filter(
+      (r) => r.record === "SPF" || r.record === "DKIM",
+    ),
+    receiving = domain.records.filter((r) => r.record === "Receiving");
+  const sendingReady =
+    domain.id === id &&
+    domain.name.toLowerCase() === from.split("@")[1].toLowerCase() &&
+    domain.capabilities.sending === "enabled" &&
+    ["verified", "partially_verified", "partially_failed"].includes(
+      domain.status,
+    ) &&
+    ["SPF", "DKIM"].every((kind) => {
+      const records = sending.filter((r) => r.record === kind);
+      return (
+        records.length > 0 &&
+        records
+          .filter((r) => r.type !== "CNAME")
+          .every((r) => r.status === "verified") &&
+        (records.every((r) => r.type !== "CNAME") ||
+          records.some((r) => r.type === "CNAME" && r.status === "verified"))
+      );
+    });
+  return {
+    from,
+    domainId: id,
+    domain: domain.name,
+    domainStatus: domain.status,
+    sendingReady,
+    receivingReady:
+      domain.capabilities.receiving === "enabled" &&
+      receiving.length > 0 &&
+      receiving.every((r) => r.status === "verified"),
+  };
+}
 export function createResendProvider(
   config: NotificationConfiguration,
   request: typeof fetch = fetch,
 ): NotificationProvider {
+  let readWait = 0;
   async function read(path: string): Promise<unknown> {
     if (!config.readApiKey) throw new ApplicationError("SETUP_REQUIRED");
     const r = await request(`https://api.resend.com${path}`, {
@@ -52,12 +92,18 @@ export function createResendProvider(
       signal: AbortSignal.timeout(10000),
       cache: "no-store",
     });
+    readWait = Math.ceil(
+      Math.min(2147483000, Math.max(readWait, waitSeconds(r.headers))),
+    );
     if (!r.ok) throw new ApplicationError("PROVIDER_UNAVAILABLE");
     return r.json();
   }
   return {
     async inspect() {
+      readWait = 0;
       const base = {
+        retryAfterSeconds: 0,
+        senders: new Array<ReturnType<typeof inspectDomain>>(),
         sendingReady: false,
         receivingReady: false,
         domain: config.from.split("@")[1],
@@ -72,34 +118,44 @@ export function createResendProvider(
         const domain = domainSchema.parse(
           await read(`/domains/${encodeURIComponent(config.domainId)}`),
         );
+        if (readWait > 0) throw new ApplicationError("PROVIDER_UNAVAILABLE");
+        const primary = inspectDomain(domain, config.domainId, config.from),
+          senders = [primary];
+        if (config.costFrom && config.costFrom !== config.from) {
+          if (
+            config.costFrom.split("@")[1].toLowerCase() ===
+            primary.domain.toLowerCase()
+          )
+            senders.push({ ...primary, from: config.costFrom });
+          else if (config.costDomainId) {
+            const costDomain = domainSchema.parse(
+              await read(`/domains/${encodeURIComponent(config.costDomainId)}`),
+            );
+            if (readWait > 0)
+              throw new ApplicationError("PROVIDER_UNAVAILABLE");
+            senders.push(
+              inspectDomain(costDomain, config.costDomainId, config.costFrom),
+            );
+          }
+        }
         const usage = resendUsageSchema.parse(await read("/usage"));
-        const sending = domain.records.filter(
-          (r) => r.record === "SPF" || r.record === "DKIM",
-        );
-        const receiving = domain.records.filter(
-          (r) => r.record === "Receiving",
-        );
         return {
           ...base,
-          domain: domain.name,
-          domainStatus: domain.status,
+          domain: primary.domain,
+          domainStatus: primary.domainStatus,
+          sendingReady: primary.sendingReady,
+          receivingReady: primary.receivingReady,
+          senders,
           readAccess: "verified",
           usage,
-          sendingReady:
-            domain.id === config.domainId &&
-            domain.name.toLowerCase() === base.domain.toLowerCase() &&
-            domain.capabilities.sending === "enabled" &&
-            ["verified", "partially_verified"].includes(domain.status) &&
-            sending.some((r) => r.record === "SPF") &&
-            sending.some((r) => r.record === "DKIM") &&
-            sending.every((r) => r.status === "verified"),
-          receivingReady:
-            domain.capabilities.receiving === "enabled" &&
-            receiving.length > 0 &&
-            receiving.every((r) => r.status === "verified"),
+          retryAfterSeconds: readWait,
         };
       } catch {
-        return { ...base, readAccess: "unavailable" };
+        return {
+          ...base,
+          retryAfterSeconds: readWait,
+          readAccess: "unavailable",
+        };
       }
     },
     async send(mail, key) {

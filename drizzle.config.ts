@@ -8,6 +8,7 @@ export default defineConfig({
   schemaFilter: ["public"],
   tablesFilter: [
     "notification_terms",
+    "notification_preference",
     "notification_setup",
     "notification_notice",
     "notification_payload",

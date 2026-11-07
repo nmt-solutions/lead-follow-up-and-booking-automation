@@ -40,7 +40,9 @@ export function verifyNotificationWebhook(
     !eventId ||
     !/^[a-zA-Z0-9_-]{1,200}$/.test(eventId) ||
     !timestamp ||
-    !signature
+    !/^\d{1,12}$/.test(timestamp) ||
+    !signature ||
+    signature.length > 4096
   )
     throw new ApplicationError("FORBIDDEN");
   const secrets = [config.webhookSecret];

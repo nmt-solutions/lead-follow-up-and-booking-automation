@@ -1281,6 +1281,22 @@ const notificationPolicies = (prefix: string) => [
     withCheck: sql`false`,
   }),
 ];
+export const notificationPreference = pgTable(
+  "notification_preference",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    businessId: uuid("business_id").references(() => business.id),
+    purpose: text("purpose").notNull(),
+    enabled: boolean("enabled").notNull(),
+    version: integer("version").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_preference"),
+).enableRLS();
 export const notificationTerms = pgTable(
   "notification_terms",
   {
@@ -1322,6 +1338,7 @@ export const notificationNotice = pgTable(
       .$type<import("../models/notifications").NoticePurpose>()
       .notNull(),
     sourceId: text("source_id").notNull(),
+    sourceStage: text("source_stage").notNull(),
     businessId: uuid("business_id").references(() => business.id),
     actorId: text("actor_id"),
     authority: text("authority").notNull(),
@@ -1332,6 +1349,8 @@ export const notificationNotice = pgTable(
     keyRef: text("key_ref").notNull(),
     payloadHash: text("payload_hash").notNull(),
     state: text("state").notNull().default("pending"),
+    uncertain: boolean("uncertain").notNull().default(false),
+    priorUncertain: boolean("prior_uncertain").notNull().default(false),
     providerId: text("provider_id"),
     firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
     retryUntil: timestamp("retry_until", { withTimezone: true }),
@@ -1355,7 +1374,7 @@ export const notificationNotice = pgTable(
     uniqueIndex("notification_provider_identity").on(t.account, t.providerId),
     check(
       "notification_purpose",
-      sql`${t.purpose} in ('authentication','invitation','cost_alert','sender_health','handoff')`,
+      sql`${t.purpose} in ('authentication','invitation','cost_alert','sender_health','handoff','operations','subscription')`,
     ),
     check(
       "notification_state",
@@ -1383,6 +1402,7 @@ export const notificationEvent = pgTable(
       .notNull()
       .references(() => notificationNotice.id),
     kind: text("kind").notNull(),
+    lease: uuid("lease"),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
   () => notificationPolicies("notification_event"),

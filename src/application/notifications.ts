@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { SignInMailer } from "../auth/auth";
 import type { InvitationMailer } from "../models/team";
+import type { CostMailer } from "../models/costs";
 import { z } from "zod";
 import type { Actor } from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import {
   notificationTermsSchema,
+  notificationPreferenceSchema,
   type NotificationConfiguration,
   type NotificationProvider,
   type NoticeWork,
@@ -20,6 +22,7 @@ import type {
 import type { notificationVault } from "../notifications/vault";
 import { NotificationDeliveryError } from "../notifications/resend";
 import { verifyNotificationWebhook } from "../notifications/webhook";
+import { needsAttention } from "./operations";
 
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -31,6 +34,7 @@ export function createNotificationApplication<C>(d: {
   vault: ReturnType<typeof notificationVault>;
   configuration: NotificationConfiguration;
   recoveryConfigured?: boolean;
+  deployment?: NotificationWorkspace["deployment"];
 }) {
   const r = d.repository,
     config = d.configuration;
@@ -55,6 +59,11 @@ export function createNotificationApplication<C>(d: {
         payloadBinding(claim.id, claim.purpose, claim.sourceId),
         claim.now,
       );
+      if (
+        config.mode === "test_recipient" &&
+        mail.to[0].toLowerCase() !== config.testRecipient?.toLowerCase()
+      )
+        throw new ApplicationError("CONFLICT");
       if (!(await r.gate(claim))) {
         await r.finish(claim, "held", null, 60);
         throw new ApplicationError("FORBIDDEN");
@@ -93,7 +102,7 @@ export function createNotificationApplication<C>(d: {
           authority.expiresAt,
         ),
       },
-      binding,
+      { ...binding, from: mail.from },
     );
     return deliver(work);
   }
@@ -115,6 +124,7 @@ export function createNotificationApplication<C>(d: {
           {
             id,
             purpose: "authentication",
+            sourceStage: "magic_link_requested",
             sourceId: id,
             businessId: null,
             actorId: null,
@@ -146,6 +156,7 @@ export function createNotificationApplication<C>(d: {
       const source = {
         id: randomUUID(),
         purpose: "invitation" as const,
+        sourceStage: "invitation_pending",
         sourceId: message.invitationId,
         businessId: message.businessId,
         actorId: message.actorId,
@@ -169,9 +180,58 @@ export function createNotificationApplication<C>(d: {
       });
     },
   };
+  const costMailer: CostMailer = {
+    async send(message) {
+      const source = {
+        id: randomUUID(),
+        purpose: "cost_alert" as const,
+        sourceStage: "budget_threshold_available",
+        sourceId: message.authority.alertId,
+        businessId: null,
+        actorId: message.authority.actorId,
+        authority: message.authority.lease,
+        key: message.key,
+      };
+      const current = await r.source(source);
+      if (
+        !current ||
+        current.email !== message.email ||
+        current.summary !== message.text ||
+        message.key !== `operator-cost/${message.authority.alertId}`
+      )
+        throw new ApplicationError("FORBIDDEN");
+      const from = config.costFrom ?? config.from;
+      return produce(source, {
+        from,
+        to: [message.email],
+        subject: "Operator budget threshold reached",
+        text: message.text,
+      });
+    },
+  };
   return {
+    async setPreference(c: C, businessId: unknown, value: unknown) {
+      const tenant = z.uuid().nullable().safeParse(businessId),
+        choice = notificationPreferenceSchema.safeParse(value);
+      if (!tenant.success || !choice.success)
+        throw new ApplicationError("INVALID_INPUT");
+      const actor = tenant.data
+        ? await d.authenticate(c)
+        : await d.authenticatePlatform(c);
+      await r.setPreference(actor, config.account, tenant.data, choice.data);
+    },
+    async preferences(c: C, businessId: unknown) {
+      const tenant = z.uuid().nullable().safeParse(businessId);
+      if (!tenant.success) throw new ApplicationError("INVALID_INPUT");
+      return r.preferences(
+        tenant.data ? await d.authenticate(c) : await d.authenticatePlatform(c),
+        config.account,
+        tenant.data,
+      );
+    },
     signInMailer,
     invitationMailer,
+    costMailer,
     async retry(c: C, value: unknown) {
       const id = z.uuid().safeParse(value);
       if (!id.success) throw new ApplicationError("INVALID_INPUT");
@@ -227,6 +287,14 @@ export function createNotificationApplication<C>(d: {
       );
       return {
         ...state,
+        deployment: d.deployment ?? {
+          account: true,
+          domain: true,
+          mode: true,
+          payloadKey: true,
+          readKey: Boolean(config.readApiKey),
+          sendingKey: Boolean(config.apiKey),
+        },
         account: config.account,
         mode: config.mode,
         sender: config.from,
@@ -236,6 +304,50 @@ export function createNotificationApplication<C>(d: {
     },
     async recoverPending() {
       let recovered = 0;
+      await r.syncCosts(config.account);
+      const inspection = await r.maintenanceSetup(binding);
+      if (inspection)
+        await r.saveSetup(
+          { userId: inspection.actorId },
+          binding,
+          inspection,
+          await d.provider.inspect(),
+        );
+      for (const candidate of await r.candidates(config.account)) {
+        const source = await r.source(candidate);
+        if (!source?.email) continue;
+        if (
+          candidate.purpose === "operations" &&
+          source.outcome !== "escalated" &&
+          (!source.snapshot ||
+            !source.currentSnapshot ||
+            !needsAttention(source.snapshot) ||
+            !needsAttention(source.currentSnapshot))
+        )
+          continue;
+        const path = candidate.businessId
+          ? `/businesses/${candidate.businessId}/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`
+          : `/platform/${candidate.purpose === "subscription" ? "subscription-payments" : "operations"}`;
+        try {
+          await produce(
+            {
+              ...candidate,
+              key: `platform-notice/${hash(candidate.sourceId)}`,
+            },
+            {
+              from: config.from,
+              to: [source.email],
+              subject:
+                candidate.purpose === "subscription"
+                  ? "Subscription status updated"
+                  : "Platform action needs attention",
+              text: `A saved ${candidate.purpose === "subscription" ? "subscription" : "platform"} notice is available. Recorded stage: ${candidate.sourceStage}. Review current status and the responsible next action:\n\n${new URL(path, config.origin).toString()}`,
+            },
+          );
+        } catch {
+          /* Persisted work retains its selected audience and exact source stage. */
+        }
+      }
       for (const work of await r.work(config.account)) {
         try {
           await deliver(work);

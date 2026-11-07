@@ -6,7 +6,8 @@ import { configuredOperationLogs } from "../operations/configuration";
 import { createCostApplication } from "../application/costs";
 import { createCostRepository } from "../db/cost-repository";
 import { createCostHttp } from "../http/costs";
-import { configuredCostMailer } from "../costs/mailer";
+import { configuredNotifications } from "../notifications/configuration";
+import { createNotificationHttp } from "../http/notifications";
 import { routeSenderAdapters } from "../senders/adapter";
 import { createMicrosoftOpportunityMail } from "../microsoft-mail/opportunity-mail";
 import { createMicrosoftSenderAdapter } from "../microsoft-mail/sender";
@@ -99,7 +100,6 @@ import { createInboxHttp } from "../http/inbox";
 import { normalizedInquiryAdapter } from "../inbox/adapter";
 import { Pool } from "pg";
 import { createAuth } from "../auth/auth";
-import { createSignInMailer } from "../auth/resend";
 import { createBusinessApplication } from "../application/business";
 import { createBusinessRepository } from "../db/business-repository";
 import { runtimeDatabase, verifyRuntimeRole } from "../db/runtime";
@@ -110,7 +110,6 @@ import { readEnvironment } from "./environment";
 import { createTeamApplication } from "../application/team";
 import { createTeamRepository } from "../db/team-repository";
 import { createTeamHttp } from "../http/team";
-import { createInvitationMailer } from "../auth/invitation-mailer";
 import { invitationTokens } from "../auth/invitation-tokens";
 import { createFileApplication } from "../application/files";
 import { createBillingApplication } from "../application/billing";
@@ -174,26 +173,44 @@ async function composeServices() {
     await pool.end();
     throw error;
   }
+  const notificationAccess: {
+    current?: ReturnType<typeof createSessionAccess>;
+  } = {};
+  const notificationRuntime = configuredNotifications<Headers>({
+    database: runtimeDatabase(pool),
+    env: process.env,
+    authenticate: (credentials) => {
+      if (!notificationAccess.current)
+        throw new ApplicationError("UNAUTHENTICATED");
+      return notificationAccess.current.authenticate(credentials);
+    },
+    authenticatePlatform: (credentials) => {
+      if (!notificationAccess.current)
+        throw new ApplicationError("UNAUTHENTICATED");
+      return notificationAccess.current.authenticatePlatform(credentials);
+    },
+  });
+  const notifications = notificationRuntime.application;
   const auth = createAuth({
     database: runtimeDatabase(pool),
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
-    mailer: createSignInMailer({
-      apiKey: environment.RESEND_API_KEY,
-      from: environment.AUTH_EMAIL_FROM,
-    }),
+    mailer: notifications.signInMailer,
   });
   const access = createSessionAccess({
     auth,
     database: runtimeDatabase(pool),
     clock: { now: () => new Date() },
   });
+  notificationAccess.current = access;
   const { authenticate, authenticatePrivileged, authenticatePlatform } = access;
   const costs = createCostApplication({
     authenticatePlatform,
     repository: createCostRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
-    mailer: configuredCostMailer(process.env),
+    mailer: notificationRuntime.costEmailConfigured
+      ? notifications.costMailer
+      : null,
     scheduleConfigured: Boolean(process.env.TRIGGER_COST_BUDGET_CRON?.trim()),
   });
   const campaigns = createCampaignApplication({
@@ -307,10 +324,7 @@ async function composeServices() {
     repository: createTeamRepository(runtimeDatabase(pool)),
     clock: { now: () => new Date() },
     tokens: invitationTokens(environment.BETTER_AUTH_SECRET),
-    mailer: createInvitationMailer({
-      apiKey: environment.RESEND_API_KEY,
-      from: environment.AUTH_EMAIL_FROM,
-    }),
+    mailer: notifications.invitationMailer,
     origin: environment.BETTER_AUTH_URL,
   });
   const billing = createBillingApplication({
@@ -725,6 +739,12 @@ async function composeServices() {
     access,
     application,
     team,
+    notifications,
+    notificationsHttp: createNotificationHttp({
+      application: notifications,
+      origin: environment.BETTER_AUTH_URL,
+      reportFailure,
+    }),
     files,
     billing,
     tax,

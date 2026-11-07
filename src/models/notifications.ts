@@ -6,6 +6,8 @@ export const noticePurposeSchema = z.enum([
   "cost_alert",
   "sender_health",
   "handoff",
+  "operations",
+  "subscription",
 ]);
 export type NoticePurpose = z.infer<typeof noticePurposeSchema>;
 export const noticeStateSchema = z.enum([
@@ -87,8 +89,24 @@ export type NotificationConfiguration = {
   previousWebhookValidUntil?: string;
   webhookRotatedAt?: string;
   origin: string;
+  costFrom?: string;
+  costDomainId?: string;
+  testRecipient?: string;
 };
 export const notificationSetupSchema = z.object({
+  senders: z
+    .array(
+      z.object({
+        from: z.email(),
+        domainId: z.uuid().nullable(),
+        domain: z.string(),
+        domainStatus: z.string(),
+        sendingReady: z.boolean(),
+        receivingReady: z.boolean(),
+      }),
+    )
+    .default([]),
+  retryAfterSeconds: z.number().int().nonnegative().max(2147483000).default(0),
   sendingReady: z.boolean(),
   receivingReady: z.boolean(),
   domain: z.string(),
@@ -104,6 +122,7 @@ export const noticeViewSchema = z.object({
   purpose: noticePurposeSchema,
   businessId: z.uuid().nullable(),
   sourceId: z.string(),
+  sourceStage: z.string(),
   state: noticeStateSchema,
   stage: deliveryStageSchema.nullable(),
   providerId: z.string().nullable(),
@@ -118,6 +137,15 @@ export const noticeViewSchema = z.object({
 });
 export type NoticeView = z.infer<typeof noticeViewSchema>;
 export const notificationWorkspaceSchema = z.object({
+  allowedPreferences: z.array(z.enum(["operations", "subscription"])),
+  deployment: z.object({
+    account: z.boolean(),
+    domain: z.boolean(),
+    mode: z.boolean(),
+    payloadKey: z.boolean(),
+    readKey: z.boolean(),
+    sendingKey: z.boolean(),
+  }),
   account: z.string(),
   mode: z.enum(["production", "test_recipient"]),
   sender: z.string(),
@@ -148,7 +176,18 @@ export type NoticeDraft = {
   payloadHash: string;
   sealed: string;
   key: string;
+  sourceStage: string;
 };
+export const notificationPreferenceSchema = z.strictObject({
+  purpose: z.enum(["operations", "subscription"]),
+  enabled: z.boolean(),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export const notificationPreferenceViewSchema = z.object({
+  purpose: z.enum(["operations", "subscription"]),
+  enabled: z.boolean(),
+  version: z.number().int().positive(),
+});
 export type NoticeWork = { id: string; capability: string };
 export type NoticeClaim = NoticeWork & {
   lease: string;
