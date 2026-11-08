@@ -270,6 +270,149 @@ describe("Explicit bounded pilot mailbox setup", () => {
     expect(s.google.sends).toEqual([]);
     expect((await s.pilots.workspace(c, b)).pilots[0].status).toBe("approved");
   });
+  it("fences the next native setup request after local OAuth disconnect during an earlier native read", async () => {
+    const s = await pilotSetupFixture(h, false),
+      c = s.f.owner,
+      b = s.f.business.id,
+      input = approval(s);
+    await s.pilots.authorizeSetup(c, b, input);
+    const work = await s.mailboxes.queue(c, b, s.mailboxId, {
+      mode: "incremental",
+      pilotSetupRequestKey: input.requestKey,
+    });
+    s.google.control.beforeProfile = async () => {
+      s.google.control.beforeProfile = undefined;
+      await s.gmail.disconnect(c, b, s.mailboxId);
+    };
+    const before = s.google.calls.length;
+    await s.mailboxes.execute(work).catch(() => {});
+    expect(
+      s.google.calls
+        .slice(before)
+        .filter((call) => call.url.pathname.endsWith("/labels")),
+    ).toEqual([]);
+    expect(await s.gmail.read(c, b, s.mailboxId)).toMatchObject({
+      status: "disconnected",
+      read: false,
+    });
+    const actor = await h.access.authenticateForWork(c),
+      client = await h.runtime.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true),set_config('app.pilot_session',$3,true),set_config('app.at','2100-01-01',true)",
+        [actor.userId, b, actor.sessionId],
+      );
+      expect(
+        (
+          await client.query(
+            "select public.reserve_pilot_effect($1,'mailbox',$2,1,$3) allowed",
+            [
+              b,
+              `${input.requestKey}:0:native:read:${randomUUID()}`,
+              {
+                jobId: input.requestKey,
+                mailboxId: s.mailboxId,
+                phase: "native:read",
+              },
+            ],
+          )
+        ).rows[0].allowed,
+      ).toBe(false);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+    expect((await s.pilots.workspace(c, b)).pilots[0].status).toBe("approved");
+  });
+  it("binds setup reservations to the original session, queued job, checkpoint and read-only phase", async () => {
+    const s = await pilotSetupFixture(h, false),
+      c = s.f.owner,
+      b = s.f.business.id,
+      input = approval(s),
+      actor = await h.access.authenticateForWork(c);
+    await s.pilots.authorizeSetup(c, b, input);
+    async function reserve(
+      changes: Record<string, unknown> = {},
+      operation?: string,
+      identity = actor,
+      rebind = false,
+    ) {
+      const client = await h.runtime.connect();
+      try {
+        await client.query("begin");
+        await client.query(
+          "select set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true),set_config('app.pilot_session',$3,true),set_config('app.at','2100-01-01',true)",
+          [identity.userId, b, identity.sessionId],
+        );
+        if (rebind)
+          await client.query("update mailbox_job set identity=$1 where id=$2", [
+            identity,
+            input.requestKey,
+          ]);
+        return (
+          await client.query(
+            "select public.reserve_pilot_effect($1,'mailbox',$2,1,$3) allowed",
+            [
+              b,
+              operation ?? `${input.requestKey}:0:inspect:${randomUUID()}`,
+              {
+                jobId: input.requestKey,
+                mailboxId: s.mailboxId,
+                checkpoint: 0,
+                phase: "inspect",
+                ...changes,
+              },
+            ],
+          )
+        ).rows[0].allowed;
+      } finally {
+        await client.query("rollback");
+        client.release();
+      }
+    }
+    const unqueued = await reserve();
+    const work = await s.mailboxes.queue(c, b, s.mailboxId, {
+      mode: "incremental",
+      pilotSetupRequestKey: input.requestKey,
+    });
+    const renewed = await h.signIn("tax-owner@example.com"),
+      newSession = await h.access.authenticateForWork(renewed);
+    expect(newSession.sessionId).not.toBe(actor.sessionId);
+    const results = {
+      unqueued,
+      current: await reserve(),
+      wrongCheckpoint: await reserve({ checkpoint: 1 }),
+      wrongOperation: await reserve({}, `${input.requestKey}:forged`),
+      wrongPhase: await reserve(
+        { phase: "native:send" },
+        `${input.requestKey}:0:native:send:${randomUUID()}`,
+      ),
+      newSession: await reserve({}, undefined, newSession),
+      reboundIdentity: await reserve({}, undefined, newSession, true),
+    };
+    expect(results).toEqual({
+      unqueued: false,
+      current: true,
+      wrongCheckpoint: false,
+      wrongOperation: false,
+      wrongPhase: false,
+      newSession: false,
+      reboundIdentity: false,
+    });
+    await expect(
+      s.mailboxes.queue(renewed, b, s.mailboxId, {
+        mode: "incremental",
+        pilotSetupRequestKey: input.requestKey,
+      }),
+    ).rejects.toMatchObject({ code: "PAID_ACCESS_REQUIRED" });
+    let result = await s.mailboxes.execute(work);
+    for (let page = 0; page < 6 && result?.status === "partial"; page++)
+      result = await s.mailboxes.execute(work);
+    expect(result).toMatchObject({ status: "completed" });
+    expect(await reserve()).toBe(false);
+    expect(s.google.sends).toEqual([]);
+  });
   it("holds every native refresh and uncertain request against the same finite setup allowance", async () => {
     const s = await pilotSetupFixture(h),
       c = s.f.owner,

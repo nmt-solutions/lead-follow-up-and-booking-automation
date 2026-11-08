@@ -150,7 +150,7 @@ export async function securePilots(pool: PoolClient) {
        AND paid.start<=(plan->>'startsAt')::timestamptz AND paid.end>=(plan->>'endsAt')::timestamptz
        AND paid.id IN(SELECT current_paid.id FROM public.current_paid_scope(NEW.business_id,clock_timestamp()) current_paid) LIMIT 1;
      IF mailbox_version IS NULL OR setup_until IS NULL OR setup_until<=clock_timestamp() OR NOT public.pilot_global_room('INR',0) THEN RAISE insufficient_privilege; END IF;
-     NEW.data=NEW.data||jsonb_build_object('mailboxVersion',mailbox_version,'expiresAt',to_char(setup_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'));
+     NEW.data=NEW.data||jsonb_build_object('sessionId',current_setting('app.pilot_session',true),'mailboxVersion',mailbox_version,'expiresAt',to_char(setup_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'));
    END IF;
    IF NEW.kind='effort' AND NOT coalesce(jsonb_typeof(NEW.data)='object'
      AND NEW.data->>'kind' IN ('setup','support','sales','billing_tax','maintenance')
@@ -260,8 +260,11 @@ export async function securePilots(pool: PoolClient) {
  SELECT e.* INTO setup FROM public.pilot_event e WHERE e.business_id=tenant AND e.kind='setup_authorized' AND e.request_key::text=effect_intent->>'jobId';
  IF setup.id IS NOT NULL THEN
    IF effect_kind<>'mailbox' OR units<>1 OR NOT public.pilot_setup_current(tenant,effect_intent->>'jobId',effect_intent->>'mailboxId')
-     OR NOT coalesce(effect_intent->>'phase' IN ('inspect','list','read','confirm_grant') OR effect_intent->>'phase' LIKE 'native:%',false)
-     OR operation NOT LIKE (effect_intent->>'jobId')||':%' THEN RETURN false; END IF;
+     OR NOT coalesce(effect_intent->>'phase' IN ('inspect','list','read','confirm_grant','native:read'),false)
+     OR NOT EXISTS(SELECT 1 FROM public.mailbox_job j WHERE j.id::text=effect_intent->>'jobId' AND j.business_id=tenant
+       AND j.mailbox_id::text=effect_intent->>'mailboxId' AND j.state->'checkpoint'=effect_intent->'checkpoint'
+       AND j.state->>'status' IN ('queued','running','partial') AND j.state->>'reason' IS DISTINCT FROM 'limit_reached')
+     OR NOT coalesce(operation ~ ('^'||(effect_intent->>'jobId')||':'||(effect_intent->>'checkpoint')||':'||(effect_intent->>'phase')||':[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),false) THEN RETURN false; END IF;
    SELECT r.* INTO p FROM public.pilot_record r WHERE r.id=setup.pilot_id AND r.business_id=tenant;
  ELSE
  SELECT r.* INTO p FROM public.pilot_record r WHERE r.business_id=tenant AND EXISTS(SELECT 1 FROM public.pilot_event e WHERE e.pilot_id=r.id AND e.business_id=r.business_id AND e.kind='activated') ORDER BY r.at DESC,r.id DESC LIMIT 1;

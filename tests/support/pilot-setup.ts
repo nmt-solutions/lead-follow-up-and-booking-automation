@@ -147,6 +147,7 @@ export async function pilotSetupFixture(
     ...s,
     mailboxes,
     mailboxId,
+    gmail,
     google,
     mailboxesFor: (database: ReturnType<typeof runtimeDatabase>) =>
       createMailboxApplication({

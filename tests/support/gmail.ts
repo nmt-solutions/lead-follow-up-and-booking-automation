@@ -32,6 +32,7 @@ export function gmailFixture() {
     sendResponse: undefined as unknown,
     beforeRefresh: undefined as (() => Promise<void>) | undefined,
     beforeBody: undefined as (() => Promise<void>) | undefined,
+    beforeProfile: undefined as (() => Promise<void>) | undefined,
     beforeToken: undefined as (() => Promise<void>) | undefined,
   };
   const fetcher: typeof fetch = async (input, init) => {
@@ -118,11 +119,13 @@ export function gmailFixture() {
       if (control.sendLost) throw new Error("private-gmail-response-lost");
       return response(control.sendResponse ?? { id, threadId });
     }
-    if (url.pathname.endsWith("/profile"))
+    if (url.pathname.endsWith("/profile")) {
+      await control.beforeProfile?.();
       return response({
         emailAddress: control.email,
         historyId: "18446744073709551629",
       });
+    }
     if (url.pathname.endsWith("/labels"))
       return response({
         labels: [
