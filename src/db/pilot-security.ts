@@ -260,7 +260,7 @@ export async function securePilots(pool: PoolClient) {
  SELECT e.* INTO setup FROM public.pilot_event e WHERE e.business_id=tenant AND e.kind='setup_authorized' AND e.request_key::text=effect_intent->>'jobId';
  IF setup.id IS NOT NULL THEN
    IF effect_kind<>'mailbox' OR units<>1 OR NOT public.pilot_setup_current(tenant,effect_intent->>'jobId',effect_intent->>'mailboxId')
-     OR NOT coalesce(effect_intent->>'phase' IN ('inspect','list','body','confirm_grant') OR effect_intent->>'phase' LIKE 'native:%',false)
+     OR NOT coalesce(effect_intent->>'phase' IN ('inspect','list','read','confirm_grant') OR effect_intent->>'phase' LIKE 'native:%',false)
      OR operation NOT LIKE (effect_intent->>'jobId')||':%' THEN RETURN false; END IF;
    SELECT r.* INTO p FROM public.pilot_record r WHERE r.id=setup.pilot_id AND r.business_id=tenant;
  ELSE

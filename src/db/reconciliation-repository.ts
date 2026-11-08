@@ -417,9 +417,11 @@ export function createReconciliationRepository(database: Database) {
           where a.evidence_id=${evidenceId}::uuid and a.actor_id=${actor.userId}
             and a.token_hash=${reconciliationHash(token)} and a.expires_at>clock_timestamp()
             and s.id=${actor.sessionId} and s.expires_at>${at}::timestamptz
+            and s.expires_at>clock_timestamp()
             and o.reconciliation and u.two_factor_enabled and f.verified
             and s.mfa_factor_id=f.id and s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex')
             and s.mfa_verified_at<=${at}::timestamptz and s.mfa_verified_at>${at}::timestamptz-interval '15 minutes'
+            and s.mfa_verified_at<=clock_timestamp() and s.mfa_verified_at>clock_timestamp()-interval '15 minutes'
         `);
         if (!current.rows.length) throw new ApplicationError("FORBIDDEN");
       }),

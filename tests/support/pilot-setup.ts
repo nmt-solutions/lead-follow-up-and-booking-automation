@@ -72,6 +72,7 @@ export async function pilotSetupFixture(
             requestedSend: false,
             enabled: true,
             scope: { kind: "folders", refs: ["Label_sales"] },
+            salesSubjectTerms: ["inquiry"],
             history: null,
           },
         },

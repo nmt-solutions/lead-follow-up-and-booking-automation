@@ -92,6 +92,21 @@ describe("Subscription money reconciliation through the public application", () 
       code: "FORBIDDEN",
     });
   });
+  async function authorizeOriginalEvidence(operator: Headers) {
+    const stamp = (
+      await h.admin.query<{ now: Date }>("select clock_timestamp() now")
+    ).rows[0].now;
+    h.clock.set(stamp.toISOString());
+    await h.reverifyAuthenticator(operator);
+  }
+  async function evidenceGrant(
+    app: ReturnType<typeof compose>,
+    operator: Headers,
+    evidenceId: string,
+  ) {
+    await authorizeOriginalEvidence(operator);
+    return app.evidenceAccess(operator, { evidenceId });
+  }
   async function evidence(
     app: ReturnType<typeof compose>,
     op: Headers,
@@ -858,7 +873,7 @@ describe("Subscription money reconciliation through the public application", () 
       app = compose(),
       e = await evidence(app, f.operator),
       actor = await h.authenticate(f.operator);
-    const grant = await app.evidenceAccess(f.operator, { evidenceId: e.id });
+    const grant = await evidenceGrant(app, f.operator, e.id);
     expect(
       Buffer.from(
         (
@@ -914,13 +929,16 @@ describe("Subscription money reconciliation through the public application", () 
     const f = await purchase(),
       app = compose(),
       e = await evidence(app, f.operator),
-      grant = await app.evidenceAccess(f.operator, { evidenceId: e.id });
+      grant = await evidenceGrant(app, f.operator, e.id);
     let reads = 0;
     const expiring = createReconciliationApplication({
       repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
       clock: h.clock,
       authenticatePlatform: async (headers: Headers) => {
-        if (++reads === 2) h.clock.set("2026-11-05T09:16:00.000Z");
+        if (++reads === 2)
+          h.clock.set(
+            new Date(h.clock.now().getTime() + 16 * 60000).toISOString(),
+          );
         return h.access.authenticatePlatformForWork(headers);
       },
     });
@@ -936,7 +954,7 @@ describe("Subscription money reconciliation through the public application", () 
     await h.provisionOperator(operator, { tax: false, reconciliation: true });
     const app = compose(),
       original = await evidence(app, operator),
-      grant = await app.evidenceAccess(operator, { evidenceId: original.id }),
+      grant = await evidenceGrant(app, operator, original.id),
       frozen = h.clock.now().toISOString();
     // Technical lease fixture: age the publicly issued, unchanged token with
     // its original 60-second lifetime. Expiry during I/O uses real DB time.
@@ -978,12 +996,86 @@ describe("Subscription money reconciliation through the public application", () 
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+  it.each(["session", "MFA"] as const)(
+    "denies evidence after original %s expiry during the final database lock under a frozen application clock",
+    async (boundary) => {
+      h.clock.set(
+        (
+          await h.admin.query<{ now: Date }>("select clock_timestamp() now")
+        ).rows[0].now.toISOString(),
+      );
+      const operator = await h.signIn(
+        `final-db-${boundary.toLowerCase()}@example.com`,
+      );
+      await h.provisionOperator(operator, { tax: false, reconciliation: true });
+      const app = compose(),
+        original = await evidence(app, operator),
+        grant = await evidenceGrant(app, operator, original.id),
+        frozen = h.clock.now().toISOString(),
+        blocker = await h.admin.connect();
+      let identities = 0,
+        ready: (() => void) | undefined;
+      const lockReady = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      const delayed = createReconciliationApplication({
+        repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
+        clock: h.clock,
+        authenticatePlatform: async (headers: Headers) => {
+          const actor = await h.access.authenticatePlatformForWork(headers);
+          if (++identities === 3) {
+            await h.admin.query(
+              boundary === "session"
+                ? "update session set expires_at=clock_timestamp()+interval '1 second' where id=$1"
+                : "update session set mfa_verified_at=clock_timestamp()-interval '14 minutes 59 seconds' where id=$1",
+              [actor.sessionId],
+            );
+            await blocker.query("begin");
+            await blocker.query(
+              "select pg_advisory_xact_lock(hashtextextended('reconciliation',0))",
+            );
+            ready?.();
+          }
+          return actor;
+        },
+      });
+      try {
+        const outcome = delayed
+          .evidenceContent(operator, {
+            evidenceId: original.id,
+            token: grant.token,
+          })
+          .then(
+            () => "private evidence returned",
+            (error: unknown) => error,
+          );
+        await lockReady;
+        let waiting = false;
+        for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+          waiting = (
+            await h.admin.query<{ waiting: boolean }>(
+              "select exists(select 1 from pg_stat_activity where datname=current_database() and wait_event='advisory' and query like '%pg_advisory_xact_lock%') waiting",
+            )
+          ).rows[0].waiting;
+        }
+        expect(waiting).toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        await blocker.query("commit");
+        expect(await outcome).toMatchObject({ code: "FORBIDDEN" });
+        expect(h.clock.now().toISOString()).toBe(frozen);
+        expect(Date.parse(grant.expiresAt)).toBeGreaterThan(Date.now());
+      } finally {
+        await blocker.query("rollback");
+        blocker.release();
+      }
+    },
+  );
   it("requires the original persisted session after the last identity adapter has returned", async () => {
     const operator = await h.signIn("last-session-evidence@example.com");
     await h.provisionOperator(operator, { tax: false, reconciliation: true });
     const app = compose(),
       original = await evidence(app, operator),
-      grant = await app.evidenceAccess(operator, { evidenceId: original.id });
+      grant = await evidenceGrant(app, operator, original.id);
     let calls = 0;
     const signingOut = createReconciliationApplication({
       repository: createReconciliationRepository(runtimeDatabase(h.runtime)),
@@ -1005,7 +1097,7 @@ describe("Subscription money reconciliation through the public application", () 
     const f = await purchase(),
       app = compose(),
       e = await evidence(app, f.operator),
-      grant = await app.evidenceAccess(f.operator, { evidenceId: e.id }),
+      grant = await evidenceGrant(app, f.operator, e.id),
       blocker = await h.admin.connect();
     let reads = 0,
       locked: (() => void) | undefined;
@@ -1046,7 +1138,7 @@ describe("Subscription money reconciliation through the public application", () 
         waiting = state.rows[0].waiting;
       }
       expect(waiting).toBe(true);
-      h.clock.set("2026-11-05T09:16:00.000Z");
+      h.clock.set(new Date(h.clock.now().getTime() + 16 * 60000).toISOString());
       await blocker.query("commit");
       expect(await outcome).toMatchObject({ code: "MFA_REQUIRED" });
     } finally {
@@ -1088,6 +1180,7 @@ describe("Subscription money reconciliation through the public application", () 
         )
       ).status,
     ).toBe(400);
+    await authorizeOriginalEvidence(f.operator);
     const access = await http.command(request({ evidenceId: e.id }), "access"),
       grant = await access.json();
     const content = await http.command(
@@ -1141,6 +1234,7 @@ describe("Subscription money reconciliation through the public application", () 
       contentType: "text/plain",
     });
     expect(metadata).not.toHaveProperty("contentBase64");
+    await authorizeOriginalEvidence(f.operator);
     const access = await http.command(
       request({ evidenceId: metadata.id }),
       "access",
@@ -1258,7 +1352,7 @@ describe("Subscription money reconciliation through the public application", () 
         note: "Bank evidence still unavailable",
         evidenceIds: [e.id],
       });
-      await app.evidenceAccess(f.operator, { evidenceId: e.id });
+      await evidenceGrant(app, f.operator, e.id);
     });
     it("preserves original source/evidence/history and all restricted scopes while pausing writes before full configured DDL", async () => {
       const before = await compose().workspace(f.operator, cohort),
@@ -1300,9 +1394,7 @@ describe("Subscription money reconciliation through the public application", () 
         "select count(*)::int n from pg_constraint where conname='reconciliation_record_predecessor' and convalidated",
       );
       expect(scopes.rows[0].n).toBe(1);
-      const grant = await compose().evidenceAccess(f.operator, {
-        evidenceId: e.id,
-      });
+      const grant = await evidenceGrant(compose(), f.operator, e.id);
       expect(
         (
           await compose().evidenceContent(f.operator, {

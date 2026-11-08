@@ -206,6 +206,28 @@ describe("Explicit bounded pilot mailbox setup", () => {
       s.mutations.filter((mutation) => mutation.path === "/v1/orders"),
     ).toHaveLength(1);
   });
+  it("captures a selected incoming message body through the approved setup job before activation", async () => {
+    const s = await pilotSetupFixture(h, false),
+      c = s.f.owner,
+      b = s.f.business.id,
+      input = approval(s);
+    s.google.add("a1", { at: h.clock.now().toISOString() });
+    s.google.pages.set("Label_sales", {
+      messages: [{ id: "a1", threadId: "abc123" }],
+    });
+    await s.pilots.authorizeSetup(c, b, input);
+    const work = await s.mailboxes.queue(c, b, s.mailboxId, {
+      mode: "incremental",
+      pilotSetupRequestKey: input.requestKey,
+    });
+    let result = await s.mailboxes.execute(work);
+    for (let page = 0; page < 6 && result?.status === "partial"; page++)
+      result = await s.mailboxes.execute(work);
+    expect(result).toMatchObject({ status: "completed", captured: 1 });
+    expect(s.google.bodyReads).toEqual(["a1"]);
+    expect(s.google.sends).toEqual([]);
+    expect((await s.pilots.workspace(c, b)).pilots[0].status).toBe("approved");
+  });
   it("holds every native refresh and uncertain request against the same finite setup allowance", async () => {
     const s = await pilotSetupFixture(h),
       c = s.f.owner,

@@ -1000,6 +1000,43 @@ describe("Selected Gmail at the persisted application seam", () => {
       a.google.calls.filter((call) => call.url.pathname === "/revoke"),
     ).toHaveLength(1);
   });
+  it("fences another Business's Google adoption while the original attributed revocation remains pending", async () => {
+    const a = await setup(),
+      b = await setup();
+    await authorizeNativeRevoke(a.credentials);
+    await h.reverifyAuthenticator(b.credentials);
+    b.google.control.subject = a.google.control.subject;
+    await connect(a);
+    const pending = await b.app.start(
+      b.credentials,
+      b.businessId,
+      b.mailbox.id,
+    );
+    a.google.control.revokeError = 503;
+    expect(
+      await a.app.disconnect(a.credentials, a.businessId, a.mailbox.id),
+    ).toMatchObject({ status: "revocation_pending", read: false });
+    await expect(
+      b.app.callback(b.credentials, b.businessId, b.mailbox.id, {
+        state: new URL(pending.authorizationUrl).searchParams.get("state"),
+        code: "fixture-code",
+      }),
+    ).rejects.toThrow();
+    expect(
+      await b.app.read(b.credentials, b.businessId, b.mailbox.id),
+    ).toMatchObject({ status: "connecting", read: false });
+    a.google.control.revokeError = 0;
+    await a.app.disconnect(a.credentials, a.businessId, a.mailbox.id);
+    b.google.control.refreshToken = "fresh-after-revocation";
+    await connect(b);
+    expect(await synchronize(b)).toMatchObject({ status: "completed" });
+    expect(
+      a.google.calls.filter((call) => call.url.pathname === "/revoke"),
+    ).toHaveLength(2);
+    expect(
+      b.google.calls.filter((call) => call.url.pathname === "/revoke"),
+    ).toEqual([]);
+  });
   it("never revokes another Business's genuine Google token rejected during ordinary reconnect and disconnect", async () => {
     const a = await setup(),
       b = await setup("other@example.com");
