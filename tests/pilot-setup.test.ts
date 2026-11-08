@@ -71,6 +71,48 @@ describe("Explicit bounded pilot mailbox setup", () => {
     });
   }
 
+  describe("upgrade from the deployed pilot event constraint", () => {
+    let upgraded: Awaited<ReturnType<typeof pilotSetupFixture>>;
+    beforeEach(async () => {
+      upgraded = await pilotSetupFixture(h, false);
+      // Infrastructure fixture: the previous released deployment has only the
+      // original event kinds. Exercise the full pinned prepare/push/secure path.
+      await h.admin.query(`
+        alter table public.pilot_event drop constraint pilot_event_kind;
+        alter table public.pilot_event add constraint pilot_event_kind
+          check(kind in ('prepared','approved','activated','effort','results','renewal','reuse','stopped'));
+      `);
+      await h.reapplySchema();
+    });
+    it("authorizes and executes selected setup after upgrading an existing deployed schema", async () => {
+      const s = upgraded,
+        c = s.f.owner,
+        b = s.f.business.id,
+        input = approval(s);
+      const approved = await s.pilots.authorizeSetup(c, b, input);
+      expect(approved.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "setup_authorized",
+            requestKey: input.requestKey,
+          }),
+        ]),
+      );
+      const work = await s.mailboxes.queue(c, b, s.mailboxId, {
+        mode: "incremental",
+        pilotSetupRequestKey: input.requestKey,
+      });
+      let result = await s.mailboxes.execute(work);
+      for (let page = 0; page < 6 && result?.status === "partial"; page++)
+        result = await s.mailboxes.execute(work);
+      expect(result).toMatchObject({ status: "completed" });
+      expect((await s.pilots.workspace(c, b)).pilots[0].status).toBe(
+        "approved",
+      );
+      expect(s.google.sends).toEqual([]);
+    });
+  });
+
   it("repairs a paid prepared pilot whose selected native synchronization becomes stale before activation", async () => {
     const s = await pilotSetupFixture(h),
       b = s.f.business.id,

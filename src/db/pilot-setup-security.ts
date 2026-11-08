@@ -2,6 +2,13 @@ import type { PoolClient } from "pg";
 
 /** Private predicate for the original explicitly approved read-only job. */
 export async function securePilotSetup(pool: PoolClient) {
+  // Pinned Drizzle push does not update an existing CHECK. Install this exact
+  // expanded event set inside managed secure, after preparation pauses writes.
+  await pool.query(`
+ ALTER TABLE public.pilot_event DROP CONSTRAINT IF EXISTS pilot_event_kind;
+ ALTER TABLE public.pilot_event ADD CONSTRAINT pilot_event_kind
+   CHECK(kind IN ('prepared','approved','activated','effort','results','renewal','reuse','stopped','setup_authorized'));
+ `);
   await pool.query(`
  CREATE OR REPLACE FUNCTION public.pilot_setup_current(tenant uuid,job text,mailbox text) RETURNS boolean
  LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
