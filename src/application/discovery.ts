@@ -1,3 +1,4 @@
+import type { createCapacityDiscoveryQueue } from "../discovery/capacity";
 import {
   saveScheduleSchema,
   scheduleCommandSchema,
@@ -24,6 +25,7 @@ import type { DiscoveryRepository } from "../discovery/repository";
 import {
   discover,
   DiscoveryServices,
+  DiscoveryFailure,
   owned,
   exitReason,
 } from "../discovery/workflow";
@@ -45,9 +47,11 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   clock: Clock;
   provider: DiscoveryProvider | null;
   queue: {
+    capacity?: ReturnType<typeof createCapacityDiscoveryQueue>["capacity"];
     enqueue(work: DiscoveryWork): Promise<void>;
     schedule?(work: ScheduleWork): Promise<void>;
   } | null;
+  requireCapacity?: boolean;
   reportFailure?(diagnostic: {
     businessId: string;
     runId: string;
@@ -55,8 +59,19 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   }): void;
 }) {
   const { repository, clock } = dependencies;
-  async function publish(actor?: Actor, businessId?: string) {
-    const pending = await repository.pendingDispatches(actor, businessId);
+  async function publish(
+    actor?: Actor,
+    businessId?: string,
+    target?: { businessId: string; dispatchId: string },
+  ) {
+    const pending = (
+      await repository.pendingDispatches(actor, businessId)
+    ).filter(
+      (item) =>
+        !target ||
+        (item.id === target.dispatchId &&
+          item.payload.work.businessId === target.businessId),
+    );
     let failed = false;
     for (const item of pending) {
       let accepted = false;
@@ -125,6 +140,17 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
   }
   async function workspace(credentials: Credentials, id: unknown) {
     const actor = await dependencies.authenticate(credentials);
+    const capacity = await dependencies.queue?.capacity?.workspace(
+      actor,
+      validate(businessIdSchema, id),
+    );
+    if (capacity) {
+      const current = await dependencies.authenticate(credentials);
+      if (current.userId !== actor.userId)
+        throw new ApplicationError("FORBIDDEN");
+    }
+    // Read private source/evidence state only after native I/O and current
+    // original-session authorization. A revoked read must not return old data.
     const state = await repository.workspace(
       actor,
       validate(businessIdSchema, id),
@@ -153,6 +179,25 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
       state.setup.push(
         "Saved-search scheduling and dispatch recovery are not configured.",
       );
+    if (capacity) {
+      state.capacity = capacity;
+      if (!["available", "busy"].includes(state.capacity.status))
+        state.setup.push(
+          "Discovery execution capacity requires current operator approval, paid entitlement and verified worker deployment. Existing work remains available.",
+        );
+    }
+    if (dependencies.requireCapacity && !state.capacity)
+      state.capacity = {
+        mode: null,
+        status: "setup_required",
+        slots: 0,
+        running: null,
+        queued: null,
+        observedAt: null,
+      };
+    const current = await dependencies.authenticate(credentials);
+    if (current.userId !== actor.userId)
+      throw new ApplicationError("FORBIDDEN");
     return state;
   }
   return {
@@ -225,7 +270,8 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
         return { outcome: reason };
       }
     },
-    recoverDispatches: () => publish(),
+    recoverDispatches: (target?: { businessId: string; dispatchId: string }) =>
+      publish(undefined, undefined, target),
     async stopSchedule(payload: unknown) {
       const work = validate(scheduleWorkSchema, payload);
       await repository.failSchedule(work, "worker_lost", clock.now());
@@ -291,6 +337,23 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
       options: { signal?: AbortSignal; durable?: DurableAttempt } = {},
     ) {
       const work = validate(workSchema, payload);
+      // Unavailable native observation retries under Trigger without claiming or spending.
+      if (dependencies.requireCapacity && !dependencies.queue?.capacity)
+        throw new Error("Discovery capacity setup is required");
+      try {
+        await dependencies.queue?.capacity?.authorize(work);
+      } catch (error: unknown) {
+        if (!(error instanceof ApplicationError))
+          throw new Error(
+            "Discovery capacity is unavailable; retry the same durable work",
+          );
+        const reason =
+          error.code === "DISCOVERY_SCOPE_INVALID"
+            ? "configuration_changed"
+            : "authorization_revoked";
+        await repository.finish(work, reason, clock.now());
+        return { outcome: reason };
+      }
       let run;
       try {
         await dependencies.authenticateWork(work);
@@ -337,7 +400,15 @@ export function createDiscoveryApplication<Credentials>(dependencies: {
               repository,
               clock,
               provider,
-              authorize: () => dependencies.authenticateWork(work),
+              authorize: async () => {
+                try {
+                  await dependencies.queue?.capacity?.authorize(work);
+                } catch (error: unknown) {
+                  if (error instanceof ApplicationError) throw error;
+                  throw new DiscoveryFailure("queue_unavailable");
+                }
+                return dependencies.authenticateWork(work);
+              },
             }),
           ),
           { signal },

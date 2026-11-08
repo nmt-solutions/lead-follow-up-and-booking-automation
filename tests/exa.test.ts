@@ -1,3 +1,4 @@
+import { persistPaidSubscription } from "./support/paid-subscription";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createHarness } from "./support/harness";
@@ -177,6 +178,11 @@ describe("Exa through the discovery application and real persistence", () => {
       business.id,
       configuration,
     );
+    await persistPaidSubscription(harness, owner, business.id, {
+      markets: policy.activeMarkets,
+      discovery: { quantity: 100000, unit: policy.allowanceUnit },
+      automation: { quantity: 10000, unit: "provider calls" },
+    });
     await harness.admin.query(
       "insert into discovery_configuration (business_id, policy) values ($1,$2)",
       [

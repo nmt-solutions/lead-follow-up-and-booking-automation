@@ -1,3 +1,4 @@
+import { selectSenderAdapter } from "../senders/adapter";
 import { z } from "zod";
 import { ApplicationError } from "../models/application-error";
 import { businessIdSchema, type Clock } from "../models/business";
@@ -26,7 +27,7 @@ export function createSenderApplication<Credentials>(dependencies: {
   adapter: SenderAdapter;
   clock: Clock;
 }) {
-  const { repository, adapter, clock } = dependencies;
+  const { repository, clock } = dependencies;
   async function context(credentials: Credentials, id: unknown) {
     return {
       actor: await dependencies.authenticate(credentials),
@@ -36,7 +37,7 @@ export function createSenderApplication<Credentials>(dependencies: {
   return {
     async workspace(credentials: Credentials, id: unknown) {
       const c = await context(credentials, id);
-      return repository.workspace(c.actor, c.businessId, adapter);
+      return repository.workspace(c.actor, c.businessId, dependencies.adapter);
     },
     async saveConnection(
       credentials: Credentials,
@@ -68,7 +69,7 @@ export function createSenderApplication<Credentials>(dependencies: {
         c.actor,
         c.businessId,
         parse(senderSaveSchema(senderIdentitySchema), input),
-        adapter,
+        dependencies.adapter,
       );
     },
     async check(
@@ -88,6 +89,10 @@ export function createSenderApplication<Credentials>(dependencies: {
         c.businessId,
         identity,
         expectedVersion,
+      );
+      const adapter = selectSenderAdapter(
+        dependencies.adapter,
+        inspection.connection?.configuration.provider ?? "",
       );
       let result: unknown;
       const controller = new AbortController();

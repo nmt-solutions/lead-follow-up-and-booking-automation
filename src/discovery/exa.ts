@@ -8,6 +8,7 @@ import {
   type DiscoveryPolicy,
   type DiscoveryProvider,
   type DiscoveryBrief,
+  type DiscoveryProviderCost,
 } from "../models/discovery";
 import type { Clock } from "../models/business";
 
@@ -142,6 +143,30 @@ export function createExaRetrieval(dependencies: {
     publishedDate: z.iso.datetime({ offset: true }).optional(),
   });
   const invalid = () => new DiscoveryProviderFailure("invalid_response");
+  async function reportCost(
+    raw: unknown,
+    record?: (value: DiscoveryProviderCost) => Promise<void>,
+  ) {
+    if (!record) return;
+    const response = z
+      .object({
+        requestId: z
+          .string()
+          .regex(/^[a-zA-Z0-9_.:-]{1,160}$/)
+          .optional(),
+        costDollars: z
+          .object({ total: z.number().finite().nonnegative().max(1e12) })
+          .optional(),
+      })
+      .safeParse(raw);
+    await record({
+      provider: "exa",
+      estimatedUsd: response.success
+        ? (response.data.costDollars?.total ?? null)
+        : null,
+      requestId: response.success ? (response.data.requestId ?? null) : null,
+    });
+  }
   return {
     id: "exa-search-contents-v1",
     setup,
@@ -169,6 +194,7 @@ export function createExaRetrieval(dependencies: {
         input.signal,
         config.requestTimeoutMs,
       );
+      await reportCost(raw, input.recordCost);
       const response = z
         .object({ results: z.array(entry).max(input.limit) })
         .safeParse(raw);
@@ -218,6 +244,7 @@ export function createExaRetrieval(dependencies: {
         input.signal,
         config.requestTimeoutMs,
       );
+      await reportCost(raw, input.recordCost);
       const response = z
         .object({
           results: z

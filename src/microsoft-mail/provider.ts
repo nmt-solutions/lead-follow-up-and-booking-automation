@@ -69,7 +69,12 @@ function continuation(value: string, path: string, filter: string | null) {
       throw new MicrosoftMailFailure("invalid_response");
   if (
     (url.searchParams.has("$select") &&
-      url.searchParams.get("$select") !== graphMetadataFields) ||
+      ![
+        graphMetadataFields,
+        // Existing #30 delta links remain opaque and usable. Each referenced message is
+        // still fetched independently with the current metadata selection (including Reply-To).
+        graphMetadataFields.replace(",replyTo", ""),
+      ].includes(url.searchParams.get("$select")!)) ||
     (url.searchParams.has("$filter") &&
       url.searchParams.get("$filter") !== filter)
   )
@@ -89,6 +94,16 @@ export function createMicrosoftMailProvider(
   clock: Clock,
 ): MailboxProvider {
   const http = connection.http;
+  async function api(
+    context: MailboxSnapshot,
+    ...args: Parameters<NonNullable<typeof http>["api"]>
+  ) {
+    await context.authorizeNative?.(
+      `microsoft:read:${createHash("sha256").update(args[0]).digest("hex")}`,
+    );
+    return http!.api(...args);
+  }
+
   async function call<T>(
     context: MailboxSnapshot,
     signal: AbortSignal,
@@ -109,7 +124,11 @@ export function createMicrosoftMailProvider(
       throw error;
     }
   }
-  async function nativeFolders(token: string, signal: AbortSignal) {
+  async function nativeFolders(
+    context: MailboxSnapshot,
+    token: string,
+    signal: AbortSignal,
+  ) {
     const ids: string[] = [];
     for (const alias of [
       "sentitems",
@@ -121,7 +140,12 @@ export function createMicrosoftMailProvider(
       ids.push(
         microsoftValue(
           z.object({ id: graphId }),
-          await http!.api(`me/mailFolders/${alias}?$select=id`, token, signal),
+          await api(
+            context,
+            `me/mailFolders/${alias}?$select=id`,
+            token,
+            signal,
+          ),
         ).id,
       );
     return { sentFolderRef: ids[0], excludedFolderRefs: ids.slice(1) };
@@ -133,7 +157,8 @@ export function createMicrosoftMailProvider(
       return call(context, signal, async (token, revision, ownerId) => {
         const purpose = microsoftValue(
           z.object({ userPurpose: z.string() }),
-          await http!.api(
+          await api(
+            context,
             "me/mailboxSettings?$select=userPurpose",
             token,
             signal,
@@ -141,6 +166,7 @@ export function createMicrosoftMailProvider(
         );
         if (purpose.userPurpose !== "user")
           throw new MicrosoftMailFailure("unsupported_account");
+        await context.authorizeNative?.("microsoft:profile");
         const profile = await http!.profile(token, signal);
         if (
           profile.id !== ownerId ||
@@ -149,14 +175,14 @@ export function createMicrosoftMailProvider(
         )
           throw new MicrosoftMailFailure("account_mismatch");
         const available = await loadMicrosoftMailFolders(
-            http!,
+            { ...http!, api: (...args) => api(context, ...args) },
             token,
             signal,
             context.configuration.scope.kind === "folders"
               ? context.configuration.scope.refs
               : undefined,
           ),
-          microsoft = await nativeFolders(token, signal),
+          microsoft = await nativeFolders(context, token, signal),
           availableThreads: string[] = [];
         if (context.configuration.scope.kind === "threads")
           for (const ref of context.configuration.scope.refs) {
@@ -174,7 +200,7 @@ export function createMicrosoftMailProvider(
                   )
                   .max(1),
               }),
-              await http!.api(`me/messages?${query}`, token, signal),
+              await api(context, `me/messages?${query}`, token, signal),
             );
             if (page.value.length) availableThreads.push(ref);
           }
@@ -280,7 +306,8 @@ export function createMicrosoftMailProvider(
         });
         let raw: unknown;
         try {
-          raw = await http!.api(
+          raw = await api(
+            context,
             folder.link ? continuation(folder.link, path, filter) : initial,
             token,
             signal,
@@ -329,7 +356,8 @@ export function createMicrosoftMailProvider(
           try {
             const value = microsoftValue(
               graphMessageSchema,
-              await http!.api(
+              await api(
+                context,
                 `me/messages/${encodeURIComponent(entry.id)}?$select=${graphMetadataFields}`,
                 token,
                 signal,
@@ -371,9 +399,10 @@ export function createMicrosoftMailProvider(
     },
     read(context, metadata, signal) {
       return call(context, signal, async (token) => {
-        const native = await nativeFolders(token, signal);
+        const native = await nativeFolders(context, token, signal);
         return graphEvent(
-          await http!.api(
+          await api(
+            context,
             `me/messages/${encodeURIComponent(metadata.messageRef)}?$select=${graphMetadataFields},body`,
             token,
             signal,

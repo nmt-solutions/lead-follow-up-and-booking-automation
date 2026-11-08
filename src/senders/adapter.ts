@@ -9,3 +9,22 @@ export const unavailableSenderAdapter: SenderAdapter = {
     throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
   },
 };
+
+export const selectSenderAdapter = (adapter: SenderAdapter, provider: string) =>
+  adapter.select?.(provider) ?? adapter;
+export function routeSenderAdapters(
+  providers: Readonly<Record<string, SenderAdapter>>,
+): SenderAdapter {
+  const select = (provider: string) =>
+    providers[provider] ?? unavailableSenderAdapter;
+  return {
+    key: "native-mail-v1",
+    mode: Object.keys(providers).length ? "live" : "unconfigured",
+    select,
+    inspect: (context, signal) =>
+      select(context.connection?.configuration.provider ?? "").inspect(
+        context,
+        signal,
+      ),
+  };
+}

@@ -1,10 +1,55 @@
+import { pilotCostOwnerRead } from "./pilot-owner-policies";
+import type { CapacityRoute } from "../models/discovery-capacity";
+import type { CapacityPolicy } from "../models/discovery-capacity";
+import type { MailAcceptance } from "../models/mail-dispatch";
+import type { ReconciliationEntry } from "../models/reconciliation";
+import type {
+  FilingPolicyDefinition,
+  FilingTarget,
+  FilingPolicy,
+  FilingEvidence,
+} from "../models/tax-filings";
+import type {
+  ObligationDefinition,
+  ReportingPeriod,
+  LiabilitySnapshot,
+  LiabilityReport,
+  TaxReminder,
+} from "../models/tax-periods";
+import type { ReachSnapshot, ReachFact } from "../models/reach-changes";
+import type { DataPolicy, OffboardInput } from "../models/data-governance";
+import type {
+  OperationSnapshot,
+  DiagnosticRetention,
+} from "../models/operations";
+import type {
+  SubscriptionLifecycle,
+  LifecycleEvent,
+} from "../models/subscription-lifecycle";
 import type {
   MailboxConfiguration,
   MailboxGrant,
   MailboxJobState,
   MailboxMetadata,
 } from "../models/mailboxes";
-import type { WorkIdentity } from "../models/discovery";
+import type { WorkIdentity, DiscoveryProviderCost } from "../models/discovery";
+import type { CostSource, CostPlanning, CostBudget } from "../models/costs";
+import type { HealthPayload } from "../models/sender-health";
+import type { MetaActivity } from "../models/whatsapp-intake";
+import type { MetaOutboundData } from "../models/whatsapp-sending";
+import type { TaxRule, TaxCalculation } from "../models/tax";
+import type {
+  IssuerConfiguration,
+  DocumentSnapshot,
+} from "../models/seller-documents";
+import type {
+  PaymentSnapshot,
+  CheckoutReference,
+  PaymentObservation,
+  PaymentAction,
+  MandateProof,
+  PilotCheckoutProof,
+} from "../models/subscription-payments";
 import type { MailboxAuthorizationStatus } from "../models/mailbox-authorization";
 import type { MailManual } from "../models/mail-native";
 import type {
@@ -12,6 +57,11 @@ import type {
   MicrosoftIdentity,
 } from "../models/microsoft-calendar";
 import { sql } from "drizzle-orm";
+import type {
+  AdjustmentIntent,
+  AdjustmentObservation,
+  FinancialReceipt,
+} from "../models/financial-adjustments";
 import type { CampaignSnapshot } from "../models/campaigns";
 import type {
   SequencePolicy,
@@ -37,9 +87,19 @@ import type {
   SenderInspection,
 } from "../models/senders";
 import type { GoogleCalendarStatus } from "../models/google-calendar";
+import type {
+  WhatsAppConfiguration,
+  WhatsAppStatus,
+  WhatsAppReason,
+  MetaObservation,
+  MetaAssets,
+  MetaEvidenceReview,
+  MetaEvidenceRevocation,
+} from "../models/whatsapp";
 import {
   bigint,
   boolean,
+  bigserial,
   check,
   ForeignKey,
   foreignKey,
@@ -53,11 +113,21 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 import type { BusinessRole, Invitation } from "../models/team";
 import type { SavedConfiguration } from "../models/configuration";
 import type { FileState } from "../models/files";
+import type {
+  BillingProfile,
+  BillingRevision,
+  BillingReview,
+} from "../models/billing";
+import type {
+  SubscriptionOffer,
+  SubscriptionQuote,
+} from "../models/subscription-quotes";
 import type {
   AiProfile,
   AiSample,
@@ -68,6 +138,7 @@ import type {
 } from "../models/ai";
 import type { KnowledgeConfiguration } from "../models/knowledge";
 import type { InquirySnapshot, InquiryResult } from "../models/inquiries";
+import type { OpportunityMail } from "../models/opportunity-mail";
 import type { RfqRecord } from "../models/rfq";
 import type {
   BookingConfiguration,
@@ -244,6 +315,11 @@ export const business = pgTable(
       "business_offering_length",
       sql`char_length(btrim(${table.offering})) between 1 and 4000`,
     ),
+    pgPolicy("business_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.business'::regclass)`,
+    }),
     pgPolicy("business_access", {
       for: "all",
       to: appRuntime,
@@ -359,6 +435,677 @@ export const commercialAuthorityRevision = pgTable(
     }),
   ],
 ).enableRLS();
+const pricingOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.pricing)`;
+export const subscriptionPricingRevision = pgTable(
+  "subscription_pricing_revision",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    effectiveFrom: timestamp("effective_from", {
+      withTimezone: true,
+    }).notNull(),
+    offers: jsonb("offers").$type<SubscriptionOffer[]>().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_pricing_version").on(t.version),
+    check(
+      "subscription_pricing_version_positive",
+      sql`${t.version} > 0 and ${t.effectiveFrom} >= ${t.at}`,
+    ),
+    pgPolicy("subscription_pricing_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${pricingOperatorScope}) or public.current_business_role() in ('owner','admin')`,
+    }),
+    pgPolicy("subscription_pricing_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${pricingOperatorScope}) and ${t.actorId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+const taxOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.tax)`;
+const billingOperatorScope = sql`current_setting('app.billing_review', true) = 'true' and (${taxOperatorScope})`;
+const taxRuleReadScope = sql`(${billingOperatorScope}) or (current_setting('app.tax_calculation', true) = 'true' and public.current_business_role() in ('owner','admin'))`;
+export const taxRuleRevision = pgTable(
+  "tax_rule_revision",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    version: integer("version").notNull(),
+    rule: jsonb("rule").$type<TaxRule>().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("tax_rule_key_version").on(table.key, table.version),
+    check("tax_rule_version_positive", sql`${table.version}>0`),
+    pgPolicy("tax_rule_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxRuleReadScope,
+    }),
+    pgPolicy("tax_rule_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${billingOperatorScope}) and ${table.actorId}=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const taxRuleDecision = pgTable(
+  "tax_rule_decision",
+  {
+    id: uuid("id").primaryKey(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => taxRuleRevision.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("tax_decision_revision_version").on(
+      table.revisionId,
+      table.version,
+    ),
+    check("tax_decision_version_positive", sql`${table.version}>0`),
+    check(
+      "tax_decision_outcome",
+      sql`${table.outcome} in ('approved','withdrawn')`,
+    ),
+    pgPolicy("tax_decision_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxRuleReadScope,
+    }),
+    pgPolicy("tax_decision_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${billingOperatorScope}) and ${table.actorId}=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const taxCalculation = pgTable(
+  "tax_calculation",
+  {
+    version: integer("version").notNull(),
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    resolvesId: uuid("resolves_id"),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<TaxCalculation>().notNull(),
+  },
+  (table) => [
+    uniqueIndex("tax_calculation_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check("tax_calculation_version_positive", sql`${table.version}>0`),
+    uniqueIndex("tax_calculation_request").on(
+      table.businessId,
+      table.requestKey,
+    ),
+    uniqueIndex("tax_calculation_resolution").on(table.resolvesId),
+    uniqueIndex("tax_calculation_business_id").on(table.businessId, table.id),
+    check(
+      "tax_calculation_snapshot_scope",
+      sql`${table.snapshot}->>'id'=${table.id}::text and ${table.snapshot}->>'businessId'=${table.businessId}::text and ${table.snapshot}->>'actorId'=${table.actorId} and ${table.snapshot}->>'requestKey'=${table.requestKey}::text`,
+    ),
+    pgPolicy("tax_calculation_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${billingOperatorScope})`,
+    }),
+    pgPolicy("tax_calculation_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`((${managerScope}) or (${billingOperatorScope})) and ${table.businessId}=nullif(current_setting('app.business_id',true),'')::uuid and ${table.actorId}=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const taxScopeForeignKeys = [
+  new ForeignKey(
+    taxCalculation,
+    foreignKey({
+      name: "tax_calculation_resolution_scope",
+      columns: [taxCalculation.businessId, taxCalculation.resolvesId],
+      foreignColumns: [taxCalculation.businessId, taxCalculation.id],
+    }),
+  ),
+];
+export const billingProfileRevision = pgTable(
+  "billing_profile_revision",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    version: integer("version").notNull(),
+    profile: jsonb("profile").$type<BillingProfile>().notNull(),
+    evidence: jsonb("evidence").$type<BillingRevision["evidence"]>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_profile_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check("billing_profile_version_positive", sql`${table.version} > 0`),
+    pgPolicy("billing_profile_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${billingOperatorScope})`,
+    }),
+    pgPolicy("billing_profile_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${table.actorId} = current_setting('app.actor_id', true)`,
+    }),
+  ],
+).enableRLS();
+
+export const billingProfileReview = pgTable(
+  "billing_profile_review",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => billingProfileRevision.id),
+    profileVersion: integer("profile_version").notNull(),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<BillingReview["outcome"]>().notNull(),
+    findings: jsonb("findings").$type<string[]>().notNull(),
+    note: text("note").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    actorName: text("actor_name").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_review_business_version").on(
+      table.businessId,
+      table.version,
+    ),
+    check(
+      "billing_review_version_positive",
+      sql`${table.version} > 0 and ${table.profileVersion} > 0`,
+    ),
+    check(
+      "billing_review_outcome",
+      sql`${table.outcome} in ('reviewed','missing','conflicting')`,
+    ),
+    pgPolicy("billing_review_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${billingOperatorScope})`,
+    }),
+    pgPolicy("billing_review_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${billingOperatorScope}) and ${table.actorId} = current_setting('app.actor_id', true)
+        and ${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
+        and exists (select 1 from public.billing_profile_revision p where p.id = ${table.profileId} and p.business_id = ${table.businessId} and p.version = ${table.profileVersion})`,
+    }),
+  ],
+).enableRLS();
+
+export const subscriptionQuote = pgTable(
+  "subscription_quote",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    pricingId: uuid("pricing_id")
+      .notNull()
+      .references(() => subscriptionPricingRevision.id),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => billingProfileRevision.id),
+    reviewId: uuid("review_id")
+      .notNull()
+      .references(() => billingProfileReview.id),
+    snapshot: jsonb("snapshot").$type<SubscriptionQuote>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_quote_request_once").on(
+      t.businessId,
+      t.requestKey,
+    ),
+    unique("subscription_quote_scope").on(t.id, t.businessId),
+    pgPolicy("subscription_quote_read", {
+      for: "select",
+      to: appRuntime,
+      using: managerScope,
+    }),
+    pgPolicy("subscription_quote_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and ${t.actorId} = current_setting('app.actor_id', true)
+    and exists (select 1 from public.billing_profile_revision p join public.billing_profile_review r on r.profile_id=p.id and r.business_id=p.business_id where p.id=${t.profileId} and p.business_id=${t.businessId} and r.id=${t.reviewId} and r.outcome='reviewed')
+    and ${t.snapshot}->>'businessId'=${t.businessId}::text and ${t.snapshot}->>'id'=${t.id}::text`,
+    }),
+  ],
+).enableRLS();
+
+const refundOperator = sql`exists (select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.refunds)`;
+const paymentOperator = sql`exists (select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.reconciliation)`;
+const paymentOwner = sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.subscription_payment'::regclass)`;
+function paymentHistoryPolicies(name: string, action: ReturnType<typeof sql>) {
+  const scope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid`;
+  const worker = sql`public.payment_worker_authorized(${action},business_id)`;
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${paymentOperator}) ${name === "subscription_period" ? sql`or exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and (o.documents or o.refunds))` : sql``} or ((${scope}) and (public.current_business_role() in ('owner','admin') or (${worker})))`,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${scope}) and (${worker})`,
+    }),
+    pgPolicy(`${name}_system`, {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ];
+}
+export const subscriptionPayment = pgTable(
+  "subscription_payment",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    operationKey: uuid("operation_key").notNull(),
+    recoveryKey: uuid("recovery_key").notNull(),
+    quoteId: uuid("quote_id")
+      .notNull()
+      .references(() => subscriptionQuote.id),
+    snapshot: jsonb("snapshot").$type<PaymentSnapshot>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    state: text("state").$type<PaymentAction["state"]>().notNull(),
+    started: boolean("started").notNull().default(false),
+    reason: text("reason"),
+    checkout: jsonb("checkout").$type<CheckoutReference>(),
+    observation: jsonb("observation").$type<PaymentObservation>(),
+    recovery: jsonb("recovery").$type<PaymentAction["recovery"]>(),
+    lifecycle: jsonb("lifecycle").$type<SubscriptionLifecycle>(),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+    reconciliationPending: boolean("reconciliation_pending")
+      .notNull()
+      .default(false),
+  },
+  (t) => [
+    uniqueIndex("subscription_payment_request").on(t.businessId, t.requestKey),
+    uniqueIndex("subscription_payment_operation").on(t.operationKey),
+    unique("subscription_payment_scope").on(t.id, t.businessId),
+    check(
+      "subscription_payment_snapshot_scope",
+      sql`${t.snapshot}->'quote'->>'businessId'=${t.businessId}::text and ${t.snapshot}->'quote'->>'id'=${t.quoteId}::text`,
+    ),
+    pgPolicy("subscription_payment_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${paymentOperator}) or (${managerScope}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.payment_worker_authorized(id,business_id))`,
+    }),
+    pgPolicy("subscription_payment_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`((${managerScope}) and ${t.actorId}=current_setting('app.actor_id',true) and exists(select 1 from public.subscription_quote q where q.id=${t.quoteId} and q.business_id=${t.businessId})) or public.reach_payment_insert(${t.id},${t.businessId},${t.snapshot},${t.actorId})`,
+    }),
+    pgPolicy("subscription_payment_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${managerScope}) or public.payment_worker_authorized(id,business_id)`,
+      withCheck: sql`(${managerScope}) or public.payment_worker_authorized(id,business_id)`,
+    }),
+    pgPolicy("subscription_payment_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const subscriptionLifecycleEvent = pgTable(
+  "subscription_lifecycle_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    lifecycle: jsonb("lifecycle").$type<SubscriptionLifecycle>().notNull(),
+    notice: jsonb("notice").$type<LifecycleEvent["notice"]>(),
+  },
+  (t) => [
+    uniqueIndex("subscription_lifecycle_event_identity").on(t.actionId, t.key),
+    ...paymentHistoryPolicies(
+      "subscription_lifecycle_event",
+      sql`${t.actionId}`,
+    ),
+  ],
+).enableRLS();
+export const subscriptionPaymentEvent = pgTable(
+  "subscription_payment_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id"),
+    actionId: uuid("action_id"),
+    provider: text("provider").notNull(),
+    account: text("account").notNull(),
+    eventId: text("event_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    observation: jsonb("observation").$type<PaymentObservation>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    pilotCostOwnerRead("subscription_payment_event"),
+    uniqueIndex("subscription_payment_event_identity").on(
+      t.provider,
+      t.account,
+      t.eventId,
+    ),
+    check(
+      "subscription_payment_event_optional_scope",
+      sql`(${t.businessId} is null)=(${t.actionId} is null)`,
+    ),
+    ...paymentHistoryPolicies("subscription_payment_event", sql`${t.actionId}`),
+  ],
+).enableRLS();
+export const subscriptionPaymentHistory = pgTable(
+  "subscription_payment_history",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    kind: text("kind").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    detail: jsonb("detail")
+      .$type<{
+        state: PaymentAction["state"];
+        reason: string | null;
+        observation: PaymentObservation | null;
+        checkoutProof?: MandateProof | PilotCheckoutProof;
+      }>()
+      .notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    pilotCostOwnerRead("subscription_payment_history"),
+    ...paymentHistoryPolicies(
+      "subscription_payment_history",
+      sql`${t.actionId}`,
+    ),
+  ],
+).enableRLS();
+export const subscriptionPeriod = pgTable(
+  "subscription_period",
+  {
+    id: uuid("id").primaryKey(),
+    actionId: uuid("action_id").notNull(),
+    businessId: uuid("business_id").notNull(),
+    provider: text("provider").notNull(),
+    account: text("account").notNull(),
+    paymentId: text("payment_id").notNull(),
+    start: timestamp("start", { withTimezone: true }).notNull(),
+    end: timestamp("end", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<PaymentSnapshot>().notNull(),
+    charge: jsonb("charge").$type<PaymentObservation>(),
+  },
+  (t) => [
+    pilotCostOwnerRead("subscription_period"),
+    uniqueIndex("subscription_period_window_once").on(
+      t.actionId,
+      t.start,
+      t.end,
+    ),
+    uniqueIndex("subscription_period_payment_once").on(
+      t.provider,
+      t.account,
+      t.paymentId,
+    ),
+    unique("subscription_period_scope").on(t.id, t.businessId),
+    check("subscription_period_window", sql`${t.end}>${t.start}`),
+    ...paymentHistoryPolicies("subscription_period", sql`${t.actionId}`),
+  ],
+).enableRLS();
+export const subscriptionUsage = pgTable(
+  "subscription_usage",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    periodId: uuid("period_id").notNull(),
+    kind: text("kind").$type<"discovery" | "automation">().notNull(),
+    operationId: uuid("operation_id").notNull(),
+    quantity: integer("quantity").notNull(),
+    unit: text("unit").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("subscription_usage_operation").on(
+      t.businessId,
+      t.kind,
+      t.operationId,
+    ),
+    check("subscription_usage_positive", sql`${t.quantity}>0`),
+    pgPolicy("subscription_usage_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() is not null`,
+    }),
+    pgPolicy("subscription_usage_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() is not null`,
+    }),
+  ],
+).enableRLS();
+
+const reachOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.reconciliation)`;
+const reachWorker = sql`public.reach_worker_authorized(id,business_id)`;
+export const reachChange = pgTable(
+  "reach_change",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    periodId: uuid("period_id").notNull(),
+    actionId: uuid("action_id").notNull(),
+    quoteId: uuid("quote_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    recoveryKey: uuid("recovery_key").notNull(),
+    snapshot: jsonb("snapshot").$type<ReachSnapshot>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique("reach_change_scope").on(t.id, t.businessId),
+    uniqueIndex("reach_change_request").on(t.businessId, t.requestKey),
+    check(
+      "reach_change_snapshot_scope",
+      sql`${t.snapshot}->'original'->>'id'=${t.periodId}::text and ${t.snapshot}->'original'->>'businessId'=${t.businessId}::text and ${t.snapshot}->'action'->>'id'=${t.actionId}::text and ${t.snapshot}->'target'->'quote'->>'id'=${t.quoteId}::text`,
+    ),
+    pgPolicy("reach_change_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${reachOperator}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and (${reachWorker}))`,
+    }),
+    pgPolicy("reach_change_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${managerScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const reachChangeEvent = pgTable(
+  "reach_change_event",
+  {
+    position: bigserial("position", { mode: "number" }).notNull(),
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    changeId: uuid("change_id").notNull(),
+    key: text("key").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    fact: jsonb("fact").$type<ReachFact>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("reach_change_event_identity").on(t.changeId, t.key),
+    uniqueIndex("reach_change_request_identity")
+      .on(t.businessId, t.key)
+      .where(sql`${t.key} like 'request:%'`),
+    pgPolicy("reach_change_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${managerScope}) or (${reachOperator}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.reach_worker_authorized(change_id,business_id))`,
+    }),
+    pgPolicy("reach_change_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and (public.reach_worker_authorized(change_id,business_id) or (((${managerScope}) or (${reachOperator})) and actor_id=current_setting('app.actor_id',true)))`,
+    }),
+  ],
+).enableRLS();
+export const reachChangeScopeForeignKeys = [
+  new ForeignKey(
+    reachChange,
+    foreignKey({
+      name: "reach_change_period_scope",
+      columns: [reachChange.periodId, reachChange.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+  new ForeignKey(
+    reachChange,
+    foreignKey({
+      name: "reach_change_action_scope",
+      columns: [reachChange.actionId, reachChange.businessId],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    reachChange,
+    foreignKey({
+      name: "reach_change_quote_scope",
+      columns: [reachChange.quoteId, reachChange.businessId],
+      foreignColumns: [subscriptionQuote.id, subscriptionQuote.businessId],
+    }),
+  ),
+  new ForeignKey(
+    reachChangeEvent,
+    foreignKey({
+      name: "reach_change_event_scope",
+      columns: [reachChangeEvent.changeId, reachChangeEvent.businessId],
+      foreignColumns: [reachChange.id, reachChange.businessId],
+    }),
+  ),
+];
+
+// Reconcile these composite keys after the pinned push replaces referenced
+// UNIQUE constraints, while financial runtime access remains paused.
+export const subscriptionPaymentScopeForeignKeys = [
+  new ForeignKey(
+    subscriptionLifecycleEvent,
+    foreignKey({
+      name: "subscription_lifecycle_event_scope",
+      columns: [
+        subscriptionLifecycleEvent.actionId,
+        subscriptionLifecycleEvent.businessId,
+      ],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    subscriptionPaymentEvent,
+    foreignKey({
+      name: "subscription_payment_event_scope",
+      columns: [
+        subscriptionPaymentEvent.actionId,
+        subscriptionPaymentEvent.businessId,
+      ],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    subscriptionPaymentHistory,
+    foreignKey({
+      name: "subscription_payment_history_scope",
+      columns: [
+        subscriptionPaymentHistory.actionId,
+        subscriptionPaymentHistory.businessId,
+      ],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    subscriptionPeriod,
+    foreignKey({
+      name: "subscription_period_action_scope",
+      columns: [subscriptionPeriod.actionId, subscriptionPeriod.businessId],
+      foreignColumns: [subscriptionPayment.id, subscriptionPayment.businessId],
+    }),
+  ),
+  new ForeignKey(
+    subscriptionUsage,
+    foreignKey({
+      name: "subscription_usage_period_scope",
+      columns: [subscriptionUsage.periodId, subscriptionUsage.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+];
+
 export const knowledgeRevision = pgTable(
   "knowledge_revision",
   {
@@ -517,11 +1264,26 @@ export const platformOperator = pgTable(
       .references(() => user.id),
     tax: boolean("tax").notNull().default(false),
     reconciliation: boolean("reconciliation").notNull().default(false),
+    refunds: boolean("refunds").notNull().default(false),
     ai: boolean("ai").notNull().default(false),
     discovery: boolean("discovery").notNull().default(false),
     emailPolicy: boolean("email_policy").notNull().default(false),
+    pricing: boolean("pricing").notNull().default(false),
+    whatsAppReview: boolean("whatsapp_review").notNull().default(false),
+    senderHealth: boolean("sender_health").notNull().default(false),
+    documents: boolean("documents").notNull().default(false),
+    operations: boolean("operations").notNull().default(false),
+    recovery: boolean("recovery").notNull().default(false),
+    pilots: boolean("pilots").notNull().default(false),
+    costs: boolean("costs").notNull().default(false),
+    notifications: boolean("notifications").notNull().default(false),
   },
   (table) => [
+    pgPolicy("operator_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.platform_operator'::regclass)`,
+    }),
     pgPolicy("operator_read", {
       for: "select",
       to: appRuntime,
@@ -529,6 +1291,777 @@ export const platformOperator = pgTable(
     }),
   ],
 ).enableRLS();
+
+const operationsOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.operations)`;
+const operationsScope = sql`(${operationsOperator}) or (business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() is not null)`;
+const operationsOwner = sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.operation_event'::regclass)`;
+export const operationEvent = pgTable(
+  "operation_event",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    source: text("source").notNull(),
+    targetId: uuid("target_id").notNull(),
+    snapshot: jsonb("snapshot").$type<OperationSnapshot>().notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    action: text("action").notNull(),
+    outcome: text("outcome").notNull(),
+    requestKey: uuid("request_key"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("operation_request_once").on(
+      t.businessId,
+      t.requestKey,
+      t.outcome,
+    ),
+    index("operation_source_history").on(
+      t.businessId,
+      t.source,
+      t.targetId,
+      t.position,
+    ),
+    check(
+      "operation_snapshot_scope",
+      sql`${t.snapshot}->>'businessId'=${t.businessId}::text and ${t.snapshot}->>'targetId'=${t.targetId}::text and ${t.snapshot}->>'source'=${t.source}`,
+    ),
+    pgPolicy("operation_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: operationsScope,
+    }),
+    pgPolicy("operation_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${operationsScope}) and actor_id=current_setting('app.actor_id',true) and action in ('retry','reconcile','escalate','acknowledge') and outcome in ('requested','queued','checked','escalated','acknowledged','blocked','unavailable')`,
+    }),
+    pgPolicy("operation_event_system", {
+      for: "all",
+      to: "public",
+      using: operationsOwner,
+      withCheck: operationsOwner,
+    }),
+  ],
+).enableRLS();
+export const operationRetention = pgTable(
+  "operation_retention",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    policy: jsonb("policy").$type<DiagnosticRetention>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("operation_retention_version").on(t.version),
+    check(
+      "operation_retention_positive",
+      sql`${t.version}>0 and (${t.policy}->>'diagnosticSeconds')::integer>0 and (${t.policy}->>'auditDetailSeconds')::integer>0`,
+    ),
+    pgPolicy("operation_retention_read", {
+      for: "select",
+      to: appRuntime,
+      using: operationsOperator,
+    }),
+    pgPolicy("operation_retention_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${operationsOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy("operation_retention_system", {
+      for: "select",
+      to: "public",
+      using: operationsOwner,
+    }),
+  ],
+).enableRLS();
+export const operationDetail = pgTable(
+  "operation_detail",
+  {
+    id: uuid("id").primaryKey(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => operationEvent.id),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => operationRetention.id),
+    kind: text("kind").$type<"diagnostic" | "audit">().notNull(),
+    requestId: uuid("request_id").notNull(),
+    code: text("code").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operation_detail_once").on(t.eventId, t.kind),
+    pgPolicy("operation_detail_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${operationsOperator}) and expires_at>statement_timestamp()`,
+    }),
+    pgPolicy("operation_detail_system", {
+      for: "all",
+      to: "public",
+      using: operationsOwner,
+      withCheck: operationsOwner,
+    }),
+    check(
+      "operation_detail_kind",
+      sql`${t.kind} in ('diagnostic','audit') and ${t.code} ~ '^[A-Z_]{1,80}$'`,
+    ),
+  ],
+).enableRLS();
+
+const documentOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.documents)`;
+// All access goes through bounded definer commands. Runtime cannot read private
+// payloads or author acceptance/status facts by inserting into these ledgers.
+const notificationPolicies = (prefix: string) => [
+  pgPolicy(`${prefix}_read`, {
+    for: "select",
+    to: appRuntime,
+    using: sql`false`,
+  }),
+  pgPolicy(`${prefix}_insert`, {
+    for: "insert",
+    to: appRuntime,
+    withCheck: sql`false`,
+  }),
+];
+export const notificationPreference = pgTable(
+  "notification_preference",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    businessId: uuid("business_id").references(() => business.id),
+    purpose: text("purpose").notNull(),
+    enabled: boolean("enabled").notNull(),
+    version: integer("version").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_preference"),
+).enableRLS();
+export const notificationTerms = pgTable(
+  "notification_terms",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    terms: jsonb("terms")
+      .$type<import("../models/notifications").NotificationTerms>()
+      .notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    authBootstrap: boolean("auth_bootstrap").notNull().default(false),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_terms"),
+).enableRLS();
+export const notificationSetup = pgTable(
+  "notification_setup",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    binding: jsonb("binding").notNull(),
+    setup:
+      jsonb("setup").$type<
+        import("../models/notifications").NotificationSetup
+      >(),
+    capability: uuid("capability").notNull().defaultRandom(),
+    actorId: text("actor_id").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => notificationPolicies("notification_setup"),
+).enableRLS();
+export const notificationNotice = pgTable(
+  "notification_notice",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    purpose: text("purpose")
+      .$type<import("../models/notifications").NoticePurpose>()
+      .notNull(),
+    sourceId: text("source_id").notNull(),
+    sourceStage: text("source_stage").notNull(),
+    businessId: uuid("business_id").references(() => business.id),
+    actorId: text("actor_id"),
+    authority: text("authority").notNull(),
+    authUserId: text("auth_user_id"),
+    recipientDigest: text("recipient_digest"),
+    capability: uuid("capability").notNull(),
+    key: text("key").notNull(),
+    keyRef: text("key_ref").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    state: text("state").notNull().default("pending"),
+    uncertain: boolean("uncertain").notNull().default(false),
+    priorUncertain: boolean("prior_uncertain").notNull().default(false),
+    providerId: text("provider_id"),
+    firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
+    retryUntil: timestamp("retry_until", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lease: uuid("lease"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    binding: jsonb("binding").notNull(),
+    terms: jsonb("terms"),
+    reason: text("reason").notNull().default("pending"),
+  },
+  (t) => [
+    pilotCostOwnerRead("notification_notice"),
+    uniqueIndex("notification_source_identity").on(
+      t.account,
+      t.purpose,
+      t.sourceId,
+    ),
+    uniqueIndex("notification_provider_identity").on(t.account, t.providerId),
+    check(
+      "notification_purpose",
+      sql`${t.purpose} in ('authentication','invitation','cost_alert','sender_health','handoff','operations','subscription','tax_period')`,
+    ),
+    check(
+      "notification_state",
+      sql`${t.state} in ('pending','sending','accepted','uncertain','rate_limited','rejected','held','expired')`,
+    ),
+    ...notificationPolicies("notification_notice"),
+  ],
+).enableRLS();
+export const notificationPayload = pgTable(
+  "notification_payload",
+  {
+    noticeId: uuid("notice_id")
+      .primaryKey()
+      .references(() => notificationNotice.id),
+    sealed: text("sealed").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  () => notificationPolicies("notification_payload"),
+).enableRLS();
+export const notificationEvent = pgTable(
+  "notification_event",
+  {
+    id: uuid("id").primaryKey(),
+    noticeId: uuid("notice_id")
+      .notNull()
+      .references(() => notificationNotice.id),
+    kind: text("kind").notNull(),
+    lease: uuid("lease"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [
+    ...notificationPolicies("notification_event"),
+    pilotCostOwnerRead("notification_event"),
+  ],
+).enableRLS();
+export const notificationReceipt = pgTable(
+  "notification_receipt",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    eventId: text("event_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    stage: text("stage").notNull(),
+    rawHash: text("raw_hash").notNull(),
+    recipientDigest: text("recipient_digest").notNull(),
+    senderDigest: text("sender_digest").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("notification_receipt_identity").on(t.account, t.eventId),
+    ...notificationPolicies("notification_receipt"),
+  ],
+).enableRLS();
+const costOperator = sql`nullif(current_setting('app.business_id',true),'') is null and nullif(current_setting('app.cost_budget',true),'') is null and exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.costs)`;
+const costRead = sql`(${costOperator}) or public.cost_worker_authorized(month)`;
+export const costRecord = pgTable(
+  "operator_cost_record",
+  {
+    id: uuid("id").primaryKey(),
+    sourceId: text("source_id").notNull(),
+    version: integer("version").notNull(),
+    month: text("month").notNull(),
+    origin: text("origin").$type<"native" | "operator">().notNull(),
+    source: jsonb("source").$type<CostSource>().notNull(),
+    reason: text("reason").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    pilotCostOwnerRead("operator_cost_record"),
+    uniqueIndex("operator_cost_source_version").on(t.sourceId, t.version),
+    check(
+      "operator_cost_bounds",
+      sql`${t.version}>0 and ${t.source}->>'month'=${t.month} and ${t.origin} in ('native','operator') and ${t.retainUntil}>${t.at}`,
+    ),
+    pgPolicy("operator_cost_record_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_record_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`((${costOperator}) or (origin='native' and public.cost_worker_authorized(month))) and actor_id=current_setting('app.actor_id',true) and public.cost_attribution_valid(source->>'businessId',source->>'runId')`,
+    }),
+  ],
+).enableRLS();
+export const costPlanningRevision = pgTable(
+  "operator_cost_planning",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration").$type<CostPlanning>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operator_cost_planning_version").on(t.month, t.version),
+    check(
+      "operator_cost_planning_bounds",
+      sql`${t.version}>0 and ${t.configuration}->>'month'=${t.month} and ${t.retainUntil}>${t.at}`,
+    ),
+    pgPolicy("operator_cost_planning_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_planning_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const costScan = pgTable(
+  "operator_cost_scan",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    sourceCount: integer("source_count").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [
+    pgPolicy("operator_cost_scan_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_scan_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costRead}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const costBudgetRevision = pgTable(
+  "operator_cost_budget",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    category: text("category").notNull(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration").$type<CostBudget>().notNull(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id),
+    workerKey: uuid("worker_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    pilotCostOwnerRead("operator_cost_budget"),
+    uniqueIndex("operator_cost_budget_version").on(
+      t.month,
+      t.category,
+      t.version,
+    ),
+    check(
+      "operator_cost_budget_bounds",
+      sql`${t.version}>0 and ${t.configuration}->>'month'=${t.month} and ${t.configuration}->>'category'=${t.category} and ${t.configuration}->>'ownerId'=${t.ownerId} and ${t.retainUntil}>${t.at}`,
+    ),
+    pgPolicy("operator_cost_budget_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_budget_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const costAlert = pgTable(
+  "operator_cost_alert",
+  {
+    id: uuid("id").primaryKey(),
+    month: text("month").notNull(),
+    category: text("category").notNull(),
+    threshold: integer("threshold").notNull(),
+    measure: text("measure").$type<"actual" | "forecast">().notNull(),
+    budgetId: uuid("budget_id")
+      .notNull()
+      .references(() => costBudgetRevision.id),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id),
+    valueMicros: text("value_micros").notNull(),
+    limitMicros: text("limit_micros").notNull(),
+    summary: text("summary").notNull(),
+    email: text("email"),
+    emailState: text("email_state")
+      .$type<
+        "in_app" | "pending" | "sending" | "accepted" | "uncertain" | "held"
+      >()
+      .notNull(),
+    firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
+    leaseUntil: timestamp("lease_until", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    leaseKey: uuid("lease_key"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("operator_cost_threshold_once").on(
+      t.month,
+      t.category,
+      t.threshold,
+      t.measure,
+    ),
+    pgPolicy("operator_cost_alert_read", {
+      for: "select",
+      to: appRuntime,
+      using: costRead,
+    }),
+    pgPolicy("operator_cost_alert_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costRead}) and exists(select 1 from public.operator_cost_budget b where b.id=${t.budgetId} and b.month=${t.month} and b.category=${t.category} and b.owner_id=${t.ownerId})`,
+    }),
+  ],
+).enableRLS();
+export const costNotificationEvent = pgTable(
+  "operator_cost_notification_event",
+  {
+    id: uuid("id").primaryKey(),
+    alertId: uuid("alert_id")
+      .notNull()
+      .references(() => costAlert.id),
+    kind: text("kind")
+      .$type<"sending" | "accepted" | "uncertain" | "held" | "acknowledged">()
+      .notNull(),
+    detail: text("detail").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy("operator_cost_notification_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`exists(select 1 from public.operator_cost_alert a where a.id=${t.alertId})`,
+    }),
+    pgPolicy("operator_cost_notification_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${costOperator}) and actor_id=current_setting('app.actor_id',true) and kind='acknowledged' and exists(select 1 from public.operator_cost_alert a where a.id=${t.alertId})`,
+    }),
+  ],
+).enableRLS();
+const documentScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and (public.current_business_role() in ('owner','admin') or (${documentOperator}))`;
+const documentWorker = sql`public.seller_artifact_worker_authorized(id,business_id)`;
+export const issuerRevision = pgTable(
+  "seller_issuer_revision",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration")
+      .$type<IssuerConfiguration>()
+      .notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_issuer_version").on(t.version),
+    pgPolicy("seller_issuer_revision_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentOperator}) or public.current_business_role() in ('owner','admin')`,
+    }),
+    pgPolicy("seller_issuer_revision_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const issuerDecision = pgTable(
+  "seller_issuer_decision",
+  {
+    id: uuid("id").primaryKey(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => issuerRevision.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    note: text("note").notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_issuer_decision_version").on(t.revisionId, t.version),
+    pgPolicy("seller_issuer_decision_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentOperator}) or public.current_business_role() in ('owner','admin')`,
+    }),
+    pgPolicy("seller_issuer_decision_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentOperator}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+
+export const sellerDocument = pgTable(
+  "seller_document",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    periodId: uuid("period_id").notNull(),
+    originalId: uuid("original_id"),
+    adjustmentId: uuid("adjustment_id"),
+    adjustmentSource: text("adjustment_source"),
+    recoveryKey: uuid("recovery_key").notNull(),
+    retryAfter: timestamp("retry_after", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    kind: text("kind").$type<"invoice" | "credit_note">().notNull(),
+    seriesKey: text("series_key").notNull(),
+    ordinal: bigint("ordinal", { mode: "bigint" }).notNull(),
+    number: text("number").notNull(),
+    snapshot: jsonb("snapshot").$type<DocumentSnapshot>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+    accountScope: text("account_scope").notNull(),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    artifactState: text("artifact_state")
+      .$type<"pending" | "ready" | "failed">()
+      .notNull(),
+    failure: text("failure"),
+  },
+  (t) => [
+    unique("seller_document_scope").on(t.id, t.businessId),
+    uniqueIndex("seller_document_number").on(t.number),
+    uniqueIndex("seller_document_series_ordinal").on(t.seriesKey, t.ordinal),
+    uniqueIndex("seller_document_invoice_once")
+      .on(t.periodId)
+      .where(sql`${t.kind}='invoice'`),
+    uniqueIndex("seller_document_adjustment_once").on(
+      t.businessId,
+      t.adjustmentId,
+    ),
+    uniqueIndex("seller_document_adjustment_source_once").on(
+      t.originalId,
+      t.adjustmentSource,
+    ),
+    check(
+      "seller_document_binding",
+      sql`${t.snapshot}->'source'->>'periodId'=${t.periodId}::text and ((${t.kind}='invoice' and ${t.originalId} is null) or (${t.kind}='credit_note' and ${t.originalId} is not null))`,
+    ),
+    pgPolicy("seller_document_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentScope}) or (${documentWorker}) or ((${refundOperator}) and business_id=nullif(current_setting('app.business_id',true),'')::uuid)`,
+    }),
+    pgPolicy("seller_document_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true) and (kind='invoice' or (${documentOperator}))`,
+    }),
+    pgPolicy("seller_document_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${documentScope}) or (${documentWorker})`,
+      withCheck: sql`(${documentScope}) or (${documentWorker})`,
+    }),
+    pgPolicy("seller_document_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const sellerDocumentRequest = pgTable(
+  "seller_document_request",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_document_request_once").on(t.businessId, t.requestKey),
+    pgPolicy("seller_document_request_read", {
+      for: "select",
+      to: appRuntime,
+      using: documentScope,
+    }),
+    pgPolicy("seller_document_request_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const sellerDocumentScopeForeignKeys = [
+  new ForeignKey(
+    sellerDocument,
+    foreignKey({
+      name: "seller_document_period_scope",
+      columns: [sellerDocument.periodId, sellerDocument.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+  new ForeignKey(
+    sellerDocument,
+    foreignKey({
+      name: "seller_document_original_scope",
+      columns: [sellerDocument.originalId, sellerDocument.businessId],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+  new ForeignKey(
+    sellerDocumentRequest,
+    foreignKey({
+      name: "seller_document_request_scope",
+      columns: [
+        sellerDocumentRequest.documentId,
+        sellerDocumentRequest.businessId,
+      ],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+];
+export const sellerDocumentAccess = pgTable(
+  "seller_document_access",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("seller_document_access_hash").on(t.tokenHash),
+    pgPolicy("seller_document_access_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy("seller_document_access_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${documentScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const sellerDocumentStorage = pgTable(
+  "seller_document_storage",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    action: text("action").$type<"put" | "get">().notNull(),
+    outcome: text("outcome").$type<"uncertain" | "confirmed">().notNull(),
+  },
+  () => [
+    pgPolicy("seller_document_storage_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${documentScope}) or public.seller_artifact_worker_authorized(document_id,business_id)`,
+    }),
+    pgPolicy("seller_document_storage_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`((${documentScope}) and actor_id=current_setting('app.actor_id',true)) or (actor_id is null and public.seller_artifact_worker_authorized(document_id,business_id))`,
+    }),
+    pgPolicy("seller_document_storage_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${documentScope}) or public.seller_artifact_worker_authorized(document_id,business_id)`,
+      withCheck: sql`(${documentScope}) or public.seller_artifact_worker_authorized(document_id,business_id)`,
+    }),
+  ],
+).enableRLS();
+sellerDocumentScopeForeignKeys.push(
+  new ForeignKey(
+    sellerDocumentAccess,
+    foreignKey({
+      name: "seller_document_access_scope",
+      columns: [
+        sellerDocumentAccess.documentId,
+        sellerDocumentAccess.businessId,
+      ],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+  new ForeignKey(
+    sellerDocumentStorage,
+    foreignKey({
+      name: "seller_document_storage_scope",
+      columns: [
+        sellerDocumentStorage.documentId,
+        sellerDocumentStorage.businessId,
+      ],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+);
 
 const aiOperatorScope = sql`exists (select 1 from public.platform_operator o where o.user_id = current_setting('app.actor_id', true) and o.ai)`;
 const aiMemberScope = sql`public.current_business_role() is not null`;
@@ -654,6 +2187,7 @@ export const aiExecution = pgTable(
     output: jsonb("output").$type<AiOutput>(),
   },
   (table) => [
+    pilotCostOwnerRead("ai_execution"),
     uniqueIndex("ai_execution_request").on(table.businessId, table.requestKey),
     uniqueIndex("ai_execution_scope").on(table.id, table.businessId),
     check(
@@ -705,6 +2239,7 @@ export const aiAttempt = pgTable(
     fundingReference: text("funding_reference").notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("ai_attempt"),
     index("ai_attempt_execution").on(table.businessId, table.executionId),
     uniqueIndex("ai_attempt_number").on(table.executionId, table.number),
     check(
@@ -783,7 +2318,7 @@ export const aiExecutionScopeForeignKeys = [
   ),
 ];
 
-const fileBusinessScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
+const fileBusinessScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and (public.current_business_role() is not null or (${billingOperatorScope}))`;
 const fileOwnerScope = sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.business_file'::regclass)`;
 export const businessFile = pgTable(
   "business_file",
@@ -796,6 +2331,10 @@ export const businessFile = pgTable(
       .notNull()
       .references(() => user.id),
     name: text("name").notNull(),
+    purpose: text("purpose")
+      .$type<"general" | "billing">()
+      .notNull()
+      .default("general"),
     contentType: text("content_type").notNull(),
     size: bigint("size", { mode: "number" }).notNull(),
     accountScope: text("account_scope").notNull(),
@@ -825,13 +2364,17 @@ export const businessFile = pgTable(
     ),
     check("business_file_size", sql`${table.size} > 0`),
     check(
+      "business_file_purpose",
+      sql`${table.purpose} in ('general', 'billing')`,
+    ),
+    check(
       "business_file_state",
       sql`${table.state} in ('pending','uploading','ready','failed','deleting','deleted')`,
     ),
     pgPolicy("file_read", {
       for: "select",
       to: appRuntime,
-      using: fileBusinessScope,
+      using: sql`(${fileBusinessScope}) and ((${table.purpose} = 'general' and public.current_business_role() is not null) or (${table.purpose} = 'billing' and (public.current_business_role() in ('owner','admin') or (${billingOperatorScope}))))`,
     }),
     pgPolicy("file_insert", {
       for: "insert",
@@ -873,7 +2416,7 @@ export const fileAccess = pgTable(
     pgPolicy("file_access_scope", {
       for: "all",
       to: appRuntime,
-      using: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true)`,
+      using: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId})`,
       withCheck: sql`(${fileBusinessScope}) and ${table.actorId} = current_setting('app.actor_id', true) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId})`,
     }),
     pgPolicy("file_access_system", {
@@ -900,11 +2443,12 @@ export const fileUsage = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("file_usage"),
     index("file_usage_business_idx").on(table.businessId, table.at),
     pgPolicy("file_usage_scope", {
       for: "all",
       to: appRuntime,
-      using: fileBusinessScope,
+      using: sql`(${fileBusinessScope}) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId})`,
       withCheck: sql`(${fileBusinessScope}) and exists (select 1 from public.business_file f where f.id = ${table.fileId} and f.business_id = ${table.businessId} and f.account_scope = ${table.accountScope})`,
     }),
     pgPolicy("file_usage_system", {
@@ -919,6 +2463,39 @@ export const fileUsage = pgTable(
 const discoveryScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and public.current_business_role() is not null`;
 const discoveryWrite = sql`(${discoveryScope}) and public.current_business_role() in ('owner', 'admin')`;
 const discoveryOwner = sql`current_user = (select pg_get_userbyid(c.relowner) from pg_class c where c.oid = 'public.discovery_run'::regclass)`;
+
+const capacityOperator = sql`coalesce(current_setting('app.business_id',true),'')='' and exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id',true) and o.discovery)`;
+export const discoveryCapacityPolicy = pgTable(
+  "discovery_capacity_policy",
+  {
+    id: uuid("id").primaryKey(),
+    version: integer("version").notNull().unique(),
+    requestKey: uuid("request_key").notNull().unique(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    policy: jsonb("policy").$type<CapacityPolicy>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("discovery_capacity_policy_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.discovery_capacity_policy'::regclass)`,
+    }),
+    pgPolicy("discovery_capacity_policy_read", {
+      for: "select",
+      to: appRuntime,
+      using: capacityOperator,
+    }),
+    pgPolicy("discovery_capacity_policy_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: capacityOperator,
+    }),
+  ],
+).enableRLS();
 
 export const discoveryConfiguration = pgTable(
   "discovery_configuration",
@@ -973,6 +2550,7 @@ export const discoveryRun = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("discovery_run"),
     uniqueIndex("discovery_request_key").on(table.businessId, table.requestKey),
     uniqueIndex("discovery_schedule_occurrence").on(
       table.businessId,
@@ -1006,6 +2584,41 @@ export const discoveryRun = pgTable(
       to: "public",
       using: discoveryOwner,
       withCheck: discoveryOwner,
+    }),
+  ],
+).enableRLS();
+
+export const discoveryCapacityBinding = pgTable(
+  "discovery_capacity_binding",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => discoveryRun.id),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => discoveryCapacityPolicy.id),
+    route: jsonb("route").$type<CapacityRoute>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () => [
+    pgPolicy("discovery_capacity_binding_owner_read", {
+      for: "select",
+      to: "public",
+      using: sql`current_user=(select pg_get_userbyid(c.relowner) from pg_catalog.pg_class c where c.oid='public.discovery_capacity_binding'::regclass)`,
+    }),
+    pgPolicy("discovery_capacity_binding_read", {
+      for: "select",
+      to: appRuntime,
+      using: discoveryScope,
+    }),
+    pgPolicy("discovery_capacity_binding_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: discoveryWrite,
     }),
   ],
 ).enableRLS();
@@ -1155,10 +2768,12 @@ export const discoveryUsage = pgTable(
     sources: jsonb("sources").$type<SearchResult[]>(),
     sourceUrl: text("source_url"),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
+    providerCost: jsonb("provider_cost").$type<DiscoveryProviderCost>(),
     checkOrder: bigint("check_order", { mode: "number" }),
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    pilotCostOwnerRead("discovery_usage"),
     uniqueIndex("discovery_usage_step_attempt").on(
       table.runId,
       table.stepKey,
@@ -1331,7 +2946,14 @@ function senderPolicies(name: string, mutable: boolean) {
     pgPolicy(`${name}_read`, {
       for: "select",
       to: appRuntime,
-      using: inboxScope,
+      using: [
+        "sender_identity",
+        "sender_connection",
+        "sender_reply_route",
+        "mailbox_policy",
+      ].includes(name)
+        ? sql`(${inboxScope}) or (business_id = nullif(current_setting('app.business_id', true), '')::uuid and exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id', true) and o.sender_health))`
+        : inboxScope,
     }),
     pgPolicy(`${name}_insert`, {
       for: "insert",
@@ -1420,6 +3042,47 @@ export const senderObservation = pgTable(
   },
   () => [...senderPolicies("sender_observation", false)],
 ).enableRLS();
+
+const senderHealthOperator = sql`exists(select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id', true) and o.sender_health)`;
+export const senderHealthRecord = pgTable(
+  "sender_health_record",
+  {
+    position: bigserial("position", { mode: "number" }).notNull(),
+    ...inboxColumns(),
+    identityId: uuid("identity_id").notNull(),
+    kind: text("kind").$type<HealthPayload["kind"]>().notNull(),
+    eventKey: text("event_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    payload: jsonb("payload").$type<HealthPayload>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("sender_health_record_scope").on(t.id, t.businessId),
+    uniqueIndex("sender_health_record_event").on(
+      t.businessId,
+      t.identityId,
+      t.kind,
+      t.eventKey,
+    ),
+    check(
+      "sender_health_record_kind",
+      sql`${t.kind} in ('policy','evidence','incident','failure','repair','alert','acknowledgement') and ${t.kind}=${t.payload}->>'kind'`,
+    ),
+    pgPolicy("sender_health_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${inboxScope} and (${t.kind}<>'alert' or ${t.payload}->>'audience'='business')) or ${senderHealthOperator}`,
+    }),
+    pgPolicy("sender_health_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${t.businessId}=nullif(current_setting('app.business_id', true),'')::uuid and ${t.actorId}=current_setting('app.actor_id',true) and (${senderHealthOperator} or (public.current_business_role() is not null and ${t.kind} in ('incident','failure','alert','acknowledgement')))`,
+    }),
+  ],
+).enableRLS();
 function inboxPolicies(name: string) {
   return [
     pgPolicy(`${name}_read`, {
@@ -1461,7 +3124,7 @@ export const inboxConnection = pgTable(
     conversationRefs: jsonb("conversation_refs").$type<string[]>().notNull(),
     active: boolean("active").notNull(),
     mode: text("mode")
-      .$type<"normalized_import" | "mailbox">()
+      .$type<"normalized_import" | "mailbox" | "meta">()
       .notNull()
       .default("normalized_import"),
     manualRepliesObservable: boolean("manual_replies_observable")
@@ -1505,6 +3168,7 @@ export const mailboxPolicy = pgTable(
       .default(false),
   },
   (t) => [
+    pilotCostOwnerRead("mailbox_policy"),
     uniqueIndex("mailbox_policy_scope").on(t.id, t.businessId),
     uniqueIndex("mailbox_policy_connection").on(t.connectionId),
     check("mailbox_policy_version", sql`${t.version} > 0`),
@@ -1528,6 +3192,7 @@ export const mailboxJob = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("mailbox_job"),
     uniqueIndex("mailbox_job_scope").on(t.id, t.businessId, t.mailboxId),
     ...senderPolicies("mailbox_job", true),
   ],
@@ -1832,6 +3497,14 @@ export const mailboxScopeForeignKeys = [
 ];
 export const senderScopeForeignKeys = [
   new ForeignKey(
+    senderHealthRecord,
+    foreignKey({
+      name: "sender_health_identity_scope",
+      columns: [senderHealthRecord.identityId, senderHealthRecord.businessId],
+      foreignColumns: [senderIdentity.id, senderIdentity.businessId],
+    }),
+  ),
+  new ForeignKey(
     senderReplyRoute,
     foreignKey({
       name: "sender_route_connection_scope",
@@ -2135,9 +3808,13 @@ export const opportunityDueAction = pgTable(
   {
     ...inboxColumns(),
     opportunityId: uuid("opportunity_id").notNull(),
-    messageId: uuid("message_id").notNull(),
+    messageId: uuid("message_id"),
     connectionId: uuid("connection_id").notNull(),
-    conversationId: uuid("conversation_id").notNull(),
+    conversationId: uuid("conversation_id"),
+    whatsappPlanId: uuid("whatsapp_plan_id"),
+    whatsappStep: integer("whatsapp_step"),
+    whatsappPeer: text("whatsapp_peer"),
+    metaRecoveryAt: timestamp("meta_recovery_at", { withTimezone: true }),
     actorId: text("actor_id")
       .notNull()
       .references(() => user.id),
@@ -2146,6 +3823,7 @@ export const opportunityDueAction = pgTable(
     associationVersion: integer("association_version").notNull(),
     policyVersion: integer("policy_version").notNull(),
     inquiryRunId: uuid("inquiry_run_id"),
+    email: jsonb("email").$type<OpportunityMail>(),
     evaluation: jsonb("evaluation").$type<
       QueueOpportunityAction["evaluation"] | null
     >(),
@@ -2154,7 +3832,18 @@ export const opportunityDueAction = pgTable(
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
-  () => [
+  (t) => [
+    pilotCostOwnerRead("opportunity_due_action"),
+    uniqueIndex("opportunity_due_action_scope").on(t.id, t.businessId),
+    uniqueIndex("whatsapp_plan_action").on(
+      t.whatsappPlanId,
+      t.whatsappPeer,
+      t.whatsappStep,
+    ),
+    check(
+      "opportunity_action_origin",
+      sql`(${t.whatsappPlanId} IS NULL AND ${t.whatsappStep} IS NULL AND ${t.whatsappPeer} IS NULL AND ${t.messageId} IS NOT NULL AND ${t.conversationId} IS NOT NULL) OR (${t.whatsappPlanId} IS NOT NULL AND ${t.whatsappStep} IS NOT NULL AND ${t.whatsappPeer} IS NOT NULL AND ${t.whatsappStep}>=0 AND ${t.whatsappPeer} ~ '^[1-9][0-9]{6,14}$' AND ${t.messageId} IS NULL AND ${t.conversationId} IS NULL AND ${t.inquiryRunId} IS NULL)`,
+    ),
     pgPolicy("opportunity_due_action_read", {
       for: "select",
       to: appRuntime,
@@ -2602,6 +4291,336 @@ function integrationPolicies(name: string, privileged: boolean) {
     }),
   ];
 }
+const whatsAppReviewer = sql`exists (select 1 from public.platform_operator o where o.user_id=current_setting('app.actor_id', true) and o.whatsapp_review)`;
+function metaIntakePolicies(name: string) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: inboxWrite,
+    }),
+    pgPolicy(`${name}_update`, {
+      for: "update",
+      to: appRuntime,
+      using: inboxWrite,
+      withCheck: inboxWrite,
+    }),
+  ];
+}
+export const whatsAppOutbound = pgTable(
+  "whatsapp_outbound",
+  {
+    ...inboxColumns(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    key: text("key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    data: jsonb("data").$type<MetaOutboundData>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_outbound_scope").on(t.id, t.businessId),
+    uniqueIndex("whatsapp_outbound_key").on(t.businessId, t.key),
+    pgPolicy("whatsapp_outbound_read", {
+      for: "select",
+      to: appRuntime,
+      using: inboxScope,
+    }),
+    pgPolicy("whatsapp_outbound_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxScope}) and ${t.actorId}=current_setting('app.actor_id',true) and (${t.data}->>'kind' NOT IN ('decision','permission','revoke_permission','template','cancel_plan','estimate') OR public.current_business_role() IN ('owner','admin')) and (${t.data}->>'kind'<>'decision' OR public.current_business_role()='owner')`,
+    }),
+  ],
+).enableRLS();
+export const whatsAppIntake = pgTable(
+  "whatsapp_intake",
+  {
+    ...inboxColumns(),
+    connectionVersion: integer("connection_version").notNull(),
+    accountKey: text("account_key").notNull(),
+    inboxConnectionId: uuid("inbox_connection_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    enabledAt: timestamp("enabled_at", { withTimezone: true }).notNull(),
+    receiptRetentionSeconds: integer("receipt_retention_seconds").notNull(),
+    inboundAt: timestamp("inbound_at", { withTimezone: true }),
+    echoAt: timestamp("echo_at", { withTimezone: true }),
+    gap: text("gap"),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_intake_scope").on(t.id, t.businessId),
+    check(
+      "whatsapp_intake_bounds",
+      sql`${t.connectionVersion}>0 and ${t.receiptRetentionSeconds}>=60`,
+    ),
+    ...metaIntakePolicies("whatsapp_intake"),
+  ],
+).enableRLS();
+export const whatsAppReceipt = pgTable(
+  "whatsapp_receipt",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    connectionVersion: integer("connection_version").notNull(),
+    accountKey: text("account_key").notNull(),
+    eventKey: text("event_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    activity: jsonb("activity").$type<MetaActivity>(),
+    kind: text("kind").notNull(),
+    messageRef: text("message_ref"),
+    peer: text("peer"),
+    replyTo: text("reply_to"),
+    status: text("provider_status"),
+    statusEvidence:
+      jsonb("status_evidence").$type<MetaActivity["statusEvidence"]>(),
+    state: text("state")
+      .$type<"pending" | "processed" | "historical" | "review" | "expired">()
+      .notNull(),
+    conversationId: uuid("conversation_id"),
+    opportunityId: uuid("opportunity_id"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    pilotCostOwnerRead("whatsapp_receipt"),
+    uniqueIndex("whatsapp_receipt_identity").on(
+      t.connectionId,
+      t.accountKey,
+      t.eventKey,
+    ),
+    check(
+      "whatsapp_receipt_state",
+      sql`${t.state} in ('pending','processed','historical','review','expired') and ${t.kind} in ('incoming','app_echo','status','gap') and ${t.connectionVersion}>0`,
+    ),
+    ...metaIntakePolicies("whatsapp_receipt"),
+  ],
+).enableRLS();
+const whatsAppEvidenceScope = sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid and ((${inboxWrite}) or (${whatsAppReviewer}))`;
+export const whatsAppConnection = pgTable(
+  "whatsapp_connection",
+  {
+    ...inboxColumns(),
+    version: integer("version").notNull(),
+    configuration: jsonb("configuration")
+      .$type<WhatsAppConfiguration>()
+      .notNull(),
+    status: text("status").$type<WhatsAppStatus>().notNull(),
+    reason: text("reason").$type<WhatsAppReason>(),
+    termsActorId: text("terms_actor_id")
+      .notNull()
+      .references(() => user.id),
+    termsAcceptedAt: timestamp("terms_accepted_at", {
+      withTimezone: true,
+    }).notNull(),
+    credentials: text("credentials"),
+    providerKey: text("provider_key"),
+    observation: jsonb("observation").$type<MetaObservation>(),
+    operationId: uuid("operation_id"),
+    assets: jsonb("assets").$type<MetaAssets>(),
+    coexistenceFinished: boolean("coexistence_finished")
+      .notNull()
+      .default(false),
+    phoneNumberId: text("phone_number_id"),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_business").on(t.businessId),
+    uniqueIndex("whatsapp_connection_scope").on(t.id, t.businessId),
+    uniqueIndex("whatsapp_number_exclusive").on(t.phoneNumberId),
+    check("whatsapp_version", sql`${t.version} > 0`),
+    pgPolicy("whatsapp_connection_read", {
+      for: "select",
+      to: appRuntime,
+      using: whatsAppEvidenceScope,
+    }),
+    pgPolicy("whatsapp_connection_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${inboxWrite}) and terms_actor_id = current_setting('app.actor_id', true)`,
+    }),
+    pgPolicy("whatsapp_connection_update", {
+      for: "update",
+      to: appRuntime,
+      using: inboxWrite,
+      withCheck: inboxWrite,
+    }),
+  ],
+).enableRLS();
+export const whatsAppIntakeScopeForeignKeys = [
+  new ForeignKey(
+    whatsAppReceipt,
+    foreignKey({
+      name: "whatsapp_receipt_conversation_scope",
+      columns: [whatsAppReceipt.conversationId, whatsAppReceipt.businessId],
+      foreignColumns: [inboxConversation.id, inboxConversation.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppReceipt,
+    foreignKey({
+      name: "whatsapp_receipt_opportunity_scope",
+      columns: [whatsAppReceipt.opportunityId, whatsAppReceipt.businessId],
+      foreignColumns: [inboxOpportunity.id, inboxOpportunity.businessId],
+    }),
+  ),
+
+  new ForeignKey(
+    whatsAppIntake,
+    foreignKey({
+      name: "whatsapp_intake_connection_scope",
+      columns: [whatsAppIntake.id, whatsAppIntake.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppIntake,
+    foreignKey({
+      name: "whatsapp_intake_inbox_scope",
+      columns: [whatsAppIntake.inboxConnectionId, whatsAppIntake.businessId],
+      foreignColumns: [inboxConnection.id, inboxConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppReceipt,
+    foreignKey({
+      name: "whatsapp_receipt_connection_scope",
+      columns: [whatsAppReceipt.connectionId, whatsAppReceipt.businessId],
+      foreignColumns: [whatsAppIntake.id, whatsAppIntake.businessId],
+    }),
+  ),
+];
+export const whatsAppOauth = pgTable(
+  "whatsapp_oauth",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    version: integer("version").notNull(),
+    stateHash: text("state_hash").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumed: boolean("consumed").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_oauth_state").on(t.stateHash),
+    ...integrationPolicies("whatsapp_oauth", true),
+  ],
+).enableRLS();
+export const whatsAppEvent = pgTable(
+  "whatsapp_event",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    kind: text("kind").notNull(),
+    version: integer("version").notNull(),
+    terms: jsonb("terms").$type<WhatsAppConfiguration>(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  () =>
+    integrationPolicies("whatsapp_event", true).filter(
+      (p) => p.for !== "update",
+    ),
+).enableRLS();
+export const whatsAppEvidence = pgTable(
+  "whatsapp_evidence",
+  {
+    ...inboxColumns(),
+    connectionId: uuid("connection_id").notNull(),
+    version: integer("version").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    review: jsonb("review").$type<MetaEvidenceReview>(),
+    revocation: jsonb("revocation").$type<MetaEvidenceRevocation>(),
+  },
+  (t) => [
+    uniqueIndex("whatsapp_evidence_version").on(t.businessId, t.version),
+    check(
+      "whatsapp_evidence_decision",
+      sql`(${t.review} is null) <> (${t.revocation} is null)`,
+    ),
+    check("whatsapp_evidence_positive_version", sql`${t.version} > 0`),
+    pgPolicy("whatsapp_evidence_read", {
+      for: "select",
+      to: appRuntime,
+      using: whatsAppEvidenceScope,
+    }),
+    pgPolicy("whatsapp_evidence_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`business_id = nullif(current_setting('app.business_id', true), '')::uuid
+        and (${whatsAppReviewer}) and actor_id=current_setting('app.actor_id', true)
+        and not exists (select 1 from public.membership m where m.business_id=whatsapp_evidence.business_id and m.user_id=current_setting('app.actor_id', true))
+        and exists (select 1 from public.session s join public."user" u on u.id=s.user_id join public.two_factor f on f.user_id=u.id
+          where s.id=whatsapp_evidence.session_id and s.user_id=current_setting('app.actor_id', true)
+            and s.expires_at>whatsapp_evidence.at and u.two_factor_enabled and f.verified
+            and s.mfa_verified_at<=whatsapp_evidence.at and s.mfa_verified_at>whatsapp_evidence.at-interval '15 minutes'
+            and s.mfa_factor_id=f.id and s.mfa_factor_version=encode(sha256(convert_to(f.secret,'UTF8')),'hex'))`,
+    }),
+  ],
+).enableRLS();
+export const whatsAppScopeForeignKeys = [
+  new ForeignKey(
+    whatsAppOutbound,
+    foreignKey({
+      name: "whatsapp_outbound_connection_scope",
+      columns: [whatsAppOutbound.connectionId, whatsAppOutbound.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    opportunityDueAction,
+    foreignKey({
+      name: "whatsapp_action_plan_scope",
+      columns: [
+        opportunityDueAction.whatsappPlanId,
+        opportunityDueAction.businessId,
+      ],
+      foreignColumns: [whatsAppOutbound.id, whatsAppOutbound.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppEvidence,
+    foreignKey({
+      name: "whatsapp_evidence_connection_scope",
+      columns: [whatsAppEvidence.connectionId, whatsAppEvidence.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppOauth,
+    foreignKey({
+      name: "whatsapp_oauth_connection_scope",
+      columns: [whatsAppOauth.connectionId, whatsAppOauth.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+  new ForeignKey(
+    whatsAppEvent,
+    foreignKey({
+      name: "whatsapp_event_connection_scope",
+      columns: [whatsAppEvent.connectionId, whatsAppEvent.businessId],
+      foreignColumns: [whatsAppConnection.id, whatsAppConnection.businessId],
+    }),
+  ),
+];
 export const mailboxAppMessage = pgTable(
   "mailbox_app_message",
   {
@@ -2616,6 +4635,7 @@ export const mailboxAppMessage = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull(),
   },
   (t) => [
+    pilotCostOwnerRead("mailbox_app_message"),
     uniqueIndex("mailbox_app_message_ref").on(t.mailboxId, t.messageRef),
     uniqueIndex("mailbox_app_message_internet_ref").on(
       t.mailboxId,
@@ -3507,12 +5527,16 @@ export const emailSequenceAction = pgTable(
     recoveryAt: timestamp("recovery_at", { withTimezone: true }),
     attemptId: uuid("attempt_id"),
     receipt: jsonb("receipt").$type<SequenceReceipt>(),
+    processingAcceptance: jsonb(
+      "processing_acceptance",
+    ).$type<MailAcceptance>(),
     queueState: text("queue_state")
       .$type<"none" | "pending" | "enqueued" | "failed">()
       .notNull(),
     queueRunId: text("queue_run_id"),
   },
   (t) => [
+    pilotCostOwnerRead("email_sequence_action"),
     uniqueIndex("email_sequence_action_step").on(
       t.runId,
       t.contactId,
@@ -3552,8 +5576,12 @@ export const emailSequenceEvent = pgTable(
     attemptId: uuid("attempt_id"),
     envelope: jsonb("envelope").$type<SequenceEnvelope>(),
     receipt: jsonb("receipt").$type<SequenceReceipt>(),
+    processingAcceptance: jsonb(
+      "processing_acceptance",
+    ).$type<MailAcceptance>(),
   },
   (t) => [
+    pilotCostOwnerRead("email_sequence_event"),
     uniqueIndex("email_sequence_reservation_once")
       .on(t.attemptId)
       .where(sql`${t.kind}='attempt_reserved'`),
@@ -3603,6 +5631,1147 @@ export const emailSequenceScopeForeignKeys = [
         emailSequenceAction.businessId,
         emailSequenceAction.runId,
       ],
+    }),
+  ),
+];
+
+// Customer exports are deliberately separate from private uploads and seller artifacts.
+const dataScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.current_business_role() in ('owner','admin')`;
+const dataOwner = sql`current_user=(select pg_get_userbyid(c.relowner) from pg_class c where c.oid='public.business_data_request'::regclass)`;
+function dataPolicies(name: string, insert = true) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: dataScope,
+    }),
+    ...(insert
+      ? [
+          pgPolicy(`${name}_insert`, {
+            for: "insert",
+            to: appRuntime,
+            withCheck: sql`(${dataScope}) and actor_id=current_setting('app.actor_id',true)`,
+          }),
+        ]
+      : []),
+    pgPolicy(`${name}_system`, {
+      for: "all",
+      to: "public",
+      using: dataOwner,
+      withCheck: dataOwner,
+    }),
+  ];
+}
+export const businessDataRequest = pgTable(
+  "business_data_request",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    kind: text("kind").$type<"offboard" | "reopen">().notNull(),
+    policy: jsonb("policy").$type<DataPolicy>().notNull(),
+    input: jsonb("input").$type<OffboardInput | null>(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("business_data_request_key").on(t.businessId, t.requestKey),
+    uniqueIndex("business_data_request_scope").on(t.id, t.businessId),
+    check(
+      "business_data_request_policy",
+      sql`${t.kind} in ('offboard','reopen') and ${t.policy}->'businessIds' ? ${t.businessId}::text and (${t.policy}->>'version')::integer>0 and (${t.policy}->>'effectiveUntil')::timestamptz>(${t.policy}->>'effectiveFrom')::timestamptz`,
+    ),
+    ...dataPolicies("business_data_request"),
+  ],
+).enableRLS();
+export const businessDataExport = pgTable(
+  "business_data_export",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    part: integer("part").notNull().default(1),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    policy: jsonb("policy").$type<DataPolicy>().notNull(),
+    state: text("state")
+      .$type<"pending" | "ready" | "deleting" | "deleted">()
+      .notNull(),
+    bytes: integer("bytes"),
+    sha256: text("sha256"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    cleanupDueAt: timestamp("cleanup_due_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    cleanupAttempts: integer("cleanup_attempts").notNull().default(0),
+    cleanupLease: uuid("cleanup_lease"),
+  },
+  (t) => [
+    uniqueIndex("business_data_export_key").on(t.businessId, t.requestKey),
+    uniqueIndex("business_data_export_scope").on(t.id, t.businessId),
+    check(
+      "business_data_export_state",
+      sql`${t.state} in ('pending','ready','deleting','deleted') and ${t.part}>0 and ${t.part}<=1000000 and ${t.cleanupAttempts}>=0 and (${t.state}<>'ready' or (${t.bytes}>0 and ${t.sha256} ~ '^[a-f0-9]{64}$'))`,
+    ),
+    ...dataPolicies("business_data_export"),
+    pgPolicy("business_data_export_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${dataScope}) and actor_id=current_setting('app.actor_id',true)`,
+      withCheck: dataScope,
+    }),
+  ],
+).enableRLS();
+export const businessDataGrant = pgTable(
+  "business_data_grant",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    exportId: uuid("export_id").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  () => [
+    ...dataPolicies("business_data_grant"),
+    pgPolicy("business_data_grant_update", {
+      for: "update",
+      to: appRuntime,
+      using: sql`(${dataScope}) and actor_id=current_setting('app.actor_id',true)`,
+      withCheck: dataScope,
+    }),
+  ],
+).enableRLS();
+export const businessDataStep = pgTable(
+  "business_data_step",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    kind: text("kind").notNull(),
+    targetId: text("target_id").notNull(),
+    details: jsonb("details").$type<Record<string, string>>().notNull(),
+    secret: jsonb("secret").$type<{
+      credentials: string | null;
+      rejected: string | null;
+    }>(),
+    state: text("state").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lease: uuid("lease"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    outcome: text("outcome"),
+    tokenWiped: boolean("token_wiped").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("business_data_step_target").on(
+      t.requestId,
+      t.kind,
+      t.targetId,
+    ),
+    uniqueIndex("business_data_step_scope").on(t.id, t.businessId),
+    check(
+      "business_data_step_state",
+      sql`${t.state} in ('pending','working','retry','complete','incomplete') and ${t.attempts}>=0 and ${t.kind} in ('local','gmail','google_calendar','microsoft_mail','microsoft_calendar','meta','file')`,
+    ),
+    ...dataPolicies("business_data_step", false),
+  ],
+).enableRLS();
+export const businessDataEvent = pgTable(
+  "business_data_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id").notNull(),
+    stepId: uuid("step_id").notNull(),
+    attempt: integer("attempt").notNull(),
+    outcome: text("outcome").notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    evidence: text("evidence"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [...dataPolicies("business_data_event", false)],
+).enableRLS();
+export const businessDataScopeForeignKeys = [
+  new ForeignKey(
+    businessDataGrant,
+    foreignKey({
+      name: "business_data_grant_export_scope",
+      columns: [businessDataGrant.exportId, businessDataGrant.businessId],
+      foreignColumns: [businessDataExport.id, businessDataExport.businessId],
+    }),
+  ),
+  new ForeignKey(
+    businessDataStep,
+    foreignKey({
+      name: "business_data_step_request_scope",
+      columns: [businessDataStep.requestId, businessDataStep.businessId],
+      foreignColumns: [businessDataRequest.id, businessDataRequest.businessId],
+    }),
+  ),
+  new ForeignKey(
+    businessDataEvent,
+    foreignKey({
+      name: "business_data_event_step_scope",
+      columns: [businessDataEvent.stepId, businessDataEvent.businessId],
+      foreignColumns: [businessDataStep.id, businessDataStep.businessId],
+    }),
+  ),
+];
+// Financial intents and native facts are append-only. Recovery tokens grant reads/events,
+// never creation of another refund or seller document.
+const financialWorker = sql`public.financial_worker_authorized(case_id,business_id)`;
+export const financialCase = pgTable(
+  "financial_case",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    businessId: uuid("business_id").notNull(),
+    periodId: uuid("period_id").notNull(),
+    invoiceId: uuid("invoice_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    recoveryKey: uuid("recovery_key").notNull(),
+    kind: text("kind").$type<"refund" | "dispute">().notNull(),
+    nativeDisputeId: text("native_dispute_id"),
+    intent: jsonb("intent").$type<AdjustmentIntent>().notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique("financial_case_scope").on(t.id, t.businessId),
+    uniqueIndex("financial_case_request").on(t.businessId, t.requestKey),
+    uniqueIndex("financial_case_dispute").on(
+      t.nativeDisputeId,
+      sql`(${t.intent}->'period'->'snapshot'->'provider'->>'account')`,
+    ),
+    check(
+      "financial_case_binding",
+      sql`${t.intent}->'invoice'->>'id'=${t.invoiceId}::text and ${t.intent}->'period'->>'id'=${t.periodId}::text and ${t.intent}->'period'->>'businessId'=${t.businessId}::text and ${t.intent}->'input'->>'kind'=${t.kind}
+        and ${t.intent}->>'key'=${t.id}::text and ${t.intent}->'input'->>'invoiceId'=${t.invoiceId}::text and ${t.intent}->'input'->>'requestKey'=${t.requestKey}::text
+        and ${t.intent}->'invoice'->>'periodId'=${t.periodId}::text and ${t.intent}->'invoice'->>'businessId'=${t.businessId}::text
+        and ${t.intent}->'invoice'->'snapshot'->'source'->>'paymentId'=${t.intent}->'period'->>'paymentId'
+        and ((${t.kind}='refund' and ${t.nativeDisputeId} is null) or (${t.kind}='dispute' and ${t.nativeDisputeId}=${t.intent}->'input'->>'disputeId'))`,
+    ),
+    pgPolicy("financial_case_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${refundOperator}) or public.financial_worker_authorized(id,business_id)`,
+    }),
+    pgPolicy("financial_case_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${refundOperator}) and business_id=nullif(current_setting('app.business_id',true),'')::uuid and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy("financial_case_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const financialCaseEvent = pgTable(
+  "financial_case_event",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    caseId: uuid("case_id").notNull(),
+    businessId: uuid("business_id").notNull(),
+    key: text("key").notNull(),
+    kind: text("kind").notNull(),
+    detail: jsonb("detail")
+      .$type<{
+        observation?: AdjustmentObservation;
+        access?: "preserve" | "block_period";
+        documentId?: string;
+        skip?: number;
+        [key: string]: unknown;
+      }>()
+      .notNull(),
+    actorId: text("actor_id").references(() => user.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("financial_case_event_once").on(t.caseId, t.key),
+    check(
+      "financial_case_event_access",
+      sql`not (${t.detail} ? 'access') or ${t.detail}->>'access' in ('preserve','block_period')`,
+    ),
+    pgPolicy("financial_case_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: sql`(${refundOperator}) or (${financialWorker})`,
+    }),
+    pgPolicy("financial_case_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and (((${refundOperator}) and actor_id=current_setting('app.actor_id',true)) or (${financialWorker}))`,
+    }),
+    pgPolicy("financial_case_event_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const financialCaseScopeForeignKeys = [
+  new ForeignKey(
+    financialCase,
+    foreignKey({
+      name: "financial_case_period_scope",
+      columns: [financialCase.periodId, financialCase.businessId],
+      foreignColumns: [subscriptionPeriod.id, subscriptionPeriod.businessId],
+    }),
+  ),
+  new ForeignKey(
+    financialCase,
+    foreignKey({
+      name: "financial_case_invoice_scope",
+      columns: [financialCase.invoiceId, financialCase.businessId],
+      foreignColumns: [sellerDocument.id, sellerDocument.businessId],
+    }),
+  ),
+  new ForeignKey(
+    financialCaseEvent,
+    foreignKey({
+      name: "financial_case_event_scope",
+      columns: [financialCaseEvent.caseId, financialCaseEvent.businessId],
+      foreignColumns: [financialCase.id, financialCase.businessId],
+    }),
+  ),
+];
+export const financialReceipt = pgTable(
+  "financial_receipt",
+  {
+    id: uuid("id").primaryKey(),
+    account: text("account").notNull(),
+    mode: text("mode").notNull(),
+    eventId: text("event_id").notNull(),
+    receipt: jsonb("receipt").$type<FinancialReceipt>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("financial_receipt_once").on(t.account, t.mode, t.eventId),
+    check(
+      "financial_receipt_binding",
+      sql`${t.receipt}->>'eventId'=${t.eventId} and ${t.receipt}->>'account'=${t.account} and ${t.receipt}->>'mode'=${t.mode}`,
+    ),
+    pgPolicy("financial_receipt_read", {
+      for: "select",
+      to: appRuntime,
+      using: refundOperator,
+    }),
+    pgPolicy("financial_receipt_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+
+const recoveryScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.recovery_operator_authorized()`;
+const recoveryOwner = sql`current_user=(select pg_get_userbyid(relowner) from pg_class where oid='public.infrastructure_recovery'::regclass)`;
+export const infrastructureRecovery = pgTable(
+  "infrastructure_recovery",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: text("session_id").notNull(),
+    authorizedSessionId: text("authorized_session_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    plan: jsonb("plan").notNull(),
+    planHash: text("plan_hash").notNull(),
+    stage: text("stage").notNull().default("requested"),
+    lease: uuid("lease"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("recovery_business_scope").on(t.id, t.businessId),
+    unique("recovery_request_once").on(t.requestKey),
+    uniqueIndex("recovery_plan_once").on(sql`(${t.plan}->>'id')`),
+    check(
+      "recovery_plan_scope",
+      sql`${t.plan}->>'businessId'=${t.businessId}::text and ${t.planHash}=encode(sha256(convert_to(${t.plan}::text,'UTF8')),'hex')`,
+    ),
+    pgPolicy("recovery_read", {
+      for: "select",
+      to: appRuntime,
+      using: recoveryScope,
+    }),
+    pgPolicy("recovery_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${recoveryScope} and actor_id=current_setting('app.actor_id',true) and session_id=current_setting('app.recovery_session',true) and authorized_session_id=session_id and stage='requested' and lease is null and lease_until is null`,
+    }),
+    pgPolicy("recovery_owner", {
+      for: "all",
+      to: "public",
+      using: recoveryOwner,
+      withCheck: recoveryOwner,
+    }),
+  ],
+).enableRLS();
+export const infrastructureRecoveryEvent = pgTable(
+  "infrastructure_recovery_event",
+  {
+    id: uuid("id").primaryKey(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    operationId: uuid("operation_id").notNull(),
+    stage: text("stage").notNull(),
+    outcome: text("outcome").notNull(),
+    evidence: jsonb("evidence").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [
+    pgPolicy("recovery_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: recoveryScope,
+    }),
+    pgPolicy("recovery_event_owner", {
+      for: "all",
+      to: "public",
+      using: recoveryOwner,
+      withCheck: recoveryOwner,
+    }),
+  ],
+).enableRLS();
+
+const taxReportingScope = sql`public.tax_reporting_operator()`;
+function taxReportingPolicies(name: string) {
+  return [
+    pgPolicy(name + "_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxReportingScope,
+    }),
+    pgPolicy(name + "_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${taxReportingScope}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy(name + "_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ];
+}
+const taxAttribution = () => ({
+  requestKey: uuid("request_key").notNull(),
+  input: jsonb("input").$type<Record<string, unknown>>().notNull(),
+  actorId: text("actor_id")
+    .notNull()
+    .references(() => user.id),
+  actorName: text("actor_name").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+  note: text("note").notNull(),
+});
+export const taxObligationRevision = pgTable(
+  "tax_obligation_revision",
+  {
+    id: uuid("id").primaryKey(),
+    key: text("key").notNull(),
+    version: integer("version").notNull(),
+    definition: jsonb("definition").$type<ObligationDefinition>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_obligation_key_version").on(t.key, t.version),
+    uniqueIndex("tax_obligation_request").on(t.requestKey),
+    check("tax_obligation_version", sql`${t.version}>0`),
+    ...taxReportingPolicies("tax_obligation_revision"),
+  ],
+).enableRLS();
+export const taxObligationDecision = pgTable(
+  "tax_obligation_decision",
+  {
+    id: uuid("id").primaryKey(),
+    revisionId: uuid("revision_id")
+      .notNull()
+      .references(() => taxObligationRevision.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_obligation_decision_version").on(t.revisionId, t.version),
+    uniqueIndex("tax_obligation_decision_request").on(t.requestKey),
+    check(
+      "tax_obligation_decision_outcome",
+      sql`${t.outcome} in ('approved','withdrawn') and ${t.version}>0`,
+    ),
+    ...taxReportingPolicies("tax_obligation_decision"),
+  ],
+).enableRLS();
+export const taxReportingPeriod = pgTable(
+  "tax_reporting_period",
+  {
+    id: uuid("id").primaryKey(),
+    obligationId: uuid("obligation_id")
+      .notNull()
+      .references(() => taxObligationRevision.id),
+    supersedesId: uuid("supersedes_id"),
+    definition: jsonb("definition").$type<ReportingPeriod>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_reporting_period_request").on(t.requestKey),
+    uniqueIndex("tax_reporting_period_successor").on(t.supersedesId),
+    foreignKey({
+      name: "tax_reporting_period_supersedes_fk",
+      columns: [t.supersedesId],
+      foreignColumns: [t.id],
+    }),
+    check(
+      "tax_reporting_period_binding",
+      sql`${t.definition}->>'id'=${t.id}::text and ${t.definition}->>'obligationId'=${t.obligationId}::text and coalesce(${t.definition}->>'supersedesId','')=coalesce(${t.supersedesId}::text,'') and ${t.supersedesId} is distinct from ${t.id} and (${t.definition}->>'end')::timestamptz>(${t.definition}->>'start')::timestamptz`,
+    ),
+    ...taxReportingPolicies("tax_reporting_period"),
+  ],
+).enableRLS();
+export const taxLiabilityReport = pgTable(
+  "tax_liability_report",
+  {
+    id: uuid("id").primaryKey(),
+    periodId: uuid("period_id")
+      .notNull()
+      .references(() => taxReportingPeriod.id),
+    revision: integer("revision").notNull(),
+    snapshot: jsonb("snapshot").$type<LiabilitySnapshot>().notNull(),
+    digest: text("digest").notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_liability_report_revision").on(t.periodId, t.revision),
+    uniqueIndex("tax_liability_report_request").on(t.requestKey),
+    check(
+      "tax_liability_report_binding",
+      sql`${t.snapshot}->'period'->>'id'=${t.periodId}::text and ${t.digest} ~ '^[a-f0-9]{64}$' and ${t.revision}>0`,
+    ),
+    ...taxReportingPolicies("tax_liability_report"),
+  ],
+).enableRLS();
+export const taxReportAction = pgTable(
+  "tax_report_action",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    version: integer("version").notNull(),
+    kind: text("kind").notNull(),
+    detail: jsonb("detail")
+      .$type<{ issueId: string | null; evidence: string[] }>()
+      .notNull(),
+    ...taxAttribution(),
+    actorId: text("actor_id").references(() => user.id),
+  },
+  (t) => [
+    uniqueIndex("tax_report_action_version").on(t.reportId, t.version),
+    uniqueIndex("tax_report_action_request").on(t.requestKey),
+    check(
+      "tax_report_action_kind",
+      sql`${t.kind} in ('review','raise_issue','resolve_issue','approve','invalidated') and ${t.version}>0`,
+    ),
+    ...taxReportingPolicies("tax_report_action"),
+  ],
+).enableRLS();
+export const taxPeriodReminder = pgTable(
+  "tax_period_reminder",
+  {
+    id: uuid("id").primaryKey(),
+    periodId: uuid("period_id")
+      .notNull()
+      .references(() => taxReportingPeriod.id),
+    stage: text("stage").notNull(),
+    stageAt: timestamp("stage_at", { withTimezone: true }).notNull(),
+    source: jsonb("source").$type<TaxReminder["source"]>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("tax_period_reminder_stage").on(t.periodId, t.stage),
+    pgPolicy("tax_period_reminder_read", {
+      for: "select",
+      to: appRuntime,
+      using: taxReportingScope,
+    }),
+    pgPolicy("tax_period_reminder_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`false`,
+    }),
+    pgPolicy("tax_period_reminder_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+
+export const taxFilingExport = pgTable(
+  "tax_filing_export",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    report: jsonb("report").$type<LiabilityReport>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_export_request").on(t.requestKey),
+    check(
+      "tax_filing_export_binding",
+      sql`coalesce(${t.report}->>'id'=${t.reportId}::text and ${t.report}->>'status'='approved' and (${t.report}->>'current')::boolean,false)`,
+    ),
+    ...taxReportingPolicies("tax_filing_export"),
+  ],
+).enableRLS();
+
+export const taxFilingPolicy = pgTable(
+  "tax_filing_policy",
+  {
+    id: uuid("id").primaryKey(),
+    obligationId: uuid("obligation_id")
+      .notNull()
+      .references(() => taxObligationRevision.id),
+    version: integer("version").notNull(),
+    definition: jsonb("definition").$type<FilingPolicyDefinition>().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_policy_request").on(t.requestKey),
+    uniqueIndex("tax_filing_policy_version").on(t.obligationId, t.version),
+    check("tax_filing_policy_positive_version", sql`${t.version}>0`),
+    ...taxReportingPolicies("tax_filing_policy"),
+  ],
+).enableRLS();
+export const taxFilingPolicyDecision = pgTable(
+  "tax_filing_policy_decision",
+  {
+    id: uuid("id").primaryKey(),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => taxFilingPolicy.id),
+    version: integer("version").notNull(),
+    outcome: text("outcome").$type<"approved" | "withdrawn">().notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_policy_decision_request").on(t.requestKey),
+    uniqueIndex("tax_filing_policy_decision_version").on(t.policyId, t.version),
+    check(
+      "tax_filing_policy_decision_valid",
+      sql`${t.version}>0 and ${t.outcome} in ('approved','withdrawn')`,
+    ),
+    ...taxReportingPolicies("tax_filing_policy_decision"),
+  ],
+).enableRLS();
+export const taxFilingIntent = pgTable(
+  "tax_filing_intent",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => taxFilingPolicy.id),
+    policyDecisionId: uuid("policy_decision_id")
+      .notNull()
+      .references(() => taxFilingPolicyDecision.id),
+    reportApprovalId: uuid("report_approval_id")
+      .notNull()
+      .references(() => taxReportAction.id),
+    kind: text("kind").$type<"submission" | "remittance">().notNull(),
+    target: jsonb("target").$type<FilingTarget>().notNull(),
+    report: jsonb("report").$type<LiabilityReport>().notNull(),
+    policy: jsonb("policy").$type<FilingPolicy>().notNull(),
+    amountMinor: text("amount_minor").notNull(),
+    basisDigest: text("basis_digest").notNull(),
+    amendmentOf: uuid("amendment_of"),
+    supersedesId: uuid("supersedes_id"),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_intent_request").on(t.requestKey),
+    foreignKey({
+      name: "tax_filing_amendment_fk",
+      columns: [t.amendmentOf],
+      foreignColumns: [t.id],
+    }),
+    foreignKey({
+      name: "tax_filing_supersedes_fk",
+      columns: [t.supersedesId],
+      foreignColumns: [t.id],
+    }),
+    uniqueIndex("tax_filing_amendment_child").on(t.amendmentOf),
+    uniqueIndex("tax_filing_supersedes_child").on(t.supersedesId),
+    check(
+      "tax_filing_basis_digest",
+      sql`${t.basisDigest} ~ '^[a-f0-9]{64}$' and ${t.supersedesId} is distinct from ${t.id}`,
+    ),
+    check(
+      "tax_filing_intent_binding",
+      sql`coalesce(${t.kind} in ('submission','remittance') and ${t.report}->>'id'=${t.reportId}::text and ${t.target}->>'reportId'=${t.reportId}::text and ${t.policy}->>'id'=${t.policyId}::text and ${t.amountMinor} ~ '^-?(0|[1-9][0-9]{0,59})$' and (${t.kind}='submission' or ${t.amountMinor} not like '-%') and ${t.amendmentOf} is distinct from ${t.id},false)`,
+    ),
+    ...taxReportingPolicies("tax_filing_intent"),
+  ],
+).enableRLS();
+export const taxFilingEvent = pgTable(
+  "tax_filing_event",
+  {
+    id: uuid("id").primaryKey(),
+    intentId: uuid("intent_id")
+      .notNull()
+      .references(() => taxFilingIntent.id),
+    version: integer("version").notNull(),
+    kind: text("kind").notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull(),
+    confirmationKey: text("confirmation_key"),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_event_request").on(t.requestKey),
+    uniqueIndex("tax_filing_event_version").on(t.intentId, t.version),
+    uniqueIndex("tax_filing_confirmation_reference").on(t.confirmationKey),
+    uniqueIndex("tax_filing_attempt_once")
+      .on(t.intentId)
+      .where(sql`${t.kind}='attempt'`),
+    uniqueIndex("tax_filing_confirm_once")
+      .on(t.intentId)
+      .where(sql`${t.kind}='confirm'`),
+    check(
+      "tax_filing_confirmation_key",
+      sql`coalesce((${t.kind}='confirm' and ${t.confirmationKey} ~ '^[a-f0-9]{64}$') or (${t.kind}<>'confirm' and ${t.confirmationKey} is null),false)`,
+    ),
+    check(
+      "tax_filing_event_valid",
+      sql`${t.version}>0 and ${t.kind} in ('approve','attempt','acknowledge','confirm','raise_issue','resolve_issue','supersede')`,
+    ),
+    ...taxReportingPolicies("tax_filing_event"),
+  ],
+).enableRLS();
+
+export const taxFilingEvidence = pgTable(
+  "tax_filing_evidence",
+  {
+    id: uuid("id").primaryKey(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    target: jsonb("target").$type<FilingEvidence["target"]>(),
+    metadata: jsonb("metadata")
+      .$type<
+        Omit<
+          FilingEvidence,
+          "id" | "reportId" | "target" | "actorId" | "actorName" | "at" | "note"
+        >
+      >()
+      .notNull(),
+    storageDatabase: text("storage_database")
+      .notNull()
+      .default(sql`current_database()`),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_evidence_request").on(t.requestKey),
+    ...taxReportingPolicies("tax_filing_evidence"),
+  ],
+).enableRLS();
+export const taxFilingBytes = pgTable(
+  "tax_filing_bytes",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .references(() => taxFilingEvidence.id),
+    body: text("body").notNull(),
+  },
+  () => [
+    pgPolicy("tax_filing_bytes_system", {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ],
+).enableRLS();
+export const taxFilingAccess = pgTable(
+  "tax_filing_access",
+  {
+    id: uuid("id").primaryKey(),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => taxFilingEvidence.id),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    accessHash: text("access_hash").notNull(),
+    sessionId: text("session_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("tax_filing_access_hash").on(t.accessHash),
+    check(
+      "tax_filing_access_expiry",
+      sql`${t.expiresAt}>${t.at} and ${t.expiresAt}<=${t.at}+interval '30 seconds'`,
+    ),
+    ...taxReportingPolicies("tax_filing_access"),
+  ],
+).enableRLS();
+export const taxRemittanceAllocation = pgTable(
+  "tax_remittance_allocation",
+  {
+    id: uuid("id").primaryKey(),
+    intentId: uuid("intent_id")
+      .notNull()
+      .references(() => taxFilingIntent.id),
+    confirmationId: uuid("confirmation_id")
+      .notNull()
+      .references(() => taxFilingEvent.id),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => taxFilingEvidence.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    referenceKey: text("reference_key").notNull(),
+    amountMinor: text("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    ...taxAttribution(),
+  },
+  (t) => [
+    uniqueIndex("tax_remittance_confirmation").on(t.confirmationId),
+    uniqueIndex("tax_remittance_evidence").on(t.evidenceId),
+    uniqueIndex("tax_remittance_reference").on(t.referenceKey),
+    uniqueIndex("tax_remittance_intent").on(t.intentId),
+    check(
+      "tax_remittance_amount",
+      sql`${t.amountMinor} ~ '^(0|[1-9][0-9]{0,59})$' and ${t.currency} in ('INR','USD')`,
+    ),
+    ...taxReportingPolicies("tax_remittance_allocation"),
+  ],
+).enableRLS();
+export const taxRemittanceReview = pgTable(
+  "tax_remittance_review",
+  {
+    id: uuid("id").primaryKey(),
+    allocationId: uuid("allocation_id")
+      .notNull()
+      .references(() => taxRemittanceAllocation.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => taxLiabilityReport.id),
+    version: integer("version").notNull(),
+    ...taxAttribution(),
+    policyId: uuid("policy_id")
+      .notNull()
+      .references(() => taxFilingPolicy.id),
+    policyDecisionId: uuid("policy_decision_id")
+      .notNull()
+      .references(() => taxFilingPolicyDecision.id),
+    reportApprovalId: uuid("report_approval_id")
+      .notNull()
+      .references(() => taxReportAction.id),
+  },
+  (t) => [
+    uniqueIndex("tax_remittance_review_request").on(t.requestKey),
+    uniqueIndex("tax_remittance_review_version").on(t.allocationId, t.version),
+    check("tax_remittance_review_positive_version", sql`${t.version}>0`),
+    ...taxReportingPolicies("tax_remittance_review"),
+  ],
+).enableRLS();
+
+const reconciliationAuthority = sql`coalesce(current_setting('app.business_id',true),'')='' and (${paymentOperator})`;
+function reconciliationPolicies(name: string) {
+  return [
+    pgPolicy(`${name}_read`, {
+      for: "select",
+      to: appRuntime,
+      using: reconciliationAuthority,
+    }),
+    pgPolicy(`${name}_insert`, {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`(${reconciliationAuthority}) and actor_id=current_setting('app.actor_id',true)`,
+    }),
+    pgPolicy(`${name}_system`, {
+      for: "all",
+      to: "public",
+      using: paymentOwner,
+      withCheck: paymentOwner,
+    }),
+  ];
+}
+export const reconciliationEvidence = pgTable(
+  "reconciliation_evidence",
+  {
+    id: uuid("id").primaryKey(),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    source: text("source").notNull(),
+    reference: text("reference").notNull(),
+    name: text("name").notNull(),
+    contentType: text("content_type").notNull(),
+    contentBase64: text("content_base64").notNull(),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    note: text("note").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_evidence_request").on(t.requestKey),
+    check(
+      "reconciliation_evidence_bounds",
+      sql`${t.bytes}>0 and ${t.bytes}<=262144 and length(${t.contentBase64})<=350000 and ${t.sha256} ~ '^[a-f0-9]{64}$' and ${t.source} in ('provider_statement','bank_statement','conversion_confirmation') and octet_length(decode(${t.contentBase64},'base64'))=${t.bytes} and encode(sha256(decode(${t.contentBase64},'base64')),'hex')=${t.sha256}`,
+    ),
+    ...reconciliationPolicies("reconciliation_evidence"),
+  ],
+).enableRLS();
+export const reconciliationRecord = pgTable(
+  "reconciliation_record",
+  {
+    id: uuid("id").primaryKey(),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => reconciliationEvidence.id),
+    supersedes: uuid("supersedes"),
+    identity: text("identity").notNull(),
+    data: jsonb("data").$type<ReconciliationEntry>().notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_record_request").on(t.requestKey),
+    uniqueIndex("reconciliation_record_correction").on(t.supersedes),
+    foreignKey({
+      name: "reconciliation_record_predecessor",
+      columns: [t.supersedes],
+      foreignColumns: [t.id],
+    }),
+    check(
+      "reconciliation_record_binding",
+      sql`coalesce((${t.data}->>'requestKey'=${t.requestKey}::text and ${t.data}->>'evidenceId'=${t.evidenceId}::text and (${t.data}->>'supersedes') is not distinct from ${t.supersedes}::text and ${t.data}->>'kind' in ('settlement','bank_receipt') and octet_length(${t.data}::text)<=1048576),false)`,
+    ),
+    ...reconciliationPolicies("reconciliation_record"),
+  ],
+).enableRLS();
+export const reconciliationReview = pgTable(
+  "reconciliation_review",
+  {
+    id: uuid("id").primaryKey(),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    recordId: uuid("record_id")
+      .notNull()
+      .references(() => reconciliationRecord.id),
+    reportHash: text("report_hash").notNull(),
+    outcome: text("outcome").notNull(),
+    note: text("note").notNull(),
+    evidenceIds: jsonb("evidence_ids").$type<string[]>().notNull(),
+    discrepancy: jsonb("discrepancy")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_review_request").on(t.requestKey),
+    check(
+      "reconciliation_review_outcome",
+      sql`${t.outcome} in ('acknowledged','resolved') and ${t.reportHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    ...reconciliationPolicies("reconciliation_review"),
+  ],
+).enableRLS();
+export const reconciliationAccess = pgTable(
+  "reconciliation_access",
+  {
+    id: uuid("id").primaryKey(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => reconciliationEvidence.id),
+    tokenHash: text("token_hash").notNull(),
+    at: timestamp("at", { withTimezone: true })
+      .notNull()
+      .default(sql`statement_timestamp()`),
+    expiresAt: timestamp("expires_at", { withTimezone: true })
+      .notNull()
+      .default(sql`(statement_timestamp()+interval '60 seconds')`),
+  },
+  (t) => [
+    uniqueIndex("reconciliation_access_token").on(t.tokenHash),
+    check(
+      "reconciliation_access_expiry",
+      sql`${t.expiresAt}>${t.at} and ${t.expiresAt}<=${t.at}+interval '60 seconds'`,
+    ),
+    ...reconciliationPolicies("reconciliation_access"),
+  ],
+).enableRLS();
+
+// Pilot inputs and history are immutable; effect reservations are private append-only facts.
+const pilotScope = sql`business_id=nullif(current_setting('app.business_id',true),'')::uuid and public.pilot_authorized()`;
+export const pilotRecord = pgTable(
+  "pilot_record",
+  {
+    id: uuid("id").notNull(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    requestKey: uuid("request_key").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    snapshot: jsonb("snapshot").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "pilot_record_pkey", columns: [t.id, t.businessId] }),
+    uniqueIndex("pilot_request_once").on(t.businessId, t.requestKey),
+    check(
+      "pilot_snapshot_scope",
+      sql`${t.snapshot}->'payment'->'quote'->>'businessId'=${t.businessId}::text and ${t.snapshot}->'plan'->>'paymentActionId' is not null`,
+    ),
+    pgPolicy("pilot_read", {
+      for: "select",
+      to: appRuntime,
+      using: pilotScope,
+    }),
+    pgPolicy("pilot_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${pilotScope} and public.pilot_operator() and actor_id=current_setting('app.actor_id',true)`,
+    }),
+  ],
+).enableRLS();
+export const pilotEvent = pgTable(
+  "pilot_event",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    pilotId: uuid("pilot_id").notNull(),
+    requestKey: uuid("request_key").notNull(),
+    kind: text("kind").notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    data: jsonb("data").notNull(),
+    position: bigserial("position", { mode: "number" }).notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "pilot_event_kind",
+      sql`${t.kind} in ('prepared','approved','activated','effort','results','renewal','reuse','stopped','setup_authorized')`,
+    ),
+    uniqueIndex("pilot_event_request_once").on(t.businessId, t.requestKey),
+    pgPolicy("pilot_event_read", {
+      for: "select",
+      to: appRuntime,
+      using: pilotScope,
+    }),
+    pgPolicy("pilot_event_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`${pilotScope} and actor_id=current_setting('app.actor_id',true) and (kind in ('approved','stopped') or public.pilot_operator()) and exists(select 1 from public.pilot_record p where p.id=pilot_event.pilot_id and p.business_id=pilot_event.business_id) and (kind<>'reuse' or exists(select 1 from public.membership m where m.business_id::text=pilot_event.data->>'secondBusinessId' and m.user_id=current_setting('app.actor_id',true) and m.role in ('owner','admin')))`,
+    }),
+  ],
+).enableRLS();
+export const pilotEffect = pgTable(
+  "pilot_effect",
+  {
+    id: uuid("id").primaryKey(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => business.id),
+    pilotId: uuid("pilot_id").notNull(),
+    kind: text("kind").notNull(),
+    operationId: text("operation_id").notNull(),
+    quantity: integer("quantity").notNull(),
+    cashMinor: bigint("cash_minor", { mode: "bigint" }).notNull(),
+    spendMinor: bigint("spend_minor", { mode: "bigint" }).notNull(),
+    globalInrMicros: bigint("global_inr_micros", { mode: "bigint" }).notNull(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id),
+    intent: jsonb("intent").$type<Record<string, unknown>>().notNull(),
+    seconds: integer("seconds").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pilot_effect_once").on(t.businessId, t.kind, t.operationId),
+    check(
+      "pilot_effect_nonnegative",
+      sql`${t.quantity}>0 and ${t.cashMinor}>=0 and ${t.spendMinor}>=0 and ${t.globalInrMicros}>=0 and ${t.seconds}>0`,
+    ),
+    pgPolicy("pilot_effect_read", {
+      for: "select",
+      to: appRuntime,
+      using: pilotScope,
+    }),
+    pgPolicy("pilot_effect_insert", {
+      for: "insert",
+      to: appRuntime,
+      withCheck: sql`false`,
+    }),
+  ],
+).enableRLS();
+// Keep these outside Drizzle's table creation plan: push may replace the
+// referenced composite key after adding inline foreign keys. The shared
+// prepare/secure sequence pauses and restores these validated bindings.
+export const pilotScopeForeignKeys = [
+  new ForeignKey(
+    pilotEvent,
+    foreignKey({
+      name: "pilot_event_scope",
+      columns: [pilotEvent.pilotId, pilotEvent.businessId],
+      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
+    }),
+  ),
+  new ForeignKey(
+    pilotEffect,
+    foreignKey({
+      name: "pilot_effect_scope",
+      columns: [pilotEffect.pilotId, pilotEffect.businessId],
+      foreignColumns: [pilotRecord.id, pilotRecord.businessId],
     }),
   ),
 ];

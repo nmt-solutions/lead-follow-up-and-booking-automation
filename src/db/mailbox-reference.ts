@@ -7,6 +7,7 @@ import {
   inboxAssociation,
   inboxConversation,
   mailboxAppMessage,
+  opportunityDueAction,
 } from "./schema";
 
 /** Follow exact retained RFC references to a received message's CURRENT association.
@@ -80,6 +81,42 @@ export async function resolveMailReference(
     );
   if (received.length + sent.length + appSent.length > 1)
     return { status: "ambiguous" };
+  if (!received.length && !sent.length && !appSent.length) {
+    const actions = await tx
+      .select()
+      .from(opportunityDueAction)
+      .where(
+        and(
+          eq(opportunityDueAction.businessId, businessId),
+          eq(opportunityDueAction.connectionId, mailboxId),
+        ),
+      );
+    const replies = actions.flatMap((a) =>
+      a.email &&
+      ["committed", "dispatched"].includes(a.state) &&
+      a.email.envelope.internetMessageId === reference
+        ? [a.email.envelope]
+        : [],
+    );
+    if (replies.length > 1) return { status: "ambiguous" };
+    const reply = replies[0];
+    if (reply) {
+      if (
+        (thread && reply.parent.threadRef !== thread) ||
+        !participants.includes(reply.recipient)
+      )
+        return { status: "missing" };
+      return resolveMailReference(
+        tx,
+        businessId,
+        mailboxId,
+        reply.parent.internetMessageId,
+        participants,
+        thread,
+        visited,
+      );
+    }
+  }
   if (appSent[0]) {
     const [source] = await tx
       .select()

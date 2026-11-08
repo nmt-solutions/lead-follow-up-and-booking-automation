@@ -51,6 +51,28 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       ),
     };
   }
+  async function pilotBudget(
+    c: { actor: WorkIdentity; businessId: string; opportunityId?: string },
+    phase: string,
+    payload: Record<string, unknown>,
+    selected?: Record<string, unknown> | null,
+  ) {
+    const decision = await dependencies.repository.reservePilotOperation(
+      c.actor,
+      c.businessId,
+      c.opportunityId ?? null,
+      phase,
+      payload,
+      selected,
+    );
+    if (!decision.allowed && phase !== "read")
+      throw new ApplicationError("PAID_ACCESS_REQUIRED");
+    return {
+      ...dep,
+      pilotBlocked: !decision.allowed,
+      pilotProvider: decision.provider,
+    };
+  }
   async function read(
     credentials: Credentials,
     businessId: unknown,
@@ -61,7 +83,7 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       c.actor,
       c.businessId,
       c.opportunityId,
-      dep,
+      await pilotBudget(c, "read", {}),
     );
   }
   return {
@@ -71,12 +93,19 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       businessId: unknown,
       input: unknown,
     ) {
-      const actor = await dependencies.authenticateForWork(credentials);
+      const actor = await dependencies.authenticateForWork(credentials),
+        id = validate(z.uuid(), businessId),
+        data = validate(configureBookingSchema, input);
       await dependencies.repository.configure(
         actor,
-        validate(z.uuid(), businessId),
-        validate(configureBookingSchema, input),
-        dep,
+        id,
+        data,
+        await pilotBudget(
+          { actor, businessId: id },
+          "configure",
+          data,
+          data.configuration.calendar,
+        ),
       );
     },
     async availability(
@@ -85,13 +114,15 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       opportunityId: unknown,
       input: unknown,
     ) {
-      const c = await context(credentials, businessId, opportunityId);
+      const c = await context(credentials, businessId, opportunityId),
+        data = validate(availabilityQuerySchema, input),
+        native = await pilotBudget(c, "availability", data);
       return dependencies.repository.availability(
         c.actor,
         c.businessId,
         c.opportunityId,
-        validate(availabilityQuerySchema, input),
-        dep,
+        data,
+        native,
       );
     },
     async request(
@@ -100,13 +131,15 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       opportunityId: unknown,
       input: unknown,
     ) {
-      const c = await context(credentials, businessId, opportunityId);
+      const c = await context(credentials, businessId, opportunityId),
+        data = validate(appointmentRequestSchema, input),
+        native = await pilotBudget(c, "request", data);
       await dependencies.repository.request(
         c.actor,
         c.businessId,
         c.opportunityId,
-        validate(appointmentRequestSchema, input),
-        dep,
+        data,
+        native,
       );
       return read(credentials, businessId, opportunityId);
     },
@@ -116,13 +149,15 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       opportunityId: unknown,
       input: unknown,
     ) {
-      const c = await context(credentials, businessId, opportunityId);
+      const c = await context(credentials, businessId, opportunityId),
+        data = validate(appointmentRefSchema, input),
+        native = await pilotBudget(c, "book", data);
       await dependencies.repository.book(
         c.actor,
         c.businessId,
         c.opportunityId,
-        validate(appointmentRefSchema, input).appointmentId,
-        dep,
+        data.appointmentId,
+        native,
       );
       return read(credentials, businessId, opportunityId);
     },
@@ -132,13 +167,15 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       opportunityId: unknown,
       input: unknown,
     ) {
-      const c = await context(credentials, businessId, opportunityId);
+      const c = await context(credentials, businessId, opportunityId),
+        data = validate(appointmentRefSchema, input),
+        native = await pilotBudget(c, "reconcile", data);
       await dependencies.repository.reconcile(
         c.actor,
         c.businessId,
         c.opportunityId,
-        validate(appointmentRefSchema, input).appointmentId,
-        dep,
+        data.appointmentId,
+        native,
       );
       return read(credentials, businessId, opportunityId);
     },
@@ -163,13 +200,15 @@ export function createAppointmentApplication<Credentials>(dependencies: {
       opportunityId: unknown,
       input: unknown,
     ) {
-      const c = await context(credentials, businessId, opportunityId);
+      const c = await context(credentials, businessId, opportunityId),
+        data = validate(appointmentRefSchema, input),
+        native = await pilotBudget(c, "cancel", data);
       await dependencies.repository.cancel(
         c.actor,
         c.businessId,
         c.opportunityId,
-        validate(appointmentRefSchema, input).appointmentId,
-        dep,
+        data.appointmentId,
+        native,
       );
       return read(credentials, businessId, opportunityId);
     },

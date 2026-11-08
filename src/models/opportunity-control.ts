@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { commercialEvaluationSchema } from "./commercial-authority";
 import type { EmailDispatchAuthorization } from "./email-eligibility";
+import type { MailDispatchAccess, MailResult } from "./mail-dispatch";
+import type {
+  OpportunityMail,
+  OpportunityMailEnvelope,
+} from "./opportunity-mail";
 
 const note = z
   .string()
@@ -75,8 +80,10 @@ export type DueAction = {
   state: "pending" | "committed" | "dispatched" | "cancelled";
   reason: string | null;
   dueAt: string;
+  email?: Omit<OpportunityMail, "envelope"> | null;
 };
 export type OpportunityDispatch = {
+  email?: OpportunityMailEnvelope;
   emailEligibility?: EmailDispatchAuthorization;
   sender?: {
     identityId: string;
@@ -103,12 +110,18 @@ export type OpportunityDispatch = {
     inquiryRunId: string;
   };
 };
-/** Concrete future-send adapter seam. No live channel transport is activated by #19.
+/** Guarded channel adapter seam. Legacy deterministic/other-channel providers may return void;
+ * native mail returns validated acceptance evidence and receives invocation-local locked access.
  * A throw after invocation is ambiguous: committed work is never automatically retried.
- * Implementations must bound/cancel their I/O and honor actionId as an idempotency key.
+ * Implementations must bound/cancel I/O and make one call per committed action. An RFC Message-ID is correlation, not provider deduplication.
  */
 export type OpportunityActionProvider = {
+  selectEmail?(key: string): OpportunityActionProvider;
   emailIdentity?: { adapterKey: string; mode: "fixture" | "live" };
   channels: readonly ("email" | "whatsapp")[];
-  dispatch(action: OpportunityDispatch, signal: AbortSignal): Promise<void>;
+  dispatch(
+    action: OpportunityDispatch,
+    signal: AbortSignal,
+    access?: MailDispatchAccess,
+  ): Promise<void | MailResult>;
 };

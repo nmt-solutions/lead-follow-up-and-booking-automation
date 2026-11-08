@@ -1,3 +1,4 @@
+import { bindDiscoveryCapacity } from "./discovery-capacity-repository";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -9,8 +10,10 @@ import {
   settings,
   briefFor,
   checkCurrent,
+  requireDiscoveryAvailable,
 } from "./discovery-state";
 import { ApplicationError } from "../models/application-error";
+import { paidAllowance } from "./paid-access";
 import type { Actor, Clock } from "../models/business";
 import type { DiscoveryWork, WorkIdentity } from "../models/discovery";
 import { availableMarkets } from "../discovery/repository";
@@ -30,6 +33,8 @@ export async function persistDispatch(
   payload: Dispatch,
   at: Date,
 ) {
+  if (payload.kind === "discovery")
+    await bindDiscoveryCapacity(tx, payload.work);
   await tx.insert(discoveryDispatch).values({
     id: randomUUID(),
     businessId: payload.work.businessId,
@@ -55,9 +60,14 @@ async function validateSearch(
   tx: Transaction,
   businessId: string,
   input: SaveSchedule,
+  at: Date,
 ) {
-  const { profile, policy } = await settings(tx, businessId);
+  await requireDiscoveryAvailable(tx, businessId);
+  const { profile, policy } = await settings(tx, businessId, at);
   if (!policy) throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
+  const paid = await paidAllowance(tx, businessId, "discovery", at);
+  if (!paid || input.search.budget > paid.remaining)
+    throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
   if (
     input.search.budget > policy.maxRunBudget ||
     !input.search.markets.every((m) =>
@@ -88,6 +98,7 @@ export function createDiscoveryScheduleRepository(
           .select()
           .from(discoveryDispatch)
           .where(eq(discoveryDispatch.businessId, businessId));
+        await requireCapability(tx, actor, businessId, "sales.work");
         return rows.map((row) => {
           const outgoing = dispatches.filter(
             (d) =>
@@ -159,7 +170,12 @@ export function createDiscoveryScheduleRepository(
             return { id: row.id, revision: row.revision };
           if ((row?.revision ?? 0) !== input.expectedRevision)
             throw new ApplicationError("CONFLICT");
-          const current = await validateSearch(tx, businessId, input);
+          const current = await validateSearch(
+            tx,
+            businessId,
+            input,
+            clock.now(),
+          );
           const value = {
             id: input.scheduleId,
             businessId,
@@ -229,7 +245,12 @@ export function createDiscoveryScheduleRepository(
           if (row.revision !== input.expectedRevision)
             throw new ApplicationError("CONFLICT");
           if (input.action === "resume") {
-            const current = await validateSearch(tx, businessId, row.input);
+            const current = await validateSearch(
+              tx,
+              businessId,
+              row.input,
+              clock.now(),
+            );
             if (
               !isDeepStrictEqual(current.policy, row.policy) ||
               !isDeepStrictEqual(current.brief, row.brief)
@@ -297,7 +318,26 @@ export function createDiscoveryScheduleRepository(
             return { outcome: "stale" };
           if (row.nextDueAt > at) return { outcome: "not_due" };
           await requireWorkSession(tx, work, clock.now());
-          const current = await validateSearch(tx, work.businessId, row.input);
+          const current = await (async () => {
+            try {
+              return await validateSearch(
+                tx,
+                work.businessId,
+                row.input,
+                clock.now(),
+              );
+            } catch (error: unknown) {
+              if (
+                error instanceof ApplicationError &&
+                error.code === "DISCOVERY_SETUP_REQUIRED"
+              ) {
+                const now = await settings(tx, work.businessId, clock.now());
+                if (now.configuredPolicy && !now.policy)
+                  throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+              }
+              throw error;
+            }
+          })();
           if (
             current.policy.adapterId !== adapterId ||
             !isDeepStrictEqual(current.policy, row.policy) ||
@@ -432,6 +472,7 @@ export function createDiscoveryScheduleRepository(
               tx,
               work.businessId,
               row.input,
+              clock.now(),
             );
             if (
               !isDeepStrictEqual(current.brief, row.brief) ||
@@ -457,7 +498,7 @@ export function createDiscoveryScheduleRepository(
             )
               return false;
             await requireWorkSession(tx, work, clock.now());
-            await checkCurrent(tx, run);
+            await checkCurrent(tx, run, clock.now());
             if (run.scheduleId) {
               const [schedule] = await tx
                 .select()
@@ -532,7 +573,7 @@ export function createDiscoveryScheduleRepository(
         schedule.revision !== run.scheduleRevision
       )
         throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
-      await checkCurrent(tx, run);
+      await checkCurrent(tx, run, clock.now());
     },
   };
 }

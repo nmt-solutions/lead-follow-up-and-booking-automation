@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { createGmailGrantService } from "../application/gmail-grants";
 import type { Clock } from "../models/business";
@@ -45,6 +46,16 @@ export function createGmailProvider(
   clock: Clock,
 ): MailboxProvider {
   const http = repository.http;
+  async function api(
+    context: MailboxSnapshot,
+    ...args: Parameters<NonNullable<typeof http>["api"]>
+  ) {
+    await context.authorizeNative?.(
+      `gmail:read:${createHash("sha256").update(args[0]).digest("hex")}`,
+    );
+    return http!.api(...args);
+  }
+
   async function call<T>(
     context: MailboxSnapshot,
     operation: (token: string) => Promise<T>,
@@ -77,7 +88,7 @@ export function createGmailProvider(
         async (token) => {
           const profile = providerValue(
             z.object({ emailAddress: z.email(), historyId }),
-            await http!.api("profile", token, signal),
+            await api(context, "profile", token, signal),
           );
           if (
             profile.emailAddress.toLowerCase() !== context.account.toLowerCase()
@@ -89,7 +100,7 @@ export function createGmailProvider(
                 .array(z.object({ id: z.string().min(1).max(256) }))
                 .max(1000),
             }),
-            await http!.api("labels", token, signal),
+            await api(context, "labels", token, signal),
           );
           const availableThreads: string[] = [];
           if (context.configuration.scope.kind === "threads")
@@ -99,7 +110,8 @@ export function createGmailProvider(
               try {
                 const thread = providerValue(
                   z.object({ id: gmailId }),
-                  await http!.api(
+                  await api(
+                    context,
                     `threads/${encodeURIComponent(ref)}?format=minimal&fields=id`,
                     token,
                     signal,
@@ -151,7 +163,7 @@ export function createGmailProvider(
           } else {
             const profile = providerValue(
               z.object({ historyId }),
-              await http!.api("profile", token, signal),
+              await api(context, "profile", token, signal),
             );
             cursor = {
               v: 1,
@@ -197,7 +209,8 @@ export function createGmailProvider(
               try {
                 const message = providerValue(
                   messageSchema,
-                  await http!.api(
+                  await api(
+                    context,
                     `messages/${encodeURIComponent(id)}?format=metadata`,
                     token,
                     signal,
@@ -240,7 +253,8 @@ export function createGmailProvider(
                     id: gmailId,
                     messages: z.array(messageSchema).max(10000).default([]),
                   }),
-                  await http!.api(
+                  await api(
+                    context,
                     `threads/${encodeURIComponent(id)}?format=metadata`,
                     token,
                     signal,
@@ -295,7 +309,7 @@ export function createGmailProvider(
               if (cursor.page) query.set("pageToken", cursor.page);
               const page = providerValue(
                 refsSchema,
-                await http!.api(`messages?${query}`, token, signal),
+                await api(context, `messages?${query}`, token, signal),
               );
               ids = page.messages.map((m) => m.id);
               nextPage = page.nextPageToken;
@@ -388,7 +402,7 @@ export function createGmailProvider(
                   .max(10)
                   .default([]),
               }),
-              await http!.api(`history?${query}`, token, signal),
+              await api(context, `history?${query}`, token, signal),
             );
             if (
               history.history.some((h) =>
@@ -437,7 +451,7 @@ export function createGmailProvider(
               throw error;
             const profile = providerValue(
               z.object({ historyId }),
-              await http!.api("profile", token, signal),
+              await api(context, "profile", token, signal),
             );
             return result(
               [],
@@ -462,7 +476,8 @@ export function createGmailProvider(
         context,
         async (token) =>
           gmailEvent(
-            await http!.api(
+            await api(
+              context,
               `messages/${encodeURIComponent(metadata.messageRef)}?format=full`,
               token,
               signal,

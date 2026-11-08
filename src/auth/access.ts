@@ -39,9 +39,19 @@ export function privilegedRoles(database: Database, userId: string) {
       operator: Boolean(
         operator?.tax ||
         operator?.reconciliation ||
+        operator?.refunds ||
         operator?.ai ||
         operator?.discovery ||
-        operator?.emailPolicy,
+        operator?.emailPolicy ||
+        operator?.pricing ||
+        operator?.whatsAppReview ||
+        operator?.senderHealth ||
+        operator?.documents ||
+        operator?.operations ||
+        operator?.recovery ||
+        operator?.pilots ||
+        operator?.costs ||
+        operator?.notifications,
       ),
     };
   });
@@ -180,5 +190,12 @@ export function createSessionAccess(options: {
     authenticatePrivileged: (headers: Headers) => privileged(headers),
     authenticatePlatform: (headers: Headers) =>
       privileged(headers, operatorMfaLifetime),
+    authenticatePlatformForWork: async (headers: Headers) => {
+      const actor = await privileged(headers, operatorMfaLifetime);
+      const identity = await primary(headers);
+      if (identity.user.id !== actor.userId)
+        throw new ApplicationError("UNAUTHENTICATED");
+      return { ...actor, sessionId: identity.session.id };
+    },
   };
 }

@@ -8,6 +8,7 @@ export function microsoftMailFixture(clock: Clock) {
     "openid email profile offline_access User.Read Mail.Read MailboxSettings.Read";
   const messages = new Map<string, Record<string, unknown>>();
   const pages = new Map<string, unknown>();
+  const sends: string[] = [];
   const bodyReads: string[] = [];
   const calls: { url: URL; headers: Headers }[] = [];
   const control = {
@@ -15,6 +16,12 @@ export function microsoftMailFixture(clock: Clock) {
     userType: "Member",
     ownerId: "profile-id",
     apiError: 0,
+    sendError: 0,
+    sendLost: false,
+    sendMalformed: false,
+    unexpectedAcceptedBody: false,
+    unreadableAcceptedBody: false,
+    expiresIn: 3600,
     errorCode: "ErrorAccessDenied",
     retryAfter: "60",
     beforeBody: undefined as (() => Promise<void>) | undefined,
@@ -25,8 +32,15 @@ export function microsoftMailFixture(clock: Clock) {
     calls.push({ url, headers: new Headers(init?.headers) });
     const response = (raw: unknown, status = 200) =>
       new Response(JSON.stringify(raw), { status });
-    if (url.hostname !== "graph.microsoft.com")
-      return identity.fetch(input, init);
+    if (url.hostname !== "graph.microsoft.com") {
+      const result = await identity.fetch(input, init);
+      if (url.pathname.endsWith("/token") && result.ok)
+        return response({
+          ...(await result.json()),
+          expires_in: control.expiresIn,
+        });
+      return result;
+    }
     if (control.apiError)
       return new Response(
         JSON.stringify({
@@ -37,6 +51,36 @@ export function microsoftMailFixture(clock: Clock) {
           headers: { "Retry-After": control.retryAfter },
         },
       );
+    if (
+      init?.method === "POST" &&
+      (url.pathname.endsWith("/sendMail") || url.pathname.endsWith("/reply"))
+    ) {
+      sends.push(Buffer.from(String(init.body), "base64").toString("utf8"));
+      if (control.sendLost) throw new Error("private-graph-response-lost");
+      if (control.sendError)
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "ErrorAccessDenied",
+              message: "private-token-payload",
+            },
+          }),
+          {
+            status: control.sendError,
+            headers: { "Retry-After": control.retryAfter },
+          },
+        );
+      return new Response(
+        control.unreadableAcceptedBody
+          ? new Uint8Array([0xff])
+          : control.sendMalformed || control.unexpectedAcceptedBody
+            ? "malformed-private"
+            : null,
+        {
+          status: control.sendMalformed ? 200 : 202,
+        },
+      );
+    }
     if (url.pathname === "/v1.0/me")
       return response({
         id: control.ownerId,
@@ -162,6 +206,7 @@ export function microsoftMailFixture(clock: Clock) {
     configuration: identity.configuration,
     identity: identity.control,
     calls,
+    sends,
     control,
     messages,
     pages,

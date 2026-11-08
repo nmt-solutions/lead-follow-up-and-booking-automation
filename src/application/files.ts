@@ -39,6 +39,7 @@ function view(
 ): FileView {
   return {
     id: file.id,
+    purpose: file.purpose,
     businessId: file.businessId,
     ownerId: file.ownerId,
     name: file.name,
@@ -117,7 +118,7 @@ export function createFileApplication<Credentials>(dependencies: {
       const result = await repository.list(ctx.actor, ctx.businessId);
       return {
         files: result.data.files.map(fileView),
-        canManage: result.role !== "salesperson",
+        canManage: result.role === "owner" || result.role === "admin",
         readiness:
           policy && dependencies.storage ? "configured" : "setup_required",
         policy: policy
@@ -389,6 +390,14 @@ export function createFileApplication<Credentials>(dependencies: {
       for (const target of targets) {
         let success = true;
         try {
+          if (
+            !(await repository.cleanupCurrent(
+              target.id,
+              target.operation_id,
+              policy.accountScope,
+            ))
+          )
+            continue;
           await storage.delete(fileObjectKey(target.business_id, target.id));
         } catch {
           success = false;

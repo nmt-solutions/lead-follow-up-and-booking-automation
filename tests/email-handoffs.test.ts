@@ -314,6 +314,17 @@ describe("Own-client email handoff at the persisted application seam", () => {
       (await f.app.workspace(f.owner, f.business.id)).candidates[0].prospect
         .relationship,
     ).toBe("potential_buyer");
+    const report = await reporting(h).read(f.owner, f.business.id, {});
+    expect(
+      Object.fromEntries(report.metrics.map((m) => [m.id, m.value])),
+    ).toMatchObject({
+      email_prepared: 1,
+      email_user_marked_sent: 0,
+      email_sent_folder_observed: 1,
+      email_reply_observed: 1,
+      direct_engagement: 0,
+      confirmed_sale: 0,
+    });
   });
   it("rejects widened recipients, edited content, unsupported follow-ups and forged observations through the HTTP contract", async () => {
     const f = await setup();
@@ -973,3 +984,4 @@ describe("Own-client email handoff at the persisted application seam", () => {
     }
   });
 });
+import { reporting } from "./support/reporting";

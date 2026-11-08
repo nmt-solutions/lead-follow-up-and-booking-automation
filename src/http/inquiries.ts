@@ -13,6 +13,24 @@ export function createInquiryHttp(options: {
   const respond = createResponder(options.reportFailure);
   const body = createJsonBodyReader(options.origin, 4096);
   return {
+    reconcile: (
+      request: Request,
+      businessId: string,
+      id: string,
+      runId: string,
+    ) =>
+      respond(async () => {
+        if (!z.strictObject({}).safeParse(await body(request)).success)
+          throw new ApplicationError("INVALID_INPUT");
+        return dataResponse(
+          await options.application.reconcile(
+            request.headers,
+            businessId,
+            id,
+            runId,
+          ),
+        );
+      }),
     read: (request: Request, businessId: string, id: string) =>
       respond(async () =>
         dataResponse(

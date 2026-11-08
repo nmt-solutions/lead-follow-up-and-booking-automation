@@ -1,3 +1,4 @@
+import { reservePilotEffect, requirePilotPath } from "./pilot-limits";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, count, sql } from "drizzle-orm";
@@ -23,6 +24,7 @@ import { retainMailManual, applyMailManual } from "./mailbox-intake";
 import { pauseMailboxFollowups } from "./mailbox-visibility";
 import { reconcileHandoffReplies } from "./email-handoff-observations";
 import { sequenceMailboxReferences } from "./email-sequence-observations";
+import { opportunityMailReferences } from "./opportunity-mail";
 import {
   inboxConnection,
   mailboxPolicy,
@@ -44,9 +46,11 @@ async function createJob(
   policy: Policy,
   mode: "incremental" | "history",
   at: Date,
+  setupRequestKey?: string,
 ): Promise<MailboxWork> {
-  const id = randomUUID();
+  const id = setupRequestKey ?? randomUUID();
   const state: MailboxJobState = {
+    ...(setupRequestKey ? { pilotSetupRequestKey: setupRequestKey } : {}),
     id,
     mode,
     policyVersion: policy.version,
@@ -518,7 +522,7 @@ export function createMailboxRepository(
         return view(tx, await policyAt(tx, businessId, id), at, true);
       });
     },
-    queue(identity, businessId, mailboxId, mode) {
+    queue(identity, businessId, mailboxId, mode, pilotSetupRequestKey) {
       return access(identity, businessId, true, async (tx) => {
         const policy = await policyAt(tx, businessId, mailboxId);
         if (
@@ -538,8 +542,40 @@ export function createMailboxRepository(
             ),
           )
           .orderBy(desc(mailboxJob.createdAt));
+        if (pilotSetupRequestKey) {
+          if (mode !== "incremental") throw new ApplicationError("FORBIDDEN");
+          await requirePilotPath(tx, businessId, "mailbox", {
+            mailboxId,
+            jobId: pilotSetupRequestKey,
+            pilotSetupRequestKey,
+          });
+          const existing = jobs.find((job) => job.id === pilotSetupRequestKey);
+          if (existing) {
+            if (
+              !isDeepStrictEqual(existing.identity, identity) ||
+              existing.state.pilotSetupRequestKey !== pilotSetupRequestKey
+            )
+              throw new ApplicationError("CONFLICT");
+            return {
+              businessId,
+              mailboxId,
+              jobId: existing.id,
+              policyVersion: policy.version,
+              identity,
+            };
+          }
+          return createJob(
+            tx,
+            identity,
+            policy,
+            mode,
+            clock.now(),
+            pilotSetupRequestKey,
+          );
+        }
         const existing = jobs.find(
           (job) =>
+            !job.state.pilotSetupRequestKey &&
             job.state.mode === mode &&
             (mode === "history" || job.state.status !== "completed"),
         );
@@ -565,6 +601,7 @@ export function createMailboxRepository(
     async repeat(work) {
       return access(work.identity, work.businessId, true, async (tx) => {
         const { policy, job, oauth } = await loadWork(tx, work);
+        if (job.state.pilotSetupRequestKey) return null;
         if (
           oauth?.status !== "connected" ||
           job.state.mode !== "incremental" ||
@@ -627,11 +664,51 @@ export function createMailboxRepository(
         return next;
       });
     },
+    authorizeCall(work, checkpoint, phase, payload) {
+      return access(work.identity, work.businessId, true, async (tx) => {
+        const { policy, job } = await loadWork(tx, work);
+        if (
+          job.state.checkpoint !== checkpoint ||
+          job.state.status === "completed"
+        )
+          throw new ApplicationError("CONFLICT");
+        await requirePilotPath(tx, work.businessId, "mailbox", {
+          mailboxId: policy.id,
+          jobId: job.id,
+          ...(job.state.pilotSetupRequestKey
+            ? { pilotSetupRequestKey: job.state.pilotSetupRequestKey }
+            : {}),
+        });
+        await reservePilotEffect(
+          tx,
+          work.businessId,
+          "mailbox",
+          `${job.id}:${checkpoint}:${phase}:${randomUUID()}`,
+          1,
+          { jobId: job.id, checkpoint, phase, mailboxId: policy.id, payload },
+        );
+        const role = await requireCapability(
+          tx,
+          work.identity,
+          work.businessId,
+          "integrations.manage",
+        );
+        await requireSalesSession(tx, work.identity, clock.now(), role);
+      });
+    },
     prepare(work) {
       return access(work.identity, work.businessId, true, async (tx) => {
         const { policy, job, oauth } = await loadWork(tx, work);
         if (job.state.status === "completed") return null;
         if (job.state.reason === "limit_reached") return null;
+        await requirePilotPath(tx, work.businessId, "mailbox", {
+          mailboxId: policy.id,
+          jobId: job.id,
+          ...(job.state.pilotSetupRequestKey
+            ? { pilotSetupRequestKey: job.state.pilotSetupRequestKey }
+            : {}),
+        });
+
         const conversations = await tx
           .select({ ref: inboxConversation.providerRef })
           .from(inboxConversation)
@@ -669,6 +746,7 @@ export function createMailboxRepository(
           checkpoint: job.state.checkpoint,
           permissionObservation: policy.grant,
           mode: job.state.mode,
+          pilotSetupRequestKey: job.state.pilotSetupRequestKey,
           limit:
             job.state.mode === "history"
               ? Math.min(
@@ -682,12 +760,27 @@ export function createMailboxRepository(
           knownThreads: conversations.map((c) => c.ref),
           oauthGeneration: oauth?.generation ?? null,
           appMessages,
-          sequenceMessages: await sequenceMailboxReferences(
-            tx,
-            work.businessId,
-            policy.connectionId,
-            policy.account,
-          ),
+          sequenceMessages: [
+            ...(await sequenceMailboxReferences(
+              tx,
+              work.businessId,
+              policy.connectionId,
+              policy.account,
+            )),
+            ...(
+              await opportunityMailReferences(
+                tx,
+                work.businessId,
+                policy.connectionId,
+                policy.account,
+              )
+            ).map((e) => ({
+              internetMessageId: e.internetMessageId,
+              recipient: e.recipient,
+              fromAddress: e.fromAddress,
+              replyTo: e.replyTo,
+            })),
+          ],
           retryAt: job.state.retryAt,
           visibility:
             policy.lastSyncedAt &&
@@ -702,6 +795,12 @@ export function createMailboxRepository(
       const work = snapshot.work;
       return access(work.identity, work.businessId, true, async (tx) => {
         const { policy, job, oauth } = await loadWork(tx, work);
+        if (job.state.pilotSetupRequestKey)
+          await requirePilotPath(tx, work.businessId, "mailbox", {
+            mailboxId: policy.id,
+            jobId: job.id,
+            pilotSetupRequestKey: job.state.pilotSetupRequestKey,
+          });
         if (
           (oauth?.generation ?? null) !== snapshot.oauthGeneration ||
           (oauth && oauth.status !== "connected") ||

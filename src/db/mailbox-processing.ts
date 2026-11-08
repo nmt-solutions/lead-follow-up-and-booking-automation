@@ -1,5 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import {
+  metaInboundAllowed,
+  metaOpportunityVisible,
+} from "./whatsapp-visibility";
+import {
   permissionAllows,
   selectedMetadata,
   type MailboxMetadata,
@@ -21,6 +25,8 @@ export async function opportunityRepliesVisible(
   opportunityId: string,
   at: Date,
 ) {
+  if (!(await metaOpportunityVisible(tx, businessId, opportunityId)))
+    return false;
   const messages = await tx
     .select({
       connectionId: inboxMessage.connectionId,
@@ -73,6 +79,8 @@ export async function mailboxMessageAllowed(
     );
   if (!inbox?.active) return false;
   if (inbox.mode === "normalized_import") return true;
+  if (inbox.mode === "meta")
+    return metaInboundAllowed(tx, businessId, connectionId);
   if (metadata) {
     const [message] = await tx
       .select({ current: inboxMessage.mailboxCurrentMetadata })

@@ -4,6 +4,31 @@ import {
 } from "./application-error";
 
 const failures = {
+  DATA_POLICY_REQUIRED: {
+    status: 409,
+    message:
+      "Data access, source rights or retention policy needs operator review. Affected export or destruction remains blocked.",
+  },
+  EXPORT_LIMIT_REACHED: {
+    status: 409,
+    message:
+      "This export exceeds the configured byte bound. Ask the operator to review a bounded export scope.",
+  },
+  SELLER_DOCUMENT_SETUP_REQUIRED: {
+    status: 503,
+    message:
+      "Seller documents need an approved effective issuer configuration matching the original currency, rounding and required legal fields. Ask the document operator to review setup.",
+  },
+  PAID_ACCESS_REQUIRED: {
+    status: 409,
+    message:
+      "Paid access or matching included units are unavailable. Review Subscription payments and allowances; stored work remains available.",
+  },
+  PRICING_SETUP_REQUIRED: {
+    status: 409,
+    message:
+      "Review billing evidence and configure explicit currency prices and allowances before creating this quote. Refresh the subscription quote to see the missing setup.",
+  },
   INVALID_PROVIDER_RESPONSE: {
     status: 502,
     message:

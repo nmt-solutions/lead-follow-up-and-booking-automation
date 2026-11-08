@@ -1,6 +1,13 @@
-import { tasks, idempotencyKeys } from "@trigger.dev/sdk";
-import type { ScheduleWork } from "../models/discovery-schedules";
-import type { DiscoveryProvider, DiscoveryWork } from "../models/discovery";
+import { createCapacityDiscoveryQueue, capacityDeployment } from "./capacity";
+import type { createDiscoveryCapacityRepository } from "../db/discovery-capacity-repository";
+import {
+  tasks,
+  idempotencyKeys,
+  concurrencyLimits,
+  queues,
+  deployments,
+} from "@trigger.dev/sdk";
+import type { DiscoveryProvider } from "../models/discovery";
 import type { createAiApplication } from "../application/ai";
 import { createProfiledDiscoveryProvider } from "../ai/discovery-provider";
 import { createExaRetrieval } from "./exa";
@@ -31,32 +38,36 @@ export function configuredDiscoveryProvider(
 ): DiscoveryProvider | null {
   return retrieval ? createProfiledDiscoveryProvider(retrieval, ai) : null;
 }
-export function configuredDiscoveryQueue(environment: NodeJS.ProcessEnv) {
+export function configuredDiscoveryQueue(
+  environment: NodeJS.ProcessEnv,
+  repository: ReturnType<typeof createDiscoveryCapacityRepository>,
+  execution?: Parameters<typeof createCapacityDiscoveryQueue>[0]["execution"],
+) {
+  const deployment = capacityDeployment(environment);
   if (
+    !deployment ||
     !environment.TRIGGER_SECRET_KEY ||
     !environment.TRIGGER_PROJECT_REF ||
     !environment.TRIGGER_DISCOVERY_RECOVERY_CRON ||
     environment.DISCOVERY_WORKER_DEPLOYMENT_CONFIRMED !== "true"
   )
     return null;
-  return {
-    async schedule(work: ScheduleWork) {
-      await tasks.trigger("scheduled-prospect-discovery", work, {
-        delay: new Date(work.dueAt),
-        idempotencyKey: await idempotencyKeys.create(
-          `discovery-schedule-${work.scheduleId}-${work.revision}-${work.dueAt}`,
-          { scope: "global" },
+  return createCapacityDiscoveryQueue({
+    deployment,
+    repository,
+    execution,
+    native: {
+      key: (value) => idempotencyKeys.create(value, { scope: "global" }),
+      deployment: () =>
+        deployments.retrieveCurrent({ retry: { maxAttempts: 1 } }),
+      queue: () =>
+        queues.retrieve(
+          { type: "task", name: "bounded-prospect-discovery" },
+          { retry: { maxAttempts: 1 } },
         ),
-      });
+      retrieve: (name) =>
+        concurrencyLimits.retrieve(name, { retry: { maxAttempts: 1 } }),
+      trigger: (task, work, options) => tasks.trigger(task, work, options),
     },
-    async enqueue(work: DiscoveryWork) {
-      await tasks.trigger("bounded-prospect-discovery", work, {
-        idempotencyKey: await idempotencyKeys.create(
-          `discovery-${work.runId}-${work.executionKey}`,
-          { scope: "global" },
-        ),
-        idempotencyKeyTTL: "30d",
-      });
-    },
-  };
+  });
 }

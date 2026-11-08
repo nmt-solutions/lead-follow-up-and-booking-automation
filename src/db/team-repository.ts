@@ -385,9 +385,29 @@ export function createTeamRepository(database: Database): TeamRepository {
           .where(eq(platformOperator.userId, actor.userId));
         if (
           !operator ||
-          !(capability === "tax.manage"
-            ? operator.tax
-            : operator.reconciliation)
+          !(capability === "refunds.manage"
+            ? operator.refunds
+            : capability === "notifications.manage"
+              ? operator.notifications
+              : capability === "pilots.manage"
+                ? operator.pilots
+                : capability === "recovery.manage"
+                  ? operator.recovery
+                  : capability === "operations.manage"
+                    ? operator.operations
+                    : capability === "costs.manage"
+                      ? operator.costs
+                      : capability === "documents.manage"
+                        ? operator.documents
+                        : capability === "sender-health.manage"
+                          ? operator.senderHealth
+                          : capability === "whatsapp.review"
+                            ? operator.whatsAppReview
+                            : capability === "pricing.manage"
+                              ? operator.pricing
+                              : capability === "tax.manage"
+                                ? operator.tax
+                                : operator.reconciliation)
         )
           throw new ApplicationError("FORBIDDEN");
       });

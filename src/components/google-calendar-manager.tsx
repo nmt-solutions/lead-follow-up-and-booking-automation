@@ -34,6 +34,10 @@ const statusLabels: Record<GoogleCalendarView["status"], string> = {
   disconnected: "Disconnected",
 };
 const reasonLabels: Record<string, string> = {
+  manual_required:
+    "Disconnected locally. Unattributed credentials were disposed of without revoking an unverified account. Review the intended Google account permissions; remote consent removal is incomplete.",
+  shared_identity:
+    "Disconnected locally. Another connection still uses this Google consent, so it was not revoked. Review shared consent before removing it in Google.",
   rate_limited:
     "Google is limiting requests. Wait before refreshing or reconciling; no automatic booking retry will run.",
   revoked:

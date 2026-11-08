@@ -1,4 +1,5 @@
-import { and, eq } from "drizzle-orm";
+import { requireCapacityBindingCurrent } from "./discovery-capacity-repository";
+import { and, eq, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type { Transaction } from "./scope";
 import { business, discoveryConfiguration, session } from "./schema";
@@ -12,6 +13,7 @@ import {
 } from "../models/discovery";
 import type { BusinessProfile } from "../models/business";
 import { availableMarkets } from "../discovery/repository";
+import { paidAllowance } from "./paid-access";
 
 export async function requireWorkSession(
   tx: Transaction,
@@ -58,7 +60,7 @@ export function briefFor(
   };
 }
 
-export async function settings(tx: Transaction, businessId: string) {
+export async function settings(tx: Transaction, businessId: string, at: Date) {
   const [profile] = await tx
     .select()
     .from(business)
@@ -69,11 +71,36 @@ export async function settings(tx: Transaction, businessId: string) {
     .from(discoveryConfiguration)
     .where(eq(discoveryConfiguration.businessId, businessId));
   const parsed = discoveryPolicySchema.safeParse(configuration?.policy);
-  return { profile, policy: parsed.success ? parsed.data : null };
+  const paid = await paidAllowance(tx, businessId, "discovery", at);
+  const configured = parsed.success ? parsed.data : null;
+  const markets = paid?.period.markets ?? [];
+  const policy = configured
+    ? {
+        ...configured,
+        activeMarkets:
+          paid &&
+          paid.allowance.quantity > 0 &&
+          paid.allowance.unit === configured.allowanceUnit
+            ? configured.activeMarkets.filter((m) => markets.includes(m))
+            : [],
+      }
+    : null;
+  return {
+    profile,
+    policy: policy?.activeMarkets.length ? policy : null,
+    configuredPolicy: configured,
+  };
 }
 
-export async function checkCurrent(tx: Transaction, run: DiscoveryRun) {
-  const { profile, policy } = await settings(tx, run.businessId);
+// Explicit budget approval/resume validates current scope without treating an
+// obsolete execution's actor or capacity binding as authority for new work.
+export async function checkCurrentScope(
+  tx: Transaction,
+  run: DiscoveryRun,
+  at: Date,
+) {
+  await requireDiscoveryAvailable(tx, run.businessId);
+  const { profile, policy } = await settings(tx, run.businessId, at);
   if (
     !policy ||
     !isDeepStrictEqual(policy, run.policy) ||
@@ -86,4 +113,23 @@ export async function checkCurrent(tx: Transaction, run: DiscoveryRun) {
     )
   )
     throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
+}
+
+export async function checkCurrent(
+  tx: Transaction,
+  run: DiscoveryRun,
+  at: Date,
+) {
+  await checkCurrentScope(tx, run, at);
+  await requireCapacityBindingCurrent(tx, run);
+}
+
+export async function requireDiscoveryAvailable(
+  tx: Transaction,
+  businessId: string,
+) {
+  const result = await tx.execute<{ stopped: boolean }>(
+    sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
+  );
+  if (result.rows[0]?.stopped) throw new ApplicationError("FORBIDDEN");
 }

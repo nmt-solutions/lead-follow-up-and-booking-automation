@@ -11,6 +11,7 @@ import type {
   StopReason,
   DiscoveryCommand,
   SearchResult,
+  DiscoveryProviderCost,
 } from "../models/discovery";
 
 import type { createDiscoveryScheduleRepository } from "../db/discovery-schedule-repository";
@@ -53,6 +54,11 @@ export type DiscoveryRepository = ReturnType<
     completed: boolean;
     sources: SearchResult[] | null;
   } | null>;
+  recordProviderCost(
+    work: DiscoveryWork,
+    operationId: string,
+    value: DiscoveryProviderCost,
+  ): Promise<void>;
   record(
     work: DiscoveryWork,
     operationId: string,

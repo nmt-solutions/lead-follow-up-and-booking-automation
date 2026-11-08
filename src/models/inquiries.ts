@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { opportunityMailEvidenceSchema } from "./opportunity-mail";
 import {
   informationalReplyTemplates,
   validQualificationValue,
@@ -70,6 +71,14 @@ export const inquiryResultSchema = z.strictObject({
 });
 export type InquiryResult = z.infer<typeof inquiryResultSchema>;
 export const inquiryRunSchema = inquiryResultSchema.extend({
+  reply: z.strictObject({
+    nativeGmail: z.boolean(),
+    nativeProvider: z.enum(["gmail", "microsoft"]).nullable().optional(),
+    recipient: z.string(),
+    subject: z.string(),
+    fromAddress: z.string().nullable(),
+    replyTo: z.string().nullable(),
+  }),
   id: z.uuid(),
   messageId: z.uuid(),
   actorId: z.string(),
@@ -83,6 +92,7 @@ export const inquiryRunSchema = inquiryResultSchema.extend({
       state: z.enum(["pending", "committed", "dispatched", "cancelled"]),
       reason: z.string().nullable(),
       dueAt: z.iso.datetime(),
+      email: opportunityMailEvidenceSchema.nullable().optional(),
     })
     .nullable(),
 });
@@ -116,6 +126,10 @@ export const initialInquiryResult: InquiryResult = {
 // #22 owns structured amounts/limits. Neither a model classification nor an answer citation grants that authority.
 const commercial =
   /(?:\b(?:price|pricing|cost|quote|quotation|discount|order|payment|pay|charge|free|complimentary|guarantee|confirm(?:ed)?|booked|reserved|refund|deposit|rate|fee|rupees?|dollars?|usd|inr|eur|gbp)\b|[$€£₹]|\d\s*%)/i;
+/** Shared conservative review gate; a channel/template approval never grants financial authority. */
+export function requiresCommercialReview(content: string) {
+  return commercial.test(content);
+}
 export function inquiryDecision(input: {
   configuration: KnowledgeConfiguration;
   messages: { id: string; text: string }[];

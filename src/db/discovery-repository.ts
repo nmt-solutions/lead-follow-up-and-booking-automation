@@ -1,3 +1,4 @@
+import { pilotEffectCurrent } from "./pilot-limits";
 import {
   createDiscoveryScheduleRepository,
   persistDispatch,
@@ -10,6 +11,7 @@ import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import {
   discoveryRun,
+  discoveryCapacityBinding,
   discoveryDispatch,
   discoverySchedule,
   discoveryProspect,
@@ -26,6 +28,7 @@ import {
   sourceCheckSchema,
   evidenceUrlSchema,
   searchResultSchema,
+  discoveryProviderCostSchema,
   type DiscoveryWork,
   type RunView,
 } from "../models/discovery";
@@ -39,8 +42,11 @@ import {
   briefFor,
   settings,
   checkCurrent,
+  checkCurrentScope,
+  requireDiscoveryAvailable,
 } from "./discovery-state";
 import { coverageCounts } from "../discovery/evidence";
+import { reservePaidUsage, paidAllowance } from "./paid-access";
 import {
   consolidateViews,
   contactIdentities,
@@ -177,7 +183,9 @@ export function createDiscoveryRepository(
         const run = await ownedRun(tx, work);
         await requireWorkSession(tx, work, at);
         await schedules.checkScheduleForRun(tx, run);
-        await checkCurrent(tx, run);
+        await checkCurrent(tx, run, clock.now());
+        if (!(await pilotEffectCurrent(tx, work.businessId, "discovery")))
+          throw new ApplicationError("PAID_ACCESS_REQUIRED");
         if (run.status !== "running")
           throw new ApplicationError("DISCOVERY_SCOPE_INVALID");
       });
@@ -190,7 +198,7 @@ export function createDiscoveryRepository(
           businessId,
           "sales.work",
         );
-        const { profile, policy } = await settings(tx, businessId);
+        const { profile, policy } = await settings(tx, businessId, clock.now());
         const markets = availableMarkets(profile, policy);
         const rows = await tx
           .select()
@@ -229,7 +237,23 @@ export function createDiscoveryRepository(
             clock.now(),
             checks.filter((c) => c.runId === row.id),
           );
+          const [capacityBinding] = await tx
+            .select()
+            .from(discoveryCapacityBinding)
+            .where(
+              and(
+                eq(discoveryCapacityBinding.id, row.executionId),
+                eq(discoveryCapacityBinding.businessId, businessId),
+              ),
+            );
           runs.push({
+            executionCapacity: capacityBinding
+              ? {
+                  mode: capacityBinding.route.mode,
+                  slots: capacityBinding.route.slots,
+                  policyVersion: capacityBinding.route.version,
+                }
+              : null,
             id: row.id,
             businessId,
             queueState:
@@ -326,12 +350,24 @@ export function createDiscoveryRepository(
             ),
           });
         }
+        const stop = await tx.execute<{ stopped: boolean }>(
+          sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
+        );
+        const stopped = stop.rows[0]?.stopped === true;
+        await requireCapability(tx, actor, businessId, "sales.work");
         return {
           schedules: [],
-          canRun: role !== "salesperson",
+          canRun: role !== "salesperson" && !stopped,
           setup: [
+            ...(stopped
+              ? [
+                  "Business connections are stopped. Allow new setup from Data and offboarding before approving new discovery.",
+                ]
+              : []),
             ...(!policy
-              ? ["Operator discovery configuration is missing or invalid."]
+              ? [
+                  "Active paid discovery scope, matching allowance units and operational configuration are required.",
+                ]
               : []),
             ...(!markets.length
               ? [
@@ -361,6 +397,7 @@ export function createDiscoveryRepository(
         async (tx) => {
           await requireCapability(tx, actor, businessId, "profile.manage");
           await requireWorkSession(tx, actor, clock.now());
+          await requireDiscoveryAvailable(tx, businessId);
           const [existing] = await tx
             .select()
             .from(discoveryRun)
@@ -404,8 +441,20 @@ export function createDiscoveryRepository(
               },
             };
           }
-          const { profile, policy } = await settings(tx, businessId);
+          const { profile, policy } = await settings(
+            tx,
+            businessId,
+            clock.now(),
+          );
           if (!policy) throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
+          const paid = await paidAllowance(
+            tx,
+            businessId,
+            "discovery",
+            clock.now(),
+          );
+          if (!paid || input.budget > paid.remaining)
+            throw new ApplicationError("PAID_ACCESS_REQUIRED");
           if (
             input.budget > policy.maxRunBudget ||
             !input.markets.every((market) =>
@@ -524,7 +573,7 @@ export function createDiscoveryRepository(
             );
             status = "stopped";
           } else {
-            await checkCurrent(tx, run);
+            await checkCurrentScope(tx, run, clock.now());
             if (run.status !== "stopped")
               throw new ApplicationError("CONFLICT");
             if (input.action === "increase") {
@@ -692,7 +741,7 @@ export function createDiscoveryRepository(
               return null;
             }
           } else if (run.status !== "queued") return null;
-          await checkCurrent(tx, run);
+          await checkCurrent(tx, run, clock.now());
           await tx
             .update(discoveryRun)
             .set({
@@ -722,7 +771,7 @@ export function createDiscoveryRepository(
           const run = await ownedRun(tx, work);
           await requireWorkSession(tx, work, clock.now());
           if (run.status !== "running") return null;
-          await checkCurrent(tx, run);
+          await checkCurrent(tx, run, clock.now());
           await schedules.checkScheduleForRun(tx, run);
           const previous = await tx
             .select()
@@ -784,6 +833,15 @@ export function createDiscoveryRepository(
           if (!units) throw new ApplicationError("DISCOVERY_SETUP_REQUIRED");
           if (run.used + units > run.budget) return null;
           const id = randomUUID();
+          await reservePaidUsage(
+            tx,
+            work.businessId,
+            "discovery",
+            id,
+            units,
+            run.policy.allowanceUnit,
+            at,
+          );
           await tx
             .update(discoveryRun)
             .set({ used: run.used + units, updatedAt: at })
@@ -801,10 +859,43 @@ export function createDiscoveryRepository(
             query: run.policy.permissions.retainQueries ? query : null,
             at,
           });
+          // Paid/usage serialization may wait after native availability was
+          // confirmed. Recheck current authority before committing a call.
+          await checkCurrent(tx, run, clock.now());
           return { id, units, completed: false, sources: null };
         },
         { lock: true },
       );
+    },
+    recordProviderCost(work, operationId, value) {
+      return scoped(database, work, work.businessId, async (tx) => {
+        const run = await ownedRun(tx, work);
+        await requireWorkSession(tx, work, clock.now());
+        const parsed = discoveryProviderCostSchema.safeParse(value);
+        if (!parsed.success)
+          throw new ApplicationError("INVALID_PROVIDER_RESPONSE");
+        const [usage] = await tx
+          .select()
+          .from(discoveryUsage)
+          .where(
+            and(
+              eq(discoveryUsage.id, operationId),
+              eq(discoveryUsage.runId, run.id),
+              eq(discoveryUsage.businessId, work.businessId),
+            ),
+          );
+        if (!usage || usage.kind === "review")
+          throw new ApplicationError("NOT_FOUND");
+        if (usage.providerCost) {
+          if (!isDeepStrictEqual(usage.providerCost, parsed.data))
+            throw new ApplicationError("CONFLICT");
+          return;
+        }
+        await tx
+          .update(discoveryUsage)
+          .set({ providerCost: parsed.data })
+          .where(eq(discoveryUsage.id, usage.id));
+      });
     },
     record(work, operationId, prospect, at, details) {
       return scoped(

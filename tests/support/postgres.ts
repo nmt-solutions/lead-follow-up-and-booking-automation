@@ -31,7 +31,9 @@ async function availablePort() {
   return address.port;
 }
 
-export async function startPostgres() {
+export async function startPostgres(
+  options: { initializeSchema?: boolean } = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), "business-postgres-"));
   const port = await availablePort();
   const password = randomBytes(24).toString("hex");
@@ -87,7 +89,9 @@ export async function startPostgres() {
       });
     }
   }
-  async function reapplySchema() {
+  async function reapplySchema(
+    securityOptions: { allowQuarantined?: boolean } = {},
+  ) {
     await prepareDatabaseRole(admin);
     const pushed = await run(process.execPath, [drizzleCli, "push"], {
       env: {
@@ -99,19 +103,33 @@ export async function startPostgres() {
     });
     // The pinned CLI can print a database error and still exit zero.
     if (/^(?:error|Error):/m.test(`${pushed.stdout}\n${pushed.stderr}`))
-      throw new Error("The test schema push reported a database failure");
-    await secureDatabase(admin);
+      throw new Error(
+        `The test schema push reported a database failure: ${`${pushed.stdout}\n${pushed.stderr}`.match(/^(?:error|Error):[^\n]*/m)?.[0]}`,
+      );
+    await secureDatabase(admin, securityOptions);
   }
   try {
     await postgres.initialise();
     await postgres.start();
-    await reapplySchema();
+    if (options.initializeSchema !== false) await reapplySchema();
+    else
+      await admin.query(
+        "CREATE ROLE app_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      );
     // A random hex password in an isolated, disposable local cluster, never a production credential.
     await admin.query(`ALTER ROLE app_runtime LOGIN PASSWORD '${password}'`);
     return {
       admin,
       runtime,
       reapplySchema,
+      nativeEnvironment: {
+        PGHOST: "127.0.0.1",
+        PGPORT: String(port),
+        PGUSER: "postgres",
+        PGPASSWORD: password,
+        PGDATABASE: "postgres",
+        PGSSLMODE: "disable",
+      },
       async close() {
         await runtime.end();
         await admin.end();

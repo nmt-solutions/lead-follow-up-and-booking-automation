@@ -159,8 +159,11 @@ export function MicrosoftMailConnection({
       </Badge>
       <p className="text-sm text-muted-foreground">
         Save your reading and sending requests below, then open Microsoft
-        consent. Calendar and app sign-in do not grant mail access. Sending
-        messages is a later capability.
+        consent. Calendar and app sign-in do not grant mail access. Approved
+        sequences and prepared inquiry replies require separate sending consent,
+        current sender health and selected reply visibility. Microsoft accepts
+        processing before native message identity is known; delivery remains
+        unconfirmed.
       </p>
       {state && (
         <p>

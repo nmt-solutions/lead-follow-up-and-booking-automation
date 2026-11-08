@@ -51,6 +51,12 @@ export default async function TeamPage({
         team={data.team}
         audit={data.audit}
       />
+      <Link
+        href={`/businesses/${businessId}/notifications`}
+        className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+      >
+        Review native invitation acceptance and delivery
+      </Link>
     </div>
   );
 }

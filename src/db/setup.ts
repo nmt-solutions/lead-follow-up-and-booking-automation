@@ -1,9 +1,56 @@
+import { preparePilotSecurity, securePilots } from "./pilot-security";
+import {
+  prepareDiscoveryCapacity,
+  secureDiscoveryCapacity,
+} from "./discovery-capacity-security";
+import {
+  discoveryCapacityBinding,
+  discoveryCapacityPolicy,
+  pilotScopeForeignKeys,
+} from "./schema";
+import { prepareRecoverySecurity, secureRecovery } from "./recovery-security";
+import { prepareFinancialSecurity } from "./financial-adjustment-security";
+import {
+  prepareTaxFilingSecurity,
+  secureTaxFilings,
+} from "./tax-filing-security";
+import {
+  prepareReconciliationSecurity,
+  secureReconciliationRecords,
+} from "./reconciliation-security";
+import {
+  prepareTaxPeriodSecurity,
+  secureTaxPeriods,
+} from "./tax-period-security";
 import type { Pool } from "pg";
+import { prepareReachSecurity, reachFunctions } from "./reach-change-security";
+import {
+  secureDataGovernance,
+  prepareDataGovernance,
+} from "./data-governance-security";
+import { secureOperations, prepareOperations } from "./operations-security";
+import { preparePaymentSecurity } from "./payment-security";
+import { prepareSellerDocumentSecurity } from "./seller-document-security";
+import { prepareCostSecurity } from "./cost-security";
+import {
+  prepareNotificationSecurity,
+  notificationTables,
+  notificationFunctions,
+} from "./notification-security";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { verifyRuntimeRole } from "./runtime";
 import {
+  whatsAppIntake,
+  whatsAppOutbound,
+  whatsAppReceipt,
+  whatsAppIntakeScopeForeignKeys,
+  whatsAppConnection,
+  whatsAppOauth,
+  whatsAppEvent,
+  whatsAppEvidence,
+  whatsAppScopeForeignKeys,
   emailSequencePolicy,
   emailSequenceScopeForeignKeys,
   emailSequenceRun,
@@ -35,16 +82,82 @@ import {
   senderReplyRoute,
   senderIdentity,
   senderObservation,
+  senderHealthRecord,
   senderScopeForeignKeys,
   business,
   membership,
   invitation,
   teamAudit,
   platformOperator,
+  operationEvent,
+  operationRetention,
+  operationDetail,
+  costRecord,
+  notificationTerms,
+  notificationPreference,
+  notificationSetup,
+  notificationNotice,
+  notificationPayload,
+  notificationEvent,
+  notificationReceipt,
+  costPlanningRevision,
+  costScan,
+  costBudgetRevision,
+  costAlert,
+  costNotificationEvent,
   businessFile,
   fileAccess,
   fileUsage,
   knowledgeRevision,
+  billingProfileRevision,
+  billingProfileReview,
+  taxRuleRevision,
+  taxRuleDecision,
+  taxCalculation,
+  taxObligationRevision,
+  taxObligationDecision,
+  taxReportingPeriod,
+  taxLiabilityReport,
+  taxReportAction,
+  taxPeriodReminder,
+  taxFilingExport,
+  taxFilingPolicy,
+  taxFilingPolicyDecision,
+  taxFilingIntent,
+  taxFilingEvent,
+  taxFilingEvidence,
+  taxFilingBytes,
+  taxFilingAccess,
+  taxRemittanceAllocation,
+  taxRemittanceReview,
+  taxScopeForeignKeys,
+  subscriptionPricingRevision,
+  subscriptionQuote,
+  subscriptionPayment,
+  subscriptionPaymentEvent,
+  subscriptionLifecycleEvent,
+  subscriptionPaymentHistory,
+  subscriptionPeriod,
+  subscriptionUsage,
+  reachChange,
+  reachChangeEvent,
+  reachChangeScopeForeignKeys,
+  subscriptionPaymentScopeForeignKeys,
+  issuerRevision,
+  issuerDecision,
+  sellerDocument,
+  sellerDocumentRequest,
+  sellerDocumentAccess,
+  sellerDocumentStorage,
+  sellerDocumentScopeForeignKeys,
+  financialCase,
+  financialCaseEvent,
+  financialReceipt,
+  reconciliationEvidence,
+  reconciliationRecord,
+  reconciliationReview,
+  reconciliationAccess,
+  financialCaseScopeForeignKeys,
   commercialAuthorityRevision,
   discoveryConfiguration,
   discoveryRun,
@@ -107,17 +220,21 @@ async function prepareFileCleanup(pool: Pool) {
     LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
     BEGIN
       IF lease_seconds <= 0 THEN RAISE EXCEPTION 'Invalid cleanup lease'; END IF;
+      at_time := least(at_time, statement_timestamp());
       DELETE FROM public.file_access a USING public.business_file f
         WHERE a.file_id = f.id AND f.account_scope = scope AND a.expires_at <= at_time;
       DELETE FROM public.business_file f WHERE f.account_scope = scope
-        AND f.state = 'deleted' AND f.purge_after <= at_time;
+        AND f.state = 'deleted' AND f.purge_after <= at_time
+        AND NOT public.business_file_protected(f.id,f.business_id);
       RETURN QUERY WITH due AS (
         SELECT f.id FROM public.business_file f
         WHERE f.account_scope = scope AND f.state <> 'deleted' AND f.cleanup_after <= at_time
+          AND NOT public.business_file_protected(f.id,f.business_id)
+          AND NOT EXISTS(SELECT 1 FROM public.business_data_step s WHERE s.business_id=f.business_id AND s.target_id=f.id::text AND s.kind='file' AND s.state IN ('pending','retry','working'))
         ORDER BY f.cleanup_after, f.id LIMIT 50 FOR UPDATE SKIP LOCKED
       ), claimed AS (
         UPDATE public.business_file f SET state = 'deleting', operation_id = gen_random_uuid(),
-          cleanup_after = at_time + make_interval(secs => lease_seconds)
+          cleanup_after = statement_timestamp() + make_interval(secs => lease_seconds)
         FROM due WHERE f.id = due.id RETURNING f.*
       ), attempts AS (
         INSERT INTO public.file_usage (id, file_id, business_id, account_scope, action, outcome, at)
@@ -127,13 +244,15 @@ async function prepareFileCleanup(pool: Pool) {
     CREATE OR REPLACE FUNCTION public.finish_file_cleanup(file_id uuid, operation uuid, at_time timestamptz, success boolean)
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
     BEGIN
+      at_time := least(at_time, statement_timestamp());
       UPDATE public.business_file f SET
         state = CASE WHEN success THEN 'deleted' ELSE 'deleting' END,
         deleted_at = CASE WHEN success THEN at_time ELSE NULL END,
         purge_after = CASE WHEN success THEN at_time + make_interval(secs => f.record_retention_seconds) ELSE NULL END,
         cleanup_after = CASE WHEN success THEN NULL ELSE f.cleanup_after END,
         failure = CASE WHEN success THEN NULL ELSE 'CLEANUP_FAILED' END
-      WHERE f.id = file_id AND f.operation_id = operation AND f.state = 'deleting';
+      WHERE f.id = file_id AND f.operation_id = operation AND f.state = 'deleting'
+        AND f.cleanup_after > statement_timestamp() AND NOT public.business_file_protected(f.id,f.business_id);
       IF FOUND AND success THEN
         UPDATE public.file_usage u SET outcome = 'succeeded' WHERE u.id = operation AND u.file_id = finish_file_cleanup.file_id;
         DELETE FROM public.file_access a WHERE a.file_id = finish_file_cleanup.file_id;
@@ -166,7 +285,45 @@ export async function prepareDatabaseRole(pool: Pool) {
   await pool.query(
     "GRANT app_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE",
   );
+  await prepareDiscoveryCapacity(pool);
   await prepareFileCleanup(pool);
+  await preparePaymentSecurity(pool);
+  await prepareReachSecurity(pool, true);
+  await pool.query(
+    `DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY(ARRAY[${reachFunctions.map((n) => `'${n}'`).join(",")}]) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP; END $$;`,
+  );
+  await prepareFinancialSecurity(pool);
+  await prepareReconciliationSecurity(pool);
+  for (const name of [
+    "reconciliation_evidence",
+    "reconciliation_record",
+    "reconciliation_review",
+    "reconciliation_access",
+  ]) {
+    await pool.query(
+      `DO $$ BEGIN IF to_regclass('public.${name}') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.${name} FROM app_runtime; END IF; END $$;`,
+    );
+  }
+  await pool.query(
+    "REVOKE ALL ON FUNCTION public.reconciliation_sources(timestamptz,timestamptz) FROM app_runtime",
+  );
+  await prepareTaxPeriodSecurity(pool);
+  await prepareTaxFilingSecurity(pool);
+  await prepareSellerDocumentSecurity(pool);
+  await prepareOperations(pool);
+  await prepareRecoverySecurity(pool);
+  await preparePilotSecurity(pool);
+  await prepareDataGovernance(pool);
+  await prepareCostSecurity(pool);
+  await prepareNotificationSecurity(pool);
+  for (const name of notificationTables) {
+    await pool.query(
+      `DO $$ BEGIN IF to_regclass('public.${name}') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.${name} FROM app_runtime; END IF; END $$;`,
+    );
+  }
+  await pool.query(
+    `DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY(${"ARRAY[" + notificationFunctions.map((n) => `'${n}'`).join(",") + "]"}) LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM app_runtime',f.signature); END LOOP; END $$;`,
+  );
   await pool.query(`
     CREATE OR REPLACE FUNCTION public.pending_email_sequence_work()
     RETURNS TABLE(payload jsonb) LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -323,17 +480,86 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.platform_operator') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.platform_operator FROM app_runtime;
       END IF;
+      IF to_regclass('public.operator_cost_record') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_record FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_planning') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_planning FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_scan') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_scan FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_budget') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_budget FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_alert') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_alert FROM app_runtime;
+      END IF;
+      IF to_regclass('public.operator_cost_notification_event') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.operator_cost_notification_event FROM app_runtime;
+      END IF;
+      REVOKE ALL ON FUNCTION public.operator_cost_native(text),public.cost_worker_authorized(text),public.cost_owner_email(text),public.cost_attribution_valid(text,text),public.operator_cost_work(),public.cost_claim_alert(uuid),public.cost_alert_deliverable(uuid,uuid),public.cost_finish_alert(uuid,uuid,text) FROM app_runtime;
       IF to_regclass('public.business_file') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.business_file, public.file_access, public.file_usage FROM app_runtime;
       END IF;
       IF to_regclass('public.knowledge_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.knowledge_revision FROM app_runtime;
       END IF;
+      IF to_regclass('public.billing_profile_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.billing_profile_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.subscription_pricing_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.subscription_pricing_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.subscription_quote') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.subscription_quote FROM app_runtime;
+      END IF;
+      IF to_regclass('public.subscription_payment') IS NOT NULL THEN
+        IF to_regclass('public.reach_change') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.reach_change,public.reach_change_event FROM app_runtime; END IF;
+        REVOKE ALL PRIVILEGES ON public.subscription_payment, public.subscription_payment_event, public.subscription_payment_history, public.subscription_period, public.subscription_usage FROM app_runtime;
+        REVOKE UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending) ON public.subscription_payment FROM app_runtime;
+        IF to_regclass('public.subscription_lifecycle_event') IS NOT NULL THEN REVOKE ALL PRIVILEGES ON public.subscription_lifecycle_event FROM app_runtime; REVOKE UPDATE(lifecycle) ON public.subscription_payment FROM app_runtime; END IF;
+        IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='subscription_payment' AND column_name='recovery') THEN REVOKE UPDATE(recovery) ON public.subscription_payment FROM app_runtime; END IF;
+      END IF;
+      IF to_regclass('public.seller_issuer_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.seller_issuer_revision,public.seller_issuer_decision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.financial_case') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.financial_case,public.financial_case_event,public.financial_receipt FROM app_runtime;
+        REVOKE ALL ON FUNCTION public.financial_credit_allowed(jsonb),public.financial_capture_receipt(jsonb),public.financial_receipt_work(text,text),public.financial_adjustments_feed(),public.financial_refunded(uuid,uuid),public.financial_worker_authorized(uuid,uuid),public.financial_pending(text,text),public.financial_reserved(uuid,uuid),public.financial_public(uuid) FROM app_runtime;
+      END IF;
+      IF to_regclass('public.seller_document') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.seller_document,public.seller_document_request FROM app_runtime;
+        REVOKE UPDATE (artifact_state,failure) ON public.seller_document FROM app_runtime;
+      END IF;
+      IF to_regprocedure('public.claim_seller_artifacts(text,integer)') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.claim_seller_artifacts(text,integer),public.seller_artifact_worker_authorized(uuid,uuid) FROM app_runtime;
+      END IF;
+      IF to_regprocedure('public.seller_next_number(uuid,text,bigint)') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.seller_next_number(uuid,text,bigint) FROM app_runtime;
+      END IF;
+      IF to_regclass('public.seller_document_access') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.seller_document_access,public.seller_document_storage FROM app_runtime;
+        REVOKE UPDATE (outcome) ON public.seller_document_storage FROM app_runtime;
+      END IF;
+      IF to_regclass('public.billing_profile_review') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.billing_profile_review FROM app_runtime;
+      END IF;
+      IF to_regclass('public.tax_rule_revision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.tax_rule_revision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.tax_rule_decision') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.tax_rule_decision FROM app_runtime;
+      END IF;
+      IF to_regclass('public.tax_calculation') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.tax_calculation FROM app_runtime;
+      END IF;
       IF to_regclass('public.commercial_authority_revision') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.commercial_authority_revision FROM app_runtime;
       END IF;
       IF to_regclass('public.discovery_run') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.discovery_configuration, public.discovery_run, public.discovery_prospect, public.discovery_result, public.discovery_usage FROM app_runtime;
+        IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='discovery_usage' AND column_name='provider_cost') THEN REVOKE UPDATE(provider_cost) ON public.discovery_usage FROM app_runtime; END IF;
         REVOKE ALL PRIVILEGES (status, stop_reason, used, completed_steps, updated_at) ON public.discovery_run FROM app_runtime;
         REVOKE ALL PRIVILEGES (outcome) ON public.discovery_usage FROM app_runtime;
       END IF;
@@ -371,6 +597,9 @@ export async function prepareDatabaseRole(pool: Pool) {
       IF to_regclass('public.opportunity_control_history') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.opportunity_control_history, public.opportunity_manual_event, public.opportunity_due_action FROM app_runtime;
         REVOKE ALL PRIVILEGES (state, reason) ON public.opportunity_due_action FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='opportunity_due_action' AND column_name='email') THEN
+          REVOKE UPDATE (email) ON public.opportunity_due_action FROM app_runtime;
+        END IF;
         REVOKE ALL PRIVILEGES (owner_id, handoff_reason, next_action, control_state, control_version, policy_version) ON public.inbox_opportunity FROM app_runtime;
       END IF;
       IF to_regclass('public.inquiry_run') IS NOT NULL THEN
@@ -401,6 +630,25 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.google_calendar_grant, public.google_calendar_oauth FROM app_runtime;
         REVOKE UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON public.google_calendar_grant FROM app_runtime;
         REVOKE UPDATE (consumed) ON public.google_calendar_oauth FROM app_runtime;
+      END IF;
+      IF to_regclass('public.whatsapp_intake') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_intake,public.whatsapp_receipt FROM app_runtime;
+        REVOKE ALL PRIVILEGES (connection_version,account_key,inbox_connection_id,actor_id,enabled_at,receipt_retention_seconds,inbound_at,echo_at,gap) ON public.whatsapp_intake FROM app_runtime;
+        REVOKE ALL PRIVILEGES (activity,state,conversation_id,opportunity_id) ON public.whatsapp_receipt FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_receipt' AND column_name='status_evidence') THEN REVOKE UPDATE(status_evidence) ON public.whatsapp_receipt FROM app_runtime; END IF;
+      END IF;
+      IF to_regclass('public.whatsapp_connection') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_connection, public.whatsapp_oauth, public.whatsapp_event FROM app_runtime;
+        REVOKE UPDATE (version, configuration, status, reason, terms_actor_id, terms_accepted_at, credentials, provider_key, observation, operation_id, assets, coexistence_finished, phone_number_id) ON public.whatsapp_connection FROM app_runtime;
+        REVOKE UPDATE (consumed) ON public.whatsapp_oauth FROM app_runtime;
+      END IF;
+      IF to_regclass('public.whatsapp_evidence') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_evidence FROM app_runtime;
+        REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON public.whatsapp_evidence FROM app_runtime;
+      END IF;
+      IF to_regclass('public.whatsapp_outbound') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.whatsapp_outbound FROM app_runtime;
+        REVOKE ALL PRIVILEGES (id,business_id,connection_id,key,actor_id,at,data,position) ON public.whatsapp_outbound FROM app_runtime;
       END IF;
       IF to_regclass('public.microsoft_mail_grant') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.microsoft_mail_grant, public.microsoft_mail_oauth FROM app_runtime;
@@ -445,6 +693,12 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE UPDATE (version, configuration, updated_at, connection_id, inbox_connection_id) ON public.sender_reply_route FROM app_runtime;
         REVOKE UPDATE (version, configuration, updated_at, connection_id, reply_route_id) ON public.sender_identity FROM app_runtime;
       END IF;
+      IF to_regclass('public.sender_health_record') IS NOT NULL THEN
+        REVOKE ALL PRIVILEGES ON public.sender_health_record FROM app_runtime;
+        REVOKE ALL ON SEQUENCE public.sender_health_record_position_seq FROM app_runtime;
+      END IF;
+      IF to_regprocedure('public.sender_health_native(uuid)') IS NOT NULL THEN REVOKE ALL ON FUNCTION public.sender_health_native(uuid) FROM app_runtime; END IF;
+      IF to_regprocedure('public.purge_sender_health_artifacts(uuid,timestamptz)') IS NOT NULL THEN REVOKE ALL ON FUNCTION public.purge_sender_health_artifacts(uuid,timestamptz) FROM app_runtime; END IF;
       IF to_regclass('public.email_market_policy') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.email_market_policy, public.email_recipient_revision, public.email_suppression, public.email_eligibility_evaluation, public.email_action_review FROM app_runtime;
       END IF;
@@ -458,6 +712,9 @@ export async function prepareDatabaseRole(pool: Pool) {
         REVOKE ALL PRIVILEGES ON public.email_sequence_policy, public.email_sequence_run, public.email_sequence_action, public.email_sequence_event FROM app_runtime;
         REVOKE UPDATE (identity,state,version,reason) ON public.email_sequence_run FROM app_runtime;
         REVOKE UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,queue_state,queue_run_id,recovery_at,identity,control_version) ON public.email_sequence_action FROM app_runtime;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='email_sequence_action' AND column_name='processing_acceptance') THEN
+          REVOKE UPDATE (processing_acceptance) ON public.email_sequence_action FROM app_runtime;
+        END IF;
       END IF;
       IF to_regclass('public.inbox_opportunity') IS NOT NULL THEN
         REVOKE UPDATE (stage,buyer_id) ON public.inbox_opportunity FROM app_runtime;
@@ -483,6 +740,12 @@ export async function prepareDatabaseRole(pool: Pool) {
   // secureDatabase validates and restores them before restoring access.
   const database = drizzle(pool);
   for (const key of [
+    ...pilotScopeForeignKeys,
+    ...sellerDocumentScopeForeignKeys,
+    ...financialCaseScopeForeignKeys,
+    ...subscriptionPaymentScopeForeignKeys,
+    ...reachChangeScopeForeignKeys,
+    ...taxScopeForeignKeys,
     ...emailSequenceScopeForeignKeys,
     ...mailboxScopeForeignKeys,
     ...gmailScopeForeignKeys,
@@ -496,6 +759,8 @@ export async function prepareDatabaseRole(pool: Pool) {
     ...appointmentScopeForeignKeys,
     ...microsoftCalendarScopeForeignKeys,
     ...googleCalendarScopeForeignKeys,
+    ...whatsAppScopeForeignKeys,
+    ...whatsAppIntakeScopeForeignKeys,
   ]) {
     const { name } = getTableConfig(key.table);
     const exists = await pool.query<{ present: boolean }>(
@@ -510,7 +775,10 @@ export async function prepareDatabaseRole(pool: Pool) {
 }
 
 /** Idempotent security settings which the pinned Drizzle version cannot express. */
-export async function secureDatabase(pool: Pool) {
+export async function secureDatabase(
+  pool: Pool,
+  options: { allowQuarantined?: boolean } = {},
+) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -538,6 +806,12 @@ export async function secureDatabase(pool: Pool) {
       "CREATE UNIQUE INDEX IF NOT EXISTS ai_execution_scope ON public.ai_execution (id, business_id)",
     );
     for (const key of [
+      ...pilotScopeForeignKeys,
+      ...sellerDocumentScopeForeignKeys,
+      ...financialCaseScopeForeignKeys,
+      ...subscriptionPaymentScopeForeignKeys,
+      ...reachChangeScopeForeignKeys,
+      ...taxScopeForeignKeys,
       ...emailSequenceScopeForeignKeys,
       ...mailboxScopeForeignKeys,
       ...gmailScopeForeignKeys,
@@ -552,6 +826,8 @@ export async function secureDatabase(pool: Pool) {
       ...appointmentScopeForeignKeys,
       ...microsoftCalendarScopeForeignKeys,
       ...googleCalendarScopeForeignKeys,
+      ...whatsAppScopeForeignKeys,
+      ...whatsAppIntakeScopeForeignKeys,
     ]) {
       const table = key.table;
       const reference = key.reference();
@@ -572,7 +848,22 @@ export async function secureDatabase(pool: Pool) {
     }
     // The pinned push also misses changes to an existing CHECK expression.
     // Upgrade the original owner-only role check from the schema's definition.
-    for (const table of [membership, inboxOpportunity]) {
+    for (const table of [
+      membership,
+      taxFilingExport,
+      taxFilingIntent,
+      taxFilingEvent,
+      reconciliationEvidence,
+      reconciliationRecord,
+      reconciliationReview,
+      reconciliationAccess,
+      opportunityDueAction,
+      notificationNotice,
+      inboxOpportunity,
+      senderHealthRecord,
+      whatsAppIntake,
+      whatsAppReceipt,
+    ]) {
       for (const constraint of getTableConfig(table).checks) {
         await database.execute(
           sql`alter table ${table} drop constraint if exists ${sql.identifier(constraint.name)}`,
@@ -585,6 +876,13 @@ export async function secureDatabase(pool: Pool) {
     // drizzle-kit 0.31 push deliberately omits USING/WITH CHECK expressions.
     // Apply the schema's expressions here, without a second source of truth.
     for (const table of [
+      whatsAppOutbound,
+      whatsAppIntake,
+      whatsAppReceipt,
+      whatsAppEvidence,
+      whatsAppConnection,
+      whatsAppOauth,
+      whatsAppEvent,
       emailSequencePolicy,
       emailSequenceRun,
       emailSequenceAction,
@@ -610,6 +908,7 @@ export async function secureDatabase(pool: Pool) {
       senderReplyRoute,
       senderIdentity,
       senderObservation,
+      senderHealthRecord,
       microsoftCalendarGrant,
       microsoftCalendarOauth,
       googleCalendarGrant,
@@ -644,10 +943,72 @@ export async function secureDatabase(pool: Pool) {
       invitation,
       teamAudit,
       platformOperator,
+      discoveryCapacityPolicy,
+      discoveryCapacityBinding,
+      operationEvent,
+      operationRetention,
+      operationDetail,
+      costRecord,
+      notificationTerms,
+      notificationPreference,
+      notificationSetup,
+      notificationNotice,
+      notificationPayload,
+      notificationEvent,
+      notificationReceipt,
+      costPlanningRevision,
+      costScan,
+      costBudgetRevision,
+      costAlert,
+      costNotificationEvent,
       businessFile,
       fileAccess,
       fileUsage,
       knowledgeRevision,
+      billingProfileRevision,
+      billingProfileReview,
+      taxRuleRevision,
+      taxRuleDecision,
+      taxCalculation,
+      taxObligationRevision,
+      taxObligationDecision,
+      taxReportingPeriod,
+      taxLiabilityReport,
+      taxReportAction,
+      taxPeriodReminder,
+      taxFilingExport,
+      taxFilingPolicy,
+      taxFilingPolicyDecision,
+      taxFilingIntent,
+      taxFilingEvent,
+      taxFilingEvidence,
+      taxFilingBytes,
+      taxFilingAccess,
+      taxRemittanceAllocation,
+      taxRemittanceReview,
+      subscriptionPricingRevision,
+      subscriptionQuote,
+      subscriptionPayment,
+      subscriptionPaymentEvent,
+      subscriptionLifecycleEvent,
+      subscriptionPaymentHistory,
+      subscriptionPeriod,
+      subscriptionUsage,
+      reachChange,
+      reachChangeEvent,
+      issuerRevision,
+      issuerDecision,
+      financialCase,
+      reconciliationEvidence,
+      reconciliationRecord,
+      reconciliationReview,
+      reconciliationAccess,
+      financialCaseEvent,
+      financialReceipt,
+      sellerDocument,
+      sellerDocumentRequest,
+      sellerDocumentAccess,
+      sellerDocumentStorage,
       commercialAuthorityRevision,
       discoveryConfiguration,
       discoveryRun,
@@ -681,12 +1042,23 @@ export async function secureDatabase(pool: Pool) {
         IF current_user=(SELECT pg_get_userbyid(c.relowner) FROM pg_catalog.pg_class c WHERE c.oid='public.inbox_opportunity'::regclass) THEN RETURN NEW; END IF;
         IF NEW.buyer_id IS DISTINCT FROM OLD.buyer_id OR NEW.stage IS DISTINCT FROM OLD.stage THEN
           IF NOT (OLD.buyer_id IS NULL AND OLD.stage='prospect' AND NEW.stage='inquiry' AND NEW.buyer_id IS NOT NULL
-            AND EXISTS (SELECT 1 FROM public.email_sequence_action a
+            AND (EXISTS (SELECT 1 FROM public.email_sequence_action a
               JOIN public.email_sequence_event r ON r.action_id=a.id AND r.business_id=a.business_id AND r.kind='reply_observed'
               JOIN public.email_sequence_event p ON p.action_id=a.id AND p.business_id=a.business_id AND p.kind='attempt_reserved'
               JOIN public.inbox_buyer b ON b.id=NEW.buyer_id AND b.business_id=a.business_id
               WHERE a.opportunity_id=OLD.id AND a.business_id=OLD.business_id
-              AND p.envelope->>'recipient'=lower(b.sender_ref) AND ((p.envelope->>'replyInboxId')::uuid=b.connection_id OR ((r.source->>'mailboxId')::uuid=b.connection_id AND r.source->>'connectionId'=p.envelope->>'replyConnectionId'))))
+              AND p.envelope->>'recipient'=lower(b.sender_ref) AND ((p.envelope->>'replyInboxId')::uuid=b.connection_id OR ((r.source->>'mailboxId')::uuid=b.connection_id AND r.source->>'connectionId'=p.envelope->>'replyConnectionId')))
+            OR EXISTS (SELECT 1 FROM public.whatsapp_outbound p
+              JOIN public.whatsapp_outbound s ON s.business_id=p.business_id AND s.data->>'kind'='result' AND s.data->>'actionId'=p.data->'intent'->>'actionId' AND s.data->'result'->>'status'='accepted'
+              JOIN public.whatsapp_intake i ON i.id=p.connection_id AND i.business_id=p.business_id
+              JOIN public.whatsapp_receipt r ON r.connection_id=i.id AND r.business_id=i.business_id AND r.connection_version=i.connection_version AND r.kind='incoming'
+              JOIN public.inbox_buyer b ON b.id=NEW.buyer_id AND b.business_id=p.business_id AND b.connection_id=i.inbox_connection_id
+              WHERE p.data->>'kind'='intent' AND p.business_id=OLD.business_id AND p.data->'intent'->>'opportunityId'=OLD.id::text
+                AND p.data->'intent'->>'inboxConnectionId'=b.connection_id::text AND p.data->'intent'->>'peer'=b.sender_ref
+                AND p.data->'intent'->>'connectionVersion'=i.connection_version::text
+                AND r.account_key=(p.data->'intent'->'assets'->>'wabaId')||':'||(p.data->'intent'->'assets'->>'phoneNumberId')
+                AND r.reply_to=s.data->'result'->>'messageRef' AND r.peer=b.sender_ref AND s.data->'result'->>'peer'=b.sender_ref
+                AND r.at>=(p.data->'intent'->>'reservedAt')::timestamptz)))
           THEN RAISE EXCEPTION 'Opportunity intake is immutable'; END IF;
         END IF;
         RETURN NEW;
@@ -697,7 +1069,7 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON email_sequence_policy, email_sequence_run, email_sequence_action, email_sequence_event FROM app_runtime;
       GRANT SELECT, INSERT ON email_sequence_policy, email_sequence_run, email_sequence_action, email_sequence_event TO app_runtime;
       GRANT UPDATE (identity,state,version,reason) ON email_sequence_run TO app_runtime;
-      GRANT UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,queue_state,queue_run_id,recovery_at,identity,control_version) ON email_sequence_action TO app_runtime;
+      GRANT UPDATE (state,reason,due_at,generation,execution_key,attempt_id,receipt,processing_acceptance,queue_state,queue_run_id,recovery_at,identity,control_version) ON email_sequence_action TO app_runtime;
       ALTER TABLE email_sequence_policy FORCE ROW LEVEL SECURITY;
       ALTER TABLE email_sequence_run FORCE ROW LEVEL SECURITY;
       ALTER TABLE email_sequence_action FORCE ROW LEVEL SECURITY;
@@ -737,6 +1109,22 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE mailbox_policy FORCE ROW LEVEL SECURITY;
       ALTER TABLE mailbox_job FORCE ROW LEVEL SECURITY;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      REVOKE ALL PRIVILEGES ON whatsapp_connection, whatsapp_oauth, whatsapp_event FROM app_runtime;
+      REVOKE ALL PRIVILEGES ON whatsapp_evidence FROM app_runtime;
+      REVOKE ALL PRIVILEGES (id, business_id, connection_id, version, actor_id, session_id, at, review, revocation) ON whatsapp_evidence FROM app_runtime;
+      GRANT SELECT, INSERT ON whatsapp_evidence TO app_runtime;
+      ALTER TABLE whatsapp_evidence FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON whatsapp_outbound FROM app_runtime;
+      REVOKE ALL PRIVILEGES (id,business_id,connection_id,key,actor_id,at,data,position) ON whatsapp_outbound FROM app_runtime;
+      GRANT SELECT, INSERT ON whatsapp_outbound TO app_runtime;
+      GRANT USAGE ON SEQUENCE whatsapp_outbound_position_seq TO app_runtime;
+      ALTER TABLE whatsapp_outbound FORCE ROW LEVEL SECURITY;
+      GRANT SELECT, INSERT ON whatsapp_connection, whatsapp_oauth, whatsapp_event TO app_runtime;
+      GRANT UPDATE (version, configuration, status, reason, terms_actor_id, terms_accepted_at, credentials, provider_key, observation, operation_id, assets, coexistence_finished, phone_number_id) ON whatsapp_connection TO app_runtime;
+      GRANT UPDATE (consumed) ON whatsapp_oauth TO app_runtime;
+      ALTER TABLE whatsapp_connection FORCE ROW LEVEL SECURITY;
+      ALTER TABLE whatsapp_oauth FORCE ROW LEVEL SECURITY;
+      ALTER TABLE whatsapp_event FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON sender_connection, sender_reply_route, sender_identity, sender_observation FROM app_runtime;
       GRANT SELECT, INSERT ON sender_connection, sender_reply_route, sender_identity, sender_observation TO app_runtime;
       GRANT UPDATE (version, configuration, updated_at) ON sender_connection TO app_runtime;
@@ -746,6 +1134,38 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE sender_reply_route FORCE ROW LEVEL SECURITY;
       ALTER TABLE sender_identity FORCE ROW LEVEL SECURITY;
       ALTER TABLE sender_observation FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON sender_health_record FROM app_runtime;
+      GRANT SELECT, INSERT ON sender_health_record TO app_runtime;
+      GRANT USAGE ON SEQUENCE sender_health_record_position_seq TO app_runtime;
+      ALTER TABLE sender_health_record FORCE ROW LEVEL SECURITY;
+      CREATE OR REPLACE FUNCTION public.sender_health_native(connection uuid) RETURNS jsonb
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+        SELECT jsonb_build_object('mailboxId',p.id,'generation',g.generation,'accountSubject',g.account_subject,
+          'status',g.status,'send',g.scopes ? CASE WHEN p.provider='gmail' THEN 'https://www.googleapis.com/auth/gmail.send' ELSE 'Mail.Send' END)
+        FROM public.mailbox_policy p JOIN LATERAL (
+          SELECT generation,account_subject,status,scopes FROM public.gmail_grant WHERE id=p.id AND business_id=p.business_id AND p.provider='gmail'
+          UNION ALL SELECT generation,account_subject,status,scopes FROM public.microsoft_mail_grant WHERE id=p.id AND business_id=p.business_id AND p.provider='microsoft'
+        ) g ON true WHERE p.connection_id=connection AND p.business_id=nullif(current_setting('app.business_id',true),'')::uuid
+          AND (public.current_business_role() IS NOT NULL OR EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.sender_health))
+      $$;
+      REVOKE ALL ON FUNCTION public.sender_health_native(uuid) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.sender_health_native(uuid) TO app_runtime;
+      CREATE OR REPLACE FUNCTION public.purge_sender_health_artifacts(identity uuid, at_time timestamptz) RETURNS integer
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+      DECLARE retention integer; affected integer;
+      BEGIN
+        IF NOT EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.sender_health) THEN RAISE EXCEPTION 'forbidden'; END IF;
+        SELECT (payload->'configuration'->>'retentionDays')::integer INTO retention FROM public.sender_health_record
+          WHERE business_id=nullif(current_setting('app.business_id',true),'')::uuid AND identity_id=identity AND kind='policy'
+          ORDER BY (payload->>'version')::integer DESC LIMIT 1;
+        IF retention IS NULL THEN RETURN 0; END IF;
+        UPDATE public.sender_health_record SET payload=jsonb_build_object('kind','evidence','evidence',null)
+          WHERE business_id=nullif(current_setting('app.business_id',true),'')::uuid AND identity_id=identity AND kind='evidence'
+          AND payload->'evidence'<>'null'::jsonb AND at<at_time-make_interval(days=>retention);
+        GET DIAGNOSTICS affected=ROW_COUNT; RETURN affected;
+      END $$;
+      REVOKE ALL ON FUNCTION public.purge_sender_health_artifacts(uuid,timestamptz) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.purge_sender_health_artifacts(uuid,timestamptz) TO app_runtime;
       REVOKE ALL PRIVILEGES ON google_calendar_grant, google_calendar_oauth FROM app_runtime;
       GRANT SELECT, INSERT ON google_calendar_grant, google_calendar_oauth TO app_runtime;
       GRANT UPDATE (generation, status, reason, account_subject, account_email, selected_calendar_id, credentials, rejected_credentials, scopes, authorized_at, actor_id, at) ON google_calendar_grant TO app_runtime;
@@ -788,7 +1208,36 @@ export async function secureDatabase(pool: Pool) {
       GRANT UPDATE (stage, buyer_id) ON inbox_opportunity TO app_runtime;
       REVOKE ALL PRIVILEGES ON opportunity_control_history, opportunity_manual_event, opportunity_due_action FROM app_runtime;
       GRANT SELECT, INSERT ON opportunity_control_history, opportunity_manual_event, opportunity_due_action TO app_runtime;
-      GRANT UPDATE (state, reason) ON opportunity_due_action TO app_runtime;
+      GRANT UPDATE (state, reason, email) ON opportunity_due_action TO app_runtime;
+      REVOKE UPDATE (whatsapp_plan_id,whatsapp_step,whatsapp_peer) ON opportunity_due_action FROM app_runtime;
+      REVOKE UPDATE (meta_recovery_at) ON opportunity_due_action FROM app_runtime;
+      GRANT UPDATE (meta_recovery_at) ON opportunity_due_action TO app_runtime;
+      CREATE OR REPLACE FUNCTION public.protect_opportunity_mail() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog, public AS $protect$
+      BEGIN
+        IF TG_OP = 'INSERT' THEN
+          IF NEW.email IS NOT NULL THEN RAISE EXCEPTION 'Mail intent requires a durable commitment'; END IF;
+          RETURN NEW;
+        END IF;
+        IF OLD.email IS NOT NULL AND (NEW.email IS NULL OR NEW.email->'envelope' IS DISTINCT FROM OLD.email->'envelope')
+          THEN RAISE EXCEPTION 'Committed mail intent is immutable'; END IF;
+        IF OLD.email IS NOT NULL AND NEW.state = 'pending'
+          THEN RAISE EXCEPTION 'Committed mail cannot be retried'; END IF;
+        IF OLD.email IS NULL AND NEW.email IS NOT NULL AND (
+          OLD.state <> 'pending' OR NEW.state <> 'committed' OR
+          NEW.email->'envelope'->>'actionId' IS DISTINCT FROM NEW.id::text OR
+          NEW.email->'envelope'->>'attemptId' IS DISTINCT FROM NEW.id::text OR
+          NEW.email->'envelope'->>'businessId' IS DISTINCT FROM NEW.business_id::text OR
+          NEW.email->'envelope'->>'opportunityId' IS DISTINCT FROM NEW.opportunity_id::text OR
+          NEW.email->'envelope'->>'mailboxId' IS DISTINCT FROM NEW.connection_id::text OR
+          NEW.email->'envelope'->>'messageId' IS DISTINCT FROM NEW.message_id::text OR
+          NEW.email->'result' IS DISTINCT FROM 'null'::jsonb OR NEW.email->'sent' IS DISTINCT FROM 'null'::jsonb)
+          THEN RAISE EXCEPTION 'Mail intent requires its exact durable commitment'; END IF;
+        RETURN NEW;
+      END $protect$;
+      DROP TRIGGER IF EXISTS protect_opportunity_mail ON public.opportunity_due_action;
+      CREATE TRIGGER protect_opportunity_mail BEFORE INSERT OR UPDATE ON public.opportunity_due_action
+        FOR EACH ROW EXECUTE FUNCTION public.protect_opportunity_mail();
       REVOKE ALL PRIVILEGES ON inquiry_run FROM app_runtime;
       GRANT SELECT, INSERT ON inquiry_run TO app_runtime;
       GRANT UPDATE (result, execution_id) ON inquiry_run TO app_runtime;
@@ -829,6 +1278,18 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON business, membership, invitation, team_audit, platform_operator FROM app_runtime;
       GRANT SELECT, INSERT ON membership, business, invitation, team_audit TO app_runtime;
       GRANT SELECT ON platform_operator TO app_runtime;
+      REVOKE ALL PRIVILEGES ON operator_cost_record FROM app_runtime;
+      GRANT SELECT,INSERT ON operator_cost_record TO app_runtime;
+      ALTER TABLE operator_cost_record FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON operator_cost_planning,operator_cost_scan FROM app_runtime;
+      GRANT SELECT,INSERT ON operator_cost_planning,operator_cost_scan TO app_runtime;
+      ALTER TABLE operator_cost_planning FORCE ROW LEVEL SECURITY;
+      ALTER TABLE operator_cost_scan FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON operator_cost_budget,operator_cost_alert,operator_cost_notification_event FROM app_runtime;
+      GRANT SELECT,INSERT ON operator_cost_budget,operator_cost_alert,operator_cost_notification_event TO app_runtime;
+      ALTER TABLE operator_cost_budget FORCE ROW LEVEL SECURITY;
+      ALTER TABLE operator_cost_alert FORCE ROW LEVEL SECURITY;
+      ALTER TABLE operator_cost_notification_event FORCE ROW LEVEL SECURITY;
       GRANT SELECT, INSERT ON email_market_policy, email_recipient_revision, email_suppression, email_eligibility_evaluation, email_action_review TO app_runtime;
       ALTER TABLE email_market_policy FORCE ROW LEVEL SECURITY;
       ALTER TABLE email_recipient_revision FORCE ROW LEVEL SECURITY;
@@ -845,6 +1306,37 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE invitation FORCE ROW LEVEL SECURITY;
       ALTER TABLE team_audit FORCE ROW LEVEL SECURITY;
       ALTER TABLE platform_operator FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON seller_issuer_revision,seller_issuer_decision FROM app_runtime;
+      GRANT SELECT,INSERT ON seller_issuer_revision,seller_issuer_decision TO app_runtime;
+      ALTER TABLE seller_issuer_revision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE seller_issuer_decision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON financial_case,financial_case_event,financial_receipt FROM app_runtime;
+      GRANT SELECT,INSERT ON financial_case,financial_case_event,financial_receipt TO app_runtime;
+      GRANT USAGE ON SEQUENCE financial_case_event_position_seq,financial_case_position_seq TO app_runtime;
+      ALTER TABLE financial_receipt FORCE ROW LEVEL SECURITY;
+      ALTER TABLE financial_case FORCE ROW LEVEL SECURITY;
+      ALTER TABLE financial_case_event FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON seller_document,seller_document_request FROM app_runtime;
+      GRANT SELECT,INSERT ON seller_document,seller_document_request TO app_runtime;
+      GRANT UPDATE (artifact_state,failure) ON seller_document TO app_runtime;
+      ALTER TABLE seller_document FORCE ROW LEVEL SECURITY;
+      ALTER TABLE seller_document_request FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON seller_document_access,seller_document_storage FROM app_runtime;
+      GRANT SELECT,INSERT ON seller_document_access,seller_document_storage TO app_runtime;
+      GRANT UPDATE (outcome) ON seller_document_storage TO app_runtime;
+      ALTER TABLE seller_document_access FORCE ROW LEVEL SECURITY;
+      ALTER TABLE seller_document_storage FORCE ROW LEVEL SECURITY;
+      CREATE OR REPLACE FUNCTION public.seller_next_number(tenant uuid, series text, first_number bigint)
+      RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
+        IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true) OR NOT (
+          coalesce(public.current_business_role() in ('owner','admin'),false) OR EXISTS(SELECT 1 FROM public.platform_operator o WHERE o.user_id=current_setting('app.actor_id',true) AND o.documents)
+        ) THEN RAISE EXCEPTION 'forbidden'; END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended('seller-documents',0));
+        RETURN (SELECT greatest(first_number,coalesce(max(d.ordinal)+1,first_number)) FROM public.seller_document d WHERE d.series_key=series);
+      END $$;
+      REVOKE ALL ON FUNCTION public.seller_next_number(uuid,text,bigint) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.seller_next_number(uuid,text,bigint) TO app_runtime;
+      GRANT EXECUTE ON FUNCTION public.claim_seller_artifacts(text,integer),public.seller_artifact_worker_authorized(uuid,uuid) TO app_runtime;
       REVOKE ALL PRIVILEGES ON business_file, file_access, file_usage FROM app_runtime;
       GRANT SELECT, INSERT ON business_file TO app_runtime;
       GRANT UPDATE (state, operation_id, sha256, failure, cleanup_after, completed_at) ON business_file TO app_runtime;
@@ -857,6 +1349,39 @@ export async function secureDatabase(pool: Pool) {
       REVOKE ALL PRIVILEGES ON knowledge_revision FROM app_runtime;
       GRANT SELECT, INSERT ON knowledge_revision TO app_runtime;
       ALTER TABLE knowledge_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON billing_profile_revision FROM app_runtime;
+      REVOKE ALL PRIVILEGES ON subscription_pricing_revision FROM app_runtime;
+      GRANT SELECT, INSERT ON subscription_pricing_revision TO app_runtime;
+      ALTER TABLE subscription_pricing_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON subscription_quote FROM app_runtime;
+      REVOKE ALL PRIVILEGES ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage FROM app_runtime;
+      GRANT SELECT,INSERT ON subscription_payment,subscription_payment_event,subscription_payment_history,subscription_period,subscription_usage TO app_runtime;
+      REVOKE ALL PRIVILEGES ON subscription_lifecycle_event FROM app_runtime;
+      GRANT SELECT,INSERT ON subscription_lifecycle_event TO app_runtime;
+      ALTER TABLE subscription_lifecycle_event FORCE ROW LEVEL SECURITY;
+      GRANT UPDATE (state,started,reason,checkout,observation,reconciled_at,reconciliation_pending,recovery,lifecycle) ON subscription_payment TO app_runtime;
+      ALTER TABLE subscription_payment FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_payment_event FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_payment_history FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_period FORCE ROW LEVEL SECURITY;
+      ALTER TABLE subscription_usage FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON reach_change,reach_change_event FROM app_runtime;
+      GRANT SELECT,INSERT ON reach_change,reach_change_event TO app_runtime;
+      GRANT USAGE ON SEQUENCE reach_change_event_position_seq TO app_runtime;
+      ALTER TABLE reach_change FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reach_change_event FORCE ROW LEVEL SECURITY;
+      GRANT SELECT, INSERT ON subscription_quote TO app_runtime;
+      ALTER TABLE subscription_quote FORCE ROW LEVEL SECURITY;
+      GRANT SELECT, INSERT ON billing_profile_revision TO app_runtime;
+      ALTER TABLE billing_profile_revision FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON billing_profile_review FROM app_runtime;
+      GRANT SELECT, INSERT ON billing_profile_review TO app_runtime;
+      ALTER TABLE billing_profile_review FORCE ROW LEVEL SECURITY;
+      REVOKE ALL PRIVILEGES ON tax_rule_revision, tax_rule_decision, tax_calculation FROM app_runtime;
+      GRANT SELECT, INSERT ON tax_rule_revision, tax_rule_decision, tax_calculation TO app_runtime;
+      ALTER TABLE tax_rule_revision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE tax_rule_decision FORCE ROW LEVEL SECURITY;
+      ALTER TABLE tax_calculation FORCE ROW LEVEL SECURITY;
       REVOKE ALL PRIVILEGES ON commercial_authority_revision FROM app_runtime;
       GRANT SELECT, INSERT ON commercial_authority_revision TO app_runtime;
       ALTER TABLE commercial_authority_revision FORCE ROW LEVEL SECURITY;
@@ -865,6 +1390,14 @@ export async function secureDatabase(pool: Pool) {
       GRANT SELECT, INSERT ON discovery_run, discovery_prospect, discovery_result, discovery_usage TO app_runtime;
       GRANT UPDATE (status, stop_reason, used, completed_steps, updated_at) ON discovery_run TO app_runtime;
       GRANT UPDATE (outcome) ON discovery_usage TO app_runtime;
+      GRANT UPDATE (provider_cost) ON discovery_usage TO app_runtime;
+      CREATE OR REPLACE FUNCTION public.protect_discovery_provider_cost() RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$ BEGIN
+        IF OLD.provider_cost IS NOT NULL AND NEW.provider_cost IS DISTINCT FROM OLD.provider_cost THEN RAISE EXCEPTION 'Provider cost observation is immutable'; END IF;
+        RETURN NEW;
+      END $$;
+      DROP TRIGGER IF EXISTS protect_discovery_provider_cost ON public.discovery_usage;
+      CREATE TRIGGER protect_discovery_provider_cost BEFORE UPDATE ON public.discovery_usage FOR EACH ROW EXECUTE FUNCTION public.protect_discovery_provider_cost();
+      REVOKE ALL ON FUNCTION public.protect_discovery_provider_cost() FROM PUBLIC;
       GRANT UPDATE (returned_results, source_url, checked_at, check_order) ON discovery_usage TO app_runtime;
       REVOKE ALL PRIVILEGES ON discovery_prospect_alias, discovery_observation FROM app_runtime;
       GRANT SELECT, INSERT ON discovery_prospect_alias, discovery_observation TO app_runtime;
@@ -886,9 +1419,99 @@ export async function secureDatabase(pool: Pool) {
       ALTER TABLE discovery_schedule FORCE ROW LEVEL SECURITY;
       ALTER TABLE discovery_dispatch FORCE ROW LEVEL SECURITY;
       GRANT UPDATE (durable_run_id, durable_attempt, attempt_started_at, schedule_revision) ON discovery_run TO app_runtime;
-      SET LOCAL ROLE app_runtime;
     `);
-    await verifyRuntimeRole(client);
+    await client.query(`
+      REVOKE ALL ON whatsapp_intake, whatsapp_receipt FROM app_runtime;
+      GRANT SELECT, INSERT ON whatsapp_intake, whatsapp_receipt TO app_runtime;
+      GRANT UPDATE (connection_version,account_key,inbox_connection_id,actor_id,enabled_at,receipt_retention_seconds,inbound_at,echo_at,gap) ON whatsapp_intake TO app_runtime;
+      GRANT UPDATE (activity,state,conversation_id,opportunity_id) ON whatsapp_receipt TO app_runtime;
+      ALTER TABLE whatsapp_intake FORCE ROW LEVEL SECURITY;
+      ALTER TABLE whatsapp_receipt FORCE ROW LEVEL SECURITY;
+      CREATE OR REPLACE FUNCTION public.resolve_meta_intake(provider text, waba text, phone text)
+      RETURNS TABLE(id uuid,business_id uuid,actor_id text)
+      LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        SELECT i.id,i.business_id,i.actor_id FROM public.whatsapp_intake i
+        JOIN public.whatsapp_connection c ON c.id=i.id AND c.business_id=i.business_id
+        JOIN public.membership m ON m.business_id=i.business_id AND m.user_id=i.actor_id
+        WHERE c.provider_key=provider AND c.assets->>'wabaId'=waba AND c.phone_number_id=phone
+          AND c.version=i.connection_version AND c.status='connected' AND c.credentials IS NOT NULL
+          AND m.role IN ('owner','admin')
+          AND c.observation->'checks'->>'customer_ownership'='confirmed'
+          AND c.observation->'checks'->>'permissions'='confirmed'
+          AND c.observation->'checks'->>'number_verified'='confirmed'
+          AND c.observation->'checks'->>'number_registered'='confirmed'
+      $$;
+      CREATE OR REPLACE FUNCTION public.pending_meta_intakes(provider text)
+      RETURNS TABLE(id uuid,business_id uuid,actor_id text)
+      LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        SELECT i.id,i.business_id,i.actor_id FROM public.whatsapp_intake i
+        JOIN public.whatsapp_connection c ON c.id=i.id AND c.business_id=i.business_id
+        JOIN public.membership m ON m.business_id=i.business_id AND m.user_id=i.actor_id
+        WHERE c.provider_key=provider AND c.version=i.connection_version AND c.status='connected'
+          AND c.credentials IS NOT NULL AND m.role IN ('owner','admin')
+          AND c.observation->'checks'->>'customer_ownership'='confirmed'
+          AND c.observation->'checks'->>'permissions'='confirmed'
+          AND c.observation->'checks'->>'number_verified'='confirmed'
+          AND c.observation->'checks'->>'number_registered'='confirmed'
+          AND EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id AND r.state IN ('pending','review') AND r.connection_version=i.connection_version)
+        ORDER BY EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id AND r.connection_version=i.connection_version AND r.state='pending') DESC,i.id LIMIT 100
+      $$;
+      CREATE OR REPLACE FUNCTION public.purge_meta_receipts(at_time timestamptz)
+      RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        UPDATE public.whatsapp_intake i SET gap='unprocessed_event_expired'
+          WHERE EXISTS (SELECT 1 FROM public.whatsapp_receipt r WHERE r.connection_id=i.id
+            AND r.connection_version=i.connection_version AND r.state IN ('pending','review') AND r.expires_at<=least(at_time,statement_timestamp()));
+        UPDATE public.whatsapp_receipt SET activity=NULL,
+          state=CASE WHEN state IN ('pending','review') THEN 'expired' ELSE state END
+        WHERE expires_at<=least(at_time,statement_timestamp()) AND activity IS NOT NULL
+      $$;
+      REVOKE ALL ON FUNCTION public.purge_meta_receipts(timestamptz) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.purge_meta_receipts(timestamptz) TO app_runtime;
+      REVOKE ALL ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.resolve_meta_intake(text,text,text),public.pending_meta_intakes(text) TO app_runtime;
+    `);
+    await preparePaymentSecurity(client);
+    await prepareReachSecurity(client);
+    await prepareFinancialSecurity(client);
+    await prepareReconciliationSecurity(client);
+    await secureReconciliationRecords(client);
+    await client.query(`
+      REVOKE ALL PRIVILEGES ON reconciliation_evidence,reconciliation_record,reconciliation_review,reconciliation_access FROM app_runtime;
+      GRANT SELECT,INSERT ON reconciliation_evidence,reconciliation_record,reconciliation_review,reconciliation_access TO app_runtime;
+      ALTER TABLE reconciliation_evidence FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reconciliation_record FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reconciliation_review FORCE ROW LEVEL SECURITY;
+      ALTER TABLE reconciliation_access FORCE ROW LEVEL SECURITY;
+    `);
+    await prepareCostSecurity(client);
+    await prepareNotificationSecurity(client);
+    for (const name of notificationTables) {
+      await client.query(
+        `REVOKE ALL PRIVILEGES ON public.${name} FROM app_runtime; GRANT SELECT,INSERT ON public.${name} TO app_runtime; ALTER TABLE public.${name} FORCE ROW LEVEL SECURITY;`,
+      );
+    }
+    await client.query(`
+      CREATE OR REPLACE FUNCTION public.pending_meta_outbound()
+      RETURNS TABLE(business_id uuid,action_id uuid,actor_id text,session_id text)
+      LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+        SELECT a.business_id,a.id,a.actor_id,a.session_id FROM public.opportunity_due_action a
+        JOIN public.inbox_connection i ON i.id=a.connection_id AND i.business_id=a.business_id AND i.mode='meta'
+        JOIN public.membership m ON m.business_id=a.business_id AND m.user_id=a.actor_id AND m.role IN ('owner','admin')
+        WHERE (a.state='pending' AND a.due_at<=statement_timestamp() OR a.state='committed')
+        ORDER BY coalesce(a.meta_recovery_at,a.created_at),a.due_at,a.id LIMIT 100
+      $$;
+      REVOKE ALL ON FUNCTION public.pending_meta_outbound() FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.pending_meta_outbound() TO app_runtime;
+    `);
+    await secureOperations(client);
+    await secureRecovery(client);
+    await secureDataGovernance(client);
+    await secureTaxPeriods(client);
+    await secureDiscoveryCapacity(client);
+    await secureTaxFilings(client);
+    await securePilots(client);
+    await client.query("SET LOCAL ROLE app_runtime");
+    await verifyRuntimeRole(client, options);
     await client.query("COMMIT");
   } catch (error: unknown) {
     await client.query("ROLLBACK");

@@ -17,7 +17,12 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db-push": "tsx scripts/database-security.ts prepare && drizzle-kit push && tsx scripts/database-security.ts secure"
+    "db-push": "tsx scripts/database-security.ts prepare && drizzle-kit push && tsx scripts/database-security.ts secure",
+    "notifications:bootstrap": "tsx scripts/notification-bootstrap.ts",
+    "recovery:bundle": "tsx scripts/recovery-tools.ts bundle",
+    "recovery:backup": "tsx scripts/recovery-tools.ts backup",
+    "recovery:provision-target": "tsx scripts/recovery-tools.ts provision-target",
+    "recovery:upload-backup": "tsx scripts/recovery-tools.ts upload-backup"
   },
   "dependencies": {
     "@ai-sdk/gateway": "4.0.136",
@@ -44,11 +49,13 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "0.0.1",
+    "svix": "2.9.1",
     "tailwind-merge": "3.7.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.4",
+    "@trigger.dev/build": "4.8.3",
     "@types/node": "22.20.5",
     "@types/pg": "8.23.1",
     "@types/react": "19.3.0",

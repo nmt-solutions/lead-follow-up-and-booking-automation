@@ -1,3 +1,4 @@
+import { capacityViewSchema, type CapacityView } from "./discovery-capacity";
 import { z } from "zod";
 import { briefSchema } from "./discovery-brief";
 import {
@@ -99,6 +100,7 @@ export const workSchema = z.strictObject({
   userId: z.string().min(1).max(256),
   sessionId: z.string().min(1).max(256),
   executionKey: z.uuid(),
+  capacityPolicyId: z.uuid().optional(),
 });
 export type DiscoveryWork = z.infer<typeof workSchema>;
 export type WorkIdentity = Pick<DiscoveryWork, "userId" | "sessionId">;
@@ -205,7 +207,17 @@ export const reviewResultSchema = z.strictObject({
     .nullable(),
 });
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
+export const discoveryProviderCostSchema = z.strictObject({
+  provider: z.literal("exa"),
+  estimatedUsd: z.number().finite().nonnegative().max(1e12).nullable(),
+  requestId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_.:-]{1,160}$/)
+    .nullable(),
+});
+export type DiscoveryProviderCost = z.infer<typeof discoveryProviderCostSchema>;
 export type SearchInput = {
+  recordCost?(value: DiscoveryProviderCost): Promise<void>;
   policy: DiscoveryPolicy;
   businessId: string;
   runId: string;
@@ -236,6 +248,7 @@ export type DiscoveryProvider = {
   review(input: ReviewInput): Promise<unknown>;
 };
 export type ContentsInput = {
+  recordCost?(value: DiscoveryProviderCost): Promise<void>;
   policy: DiscoveryPolicy;
   source: SearchResult;
   signal: AbortSignal;
@@ -375,6 +388,11 @@ export type DiscoveryRun = {
   createdAt: Date;
   updatedAt: Date;
 };
+const executionCapacitySchema = z.object({
+  mode: z.enum(["pooled", "reserved"]),
+  slots: z.number().int().positive(),
+  policyVersion: z.number().int().positive(),
+});
 export type RunView = Omit<
   DiscoveryRun,
   | "sessionId"
@@ -390,6 +408,7 @@ export type RunView = Omit<
   | "createdAt"
   | "updatedAt"
 > & {
+  executionCapacity?: z.infer<typeof executionCapacitySchema> | null;
   createdAt: string;
   updatedAt: string;
   queueState: "pending" | "enqueued" | "inactive";
@@ -407,6 +426,7 @@ export type RunView = Omit<
   consolidation: z.infer<typeof consolidationSchema>;
 };
 export type DiscoveryWorkspace = {
+  capacity?: CapacityView;
   schedules: SavedScheduleView[];
   canRun: boolean;
   setup: string[];
@@ -448,6 +468,7 @@ const prospectViewSchema = persistedProspectSchema.extend({
 
 export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
   z.strictObject({
+    capacity: capacityViewSchema.optional(),
     schedules: z.array(savedScheduleViewSchema),
     canRun: z.boolean(),
     setup: z.array(z.string()),
@@ -461,6 +482,7 @@ export const discoveryWorkspaceSchema: z.ZodType<DiscoveryWorkspace> =
       z.strictObject({
         id: z.uuid(),
         businessId: z.uuid(),
+        executionCapacity: executionCapacitySchema.nullable().optional(),
         queueState: z.enum(["pending", "enqueued", "inactive"]),
         scheduleId: z.uuid().nullable(),
         scheduleRevision: z.number().int().positive().nullable(),

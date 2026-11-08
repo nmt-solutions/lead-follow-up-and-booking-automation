@@ -1,8 +1,9 @@
 import { mailboxReplyReady } from "./mailbox-processing";
+import { senderHealthAt } from "./sender-health-repository";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { sameSenderBinding } from "../models/senders";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { ApplicationError } from "../models/application-error";
 import type { Clock } from "../models/business";
@@ -20,6 +21,12 @@ import type {
   SenderRecord,
 } from "../models/senders";
 import { senderReadiness } from "../senders/readiness";
+import { microsoftTransportKey } from "../microsoft-mail/transport";
+import { gmailSequenceKey } from "../gmail/sequence-mail";
+import {
+  nativeSendingAuthorized,
+  nativeSequenceReplyReady,
+} from "./native-mail-dispatch";
 import { requireSalesSession } from "./sales-session";
 import type { Database } from "./runtime";
 import { scoped, requireCapability, type Transaction } from "./scope";
@@ -31,6 +38,7 @@ import {
   senderIdentity,
   senderObservation,
   mailboxPolicy,
+  inboxMessage,
 } from "./schema";
 
 type Save<T> = { id: string | null; expectedVersion: number; configuration: T };
@@ -100,6 +108,9 @@ export async function inspectionAt(
     : null;
   return {
     requestedAt: requestedAt.toISOString(),
+    healthProof: row.connectionId
+      ? (await senderHealthAt(tx, businessId, row.id, requestedAt)).proof
+      : null,
     previousEvidenceId: latest?.id ?? null,
     binding: {
       businessId,
@@ -116,6 +127,36 @@ export async function inspectionAt(
     connection,
     replyRoute,
     replyConnection,
+    ...(connection?.configuration.provider === "gmail" ||
+    connection?.configuration.provider === "microsoft"
+      ? {
+          [connection.configuration.provider === "gmail"
+            ? "nativeGmail"
+            : "nativeMicrosoft"]: {
+            send: await nativeSendingAuthorized(
+              tx,
+              businessId,
+              connection.id,
+              config.fromAddress,
+              connection.configuration.provider,
+            ),
+            reply: Boolean(
+              replyRoute &&
+              replyConnection &&
+              (await nativeSequenceReplyReady(
+                tx,
+                businessId,
+                replyRoute.configuration.inboxConnectionId,
+                replyConnection.id,
+                requestedAt,
+                replyConnection.configuration.provider === "microsoft"
+                  ? "microsoft"
+                  : "gmail",
+              )),
+            ),
+          },
+        }
+      : {}),
   };
 }
 export async function identityView(
@@ -123,9 +164,11 @@ export async function identityView(
   businessId: string,
   row: IdentityRow,
   at: Date,
-  adapter?: Pick<SenderAdapter, "key" | "mode">,
+  adapter?: Pick<SenderAdapter, "key" | "mode" | "select">,
 ) {
   const context = await inspectionAt(tx, businessId, row, at);
+  if (adapter?.select)
+    adapter = adapter.select(context.connection?.configuration.provider ?? "");
   const [latest] = await tx
     .select()
     .from(senderObservation)
@@ -164,13 +207,27 @@ export async function identityView(
           ),
         )
     : [];
+  const nativeKey = adapter?.key ?? latest?.evidence.adapterKey;
+  const nativeSequence =
+    nativeKey === gmailSequenceKey || nativeKey === microsoftTransportKey;
+  const nativeProvider =
+    nativeKey === microsoftTransportKey ? "microsoft" : "gmail";
   const mailboxIssues =
-    mailbox &&
-    (!mailbox.configuration.enabled ||
-      !mailbox.configuration.requestedSend ||
-      mailbox.grant?.send !== "granted" ||
-      new Date(mailbox.grant.validUntil) <= at ||
-      mailbox.connectionVersion !== context.connection?.version)
+    (nativeSequence &&
+      (!context.connection ||
+        !(await nativeSendingAuthorized(
+          tx,
+          businessId,
+          context.connection.id,
+          row.configuration.fromAddress,
+          nativeProvider,
+        )))) ||
+    (mailbox &&
+      (!mailbox.configuration.enabled ||
+        !mailbox.configuration.requestedSend ||
+        mailbox.grant?.send !== "granted" ||
+        new Date(mailbox.grant.validUntil) <= at ||
+        mailbox.connectionVersion !== context.connection?.version))
       ? [
           {
             code: "mailbox_send_not_authorized",
@@ -179,6 +236,15 @@ export async function identityView(
           },
         ]
       : [];
+  const health = row.connectionId
+    ? await senderHealthAt(
+        tx,
+        businessId,
+        row.id,
+        at,
+        (adapter?.mode ?? latest?.evidence.mode) === "live",
+      )
+    : { issues: [] };
   return {
     ...view(row),
     identification: {
@@ -194,19 +260,41 @@ export async function identityView(
       Boolean(
         inbox?.active &&
         inbox.channel === "email" &&
-        (inbox.mode === "normalized_import" ||
-          (await mailboxReplyReady(
-            tx,
-            businessId,
-            inbox.id,
-            at,
-            context.replyConnection?.id ?? "",
-          ))),
+        (nativeSequence
+          ? await nativeSequenceReplyReady(
+              tx,
+              businessId,
+              inbox.id,
+              context.replyConnection?.id ?? "",
+              at,
+              nativeProvider,
+            )
+          : inbox.mode === "normalized_import" ||
+            (await mailboxReplyReady(
+              tx,
+              businessId,
+              inbox.id,
+              at,
+              context.replyConnection?.id ?? "",
+            ))),
       ),
       adapter,
-      mailboxIssues,
+      [...mailboxIssues, ...health.issues],
     ),
   };
+}
+
+/** Native reply continuity determines the intended use even when an imported event is a direct inquiry. */
+export function responseSenderUse(
+  message: Pick<
+    typeof inboxMessage.$inferSelect,
+    "content" | "mailboxMetadata"
+  >,
+): SenderUse {
+  return message.content.kind === "direct_inquiry" &&
+    !message.mailboxMetadata?.native?.inReplyTo
+    ? "inbound"
+    : "existing_conversation";
 }
 
 /** Current explicit response selection is the identity bound to this inbox's reply route.
@@ -278,6 +366,12 @@ export function createSenderRepository(database: Database, clock: Clock) {
           manage ? "integrations.manage" : "profile.read",
         );
         await requireSalesSession(tx, actor, clock.now(), role);
+        if (manage) {
+          const stopped = await tx.execute<{ stopped: boolean }>(
+            sql`select public.business_data_stopped(${businessId}::uuid) stopped`,
+          );
+          if (stopped.rows[0]?.stopped) throw new ApplicationError("FORBIDDEN");
+        }
         return run(tx);
       },
       { lock: true },
@@ -292,7 +386,7 @@ export function createSenderRepository(database: Database, clock: Clock) {
     businessId: string,
     context: SenderInspection,
     observation: SenderObservation,
-    adapter: Pick<SenderAdapter, "key" | "mode">,
+    adapter: Pick<SenderAdapter, "key" | "mode" | "select">,
   ) {
     return access(actor, businessId, true, async (tx) => {
       const row = await identityAt(tx, businessId, context.binding.identityId);
@@ -353,7 +447,7 @@ export function createSenderRepository(database: Database, clock: Clock) {
     workspace(
       actor: WorkIdentity,
       businessId: string,
-      adapter: Pick<SenderAdapter, "key" | "mode">,
+      adapter: Pick<SenderAdapter, "key" | "mode" | "select">,
     ): Promise<SenderWorkspace> {
       return access(actor, businessId, false, async (tx) => {
         const role = await requireCapability(
@@ -505,7 +599,7 @@ export function createSenderRepository(database: Database, clock: Clock) {
       actor: WorkIdentity,
       businessId: string,
       input: Save<SenderIdentityConfiguration>,
-      adapter: Pick<SenderAdapter, "key" | "mode">,
+      adapter: Pick<SenderAdapter, "key" | "mode" | "select">,
     ) {
       return access(actor, businessId, true, async (tx) => {
         const current = input.id

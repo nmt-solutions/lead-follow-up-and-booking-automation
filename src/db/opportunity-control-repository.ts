@@ -1,4 +1,6 @@
+import { pilotPathAllowed } from "./pilot-limits";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   evaluateEmailAction,
   emailDecisionAtDispatch,
@@ -22,12 +24,22 @@ import type {
   ControlSnapshot,
   DueAction,
   PolicyReview,
+  OpportunityDispatch,
 } from "../models/opportunity-control";
+import type { OpportunityMailEnvelope } from "../models/opportunity-mail";
+import { mailResultSchema } from "../models/mail-dispatch";
+import { microsoftTransportKey } from "../microsoft-mail/transport";
+import { reservePaidUsage, paidReservationCurrent } from "./paid-access";
+import { gmailSequenceKey } from "../gmail/sequence-mail";
+import { nativeDispatchAccess } from "./native-mail-dispatch";
+import { reconciledOpportunityMail } from "./opportunity-mail";
 import type { Database } from "./runtime";
+import type { WhatsAppSendingRepository } from "./whatsapp-sending-repository";
+import type { MetaIntent } from "../models/whatsapp-sending";
 import { scoped, requireCapability, type Transaction } from "./scope";
 import { readCommercialPolicy } from "./commercial-authority-repository";
 import { inquiryDispatchContext, lockInquiryProfile } from "./inquiry-context";
-import { responseSender } from "./sender-repository";
+import { responseSender, responseSenderUse } from "./sender-repository";
 import {
   mailboxMessageAllowed,
   opportunityRepliesVisible,
@@ -45,6 +57,8 @@ import {
   opportunityManualEvent,
   opportunityDueAction,
   emailSequenceAction,
+  senderIdentity,
+  mailboxPolicy,
 } from "./schema";
 
 type Need = typeof inboxOpportunity.$inferSelect;
@@ -65,15 +79,18 @@ function actionView(row: Action): DueAction {
     state: row.state,
     reason: row.reason,
     dueAt: row.dueAt.toISOString(),
+    email: row.email
+      ? { result: row.email.result, sent: row.email.sent }
+      : null,
   };
 }
-async function boundedDispatch(
-  operation: (signal: AbortSignal) => Promise<void>,
+async function boundedDispatch<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
 ) {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([
+    return await Promise.race([
       operation(controller.signal),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
@@ -240,11 +257,71 @@ export async function writeControl(
     );
 }
 
+function sameMailIntent(
+  a: OpportunityMailEnvelope,
+  b: OpportunityMailEnvelope,
+) {
+  return isDeepStrictEqual(a, b);
+}
+
 export function createOpportunityRepository(
   database: Database,
   clock: Clock,
+  whatsapp?: WhatsAppSendingRepository,
 ): OpportunityRepository {
   return {
+    reconcile(actor, businessId, actionId) {
+      return scoped(
+        database,
+        actor,
+        businessId,
+        async (tx) => {
+          const role = await requireCapability(
+            tx,
+            actor,
+            businessId,
+            "sales.work",
+          );
+          await requireSalesSession(tx, actor, clock.now(), role);
+          const [row] = await tx
+            .select()
+            .from(opportunityDueAction)
+            .where(
+              and(
+                eq(opportunityDueAction.businessId, businessId),
+                eq(opportunityDueAction.id, actionId),
+              ),
+            );
+          if (!row) throw new ApplicationError("NOT_FOUND");
+          if (row.actorId !== actor.userId)
+            throw new ApplicationError("FORBIDDEN");
+          if (!["committed", "dispatched"].includes(row.state))
+            return actionView(row);
+          if (whatsapp && (await whatsapp.intentAt(tx, businessId, actionId))) {
+            await whatsapp.reconcileAt(tx, actor, businessId, actionId);
+            const [updated] = await tx
+              .select()
+              .from(opportunityDueAction)
+              .where(eq(opportunityDueAction.id, actionId));
+            return actionView(updated);
+          }
+          const email = await reconciledOpportunityMail(tx, row, clock.now());
+          if (!email) return actionView(row);
+          const [updated] = await tx
+            .update(opportunityDueAction)
+            .set({ email, state: "dispatched", reason: null })
+            .where(
+              and(
+                eq(opportunityDueAction.businessId, businessId),
+                eq(opportunityDueAction.id, actionId),
+              ),
+            )
+            .returning();
+          return actionView(updated);
+        },
+        { lock: true },
+      );
+    },
     read(actor, businessId, id) {
       return scoped(
         database,
@@ -556,6 +633,371 @@ export function createOpportunityRepository(
           throw error;
         }
       }
+      async function authorize(
+        tx: Transaction,
+        action: Action,
+        role: BusinessRole,
+        intentOnly = false,
+      ) {
+        const failure = await sessionFailure(tx, action, role);
+        if (
+          !intentOnly &&
+          !(await paidReservationCurrent(
+            tx,
+            businessId,
+            "automation",
+            action.id,
+            now(),
+          ))
+        )
+          return {
+            action: await cancel(tx, "paid_automation_unavailable"),
+            failure: null,
+          };
+        if (failure)
+          return { action: await cancel(tx, "authorization_revoked"), failure };
+        const stopped = committedFollowupStopReason(action.reason);
+        if (stopped)
+          return { action: await cancel(tx, stopped), failure: null };
+        const need = await needAt(tx, businessId, action.opportunityId);
+        if (action.whatsappPlanId && whatsapp) {
+          const policy = await readCommercialPolicy(tx, businessId, false);
+          const decision = action.evaluation
+            ? evaluateCommercialAuthority(policy, action.evaluation, now())
+            : null;
+          const connection = await whatsapp.planConnectionAt(
+            tx,
+            businessId,
+            action,
+          );
+          const reason =
+            need.controlState !== "automation" ||
+            need.controlVersion !== action.controlVersion ||
+            need.ownerId !== action.actorId
+              ? "control_changed"
+              : !connection?.active
+                ? "connection_revoked"
+                : !(await opportunityRepliesVisible(
+                      tx,
+                      businessId,
+                      need.id,
+                      now(),
+                    ))
+                  ? "reply_visibility_unavailable"
+                  : policy.version !== action.policyVersion
+                    ? "policy_changed"
+                    : decision && decision.status !== "permitted"
+                      ? decision.reason
+                      : null;
+          if (reason)
+            return { action: await cancel(tx, reason), failure: null };
+          const meta = await whatsapp.prepareAt(tx, actor, action);
+          if (meta.reason || !meta.intent) {
+            if (
+              action.state === "pending" &&
+              [
+                "whatsapp_previous_attempt_unresolved",
+                "whatsapp_followup_not_due",
+                "whatsapp_outside_approved_timing",
+              ].includes(meta.reason ?? "")
+            ) {
+              const [waiting] = await tx
+                .update(opportunityDueAction)
+                .set({ reason: meta.reason })
+                .where(eq(opportunityDueAction.id, actionId))
+                .returning();
+              return { action: waiting, failure: null };
+            }
+            return {
+              action: await cancel(
+                tx,
+                meta.reason ?? "whatsapp_intent_required",
+              ),
+              failure: null,
+            };
+          }
+          if (!provider.channels.includes("whatsapp"))
+            throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+          if (
+            !(await pilotPathAllowed(tx, businessId, "whatsapp", {
+              connectionId: meta.intent.connectionId,
+            }))
+          )
+            return {
+              action: await cancel(tx, "pilot_scope_changed"),
+              failure: null,
+            };
+          const dispatch: OpportunityDispatch = {
+            actionId: action.id,
+            businessId,
+            opportunityId: need.id,
+            connectionId: action.connectionId,
+            channel: "whatsapp",
+            evaluation: action.evaluation,
+          };
+          if (
+            !(await pilotPathAllowed(tx, businessId, "whatsapp", {
+              connectionId: meta.intent.connectionId,
+            }))
+          )
+            return {
+              action: await cancel(tx, "pilot_scope_changed"),
+              failure: null,
+            };
+          return { action, failure: null, dispatch, metaIntent: meta.intent };
+        }
+        const ctx = await messageContext(
+          tx,
+          businessId,
+          action.messageId ?? "",
+        );
+        if (action.inquiryRunId && !intentOnly) await lockInquiryProfile(tx);
+        const inquiry = action.inquiryRunId
+          ? await inquiryDispatchContext(
+              tx,
+              businessId,
+              action.inquiryRunId,
+              need.id,
+              clock.now(),
+            )
+          : null;
+        const policy = await readCommercialPolicy(tx, businessId, false);
+        const decision = action.evaluation
+          ? evaluateCommercialAuthority(policy, action.evaluation, now())
+          : null;
+        const mailboxAllowed = await mailboxMessageAllowed(
+          tx,
+          businessId,
+          ctx.connection.id,
+          ctx.message.mailboxMetadata,
+          now(),
+        );
+        const replyVisible = await opportunityRepliesVisible(
+          tx,
+          businessId,
+          need.id,
+          now(),
+        );
+        const reason =
+          need.controlState !== "automation" ||
+          need.controlVersion !== action.controlVersion ||
+          need.ownerId !== action.actorId
+            ? "control_changed"
+            : ctx.association.version !== action.associationVersion ||
+                ctx.link.opportunityId !== need.id
+              ? "association_changed"
+              : !mailboxAllowed
+                ? "connection_revoked"
+                : !replyVisible
+                  ? "reply_visibility_unavailable"
+                  : policy.version !== action.policyVersion
+                    ? "policy_changed"
+                    : (inquiry?.reason ??
+                      (decision && decision.status !== "permitted"
+                        ? decision.reason
+                        : !decision && !inquiry
+                          ? "missing_authority"
+                          : null));
+        if (reason) return { action: await cancel(tx, reason), failure: null };
+        const sender =
+          ctx.connection.channel === "email"
+            ? await responseSender(
+                tx,
+                businessId,
+                ctx.connection.id,
+                now(),
+                responseSenderUse(ctx.message),
+              )
+            : null;
+        let eligibility =
+          ctx.connection.channel === "email" && !intentOnly
+            ? await evaluateEmailAction(
+                tx,
+                businessId,
+                { kind: "opportunity", id: action.id },
+                actor.userId,
+                now(),
+              )
+            : null;
+        if (sender?.reason)
+          return { action: await cancel(tx, sender.reason), failure: null };
+        if (
+          ctx.connection.channel === "email" &&
+          !(await pilotPathAllowed(tx, businessId, "inquiry_email", {
+            senderId: sender?.sender?.identityId,
+            mailboxId: ctx.connection.id,
+            action: { kind: "opportunity", id: action.id },
+          }))
+        )
+          return {
+            action: await cancel(tx, "pilot_scope_changed"),
+            failure: null,
+          };
+        if (
+          sender?.sender &&
+          (sender.sender.adapterKey !==
+            (provider.selectEmail?.(sender.sender.adapterKey) ?? provider)
+              .emailIdentity?.adapterKey ||
+            sender.sender.mode !==
+              (provider.selectEmail?.(sender.sender.adapterKey) ?? provider)
+                .emailIdentity?.mode)
+        )
+          return {
+            action: await cancel(tx, "sender_transport_unavailable"),
+            failure: null,
+          };
+        if (eligibility)
+          eligibility = await emailDecisionAtDispatch(
+            tx,
+            businessId,
+            actor.userId,
+            eligibility,
+            now(),
+          );
+        if (eligibility && eligibility.status !== "allowed")
+          return {
+            action: await cancel(tx, `email_eligibility_${eligibility.status}`),
+            failure: null,
+          };
+        const dispatch: OpportunityDispatch = {
+          actionId: action.id,
+          businessId,
+          opportunityId: need.id,
+          connectionId: ctx.connection.id,
+          channel: ctx.connection.channel,
+          evaluation: action.evaluation,
+          ...(eligibility
+            ? { emailEligibility: emailDispatchAuthorization(eligibility) }
+            : {}),
+          ...(sender?.sender ? { sender: sender.sender } : {}),
+          ...(inquiry?.reply ? { reply: inquiry.reply } : {}),
+        };
+        if (!provider.channels.includes(ctx.connection.channel))
+          throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+        if (ctx.connection.channel === "whatsapp" && whatsapp) {
+          const meta = await whatsapp.prepareAt(
+            tx,
+            actor,
+            action,
+            inquiry?.reply,
+          );
+          if (meta.reason || !meta.intent)
+            return {
+              action: await cancel(
+                tx,
+                meta.reason ?? "whatsapp_intent_required",
+              ),
+              failure: null,
+            };
+          if (
+            !(await pilotPathAllowed(tx, businessId, "whatsapp", {
+              connectionId: meta.intent.connectionId,
+            }))
+          )
+            return {
+              action: await cancel(tx, "pilot_scope_changed"),
+              failure: null,
+            };
+          return { action, failure: null, dispatch, metaIntent: meta.intent };
+        }
+        let email: OpportunityMailEnvelope | undefined;
+        if (
+          [gmailSequenceKey, microsoftTransportKey].includes(
+            sender?.sender?.adapterKey ?? "",
+          ) &&
+          ctx.connection.channel === "email"
+        ) {
+          const native = ctx.message.mailboxMetadata?.native;
+          if (
+            !inquiry?.reply ||
+            !sender?.sender ||
+            (!intentOnly && !eligibility) ||
+            !native ||
+            ctx.connection.mode !== "mailbox" ||
+            native.direction !== "incoming" ||
+            native.from !== inquiry.reply.recipientRef ||
+            !native.to.includes(sender.sender.fromAddress)
+          )
+            return {
+              action: await cancel(tx, "native_reply_context_required"),
+              failure: null,
+            };
+          const [identity] = await tx
+            .select()
+            .from(senderIdentity)
+            .where(
+              and(
+                eq(senderIdentity.businessId, businessId),
+                eq(senderIdentity.id, sender.sender.identityId),
+              ),
+            );
+          if (!identity?.configuration.connectionId)
+            return {
+              action: await cancel(tx, "sender_setup_required"),
+              failure: null,
+            };
+          const [mailbox] = await tx
+            .select()
+            .from(mailboxPolicy)
+            .where(
+              and(
+                eq(mailboxPolicy.businessId, businessId),
+                eq(mailboxPolicy.id, ctx.connection.id),
+              ),
+            );
+          if (
+            mailbox?.provider !==
+              (sender.sender.adapterKey === microsoftTransportKey
+                ? "microsoft"
+                : "gmail") ||
+            mailbox.connectionId !== identity.configuration.connectionId ||
+            mailbox.account !== sender.sender.fromAddress
+          )
+            return {
+              action: await cancel(tx, "native_reply_mailbox_mismatch"),
+              failure: null,
+            };
+          email = {
+            actionId: action.id,
+            attemptId: action.id,
+            businessId,
+            opportunityId: need.id,
+            adapterKey: sender.sender.adapterKey,
+            adapterMode: "live",
+            connectionId: identity.configuration.connectionId,
+            mailboxId: ctx.connection.id,
+            senderIdentityId: sender.sender.identityId,
+            senderVersion: sender.sender.identityVersion,
+            senderEvidenceId: sender.sender.evidenceId,
+            messageId: ctx.message.id,
+            reservedAt:
+              action.email?.envelope.reservedAt ?? now().toISOString(),
+            fromAddress: sender.sender.fromAddress,
+            fromName: sender.sender.fromName,
+            replyTo: sender.sender.replyTo,
+            platformDisclosure: sender.sender.platformDisclosure,
+            recipient: inquiry.reply.recipientRef,
+            subject: ctx.message.content.subject,
+            body: inquiry.reply.text,
+            internetMessageId: `<inquiry-${action.id}@business-operations.invalid>`,
+            parent: {
+              messageRef: ctx.message.messageRef,
+              threadRef: ctx.message.content.conversationRef,
+              internetMessageId: native.internetMessageId,
+              ...(sender.sender.adapterKey === microsoftTransportKey
+                ? { text: ctx.message.content.text, to: native.to }
+                : {}),
+            },
+          };
+          if (action.email && !sameMailIntent(action.email.envelope, email))
+            return {
+              action: await cancel(tx, "inquiry_context_changed"),
+              failure: null,
+            };
+          dispatch.email = action.email?.envelope ?? email;
+        }
+        return { action, failure: null, dispatch, email };
+      }
       const claim = await scoped(
         database,
         actor,
@@ -573,8 +1015,8 @@ export function createOpportunityRepository(
             .from(opportunityDueAction)
             .where(
               and(
-                eq(opportunityDueAction.id, actionId),
                 eq(opportunityDueAction.businessId, businessId),
+                eq(opportunityDueAction.id, actionId),
               ),
             );
           if (!row) throw new ApplicationError("NOT_FOUND");
@@ -582,31 +1024,109 @@ export function createOpportunityRepository(
             throw new ApplicationError("FORBIDDEN");
           if (row.state !== "pending" || row.dueAt > now())
             return { action: row, acquired: false, failure: null };
-          const failure = await sessionFailure(tx, row, role);
-          if (failure)
+          let email: OpportunityMailEnvelope | undefined;
+          let metaIntent: MetaIntent | undefined;
+          if (
+            ((provider.selectEmail ||
+              [gmailSequenceKey, microsoftTransportKey].includes(
+                provider.emailIdentity?.adapterKey ?? "",
+              )) &&
+              row.inquiryRunId) ||
+            (whatsapp &&
+              (row.whatsappPlanId ||
+                (await messageContext(tx, businessId, row.messageId ?? ""))
+                  .connection.channel === "whatsapp"))
+          ) {
+            // Prepare the immutable reply intent without holding global policy/profile locks across commitment.
+            // Full authorization belongs to the locked provider boundary below, and repeats after refresh.
+            const allowed = await authorize(tx, row, role, true);
+            if (!allowed.dispatch) return { ...allowed, acquired: false };
+            email = allowed.email;
+            metaIntent = allowed.metaIntent;
+          } else {
+            const failure = await sessionFailure(tx, row, role);
+            if (failure)
+              return {
+                action: await cancel(tx, "authorization_revoked"),
+                acquired: false,
+                failure,
+              };
+            const ctx = await messageContext(
+              tx,
+              businessId,
+              row.messageId ?? "",
+            );
+            if (!provider.channels.includes(ctx.connection.channel))
+              throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
+            // Legacy transports also obey exact pilot scope before any budget
+            // reservation. Full current authorization still repeats at I/O.
+            if (
+              !(await pilotPathAllowed(
+                tx,
+                businessId,
+                ctx.connection.channel === "email"
+                  ? "inquiry_email"
+                  : "whatsapp",
+                {},
+              ))
+            ) {
+              const allowed = await authorize(tx, row, role, true);
+              if (!allowed.dispatch) return { ...allowed, acquired: false };
+            }
+          }
+          try {
+            await reservePaidUsage(
+              tx,
+              businessId,
+              "automation",
+              actionId,
+              1,
+              "provider calls",
+              now(),
+            );
+          } catch (error: unknown) {
+            if (
+              !(error instanceof ApplicationError) ||
+              error.code !== "PAID_ACCESS_REQUIRED"
+            )
+              throw error;
             return {
-              action: await cancel(tx, "authorization_revoked"),
+              action: await cancel(tx, "paid_automation_unavailable"),
               acquired: false,
-              failure,
+              failure: null,
             };
-          const ctx = await messageContext(tx, businessId, row.messageId);
-          if (!provider.channels.includes(ctx.connection.channel))
-            throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
-          // Durable commitment prevents retries after a timeout/crash following an external effect.
-          // Unconfirmed includes a crash before the adapter starts; it is never proof of sending.
+          }
+          // Commit the exact intent BEFORE transport. A crash or result-write failure cannot erase correlation.
+          if (metaIntent) await whatsapp!.reserveAt(tx, actor, metaIntent);
           const [committed] = await tx
             .update(opportunityDueAction)
-            .set({ state: "committed", reason: "dispatch_unconfirmed" })
-            .where(eq(opportunityDueAction.id, actionId))
+            .set({
+              state: "committed",
+              reason: "dispatch_unconfirmed",
+              ...(email
+                ? {
+                    email: {
+                      envelope: email,
+                      result: null,
+                      sent: null,
+                    },
+                  }
+                : {}),
+            })
+            .where(
+              and(
+                eq(opportunityDueAction.businessId, businessId),
+                eq(opportunityDueAction.id, actionId),
+              ),
+            )
             .returning();
           return { action: committed, acquired: true, failure: null };
         },
         { lock: true },
       );
       if (claim.failure) throw claim.failure;
-      const { action } = claim;
-      if (!claim.acquired) return actionView(action);
-      // Only the invocation that transitions pending -> committed may call the provider.
+      if (!claim.acquired) return actionView(claim.action);
+      // Only this invocation owns the pending -> committed transition; replay never invokes transport.
       const result = await scoped(
         database,
         actor,
@@ -618,13 +1138,7 @@ export function createOpportunityRepository(
             businessId,
             "sales.work",
           );
-          const failure = await sessionFailure(tx, action, role);
-          if (failure)
-            return {
-              action: await cancel(tx, "authorization_revoked"),
-              failure,
-            };
-          const [currentAction] = await tx
+          const [current] = await tx
             .select()
             .from(opportunityDueAction)
             .where(
@@ -633,154 +1147,192 @@ export function createOpportunityRepository(
                 eq(opportunityDueAction.id, actionId),
               ),
             );
-          if (!currentAction) throw new ApplicationError("NOT_FOUND");
-          if (currentAction.state !== "committed")
-            return { action: currentAction, failure: null };
-          const stopped = committedFollowupStopReason(currentAction.reason);
-          if (stopped)
-            return { action: await cancel(tx, stopped), failure: null };
-          const need = await needAt(tx, businessId, action.opportunityId);
-          const ctx = await messageContext(tx, businessId, action.messageId);
-          if (action.inquiryRunId) await lockInquiryProfile(tx);
-          const inquiry = action.inquiryRunId
-            ? await inquiryDispatchContext(
+          if (!current) throw new ApplicationError("NOT_FOUND");
+          if (current.state !== "committed")
+            return { action: current, failure: null };
+          const allowed = await authorize(tx, current, role);
+          if (!allowed.dispatch) return allowed;
+          if (allowed.metaIntent && whatsapp) {
+            const intent = allowed.metaIntent;
+            const native = await boundedDispatch((signal) =>
+              whatsapp.dispatchAt(
                 tx,
-                businessId,
-                action.inquiryRunId,
-                need.id,
-                clock.now(),
-              )
-            : null;
-          const policy = await readCommercialPolicy(tx, businessId, false);
-          const decision = action.evaluation
-            ? evaluateCommercialAuthority(policy, action.evaluation, now())
-            : null;
-          const mailboxAllowed = await mailboxMessageAllowed(
-            tx,
-            businessId,
-            ctx.connection.id,
-            ctx.message.mailboxMetadata,
-            now(),
-          );
-          const replyVisible = await opportunityRepliesVisible(
-            tx,
-            businessId,
-            need.id,
-            now(),
-          );
-          const reason =
-            need.controlState !== "automation" ||
-            need.controlVersion !== action.controlVersion ||
-            need.ownerId !== action.actorId
-              ? "control_changed"
-              : ctx.association.version !== action.associationVersion ||
-                  ctx.link.opportunityId !== need.id
-                ? "association_changed"
-                : !mailboxAllowed
-                  ? "connection_revoked"
-                  : !replyVisible
-                    ? "reply_visibility_unavailable"
-                    : policy.version !== action.policyVersion
-                      ? "policy_changed"
-                      : (inquiry?.reason ??
-                        (decision && decision.status !== "permitted"
-                          ? decision.reason
-                          : !decision && !inquiry
-                            ? "missing_authority"
-                            : null));
-          if (reason)
-            return { action: await cancel(tx, reason), failure: null };
-          const sender =
-            ctx.connection.channel === "email"
-              ? await responseSender(
-                  tx,
-                  businessId,
-                  ctx.connection.id,
-                  now(),
-                  ctx.message.content.kind === "direct_inquiry"
-                    ? "inbound"
-                    : "existing_conversation",
-                )
-              : null;
-          let eligibility =
-            ctx.connection.channel === "email"
-              ? await evaluateEmailAction(
-                  tx,
-                  businessId,
-                  { kind: "opportunity", id: actionId },
-                  actor.userId,
-                  now(),
-                )
-              : null;
-          if (sender?.reason)
-            return { action: await cancel(tx, sender.reason), failure: null };
-          if (
-            sender?.sender &&
-            (sender.sender.adapterKey !== provider.emailIdentity?.adapterKey ||
-              sender.sender.mode !== provider.emailIdentity.mode)
-          )
-            return {
-              action: await cancel(tx, "sender_transport_unavailable"),
-              failure: null,
-            };
-          if (eligibility)
-            eligibility = await emailDecisionAtDispatch(
-              tx,
-              businessId,
-              actor.userId,
-              eligibility,
-              now(),
-            );
-          if (eligibility && eligibility.status !== "allowed")
-            return {
-              action: await cancel(
-                tx,
-                `email_eligibility_${eligibility.status}`,
-              ),
-              failure: null,
-            };
-          // Reviewed exception to external-I/O-outside-transactions: the shared lock is held
-          // through bounded adapter I/O, so a committed pause cannot precede a stale send.
-          // Policy/team/connection changes use this same lock. Providers must never retry here.
-          try {
-            await boundedDispatch((signal) =>
-              provider.dispatch(
-                {
-                  actionId,
-                  businessId,
-                  opportunityId: need.id,
-                  connectionId: ctx.connection.id,
-                  channel: ctx.connection.channel,
-                  evaluation: action.evaluation,
-                  ...(eligibility
-                    ? {
-                        emailEligibility:
-                          emailDispatchAuthorization(eligibility),
-                      }
-                    : {}),
-                  ...(sender?.sender ? { sender: sender.sender } : {}),
-                  ...(inquiry?.reply ? { reply: inquiry.reply } : {}),
+                actor,
+                intent,
+                async () => {
+                  const refreshed = await authorize(tx, current, role);
+                  return !!refreshed.dispatch;
                 },
                 signal,
               ),
             );
-          } catch (error: unknown) {
-            return {
-              action: currentAction,
-              failure: null,
-              providerFailure: { error },
-            };
+            if (native.reason || !native.result) {
+              const [latest] = await tx
+                .select()
+                .from(opportunityDueAction)
+                .where(eq(opportunityDueAction.id, actionId));
+              return {
+                action:
+                  latest.state === "cancelled"
+                    ? latest
+                    : await cancel(
+                        tx,
+                        native.reason ?? "whatsapp_send_blocked",
+                      ),
+                failure: null,
+              };
+            }
+            await whatsapp.settleAt(tx, actor, intent, native.result);
+            const [settled] = await tx
+              .update(opportunityDueAction)
+              .set({
+                state:
+                  native.result.status === "accepted"
+                    ? "dispatched"
+                    : native.result.status === "not_accepted"
+                      ? "cancelled"
+                      : "committed",
+                reason:
+                  native.result.status === "accepted"
+                    ? "whatsapp_accepted_delivery_unconfirmed"
+                    : native.result.status === "not_accepted"
+                      ? `whatsapp_${native.result.reason}`
+                      : "whatsapp_acceptance_unknown",
+              })
+              .where(
+                and(
+                  eq(opportunityDueAction.id, actionId),
+                  eq(opportunityDueAction.businessId, businessId),
+                ),
+              )
+              .returning();
+            return { action: settled, failure: null };
           }
-          const [sent] = await tx
+          let finalFailure: Awaited<ReturnType<typeof authorize>> | undefined;
+          const access = current.email
+            ? await nativeDispatchAccess(
+                tx,
+                current.email.envelope,
+                null,
+                current.email.envelope.subject,
+                async () => {
+                  // Refresh can consume time or change actual grants. Repeat ALL current-state guards under the same lock.
+                  const refreshed = await authorize(tx, current, role);
+                  if (!refreshed.dispatch) {
+                    finalFailure = refreshed;
+                    return false;
+                  }
+                  return true;
+                },
+                {
+                  ...current.email.envelope.parent,
+                  subject: current.email.envelope.subject,
+                },
+                () => clock.now(),
+              )
+            : undefined;
+          let providerResult:
+            void | import("../models/mail-dispatch").MailResult;
+          try {
+            providerResult = await boundedDispatch((signal) =>
+              (current.email
+                ? (provider.selectEmail?.(current.email.envelope.adapterKey) ??
+                  provider)
+                : provider
+              ).dispatch(allowed.dispatch, signal, access),
+            );
+          } catch (error: unknown) {
+            // Legacy providers retain their existing throw contract. Native mail failures remain visibly unknown.
+            if (!current.email)
+              return {
+                action: current,
+                failure: null,
+                providerFailure: { error },
+              };
+            providerResult = { status: "unknown" };
+          }
+          if (finalFailure) return finalFailure;
+          if (!current.email) {
+            const [sent] = await tx
+              .update(opportunityDueAction)
+              .set({ state: "dispatched", reason: null })
+              .where(eq(opportunityDueAction.id, actionId))
+              .returning();
+            return { action: sent, failure: null };
+          }
+          const parsed = mailResultSchema.safeParse(providerResult);
+          let outcome = parsed.success
+            ? parsed.data
+            : { status: "unknown" as const };
+          if (outcome.status === "accepted_pending_identity") {
+            const e = current.email.envelope,
+              a = outcome.acceptance;
+            if (
+              e.adapterKey !== microsoftTransportKey ||
+              a.actionId !== actionId ||
+              a.attemptId !== actionId ||
+              a.businessId !== businessId ||
+              a.connectionId !== e.connectionId ||
+              a.recipient !== e.recipient ||
+              a.submittedInternetMessageId !== e.internetMessageId ||
+              new Date(a.acceptedAt) < new Date(e.reservedAt) ||
+              new Date(a.acceptedAt) > now()
+            )
+              outcome = { status: "unknown" };
+          }
+          if (outcome.status === "accepted") {
+            const e = current.email.envelope,
+              r = outcome.receipt;
+            if (
+              r.actionId !== actionId ||
+              r.attemptId !== actionId ||
+              r.businessId !== businessId ||
+              r.connectionId !== e.connectionId ||
+              r.recipient !== e.recipient ||
+              r.internetMessageId !== e.internetMessageId ||
+              r.threadRef !== e.parent.threadRef ||
+              r.evidence !== "provider_response" ||
+              new Date(r.acceptedAt) < new Date(e.reservedAt) ||
+              new Date(r.acceptedAt) > now()
+            )
+              outcome = { status: "unknown" };
+          }
+          const [settled] = await tx
             .update(opportunityDueAction)
-            .set({ state: "dispatched", reason: null })
-            .where(eq(opportunityDueAction.id, actionId))
+            .set({
+              state:
+                outcome.status === "accepted" ||
+                outcome.status === "accepted_pending_identity"
+                  ? "dispatched"
+                  : outcome.status === "not_accepted"
+                    ? "cancelled"
+                    : "committed",
+              reason:
+                outcome.status === "accepted" ||
+                outcome.status === "accepted_pending_identity"
+                  ? null
+                  : outcome.status === "not_accepted"
+                    ? `provider_${outcome.reason}`
+                    : "dispatch_unconfirmed",
+              email: {
+                ...current.email,
+                result: outcome,
+                ...(outcome.status === "accepted_pending_identity"
+                  ? { processingAcceptance: outcome.acceptance }
+                  : {}),
+              },
+            })
+            .where(
+              and(
+                eq(opportunityDueAction.businessId, businessId),
+                eq(opportunityDueAction.id, actionId),
+              ),
+            )
             .returning();
-          return { action: sent, failure: null };
+          return { action: settled, failure: null };
         },
         { lock: true },
       );
-      // Throw after committing a known pre-provider cancellation, so it stays visible on reload.
       if (result.failure) throw result.failure;
       if ("providerFailure" in result && result.providerFailure)
         throw result.providerFailure.error;

@@ -1,3 +1,9 @@
+import {
+  reservePilotEffect,
+  requirePilotPath,
+  pilotEffectCurrent,
+  pilotPathAllowed,
+} from "./pilot-limits";
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
 import type { Database } from "./runtime";
@@ -7,6 +13,8 @@ import {
   appointmentHistory,
   bookingPolicy,
   inquiryRun,
+  googleCalendarGrant,
+  microsoftCalendarGrant,
 } from "./schema";
 import { inquiryContext, sameInquirySnapshot } from "./inquiry-context";
 import { requireSalesSession } from "./opportunity-control-repository";
@@ -32,6 +40,7 @@ import {
 import {
   calendarCall,
   calendarCatalog,
+  unavailableCalendarProvider,
   calendarFailureReason,
 } from "../appointments/provider";
 import {
@@ -45,12 +54,16 @@ import {
 type Appointment = typeof appointment.$inferSelect;
 type Policy = typeof bookingPolicy.$inferSelect;
 type Provider = {
+  pilotBlocked?: boolean;
+  pilotProvider?: "google" | "microsoft";
   provider: CalendarProvider;
   timeoutMs: number;
   providerForTransaction?(tx: Transaction): CalendarProvider;
 };
 const providerIn = (dep: Provider, tx: Transaction) =>
-  dep.providerForTransaction?.(tx) ?? dep.provider;
+  dep.pilotBlocked
+    ? unavailableCalendarProvider
+    : (dep.providerForTransaction?.(tx) ?? dep.provider);
 const hash = (v: unknown) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
 const sameInstant = (a: string, b: string) =>
@@ -243,6 +256,15 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         p.reason = "hold_expired";
       }
   }
+  async function pilotCalendarCurrent(
+    tx: Transaction,
+    businessId: string,
+    path: Record<string, unknown>,
+  ) {
+    await requirePilotPath(tx, businessId, "calendar", path);
+    if (!(await pilotEffectCurrent(tx, businessId, "calendar")))
+      throw new ApplicationError("PAID_ACCESS_REQUIRED");
+  }
   async function readyCalendar(
     tx: Transaction,
     businessId: string,
@@ -252,6 +274,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
     if (!policy.calendar || !providerIn(dep, tx).available)
       return "calendar_setup_required";
     try {
+      await pilotCalendarCurrent(tx, businessId, policy.calendar);
       const all = await calendarCatalog(
         providerIn(dep, tx),
         businessId,
@@ -311,6 +334,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
     };
+    await pilotCalendarCurrent(tx, scope.businessId, scope);
     const raw = await calendarCall(
       (s) => providerIn(dep, tx).availability(query, s),
       dep.timeoutMs,
@@ -500,6 +524,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
     let raw: unknown;
     const at = clock.now();
     try {
+      await pilotCalendarCurrent(tx, p.businessId, p.intent);
       raw = await calendarCall(
         (s) =>
           providerIn(dep, tx).lookup(
@@ -596,6 +621,98 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
     );
   }
   return {
+    async reservePilotOperation(
+      actor: WorkIdentity,
+      businessId: string,
+      opportunityId: string | null,
+      phase: string,
+      payload: Record<string, unknown>,
+      selected?: Record<string, unknown> | null,
+    ) {
+      try {
+        return await scope(actor, businessId, async (tx, canManage) => {
+          if (phase === "configure" && !canManage)
+            throw new ApplicationError("FORBIDDEN");
+          if (opportunityId) {
+            if (phase === "read") await context(tx, businessId, opportunityId);
+            else await owner(tx, actor, businessId, opportunityId);
+          }
+          const current = (await policies(tx, businessId))[0];
+          let provider = current?.calendar?.provider;
+          if (
+            selected &&
+            selected.connectionId !== current?.calendar?.connectionId
+          ) {
+            const [google] = await tx
+              .select({ id: googleCalendarGrant.id })
+              .from(googleCalendarGrant)
+              .where(
+                and(
+                  eq(googleCalendarGrant.id, String(selected.connectionId)),
+                  eq(googleCalendarGrant.businessId, businessId),
+                ),
+              );
+            const [microsoft] = await tx
+              .select({ id: microsoftCalendarGrant.id })
+              .from(microsoftCalendarGrant)
+              .where(
+                and(
+                  eq(microsoftCalendarGrant.id, String(selected.connectionId)),
+                  eq(microsoftCalendarGrant.businessId, businessId),
+                ),
+              );
+            provider =
+              google && !microsoft
+                ? "google"
+                : microsoft && !google
+                  ? "microsoft"
+                  : undefined;
+          }
+          const path = { ...(selected ?? current?.calendar ?? {}), provider };
+          await requirePilotPath(tx, businessId, "calendar", path);
+          // An empty binding asks to enumerate all calendars. A pilot authorizes
+          // only the exact selected provider/account/calendar, independently.
+          const allCalendarsAllowed = await pilotPathAllowed(
+            tx,
+            businessId,
+            "calendar",
+            {},
+          );
+          await reservePilotEffect(
+            tx,
+            businessId,
+            "calendar",
+            `${phase}:${randomUUID()}`,
+            1,
+            {
+              phase,
+              opportunityId,
+              policyId: current?.id ?? null,
+              path,
+              payload,
+            },
+          );
+          const role = await requireCapability(
+            tx,
+            actor,
+            businessId,
+            "sales.work",
+          );
+          await requireSalesSession(tx, actor, clock.now(), role);
+          return {
+            allowed: true,
+            provider: allCalendarsAllowed ? undefined : provider,
+          };
+        });
+      } catch (error) {
+        if (
+          error instanceof ApplicationError &&
+          error.code === "PAID_ACCESS_REQUIRED"
+        )
+          return { allowed: false, provider: undefined };
+        throw error;
+      }
+    },
     configure(
       actor: WorkIdentity,
       businessId: string,
@@ -608,11 +725,13 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         if ((all[0]?.version ?? 0) !== input.expectedVersion)
           throw new ApplicationError("CONFLICT");
         const selected = input.configuration.calendar;
+        if (selected) await pilotCalendarCurrent(tx, businessId, selected);
         const catalog = selected
           ? await calendarCatalog(
               providerIn(dep, tx),
               businessId,
               dep.timeoutMs,
+              dep.pilotProvider,
             )
           : [];
         const calendar = selected
@@ -649,10 +768,16 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
         let calendars: AppointmentWorkspace["calendars"] = [];
         let setupReason: string | null = "calendar_setup_required";
         try {
+          await pilotCalendarCurrent(
+            tx,
+            businessId,
+            allPolicies[0]?.calendar ?? {},
+          );
           calendars = await calendarCatalog(
             providerIn(dep, tx),
             businessId,
             dep.timeoutMs,
+            dep.pilotProvider,
           );
           setupReason = allPolicies[0]
             ? await readyCalendar(tx, businessId, allPolicies[0], dep)
@@ -970,6 +1095,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           await finish(tx, actor, p, "blocked", finalReason);
           return;
         }
+        await pilotCalendarCurrent(tx, businessId, p.intent);
         let raw: unknown;
         try {
           raw = await calendarCall(
@@ -1223,6 +1349,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
           // Observe the current revision before a conditional cancellation. This is
           // a manual authorized action and does not require automation handback.
           const observedAt = clock.now();
+          await pilotCalendarCurrent(tx, businessId, p.intent);
           const lookupResult = calendarLookupSchema.safeParse(
             await calendarCall(
               (s) =>
@@ -1288,6 +1415,7 @@ export function createAppointmentRepository(database: Database, clock: Clock) {
             );
             return;
           }
+          await pilotCalendarCurrent(tx, businessId, p.intent);
           raw = await calendarCall(
             (s) =>
               providerIn(dep, tx).cancel(

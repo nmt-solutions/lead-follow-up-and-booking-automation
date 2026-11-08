@@ -71,6 +71,80 @@ export default async function BusinessPage({
       >
         Offerings, buyers and geography
       </Link>
+      <Link
+        href={`/businesses/${businessId}/operations`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Action history and recovery
+      </Link>
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/pilots`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Paid pilot preparation and evidence
+        </Link>
+      )}
+      <Link
+        href={`/businesses/${businessId}/reports`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Discovery quality and sales outcomes
+      </Link>
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/whatsapp`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          WhatsApp identity and Meta onboarding
+        </Link>
+      )}
+      <Link
+        href={`/businesses/${businessId}/notifications`}
+        className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+      >
+        Notification preferences and delivery
+      </Link>
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/billing`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Billing profile and evidence
+        </Link>
+      )}
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/subscription-quotes`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Subscription quotes
+        </Link>
+      )}
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/subscription-payments`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Subscription payments and paid access
+        </Link>
+      )}
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/financial-adjustments`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Refund and dispute history
+        </Link>
+      )}
+      {access.role !== "salesperson" && (
+        <Link
+          href={`/businesses/${businessId}/seller-documents`}
+          className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
+        >
+          Invoices and credit notes
+        </Link>
+      )}
       {access.role !== "salesperson" && (
         <Link
           href={`/businesses/${businessId}/calendar`}
@@ -148,6 +222,12 @@ export default async function BusinessPage({
         className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
       >
         Private Business files
+      </Link>
+      <Link
+        className="inline-flex min-h-11 items-center text-primary underline"
+        href={`/businesses/${businessId}/data`}
+      >
+        Data export and offboarding
       </Link>
       {(await searchParams).joined === "1" && (
         <p

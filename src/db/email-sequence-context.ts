@@ -1,3 +1,5 @@
+import { pilotPathAllowed } from "./pilot-limits";
+import { selectSequenceMail } from "../email-sequences/provider";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ApplicationError } from "../models/application-error";
 import type { WorkIdentity } from "../models/discovery";
@@ -9,6 +11,7 @@ import type { Clock } from "../models/business";
 import type { Transaction } from "./scope";
 import { requireCapability } from "./scope";
 import { requireSalesSession } from "./sales-session";
+import { paidAllowance } from "./paid-access";
 import { campaignHash, createCampaignRepository } from "./campaign-repository";
 import { identityView } from "./sender-repository";
 import { emailDecisionAtDispatch } from "./email-eligibility-context";
@@ -40,6 +43,7 @@ export async function sequenceUsage(
   tx: Transaction,
   businessId: string,
   policy: SequencePolicy,
+  at: Date,
 ) {
   const events = await tx
     .select()
@@ -62,7 +66,10 @@ export async function sequenceUsage(
   return {
     events,
     reserved: reservations.length,
-    remaining: Math.max(0, policy.maxProviderCalls - reservations.length),
+    remaining: Math.min(
+      Math.max(0, policy.maxProviderCalls - reservations.length),
+      (await paidAllowance(tx, businessId, "automation", at))?.remaining ?? 0,
+    ),
   };
 }
 export function recipientReservedAttempts(
@@ -130,9 +137,20 @@ export function createSequenceGate(d: {
       actor,
       businessId,
       revision: r,
-      provider,
       action: { contactId, stepIndex, opportunityId, id: sequenceActionId },
     } = context;
+    const nativeProvider =
+      context.revision.snapshot.senderContext.connection?.configuration
+        .provider;
+    const provider = selectSequenceMail(
+      context.provider,
+      nativeProvider === "microsoft"
+        ? "microsoft-mail-send-v1"
+        : nativeProvider === "gmail"
+          ? "gmail-sequence-v1"
+          : context.provider.key,
+    );
+
     const role = await requireCapability(tx, actor, businessId, "sales.work");
     await requireSalesSession(tx, actor, clock.now(), role);
     const recipient = r.snapshot.recipients.find(
@@ -264,11 +282,20 @@ export function createSequenceGate(d: {
       return { reason: "sender_transport_unavailable" } as const;
     const policy = await sequencePolicyAt(tx, businessId);
     const at = clock.now();
+    const paid = await paidAllowance(tx, businessId, "automation", at);
+    if (
+      !paid ||
+      paid.allowance.unit !== "provider calls" ||
+      paid.allowance.quantity === 0
+    )
+      return { reason: "paid_automation_unavailable" } as const;
     if (
       !policy?.configuration.enabled ||
       at < new Date(policy.configuration.periodStart) ||
       at >= new Date(policy.configuration.periodEnd) ||
-      policy.configuration.adapterKey !== provider.key ||
+      !(
+        policy.configuration.adapterKeys ?? [policy.configuration.adapterKey]
+      ).includes(provider.key) ||
       policy.configuration.mode !== provider.mode
     )
       return { reason: "sequence_allowance_unavailable" } as const;
@@ -290,6 +317,20 @@ export function createSequenceGate(d: {
       if (handoffs.some((e) => e.kind !== "prepared"))
         return { reason: "manual_send_review_required" } as const;
     }
+    if (
+      !(await pilotPathAllowed(tx, businessId, "outreach_email", {
+        senderId: r.snapshot.senderIdentityId,
+        mailboxId:
+          r.snapshot.senderContext.replyRoute?.configuration.inboxConnectionId,
+        action: {
+          kind: "campaign",
+          id: r.id,
+          recipientKey: contactId,
+          stepIndex,
+        },
+      }))
+    )
+      return { reason: "pilot_scope_changed" } as const;
     const finalAt = clock.now();
     const finalEligibility = await emailDecisionAtDispatch(
       tx,

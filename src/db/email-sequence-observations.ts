@@ -1,3 +1,5 @@
+import type { SequenceEnvelope } from "../models/email-sequences";
+import type { MailManual } from "../models/mail-native";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import type { IncomingInquiry } from "../models/inbox";
@@ -86,7 +88,9 @@ export async function sequenceMailboxReferences(
       ),
     );
   return rows.flatMap(({ envelope: e }) =>
-    e && e.replyConnectionId === connectionId && e.replyTo === account
+    e &&
+    ((e.replyConnectionId === connectionId && e.replyTo === account) ||
+      (e.connectionId === connectionId && e.fromAddress === account))
       ? [
           {
             internetMessageId: e.internetMessageId,
@@ -138,7 +142,9 @@ export async function sequenceReference(
       !(
         envelope.replyInboxId === connectionId ||
         (mailbox?.connectionId === envelope.replyConnectionId &&
-          mailbox.account === envelope.replyTo)
+          mailbox.account === envelope.replyTo) ||
+        (mailbox?.connectionId === envelope.connectionId &&
+          mailbox.account === envelope.fromAddress)
       ) ||
       !participants.includes(envelope.recipient)
     )
@@ -273,6 +279,35 @@ export async function pauseMailboxSequences(
   return affected.map((r) => r.action.opportunityId);
 }
 
+/** Exact committed effect, including native headers, content and time; a caller marker alone proves nothing. */
+export function exactSequenceSent(
+  e: SequenceEnvelope,
+  event: IncomingInquiry | MailManual,
+  m: MailboxMetadata,
+  sentFolder: string,
+  at: Date,
+) {
+  const native = m.native;
+  return Boolean(
+    sentFolder &&
+    m.folderRefs.includes(sentFolder) &&
+    event.kind === "manual_reply" &&
+    native?.direction === "manual_reply" &&
+    native.from === e.fromAddress &&
+    native.to.length === 1 &&
+    native.to[0] === e.recipient &&
+    native.internetMessageId === e.internetMessageId &&
+    event.subject === e.subject &&
+    event.text.replace(/\r\n|\r/g, "\n") === e.body.replace(/\r\n|\r/g, "\n") &&
+    new Date(event.occurredAt) >= new Date(e.reservedAt) &&
+    new Date(event.occurredAt) <= at &&
+    (e.adapterKey !== "microsoft-mail-send-v1" ||
+      (native.replyTo?.length === 1 &&
+        native.replyTo[0] === e.replyTo &&
+        native.inReplyTo === (e.parent?.internetMessageId ?? null))),
+  );
+}
+
 export async function observeSequenceSent(
   tx: Transaction,
   batch: MailboxBatch,
@@ -303,14 +338,22 @@ export async function observeSequenceSent(
       ? "SENT"
       : snapshot.permissionObservation?.microsoft?.sentFolderRef;
   if (
+    (["gmail-sequence-v1", "microsoft-mail-send-v1"].includes(e.adapterKey) &&
+      e.adapterKey !==
+        (snapshot.provider === "gmail"
+          ? "gmail-sequence-v1"
+          : "microsoft-mail-send-v1")) ||
     !sentFolder ||
-    !metadata.folderRefs.includes(sentFolder) ||
+    !exactSequenceSent(e, event, metadata, sentFolder, at) ||
     event.native.from !== e.fromAddress ||
     event.native.to.length !== 1 ||
     event.subject !== e.subject ||
     event.text.replace(/\r\n|\r/g, "\n") !== e.body.replace(/\r\n|\r/g, "\n") ||
     new Date(event.occurredAt) < original.reservedAt ||
-    native.internetMessageId !== e.internetMessageId
+    native.internetMessageId !== e.internetMessageId ||
+    (original.action.receipt &&
+      (original.action.receipt.messageRef !== event.messageRef ||
+        original.action.receipt.threadRef !== event.conversationRef))
   )
     return false;
   const [seen] = await tx

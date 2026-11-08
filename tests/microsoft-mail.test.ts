@@ -1,3 +1,5 @@
+import { persistPaidSubscription } from "./support/paid-subscription";
+import { readOperatorCosts } from "./support/costs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eligibilityApplication } from "./support/email-eligibility";
@@ -45,6 +47,11 @@ describe("Selected MicrosoftMail at the persisted application seam", () => {
       offering: "Steel",
       homeMarket: "US",
       website: "",
+    });
+    await persistPaidSubscription(h, credentials, business.id, {
+      markets: ["US"],
+      discovery: { quantity: 0, unit: "research units" },
+      automation: { quantity: 10000, unit: "provider calls" },
     });
     const database = runtimeDatabase(h.runtime);
     const senders = createSenderApplication({
@@ -205,6 +212,41 @@ describe("Selected MicrosoftMail at the persisted application seam", () => {
       },
     });
   }
+  it("continues legacy Microsoft delta selections while reading current message metadata without expanding processing scope", async () => {
+    const f = await setup();
+    await connect(f);
+    const fields =
+      "id,conversationId,parentFolderId,receivedDateTime,sentDateTime,isDraft,subject,internetMessageId,from,sender,toRecipients,ccRecipients,bccRecipients,internetMessageHeaders";
+    f.graph.add("legacy-source");
+    f.graph.pages.set("sales", {
+      value: [{ id: "legacy-source" }],
+      "@odata.deltaLink": `https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=legacy-base&$select=${fields}`,
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    expect((await synchronize(f))?.status).toBe("completed");
+    f.graph.add("legacy-follow", {
+      reply: "<legacy-source@example.com>",
+      at: "2026-11-05T09:03:00Z",
+    });
+    f.graph.pages.set("legacy-base", {
+      value: [{ id: "legacy-follow" }],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=legacy-next",
+    });
+    h.clock.set("2026-11-05T09:04:00Z");
+    expect((await synchronize(f))?.status).toBe("completed");
+    const state = await f.inbox.workspace(f.credentials, f.businessId);
+    expect(
+      (
+        await f.inbox.conversation(
+          f.credentials,
+          f.businessId,
+          state.conversations[0].id,
+        )
+      ).messages,
+    ).toHaveLength(2);
+    expect(f.graph.bodyReads).toEqual(["legacy-source", "legacy-follow"]);
+  });
   it("binds separate read consent to the current Business/mailbox/session, encrypts tokens and rejects replay", async () => {
     const f = await setup();
     const start = await f.app.start(f.credentials, f.businessId, f.mailbox.id);
@@ -535,6 +577,50 @@ describe("Selected MicrosoftMail at the persisted application seam", () => {
       detail.messages[0].opportunityId,
       detail.messages[0].opportunityId,
     ]);
+  });
+  it("ingests recorded native Outlook usage into cost coverage without retaining mailbox content", async () => {
+    const f = await setup();
+    await connect(f);
+    const inquiry = f.graph.add("cost-source");
+    f.graph.pages.set("sales", {
+      value: [inquiry],
+      "@odata.deltaLink":
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sales/messages/delta?$deltatoken=cost-base",
+    });
+    h.clock.set("2026-11-05T09:02:00Z");
+    await synchronize(f);
+    const ws = await f.inbox.workspace(f.credentials, f.businessId);
+    const detail = await f.inbox.conversation(
+      f.credentials,
+      f.businessId,
+      ws.conversations[0].id,
+    );
+    await createMailboxSendRecorder(f.database, h.clock).record(
+      await h.access.authenticateForWork(f.credentials),
+      f.businessId,
+      {
+        mailboxId: f.mailbox.id,
+        messageRef: "cost-app-send",
+        internetMessageId: "<cost-app-send@example.com>",
+        replyToMessageId: detail.messages[0].id,
+      },
+    );
+    const costs = await readOperatorCosts(h, f.credentials);
+    const rows = costs.sources.filter(
+      (r) =>
+        r.source.businessId === f.businessId &&
+        r.sourceId.startsWith("native:native-mail:"),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toMatchObject({
+      provider: "microsoft",
+      category: "messaging",
+      amount: null,
+      quantity: 1,
+    });
+    expect(JSON.stringify(rows)).not.toMatch(
+      /buyer@example.com|cost-app-send@example.com|private|Hello/,
+    );
   });
   it("retains a partial checkpoint through Graph throttling and does not call Graph again before the controlled retry time", async () => {
     const f = await setup();

@@ -120,6 +120,11 @@ export const senderObservationSchema = z.strictObject({
   binding: senderBindingSchema,
   observedAt: z.iso.datetime({ offset: true }),
   validUntil: z.iso.datetime({ offset: true }),
+  verificationReference: z
+    .url()
+    .max(2000)
+    .regex(/^https:\/\//)
+    .optional(),
   checks: senderChecksSchema,
   approvedUses: z
     .array(senderUseSchema)
@@ -129,6 +134,7 @@ export const senderObservationSchema = z.strictObject({
 export type SenderObservation = z.infer<typeof senderObservationSchema>;
 export type SenderBinding = SenderObservation["binding"];
 export type SenderInspection = {
+  healthProof?: { observedAt: string; validUntil: string } | null;
   requestedAt: string;
   previousEvidenceId: string | null;
   binding: SenderBinding;
@@ -136,6 +142,8 @@ export type SenderInspection = {
   connection: SenderConnection | null;
   replyRoute: ReplyRoute | null;
   replyConnection: SenderConnection | null;
+  nativeGmail?: { send: boolean; reply: boolean };
+  nativeMicrosoft?: { send: boolean; reply: boolean };
 };
 export function sameSenderBinding(a: SenderBinding, b: SenderBinding) {
   return Object.entries(a).every(
@@ -143,6 +151,7 @@ export function sameSenderBinding(a: SenderBinding, b: SenderBinding) {
   );
 }
 export type SenderAdapter = {
+  select?(provider: string): SenderAdapter;
   key: string;
   mode: "unconfigured" | "fixture" | "live";
   inspect(context: SenderInspection, signal: AbortSignal): Promise<unknown>;

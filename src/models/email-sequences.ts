@@ -2,6 +2,11 @@ import { z } from "zod";
 import type { WorkIdentity } from "./discovery";
 import type { EmailDispatchAuthorization } from "./email-eligibility";
 import { mailObservationSourceSchema } from "./mail-evidence";
+import {
+  mailReceiptSchema as sequenceReceiptSchema,
+  mailAcceptanceSchema,
+  type MailDispatchAccess,
+} from "./mail-dispatch";
 
 const positive = z.number().int().positive().max(2147483646);
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -38,6 +43,12 @@ export const sequencePolicySchema = z
   .strictObject({
     enabled: z.boolean(),
     adapterKey: z.string().min(1).max(120),
+    adapterKeys: z
+      .array(z.string().min(1).max(120))
+      .min(1)
+      .max(20)
+      .refine((v) => new Set(v).size === v.length)
+      .optional(),
     mode: z.enum(["fixture", "live"]),
     periodStart: z.iso.datetime(),
     periodEnd: z.iso.datetime(),
@@ -75,31 +86,14 @@ export const sequenceWorkSchema = z.strictObject({
   }),
 });
 export type SequenceWork = z.infer<typeof sequenceWorkSchema>;
-export const sequenceReceiptSchema = z.strictObject({
-  actionId: z.uuid(),
-  attemptId: z.uuid(),
-  businessId: z.uuid(),
-  connectionId: z.uuid(),
-  recipient: z.email(),
-  messageRef: z.string().min(1).max(256),
-  internetMessageId: z.string().min(1).max(256),
-  threadRef: z.string().min(1).max(256),
-  acceptedAt: z.iso.datetime(),
-});
-export type SequenceReceipt = z.infer<typeof sequenceReceiptSchema>;
-export const sequenceResultSchema = z.discriminatedUnion("status", [
-  z.strictObject({
-    status: z.literal("accepted"),
-    receipt: sequenceReceiptSchema,
-  }),
-  z.strictObject({
-    status: z.literal("not_accepted"),
-    reason: z.enum(["rate_limited", "rejected", "unavailable"]),
-    retryAt: z.iso.datetime().nullable(),
-  }),
-  z.strictObject({ status: z.literal("unknown") }),
-]);
-export type SequenceResult = z.infer<typeof sequenceResultSchema>;
+export {
+  mailReceiptSchema as sequenceReceiptSchema,
+  mailResultSchema as sequenceResultSchema,
+} from "./mail-dispatch";
+export type {
+  MailReceipt as SequenceReceipt,
+  MailResult as SequenceResult,
+} from "./mail-dispatch";
 export type SequenceEnvelope = {
   adapterKey: string;
   adapterMode: "fixture" | "live";
@@ -123,16 +117,24 @@ export type SequenceEnvelope = {
   replyTo: string;
   platformDisclosure: string;
   internetMessageId: string;
+  parent?: { internetMessageId: string; threadRef: string; subject: string };
   emailEligibility: EmailDispatchAuthorization;
 };
 /** Send performs exactly one bounded transport call, with no internal retry. Message-ID is correlation, never a deduplication promise.
  * Reconcile is read-only. Only authoritative NOT accepted evidence permits a new attempt; search absence is unknown. */
 export type SequenceMailProvider = {
+  select?(key: string): SequenceMailProvider;
+  adapters?: { key: string; mode: "fixture" | "live" | "unconfigured" }[];
   key: string;
   mode: "fixture" | "live" | "unconfigured";
-  send(envelope: SequenceEnvelope, signal: AbortSignal): Promise<unknown>;
+  send(
+    envelope: SequenceEnvelope,
+    signal: AbortSignal,
+    access?: SequenceMailAccess,
+  ): Promise<unknown>;
   reconcile(envelope: SequenceEnvelope, signal: AbortSignal): Promise<unknown>;
 };
+export type SequenceMailAccess = MailDispatchAccess;
 export type SequenceQueue = {
   enqueue(work: SequenceWork, dueAt: Date): Promise<string>;
   cancel(runId: string): Promise<void>;
@@ -157,6 +159,7 @@ export const sequenceEventKinds = [
   "attempt_reserved",
   "dispatch_boundary",
   "provider_accepted",
+  "provider_accepted_identity_pending",
   "not_accepted",
   "acceptance_unknown",
   "sent_folder_observed",
@@ -167,6 +170,14 @@ export const sequenceEventKinds = [
 ] as const;
 export type SequenceEventKind = (typeof sequenceEventKinds)[number];
 export const sequenceWorkspaceSchema = z.object({
+  adapters: z
+    .array(
+      z.object({
+        key: z.string(),
+        mode: z.enum(["fixture", "live", "unconfigured"]),
+      }),
+    )
+    .optional(),
   provider: z.object({
     key: z.string(),
     mode: z.enum(["fixture", "live", "unconfigured"]),
@@ -215,6 +226,7 @@ export const sequenceWorkspaceSchema = z.object({
               queueState: z.enum(["none", "pending", "enqueued", "failed"]),
               attempts: z.number().int(),
               receipt: sequenceReceiptSchema.nullable(),
+              processingAcceptance: mailAcceptanceSchema.nullable(),
             }),
           ),
         }),
@@ -228,6 +240,7 @@ export const sequenceWorkspaceSchema = z.object({
           at: z.iso.datetime(),
           actorId: z.string(),
           receipt: sequenceReceiptSchema.nullable(),
+          processingAcceptance: mailAcceptanceSchema.nullable(),
           source: mailObservationSourceSchema.nullable(),
           note: z.string().nullable(),
           reviewNeeded: z.boolean(),

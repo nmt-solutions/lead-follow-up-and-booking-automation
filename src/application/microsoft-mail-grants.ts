@@ -37,7 +37,10 @@ const scopesOf = (token: MicrosoftToken) =>
     .split(/\s+/)
     .filter(Boolean)
     .map((scope) => scope.replace(/^https:\/\/graph\.microsoft\.com\//, ""));
-type AuthorizationContext = Pick<MailboxSnapshot, "oauthGeneration"> & {
+type AuthorizationContext = Pick<
+  MailboxSnapshot,
+  "oauthGeneration" | "authorizeNative"
+> & {
   work: Pick<
     MailboxSnapshot["work"],
     "identity" | "businessId" | "mailboxId" | "policyVersion"
@@ -181,6 +184,7 @@ export function createMicrosoftMailGrantService(options: {
       };
     let token: MicrosoftToken;
     try {
+      await snapshot.authorizeNative?.("microsoft:refresh");
       token = await http.token(
         {
           grant_type: "refresh_token",
@@ -189,6 +193,7 @@ export function createMicrosoftMailGrantService(options: {
         },
         signal,
       );
+      await snapshot.authorizeNative?.("microsoft:refresh-profile");
       const owner = await http.profile(token.access_token, signal);
       if (
         owner.id !== captured.tokens.ownerId ||

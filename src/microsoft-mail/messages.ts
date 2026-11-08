@@ -19,7 +19,7 @@ const recipient = z.object({
   emailAddress: z.object({ address: z.email().max(254) }),
 });
 export const graphMetadataFields =
-  "id,conversationId,parentFolderId,receivedDateTime,sentDateTime,isDraft,subject,internetMessageId,from,sender,toRecipients,ccRecipients,bccRecipients,internetMessageHeaders";
+  "id,conversationId,parentFolderId,receivedDateTime,sentDateTime,isDraft,subject,internetMessageId,from,sender,toRecipients,ccRecipients,bccRecipients,replyTo,internetMessageHeaders";
 export const graphMessageSchema = z.object({
   id: graphId,
   conversationId: graphId,
@@ -34,6 +34,7 @@ export const graphMessageSchema = z.object({
   toRecipients: z.array(recipient).max(50),
   ccRecipients: z.array(recipient).max(50),
   bccRecipients: z.array(recipient).max(50),
+  replyTo: z.array(recipient).max(50).default([]),
   internetMessageHeaders: z
     .array(
       z.object({
@@ -66,6 +67,7 @@ export function graphMetadata(
           "bcc",
           "subject",
           "message-id",
+          "reply-to",
           "in-reply-to",
           "list-id",
           "auto-submitted",
@@ -100,6 +102,13 @@ export function graphMetadata(
     inReplyTo: headers.get("in-reply-to") ?? null,
     from,
     to,
+    ...(message.replyTo.length
+      ? {
+          replyTo: message.replyTo.map((r) =>
+            r.emailAddress.address.toLowerCase(),
+          ),
+        }
+      : {}),
   });
   const appOrigin = context.appMessages?.some(
     (receipt) =>
@@ -113,7 +122,22 @@ export function graphMetadata(
     headers.has("list-id") ||
     (headers.has("auto-submitted") &&
       headers.get("auto-submitted")?.toLowerCase() !== "no");
+  const sentAddresses = [
+    message.from,
+    message.sender,
+    ...message.toRecipients,
+    ...message.ccRecipients,
+    ...message.bccRecipients,
+    ...message.replyTo,
+  ].map((r) => r.emailAddress.address);
+  // Strict sent evidence never assumes case/recipient deduplication by Exchange. Unsupported changes stay unresolved.
   const validDirection =
+    (!sent ||
+      (sentAddresses.every((a) => a === a.toLowerCase()) &&
+        message.toRecipients.length +
+          message.ccRecipients.length +
+          message.bccRecipients.length ===
+          to.length)) &&
     from === sender &&
     (sent
       ? from === account && !to.includes(account)

@@ -9,7 +9,7 @@ export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export function scoped<T>(
   database: Database,
-  actor: Actor,
+  actor: Actor & { sessionId?: string },
   businessId: string,
   operation: (tx: Transaction) => Promise<T>,
   options: { at?: Date; invitationHash?: string; lock?: boolean } = {},
@@ -17,6 +17,7 @@ export function scoped<T>(
   return database.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.actor_id', ${actor.userId}, true),
       set_config('app.business_id', ${businessId}, true),
+      set_config('app.pilot_session',${actor.sessionId ?? ""},true),
       set_config('app.at', ${options.at?.toISOString() ?? ""}, true),
       set_config('app.invitation_hash', ${options.invitationHash ?? ""}, true)`);
     if (options.lock && businessId) await lockBusiness(tx, businessId);

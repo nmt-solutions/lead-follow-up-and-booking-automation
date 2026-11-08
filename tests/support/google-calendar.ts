@@ -17,6 +17,9 @@ export function googleFixture() {
   }[] = [];
   const events = new Map<string, Record<string, unknown>>();
   const control = {
+    accessToken: "fixture-access",
+    refreshToken: "fixture-refresh",
+    email: "calendar@example.com",
     scopes: googleCalendarScopes.join(" "),
     accessRole: "owner",
     timeZone: "America/New_York",
@@ -55,10 +58,10 @@ export function googleFixture() {
         await control.beforeRefresh?.();
       }
       return response({
-        access_token: "fixture-access",
+        access_token: control.accessToken,
         refresh_token: control.refreshes
           ? "fixture-refresh-rotated"
-          : "fixture-refresh",
+          : control.refreshToken,
         expires_in: 3600,
         token_type: "Bearer",
         scope: control.scopes,
@@ -67,7 +70,7 @@ export function googleFixture() {
     if (url.endsWith("/userinfo"))
       return response({
         sub: control.subject,
-        email: "calendar@example.com",
+        email: control.email,
         email_verified: true,
       });
     if (url.endsWith("/revoke"))
