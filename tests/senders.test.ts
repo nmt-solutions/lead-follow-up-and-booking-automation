@@ -128,8 +128,7 @@ describe("Sending identities at the persisted application seam", () => {
         identification: {
           businessName: "Steel Supplier",
           fromName: "Sales team · Steel Supplier",
-          platformDisclosure:
-            "Sent through Business operations for Steel Supplier",
+          platformDisclosure: "Sent through LeadRelay for Steel Supplier",
         },
         evidence: {
           adapterKey: "deterministic-mail-v1",

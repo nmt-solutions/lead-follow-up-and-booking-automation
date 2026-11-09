@@ -14,25 +14,59 @@ and the Windows PostgreSQL package need install scripts on the current platform.
 
 Copy `.env.example` to `.env` (or `.env.local`) and supply the following privately:
 
-| Variable             | Purpose                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`       | Neon pooled connection using `app_runtime`                                                  |
-| `DATABASE_ADMIN_URL` | Database owner connection, used only by `db-push`; Neon pooled URLs are converted to direct |
-| `BETTER_AUTH_URL`    | Exact application origin; localhost for development, HTTPS in production                    |
-| `BETTER_AUTH_SECRET` | Independently generated random secret, at least 32 characters                               |
-| `RESEND_API_KEY`     | Transactional email API key                                                                 |
-| `AUTH_EMAIL_FROM`    | Verified sender email address                                                               |
+| Variable             | Purpose                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `DATABASE_URL`       | Neon pooled connection using `app_runtime`                                             |
+| `DATABASE_ADMIN_URL` | Owner connection for schema setup/migrations; Neon pooled URLs are converted to direct |
+| `BETTER_AUTH_URL`    | Exact application origin; localhost for development, HTTPS in production               |
+| `BETTER_AUTH_SECRET` | Independently generated random secret, at least 32 characters                          |
+| `RESEND_API_KEY`     | Transactional email API key                                                            |
+| `AUTH_EMAIL_FROM`    | Verified sender email address                                                          |
 
-Run `pnpm db-push`. This prepares the restricted role, runs `drizzle-kit push`, then
-reapplies and verifies policy conditions, grants, forced RLS, the membership role
-check and the deferred membership constraint.
-Always use this command for schema changes; do not generate or apply migrations.
-Push compares the live database with `src/db/schema.ts`, including its RLS policies.
-It does not use `--force`; review any destructive-change prompt before proceeding.
-The pinned Drizzle push omits policy `USING` / `WITH CHECK` expressions, so the
-security step reapplies them directly from the schema. Protected Business access
-is paused during the push and restored only after that transaction succeeds. If a
-push fails or is cancelled, fix the cause and rerun `pnpm db-push` to restore access.
+Production schema changes use generated SQL migrations:
+
+```sh
+# After editing src/db/schema.ts, generate locally without database credentials.
+pnpm db-gen --name=describe_change
+# Review and commit drizzle/*.sql, drizzle/meta/* and any security setup changes.
+
+# In the release environment, using its direct owner DATABASE_ADMIN_URL:
+pnpm db-mig
+```
+
+`db-gen` compares the source schema with the committed snapshots and writes SQL,
+the updated snapshot and migration journal under `drizzle/`. It does not load
+`.env` or connect to a database. The initial migration installs all application
+tables on a fresh database. Commit generated files together with the schema
+change. Never edit or remove an applied migration; generate a new change instead.
+Migration files use LF line endings through `.gitattributes` so their hashes stay
+the same across Windows development machines and Linux release jobs.
+
+Run `db-mig` once per release before deploying application code that requires the
+new schema. Use a dedicated migration job with the owner's credential, rather
+than a web startup hook or every application replica. The command takes a
+database advisory lock, checks the applied migration hashes/order, prepares the
+restricted role, applies pending SQL transactionally, then reapplies and verifies
+policy conditions, grants, forced RLS, helpers and deferred constraints. Applied
+SQL is recorded in `drizzle.__drizzle_migrations`; reruns skip it and recheck security.
+The command refuses quarantined recovery databases and existing public tables
+without a migration baseline. For a database previously managed with `db-push`,
+review its schema/data and establish a matching baseline separately before using
+`db-mig`. It never stamps an existing schema as migrated automatically.
+
+Review generated SQL and the source-owned security setup before release, including
+any destructive statements or data transformations. Plan a maintenance window:
+protected Business access is paused during preparation and restored only after
+security verification succeeds. If application fails, fix the cause and rerun
+`pnpm db-mig`. Pending SQL failures roll back their transaction; a failure in the
+later security phase leaves committed SQL in the journal so a retry can repair
+security without applying it twice. A migration command does not generate or
+switch credentials, copy records between databases, or provide automatic rollback.
+
+`pnpm db-push` remains available for disposable development databases and the
+separately reviewed recovery schema workflow. It compares the live schema with
+`src/db/schema.ts` and reapplies security; it is not the production release path.
+Do not mix push and migration history on the same production database.
 
 The schema owner must be able to create a PostgreSQL role. Setup creates `app_runtime` with
 `NOLOGIN`, no schema ownership, no superuser privileges and no RLS bypass. Enable
@@ -93,7 +127,7 @@ and never contact Resend. No cloud resources are provisioned by these scripts.
   role updates and authorized non-Owner removal, never membership identity or
   profile ID changes. Policies live in `src/db/schema.ts`;
   `src/db/setup.ts` owns the grants, forced RLS and deferred constraint. Both are
-  applied by `db-push` and by the test harness.
+  applied by `db-mig`, the development `db-push` command and the test harness.
 - Owner and Admin capabilities include Business billing reads/management,
   integrations and Commercial authority; Salespeople receive profile reads and
   sales work. The capability service is an authorization boundary, not an

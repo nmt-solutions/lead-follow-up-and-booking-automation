@@ -272,7 +272,7 @@ describe("Opportunity control at the persisted application seam", () => {
       fromAddress: "sales@supplier.example",
       fromName: "Sales team · Supplier",
       replyTo: "sales@supplier.example",
-      platformDisclosure: "Sent through Business operations for Supplier",
+      platformDisclosure: "Sent through LeadRelay for Supplier",
       mode: "fixture",
     });
     const queued = await queue(f);

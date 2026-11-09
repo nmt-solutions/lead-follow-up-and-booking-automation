@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Building2, ShieldCheck } from "lucide-react";
 import { SignOut } from "./sign-out";
+import { APP_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -22,7 +23,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Building2 className="size-5" aria-hidden="true" />
             </span>
             <span className="text-sm font-semibold leading-tight">
-              Business operations
+              {APP_NAME}
               <span className="mt-1 block text-xs font-normal text-muted-foreground">
                 Your Business. Your control.
               </span>

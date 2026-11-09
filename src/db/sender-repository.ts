@@ -1,6 +1,7 @@
 import { mailboxReplyReady } from "./mailbox-processing";
 import { senderHealthAt } from "./sender-health-repository";
 import { randomUUID } from "node:crypto";
+import { APP_NAME } from "../lib/brand";
 import { isDeepStrictEqual } from "node:util";
 import { sameSenderBinding } from "../models/senders";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
@@ -250,7 +251,7 @@ export async function identityView(
     identification: {
       businessName: owner.name,
       fromName: `${row.configuration.displayName} · ${owner.name}`,
-      platformDisclosure: `Sent through Business operations for ${owner.name}`,
+      platformDisclosure: `Sent through ${APP_NAME} for ${owner.name}`,
     },
     evidence: latest?.evidence ?? null,
     readiness: senderReadiness(

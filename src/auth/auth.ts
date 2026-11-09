@@ -17,6 +17,7 @@ import {
 } from "./access";
 import type { Database } from "../db/runtime";
 import * as schema from "../db/schema";
+import { APP_NAME } from "../lib/brand";
 
 export type SignInMail = { email: string; url: string };
 export type SignInMailer = { send(message: SignInMail): Promise<void> };
@@ -39,7 +40,7 @@ export function createAuth(options: {
     "/update-session",
   ]);
   return betterAuth({
-    appName: "Business profile",
+    appName: APP_NAME,
     baseURL: options.baseURL,
     secret: options.secret,
     database: drizzleAdapter(options.database, {
@@ -221,7 +222,7 @@ export function createAuth(options: {
     rateLimit: { enabled: true, storage: "database", window: 60, max: 60 },
     logger: { disabled: true },
     plugins: [
-      twoFactor({ issuer: "Business operations", allowPasswordless: true }),
+      twoFactor({ issuer: APP_NAME, allowPasswordless: true }),
       magicLink({
         expiresIn: 600,
         storeToken: "hashed",

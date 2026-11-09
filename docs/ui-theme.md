@@ -1,4 +1,4 @@
-# Business operations UI
+# LeadRelay UI
 
 The interface helps people identify their Business, understand their access and complete the next setup action. Its character comes from a quiet slate surface, a teal primary action, explicit operational status and one translucent navigation layer. Product copy describes capabilities that exist.
 

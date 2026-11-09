@@ -12,7 +12,12 @@ export const recoveryFunctions = [
 ];
 export async function prepareRecoverySecurity(pool: Pool | PoolClient) {
   await pool.query(
-    `DO $$ DECLARE t text; f record; BEGIN
+    `-- Generated policy expressions need this helper before table installation.
+      -- Authorization stays denied until secureRecovery installs and grants it.
+      CREATE OR REPLACE FUNCTION public.recovery_operator_authorized() RETURNS boolean
+      LANGUAGE sql SECURITY DEFINER SET search_path='' AS $bootstrap$ SELECT false $bootstrap$;
+      REVOKE ALL ON FUNCTION public.recovery_operator_authorized() FROM PUBLIC;
+      DO $$ DECLARE t text; f record; BEGIN
       FOREACH t IN ARRAY ARRAY['infrastructure_recovery','infrastructure_recovery_event'] LOOP
         IF to_regclass(format('public.%I',t)) IS NOT NULL THEN EXECUTE format('REVOKE ALL PRIVILEGES ON public.%I FROM app_runtime',t); END IF;
       END LOOP;

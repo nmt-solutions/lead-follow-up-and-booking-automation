@@ -11,6 +11,7 @@ export async function recoverySchemaBundle(root = process.cwd()) {
     "scripts/database-security.ts",
     "scripts/recovery-tools.ts",
     "trigger.recovery.config.ts",
+    "src/lib/brand.ts",
     "src/models/infrastructure-recovery.ts",
     "src/models/pilots.ts",
     "src/models/subscription-payments.ts",

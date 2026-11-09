@@ -1,5 +1,10 @@
 # Customer-owned WhatsApp onboarding
 
+The intake and sending tasks declare their polling crons only when all five Meta
+provider approval flags are true. Keeping Meta disabled also leaves these
+schedules undeclared; runtime credentials, worker readiness and Business
+authorization checks still apply after approval.
+
 Issue #38 implements direct Meta Cloud API Tech Provider onboarding under ADR 0008. Business Owners/Admins with current MFA use **Business → WhatsApp identity**. No BSP, platform credit line, prepaid Meta credit or message sending is activated by onboarding. Separately authorized signed intake and durable recovery are described in [WhatsApp intake](whatsapp-intake.md).
 
 ## Ownership and billing

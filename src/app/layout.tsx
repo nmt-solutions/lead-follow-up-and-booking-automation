@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
+import { APP_DESCRIPTION, APP_NAME } from "@/lib/brand";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  applicationName: APP_NAME,
   title: {
-    default: "Business operations",
-    template: "%s · Business operations",
+    default: APP_NAME,
+    template: `%s · ${APP_NAME}`,
   },
-  description: "Manage your Business profile, team and secure access.",
+  description: APP_DESCRIPTION,
   robots: { index: false, follow: false },
 };
 

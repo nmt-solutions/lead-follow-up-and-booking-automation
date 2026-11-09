@@ -66,6 +66,10 @@ Operations #55 history/diagnostic retention grants no underlying deletion, finan
 
 ## Database and rollout
 
+The maintenance task declares its cron only when `BUSINESS_DATA_POLICY_JSON` is
+nonempty. Prepare and review the policy before deploying its schedule; runtime
+policy, storage and worker checks still control every maintenance operation.
+
 Five new tables: immutable `business_data_request`, mutable artifact-only `business_data_export`, hashed single-use `business_data_grant`, private helper-owned `business_data_step` and append-only `business_data_event`. No existing financial/domain rows are backfilled or deleted during schema application. Scoped FKs participate in prepare/drop/reapply reconciliation while the corresponding runtime table/column/helper write authority is paused. Security setup restores forced RLS, original policies, narrow owner-only helper paths, triggers, scope FKs and grants. Required SELECT and INSERT grants are checked separately. Fourteen operational definer helpers (including three pre-effect lease guards) have fixed empty search paths, no PUBLIC execution, restricted execution and non-owner runtime. Startup also rejects PostgreSQL's implicit default PUBLIC execution when an ACL is absent. Five private trigger functions have no runtime or PUBLIC execution. The runtime cannot select cleanup secret envelopes or directly change steps/events.
 
 The parent/independent merger owns actual target `pnpm db-push`, the full sequential reapplication and independent before/after data/security verification. Child tests use disposable real PostgreSQL only. UI, live account/legal/provider setup, real R2 lifecycle protection and customer acceptance remain manual gates. Both Apple design skills are applied to source/flow; browser rendering and CSS/contrast/keyboard/zoom/preference measurements are not claimed.

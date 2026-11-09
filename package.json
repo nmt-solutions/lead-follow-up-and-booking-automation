@@ -1,5 +1,5 @@
 {
-  "name": "lead-follow-up-and-booking-automation",
+  "name": "leadrelay",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,6 +17,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db-gen": "tsx scripts/database-generate.ts",
+    "db-mig": "tsx scripts/database-migrate.ts",
     "db-push": "tsx scripts/database-security.ts prepare && drizzle-kit push && tsx scripts/database-security.ts secure",
     "notifications:bootstrap": "tsx scripts/notification-bootstrap.ts",
     "recovery:bundle": "tsx scripts/recovery-tools.ts bundle",

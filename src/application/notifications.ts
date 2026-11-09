@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { APP_NAME } from "../lib/brand";
 import type { SignInMailer } from "../auth/auth";
 import type { InvitationMailer } from "../models/team";
 import type { CostMailer } from "../models/costs";
@@ -134,8 +135,8 @@ export function createNotificationApplication<C>(d: {
           {
             from: config.from,
             to: [email],
-            subject: "Sign in to your Business",
-            text: `Use this link to sign in:\n\n${url}\n\nIt expires in 10 minutes and can only be used once. If you did not request it, ignore this email.`,
+            subject: `Sign in to ${APP_NAME}`,
+            text: `Use this link to sign in to ${APP_NAME}:\n\n${url}\n\nIt expires in 10 minutes and can only be used once. If you did not request it, ignore this email.`,
           },
         );
       } catch {
@@ -175,8 +176,8 @@ export function createNotificationApplication<C>(d: {
       await produce(source, {
         from: config.from,
         to: [message.email],
-        subject: `Invitation to ${message.businessName}`,
-        text: `You have been invited to ${message.businessName} as ${message.role}.\n\nSign in with ${message.email} and accept the invitation:\n${message.url}\n\nExpires: ${message.expiresAt.toISOString()}. If you did not expect this invitation, ignore it.`,
+        subject: `Invitation to ${message.businessName} on ${APP_NAME}`,
+        text: `You have been invited to ${message.businessName} on ${APP_NAME} as ${message.role}.\n\nSign in with ${message.email} and accept the invitation:\n${message.url}\n\nExpires: ${message.expiresAt.toISOString()}. If you did not expect this invitation, ignore it.`,
       });
     },
   };

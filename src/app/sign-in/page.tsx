@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Building2, LockKeyhole } from "lucide-react";
 import { getServices } from "@/server/services";
 import { SignInForm } from "@/components/sign-in-form";
+import { APP_NAME } from "@/lib/brand";
 import {
   Card,
   CardContent,
@@ -39,7 +40,7 @@ export default async function SignInPage({
           <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Building2 className="size-5" aria-hidden="true" />
           </span>
-          Business operations
+          {APP_NAME}
         </div>
         <h1 className="max-w-lg text-4xl leading-tight font-semibold tracking-tight sm:text-5xl">
           Your Business.
@@ -63,7 +64,7 @@ export default async function SignInPage({
         className="w-full min-w-0 md:max-w-md"
       >
         <CardHeader>
-          <p className="eyebrow">Welcome to your Business</p>
+          <p className="eyebrow">Welcome</p>
           <CardTitle id="sign-in-title" className="text-2xl">
             Sign in or get started
           </CardTitle>
