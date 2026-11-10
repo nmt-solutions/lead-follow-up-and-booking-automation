@@ -3,6 +3,7 @@ import { PolicyDocument } from "@/components/policy-document";
 import { termsSections } from "@/content/terms";
 export const metadata: Metadata = {
   title: "Terms and conditions",
+  alternates: { canonical: "/terms" },
   description:
     "Terms for using Lead Relay, including accounts, AI features, approvals, and subscriptions.",
   robots: { index: true, follow: true },

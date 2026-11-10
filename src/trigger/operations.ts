@@ -1,9 +1,10 @@
+import { productionCron } from "./cron";
 import { schedules } from "@trigger.dev/sdk";
 import { maintainOperationRetention } from "../operations/worker";
 
 export const operationsRetention = schedules.task({
   id: "maintain-operation-diagnostics",
-  cron: process.env.TRIGGER_OPERATIONS_RETENTION_CRON,
+  cron: productionCron(process.env.TRIGGER_OPERATIONS_RETENTION_CRON),
   retry: { maxAttempts: 3 },
   run: async () => {
     try {

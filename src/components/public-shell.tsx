@@ -2,8 +2,10 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { Brand } from "./brand";
 import { Button } from "./ui/button";
+import { sellerPublicProfile } from "@/production/subscriptions";
 
 export function PublicFooter() {
+  const seller = sellerPublicProfile();
   return (
     <footer className="border-t border-border">
       <div className="page-container flex flex-wrap items-center justify-between gap-4 py-6 text-xs leading-6 text-muted-foreground">
@@ -18,14 +20,26 @@ export function PublicFooter() {
             NMT Solutions OPC PVT LTD
           </a>
         </p>
+        {seller && (
+          <address className="max-w-lg text-xs leading-6 not-italic">
+            {seller.address} · {seller.phone} · CIN {seller.cin}
+            {seller.gstStatus === "registered"
+              ? ` · GSTIN ${seller.gstin}`
+              : ""}
+          </address>
+        )}
         <nav
           aria-label="Footer"
           className="flex flex-wrap items-center gap-x-6 gap-y-2"
         >
           <Link href="/getting-started">Getting started</Link>
+          <Link href="/pricing">Pricing</Link>
           <Link href="/privacy-policy">Privacy policy</Link>
           <Link href="/terms">Terms</Link>
-          <a href="mailto:wafa.khan@nmtsolutions.in">Contact us</a>
+          <Link href="/cancellation-policy">Cancellation</Link>
+          <Link href="/refund-policy">Refunds</Link>
+          <Link href="/service-delivery">Service delivery</Link>
+          <Link href="/contact">Contact us</Link>
         </nav>
       </div>
     </footer>
@@ -73,6 +87,12 @@ export function PublicShell({
               </>
             )}
             <Link
+              href="/pricing"
+              className="hidden min-h-11 items-center text-sm font-medium text-muted-foreground hover:text-foreground sm:inline-flex"
+            >
+              Pricing
+            </Link>
+            <Link
               href="/getting-started"
               className="hidden text-sm font-medium text-muted-foreground hover:text-foreground sm:block"
             >
@@ -87,7 +107,7 @@ export function PublicShell({
               </Link>
             )}
             <Button asChild>
-              <Link href={marketing ? "/sign-in" : "/businesses"}>
+              <Link href={marketing ? "/sign-in?signup=1" : "/businesses"}>
                 {marketing ? "Get started" : "Open Lead Relay"}
                 <ArrowUpRight data-icon="inline-end" aria-hidden="true" />
               </Link>

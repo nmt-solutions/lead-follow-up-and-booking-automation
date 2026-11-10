@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { asc, eq, sql } from "drizzle-orm";
 import type { BillingRepository } from "../application/billing";
 import { ApplicationError } from "../models/application-error";
-import { billingState } from "../models/billing";
+import { billingState, declarationReviewNote } from "../models/billing";
 import type { Database } from "./runtime";
 import {
   billingProfileRevision,
@@ -61,6 +61,60 @@ async function actorName(tx: Transaction, actorId: string) {
 }
 export function createBillingRepository(database: Database): BillingRepository {
   return {
+    confirm(actor, businessId, input, at) {
+      return scoped(
+        database,
+        actor,
+        businessId,
+        async (tx) => {
+          await requireCapability(tx, actor, businessId, "billing.manage");
+          const state = await read(tx, businessId, at);
+          if (
+            state.version !== input.expectedVersion ||
+            state.reviewVersion !== input.expectedReviewVersion ||
+            state.reviews.some((review) => review.outcome !== "reviewed")
+          )
+            throw new ApplicationError("CONFLICT");
+          const profileId = randomUUID();
+          const name = await actorName(tx, actor.userId);
+          await tx.insert(billingProfileRevision).values({
+            id: profileId,
+            businessId,
+            version: state.version + 1,
+            profile: {
+              ...input.profile,
+              evidence: [],
+              declaration: {
+                version: "2026-11-10",
+                actorId: actor.userId,
+                at: at.toISOString(),
+                acceptedTerms: true,
+              },
+            },
+            evidence: [],
+            actorId: actor.userId,
+            actorName: name,
+            at,
+            note: declarationReviewNote,
+          });
+          await tx.insert(billingProfileReview).values({
+            id: randomUUID(),
+            businessId,
+            profileId,
+            profileVersion: state.version + 1,
+            version: state.reviewVersion + 1,
+            outcome: "reviewed",
+            findings: [],
+            note: declarationReviewNote,
+            actorId: actor.userId,
+            actorName: name,
+            at,
+          });
+          return read(tx, businessId, at);
+        },
+        { lock: true },
+      );
+    },
     reviewQueue(actor, at) {
       return scoped(database, actor, "", async (tx) => {
         await requireBillingReviewer(tx, actor);

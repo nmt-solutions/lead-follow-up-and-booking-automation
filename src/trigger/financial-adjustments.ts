@@ -1,9 +1,10 @@
+import { productionCron } from "./cron";
 import { schedules } from "@trigger.dev/sdk";
 import { recoverFinancialAdjustments } from "../financial-adjustments/worker";
 
 export const reconcileFinancialAdjustments = schedules.task({
   id: "reconcile-financial-adjustments",
-  cron: process.env.TRIGGER_FINANCIAL_ADJUSTMENTS_CRON,
+  cron: productionCron(process.env.TRIGGER_FINANCIAL_ADJUSTMENTS_CRON),
   retry: { maxAttempts: 3 },
   run: async () => {
     try {

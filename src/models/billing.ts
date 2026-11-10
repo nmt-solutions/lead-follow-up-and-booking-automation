@@ -13,49 +13,58 @@ const country = z
     (value) => value === "" || countryCodes.has(value),
     "Use a two-letter country code or leave unknown.",
   );
-export const billingProfileSchema = z
-  .strictObject({
-    legalName: field,
-    registrationNumber: field,
-    address: z.strictObject({
-      line1: field,
-      line2: field,
-      city: field,
-      region: field,
-      postalCode: field,
-      country,
-    }),
-    invoiceContact: z.strictObject({
-      name: field,
-      email: z.union([z.literal(""), z.email().max(254)]),
-    }),
-    businessStatus: z.enum(["unknown", "business", "individual"]),
-    taxIdentifierStatus: z.enum(["unknown", "provided", "not_applicable"]),
-    taxIdentifiers: z
-      .array(
-        z.strictObject({
-          kind: field.min(1),
-          country: country.refine(Boolean),
-          value: field.min(1),
-        }),
-      )
-      .max(20),
-    evidence: z
-      .array(
-        z.strictObject({
-          kind: z.enum([
-            "legal_identity",
-            "billing_address",
-            "business_status",
-            "tax_identifier",
-          ]),
-          fileId: z.uuid(),
-          note: z.string().trim().min(1).max(1000),
-        }),
-      )
-      .max(40),
-  })
-  .superRefine((value, ctx) => {
+export const billingDeclarationSchema = z.strictObject({
+  version: z.literal("2026-11-10"),
+  actorId: z.string().min(1),
+  at: z.iso.datetime(),
+  acceptedTerms: z.literal(true),
+});
+export const declarationReviewNote =
+  "Customer-declared billing details; no independent identity or tax verification.";
+const billingProfileObjectSchema = z.strictObject({
+  declaration: billingDeclarationSchema.optional(),
+  legalName: field,
+  registrationNumber: field,
+  address: z.strictObject({
+    line1: field,
+    line2: field,
+    city: field,
+    region: field,
+    postalCode: field,
+    country,
+  }),
+  invoiceContact: z.strictObject({
+    name: field,
+    email: z.union([z.literal(""), z.email().max(254)]),
+  }),
+  businessStatus: z.enum(["unknown", "business", "individual"]),
+  taxIdentifierStatus: z.enum(["unknown", "provided", "not_applicable"]),
+  taxIdentifiers: z
+    .array(
+      z.strictObject({
+        kind: field.min(1),
+        country: country.refine(Boolean),
+        value: field.min(1),
+      }),
+    )
+    .max(20),
+  evidence: z
+    .array(
+      z.strictObject({
+        kind: z.enum([
+          "legal_identity",
+          "billing_address",
+          "business_status",
+          "tax_identifier",
+        ]),
+        fileId: z.uuid(),
+        note: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .max(40),
+});
+export const billingProfileSchema = billingProfileObjectSchema.superRefine(
+  (value, ctx) => {
     if (
       new Set(value.evidence.map((e) => `${e.kind}:${e.fileId}`)).size !==
       value.evidence.length
@@ -64,12 +73,88 @@ export const billingProfileSchema = z
         code: "custom",
         message: "Use distinct evidence attachments.",
       });
-  });
+  },
+);
 export const billingSaveSchema = z.strictObject({
   expectedVersion: z.number().int().min(0).max(2147483646),
   note: z.string().trim().min(1).max(1000),
-  profile: billingProfileSchema,
+  profile: billingProfileObjectSchema
+    .omit({ declaration: true })
+    .refine(
+      (value) =>
+        new Set(value.evidence.map((entry) => `${entry.kind}:${entry.fileId}`))
+          .size === value.evidence.length,
+      "Use distinct evidence attachments.",
+    ),
 });
+export const billingConfirmSchema = z
+  .strictObject({
+    expectedVersion: z.number().int().min(0).max(2147483646),
+    expectedReviewVersion: z.number().int().min(0).max(2147483646),
+    acceptedTerms: z.literal(true),
+    profile: billingProfileObjectSchema.omit({
+      declaration: true,
+      evidence: true,
+    }),
+  })
+  .superRefine(({ profile }, ctx) => {
+    if (
+      !profile.legalName ||
+      !profile.address.line1 ||
+      !profile.address.city ||
+      !profile.address.region ||
+      !profile.address.postalCode ||
+      profile.address.country !== "IN" ||
+      !profile.invoiceContact.name ||
+      !profile.invoiceContact.email ||
+      profile.businessStatus === "unknown" ||
+      profile.taxIdentifierStatus === "unknown"
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Complete the Indian billing details.",
+      });
+    if (
+      profile.taxIdentifierStatus === "provided" &&
+      (profile.taxIdentifiers.length !== 1 ||
+        profile.taxIdentifiers[0]?.country !== "IN" ||
+        profile.taxIdentifiers[0]?.kind !== "GSTIN" ||
+        !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(
+          profile.taxIdentifiers[0]?.value ?? "",
+        ))
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Check the GSTIN or select no GST registration.",
+      });
+    if (
+      profile.taxIdentifierStatus !== "provided" &&
+      profile.taxIdentifiers.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Remove the GSTIN when not registered.",
+      });
+  });
+export type BillingConfirm = z.infer<typeof billingConfirmSchema>;
+export function hasBillingDeclaration(
+  current: BillingRevision | null,
+): boolean {
+  if (!current) return false;
+  const { declaration, evidence, ...facts } = current.profile;
+  return Boolean(
+    declaration &&
+    evidence.length === 0 &&
+    declaration.actorId === current.actorId &&
+    declaration.at === current.at &&
+    billingConfirmSchema.safeParse({
+      expectedVersion: 0,
+      expectedReviewVersion: 0,
+      acceptedTerms: true,
+      profile: facts,
+    }).success,
+  );
+}
 export const billingEvidenceSnapshotSchema = z.object({
   fileId: z.uuid(),
   name: z.string(),
@@ -148,6 +233,7 @@ export function billingState(
   const current = history.at(-1) ?? null;
   const profile = current?.profile;
   const issues: string[] = [];
+  const declared = hasBillingDeclaration(current);
   if (!profile?.legalName) issues.push("legal_name");
   if (
     !profile?.address.line1 ||
@@ -167,9 +253,10 @@ export function billingState(
   )
     issues.push("tax_identifiers");
   for (const kind of ["legal_identity", "billing_address", "business_status"])
-    if (!profile?.evidence.some((entry) => entry.kind === kind))
+    if (!declared && !profile?.evidence.some((entry) => entry.kind === kind))
       issues.push(`${kind}_evidence`);
   if (
+    !declared &&
     profile?.taxIdentifierStatus === "provided" &&
     !profile.evidence.some((entry) => entry.kind === "tax_identifier")
   )

@@ -32,6 +32,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/getting-started" },
   title: "Vendor getting-started guide",
   description:
     "Set up your business, find prospects, connect sales channels, and review AI-assisted outreach in Lead Relay.",

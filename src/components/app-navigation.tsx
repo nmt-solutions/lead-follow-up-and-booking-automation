@@ -122,8 +122,8 @@ const settings: Item[] = [
   { path: "/notifications", label: "Notifications", icon: Inbox },
   { path: "/billing", label: "Billing details", icon: Wallet, manage: true },
   {
-    path: "/subscription-payments",
-    label: "Subscription",
+    path: "/plan",
+    label: "Plan & billing",
     icon: Wallet,
     manage: true,
   },

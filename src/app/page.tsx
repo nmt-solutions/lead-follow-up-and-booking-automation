@@ -97,7 +97,7 @@ const questions = [
   {
     title: "How does pricing work?",
     answer:
-      "Your quote sets the plan, included search areas, usage limits, and any paid pilot terms. Contact NMT Solutions for a quote. Creating an account does not promise a free trial or unlimited usage.",
+      "Monthly plans start at ₹1,999 per business, plus applicable taxes. Compare the included discovery credits and outreach actions on the pricing page. Review the full total and renewal terms before payment. Creating an account does not start a paid subscription.",
   },
 ];
 export default function HomePage() {

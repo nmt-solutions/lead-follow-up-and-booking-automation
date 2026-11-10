@@ -3,6 +3,7 @@ import { PolicyDocument } from "@/components/policy-document";
 import { privacySections } from "@/content/privacy";
 export const metadata: Metadata = {
   title: "Privacy policy",
+  alternates: { canonical: "/privacy-policy" },
   description:
     "How Lead Relay handles business, account, connected service, and sales data.",
   robots: { index: true, follow: true },

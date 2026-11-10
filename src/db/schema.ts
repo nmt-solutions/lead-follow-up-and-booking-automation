@@ -677,7 +677,21 @@ export const billingProfileReview = pgTable(
     pgPolicy("billing_review_insert", {
       for: "insert",
       to: appRuntime,
-      withCheck: sql`(${billingOperatorScope}) and ${table.actorId} = current_setting('app.actor_id', true)
+      withCheck: sql`((${billingOperatorScope}) or ((${managerScope})
+        and ${table.outcome}='reviewed' and ${table.findings}='[]'::jsonb
+        and ${table.note}='Customer-declared billing details; no independent identity or tax verification.'
+        and public.billing_declaration_allowed(${table.businessId})
+        and exists (select 1 from public.billing_profile_revision p where p.id=${table.profileId}
+          and p.actor_id=current_setting('app.actor_id',true) and p.at=${table.at}
+          and p.profile->'declaration'->>'version'='2026-11-10'
+          and p.profile->'declaration'->>'actorId'=p.actor_id
+          and (p.profile->'declaration'->>'at')::timestamptz=p.at
+          and p.profile->'declaration'->>'acceptedTerms'='true'
+          and p.profile->'address'->>'country'='IN'
+          and p.profile->>'businessStatus' in ('business','individual')
+          and p.profile->>'taxIdentifierStatus' in ('provided','not_applicable')
+          and p.profile->'evidence'='[]'::jsonb and p.evidence='[]'::jsonb)))
+        and ${table.actorId} = current_setting('app.actor_id', true)
         and ${table.businessId} = nullif(current_setting('app.business_id', true), '')::uuid
         and exists (select 1 from public.billing_profile_revision p where p.id = ${table.profileId} and p.business_id = ${table.businessId} and p.version = ${table.profileVersion})`,
     }),

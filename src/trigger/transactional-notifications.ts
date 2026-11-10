@@ -1,9 +1,12 @@
+import { productionCron } from "./cron";
 import { schedules } from "@trigger.dev/sdk";
 import { recoverTransactionalNotifications } from "../notifications/worker";
 
 export const transactionalNotificationRecovery = schedules.task({
   id: "transactional-notification-recovery",
-  cron: process.env.TRIGGER_TRANSACTIONAL_NOTIFICATION_CRON,
+  cron: productionCron(process.env.TRIGGER_TRANSACTIONAL_NOTIFICATION_CRON),
+  queue: { concurrencyLimit: 1 },
+  maxDuration: 120,
   retry: { maxAttempts: 3 },
   run: async () => {
     try {

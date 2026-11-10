@@ -1,3 +1,4 @@
+import { productionCron } from "./cron";
 import { AbortTaskRunError, schedules, task } from "@trigger.dev/sdk";
 import { ApplicationError } from "../models/application-error";
 import { sequenceWorkSchema } from "../models/email-sequences";
@@ -52,7 +53,7 @@ export const dispatchApprovedEmailSequence = task({
 });
 export const recoverApprovedEmailSequences = schedules.task({
   id: "recover-approved-email-sequences",
-  cron: process.env.TRIGGER_EMAIL_SEQUENCE_RECOVERY_CRON,
+  cron: productionCron(process.env.TRIGGER_EMAIL_SEQUENCE_RECOVERY_CRON),
   retry: { maxAttempts: 3 },
   maxDuration: 180,
   run: async () => {

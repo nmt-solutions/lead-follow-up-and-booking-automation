@@ -527,7 +527,10 @@ describe("Configured subscription quotes at the application seam", () => {
         request(state, { expectedCatalogVersion: 2 }),
       ),
     ).rejects.toMatchObject({ code: "PRICING_SETUP_REQUIRED" });
-    await files.deleteFile(owner, business.id, fileId);
+    await expect(
+      files.deleteFile(owner, business.id, fileId),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    h.clock.set("2026-11-05T11:05:00.000Z");
     expect((await app.workspace(owner, business.id)).billing.issues).toContain(
       "evidence_unavailable",
     );

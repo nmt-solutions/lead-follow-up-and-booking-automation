@@ -4,6 +4,8 @@ import { SetupConnections } from "@/components/setup-connections";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { ApplicationError } from "@/models/application-error";
+import { SubscriptionSetup } from "@/components/subscription-setup";
+import { subscriptionSetupData } from "@/server/subscription-setup";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Finish setup" };
@@ -12,10 +14,22 @@ export default async function SetupPage({
   searchParams,
 }: {
   params: Promise<{ businessId: string }>;
-  searchParams: Promise<{ step?: string; connection?: string }>;
+  searchParams: Promise<{ step?: string; connection?: string; plan?: string }>;
 }) {
   const { businessId } = await params;
   const query = await searchParams;
+  if (query.step === "plan") {
+    const data = await (async () => {
+      try {
+        return await subscriptionSetupData(businessId, query.plan);
+      } catch (error: unknown) {
+        return pageFailure(error);
+      }
+    })();
+    return (
+      <SubscriptionSetup key={data.selected ?? "plans"} {...data} onboarding />
+    );
+  }
   const step =
     query.step === "calendar" || query.step === "search" ? query.step : "email";
   const state = await (async () => {

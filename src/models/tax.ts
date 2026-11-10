@@ -55,6 +55,7 @@ export const taxRuleSchema = z
       )
       .min(1)
       .max(4),
+    evidenceBasis: z.enum(["documents", "customer_declaration"]).optional(),
     rates: z
       .array(
         z.strictObject({

@@ -22,7 +22,7 @@ export default async function OnboardingPage() {
   })();
   const resume = (await cookies())
     .get("lr_setup")
-    ?.value.match(/^([a-f0-9-]{36})\.(email|calendar|search)$/);
+    ?.value.match(/^([a-f0-9-]{36})\.(email|calendar|plan|search)$/);
   if (resume && state.businesses.some((b) => b.id === resume[1]))
     redirect(`/onboarding/${resume[1]}?step=${resume[2]}`);
   if (state.businesses.length) redirect("/businesses");

@@ -456,6 +456,15 @@ export async function prepareDatabaseRole(pool: Pool) {
       AND m.user_id = inviter AND (m.role = 'owner' OR (m.role = 'admin' AND invited_role = 'salesperson'))); END $$;
     REVOKE ALL ON FUNCTION public.current_business_role(), public.inviter_authorized(text, text) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.current_business_role(), public.inviter_authorized(text, text) TO app_runtime;
+    CREATE OR REPLACE FUNCTION public.billing_declaration_allowed(tenant uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN
+      IF tenant::text IS DISTINCT FROM current_setting('app.business_id',true)
+        OR NOT coalesce(public.current_business_role() IN ('owner','admin'),false)
+        THEN RETURN false; END IF;
+      RETURN NOT EXISTS(SELECT 1 FROM public.billing_profile_review r WHERE r.business_id=tenant AND r.outcome<>'reviewed');
+    END $$;
+    REVOKE ALL ON FUNCTION public.billing_declaration_allowed(uuid) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.billing_declaration_allowed(uuid) TO app_runtime;
   `);
   // A push can replace policy definitions. Pause protected access until the
   // final security transaction restores complete policies and privileges.

@@ -29,6 +29,7 @@ const mono = localFont({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://leadrelay.nmtsolutions.in"),
   applicationName: APP_NAME,
   title: {
     default: APP_NAME,

@@ -37,12 +37,14 @@ const headings = {
 export function SignInForm({
   linkFailed,
   callbackURL = "/security",
+  signup = false,
 }: {
   linkFailed: boolean;
   callbackURL?: string;
+  signup?: boolean;
 }) {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("password");
+  const [mode, setMode] = useState<Mode>(signup ? "signup" : "password");
   const [pending, setPending] = useState(false);
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);

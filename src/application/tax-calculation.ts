@@ -1,4 +1,5 @@
 import type { BillingWorkspace } from "../models/billing";
+import { hasBillingDeclaration } from "../models/billing";
 import type {
   TaxCalculation,
   TaxCalculationInput,
@@ -104,6 +105,13 @@ export function evaluateTax(
         (kind) =>
           !billing.current?.profile.evidence.some(
             (evidence) => evidence.kind === kind,
+          ) &&
+          !(
+            rule.evidenceBasis === "customer_declaration" &&
+            rule.customerCountry === "IN" &&
+            rule.currency === "INR" &&
+            rule.treatment === "taxable" &&
+            hasBillingDeclaration(billing.current)
           ),
       )
     )

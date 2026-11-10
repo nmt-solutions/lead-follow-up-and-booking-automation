@@ -3,6 +3,8 @@ import { ApplicationError } from "../models/application-error";
 import { businessIdSchema, type Actor, type Clock } from "../models/business";
 import {
   billingSaveSchema,
+  billingConfirmSchema,
+  type BillingConfirm,
   billingReviewInputSchema,
   type BillingSave,
   type BillingWorkspace,
@@ -11,6 +13,12 @@ import {
 } from "../models/billing";
 
 export type BillingRepository = {
+  confirm(
+    actor: Actor,
+    businessId: string,
+    input: BillingConfirm,
+    at: Date,
+  ): Promise<BillingWorkspace>;
   workspace(
     actor: Actor,
     businessId: string,
@@ -47,6 +55,18 @@ export function createBillingApplication<Credentials>(dependencies: {
   clock: Clock;
 }) {
   return {
+    async confirm(
+      credentials: Credentials,
+      businessId: unknown,
+      value: unknown,
+    ) {
+      return dependencies.repository.confirm(
+        await dependencies.authenticate(credentials),
+        parse(businessIdSchema, businessId),
+        parse(billingConfirmSchema, value),
+        dependencies.clock.now(),
+      );
+    },
     async workspace(credentials: Credentials, businessId: unknown) {
       return dependencies.repository.workspace(
         await dependencies.authenticate(credentials),

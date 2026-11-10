@@ -16,7 +16,7 @@ export const metadata = { title: "Sign in" };
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; signup?: string }>;
 }) {
   let available = true;
   let signedIn = false;
@@ -61,7 +61,10 @@ export default async function SignInPage({
               <Brand />
             </div>
             {available ? (
-              <SignInForm linkFailed={Boolean((await searchParams).error)} />
+              <SignInForm
+                linkFailed={Boolean((await searchParams).error)}
+                signup={(await searchParams).signup === "1"}
+              />
             ) : (
               <div className="flex flex-col gap-4">
                 <h1 className="font-display text-4xl font-medium tracking-tight">

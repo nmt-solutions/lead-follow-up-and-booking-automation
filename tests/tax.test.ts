@@ -187,6 +187,52 @@ describe("Subscription tax at the public application seam", () => {
     return revision;
   }
 
+  it("uses customer declarations only for explicitly approved domestic taxable coverage and never for tax relief", async () => {
+    const { owner, operator, business } = await setup();
+    const state = await billing.workspace(owner, business.id);
+    const { evidence, declaration, ...facts } = state.current!.profile;
+    void evidence;
+    void declaration;
+    await billing.confirm(owner, business.id, {
+      expectedVersion: 1,
+      expectedReviewVersion: 1,
+      acceptedTerms: true,
+      profile: facts,
+    });
+    await approve(operator, "declaration-tax");
+    const input = () => ({
+      ...request(),
+      expectedProfileVersion: 2,
+      expectedReviewVersion: 2,
+    });
+    expect((await tax.calculate(owner, business.id, input())).status).toBe(
+      "review_required",
+    );
+    await approve(
+      operator,
+      "declaration-tax",
+      { ...rule, evidenceBasis: "customer_declaration" },
+      1,
+    );
+    expect((await tax.calculate(owner, business.id, input())).status).toBe(
+      "calculated",
+    );
+    await approve(
+      operator,
+      "declaration-tax",
+      {
+        ...rule,
+        evidenceBasis: "customer_declaration",
+        treatment: "reverse_charge",
+        rates: [],
+      },
+      2,
+    );
+    expect((await tax.calculate(owner, business.id, input())).status).toBe(
+      "review_required",
+    );
+  });
+
   it("does not resurrect superseded coverage when a newer approved revision changes jurisdiction or expires", async () => {
     const { owner, operator, business } = await setup();
     await approve(operator, "moving-coverage");

@@ -52,6 +52,106 @@ describe("Business billing profiles at the application seam", () => {
     return { owner, business };
   }
 
+  it("accepts an attributable domestic declaration without inventing document verification or granting operator authority", async () => {
+    const { owner, business } = await setup();
+    const { evidence, ...facts } = details;
+    void evidence;
+    const input = {
+      expectedVersion: 0,
+      expectedReviewVersion: 0,
+      acceptedTerms: true,
+      profile: { ...facts, taxIdentifierStatus: "not_applicable" },
+    };
+    const state = await billing.confirm(owner, business.id, input);
+    expect(state).toMatchObject({
+      status: "reviewed",
+      version: 1,
+      reviewVersion: 1,
+      issues: [],
+      current: {
+        evidence: [],
+        profile: {
+          evidence: [],
+          declaration: { version: "2026-11-10", acceptedTerms: true },
+        },
+      },
+    });
+    expect(state.reviews[0].note).toBe(
+      "Customer-declared billing details; no independent identity or tax verification.",
+    );
+    await expect(
+      billing.confirm(owner, business.id, input),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      billing.review(owner, business.id, {
+        expectedVersion: 1,
+        expectedReviewVersion: 1,
+        outcome: "reviewed",
+        findings: [],
+        note: "Pretend operator review",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      billing.save(owner, business.id, {
+        expectedVersion: 1,
+        note: "Forged declaration",
+        profile: state.current!.profile,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    const actor = await h.authenticate(owner);
+    const client = await h.runtime.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "select set_config('app.actor_id',$1,true),set_config('app.business_id',$2,true)",
+        [actor.userId, business.id],
+      );
+      await expect(
+        client.query(
+          "insert into billing_profile_review(id,business_id,profile_id,profile_version,version,outcome,findings,note,actor_id,actor_name,at) values(gen_random_uuid(),$1,$2,1,2,'reviewed','[]','Pretend operator review',$3,'Owner',now())",
+          [business.id, state.current!.id, actor.userId],
+        ),
+      ).rejects.toThrow(/row-level security/);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+
+  it("rejects outsider and salesperson declarations, unsupported countries and incomplete or inconsistent tax facts", async () => {
+    const { owner, business } = await setup();
+    const { evidence, ...facts } = details;
+    void evidence;
+    const input = {
+      expectedVersion: 0,
+      expectedReviewVersion: 0,
+      acceptedTerms: true,
+      profile: { ...facts, taxIdentifierStatus: "not_applicable" },
+    };
+    const outsider = await h.signIn("billing-outsider-declaration@example.com");
+    const salesperson = await invite(
+      owner,
+      business.id,
+      "billing-sales-declaration@example.com",
+      "salesperson",
+    );
+    await expect(
+      billing.confirm(outsider, business.id, input),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      billing.confirm(salesperson, business.id, input),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    for (const profile of [
+      { ...input.profile, address: { ...facts.address, country: "US" } },
+      { ...input.profile, legalName: "" },
+      { ...input.profile, taxIdentifierStatus: "provided", taxIdentifiers: [] },
+    ])
+      await expect(
+        billing.confirm(owner, business.id, { ...input, profile }),
+      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    expect((await billing.workspace(owner, business.id)).version).toBe(0);
+  });
+
   function fileApplication() {
     const storage = createMemoryStorage();
     const files = createFileApplication({
@@ -266,7 +366,10 @@ describe("Business billing profiles at the application seam", () => {
       "put",
       "get",
     ]);
-    await files.deleteFile(owner, business.id, upload.file.id);
+    await expect(
+      files.deleteFile(owner, business.id, upload.file.id),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    h.clock.set("2026-11-05T11:00:00Z");
     const afterDeletion = await billing.workspace(owner, business.id);
     expect(afterDeletion.current?.evidence).toEqual(saved.current?.evidence);
     expect(afterDeletion.issues).toContain("evidence_unavailable");

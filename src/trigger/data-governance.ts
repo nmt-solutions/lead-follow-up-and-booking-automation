@@ -1,10 +1,13 @@
+import { productionCron } from "./cron";
 import { schedules } from "@trigger.dev/sdk";
 import { maintainBusinessData } from "../data-governance/worker";
 export const businessDataMaintenance = schedules.task({
   id: "maintain-business-data",
-  cron: process.env.BUSINESS_DATA_POLICY_JSON?.trim()
-    ? process.env.TRIGGER_BUSINESS_DATA_CRON
-    : undefined,
+  cron: productionCron(
+    process.env.BUSINESS_DATA_POLICY_JSON?.trim()
+      ? process.env.TRIGGER_BUSINESS_DATA_CRON
+      : undefined,
+  ),
   retry: { maxAttempts: 3 },
   run: async () => {
     try {

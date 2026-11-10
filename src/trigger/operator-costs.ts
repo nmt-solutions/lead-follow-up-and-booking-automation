@@ -1,9 +1,10 @@
+import { productionCron } from "./cron";
 import { schedules } from "@trigger.dev/sdk";
 import { recoverOperatorCosts } from "../costs/worker";
 
 export const operatorCostRecovery = schedules.task({
   id: "operator-cost-budgets",
-  cron: process.env.TRIGGER_COST_BUDGET_CRON,
+  cron: productionCron(process.env.TRIGGER_COST_BUDGET_CRON),
   retry: { maxAttempts: 3 },
   run: async () => {
     try {

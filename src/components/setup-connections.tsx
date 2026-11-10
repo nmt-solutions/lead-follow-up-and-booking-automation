@@ -36,6 +36,7 @@ const steps = [
   { key: "business", label: "Business" },
   { key: "email", label: "Email" },
   { key: "calendar", label: "Calendar" },
+  { key: "plan", label: "Plan" },
   { key: "search", label: "First search" },
 ];
 
@@ -79,7 +80,7 @@ export function SetupConnections({
     // Navigation preference only; never used to establish access or consent.
     document.cookie = `lr_setup=${businessId}.${step}; Path=/; SameSite=Lax; Max-Age=604800${location.protocol === "https:" ? "; Secure" : ""}`;
   }, [businessId, step]);
-  function go(next: Step) {
+  function go(next: Step | "plan") {
     router.push(`/onboarding/${businessId}?step=${next}`);
   }
   function finish(path = `/businesses/${businessId}`) {
@@ -150,7 +151,7 @@ export function SetupConnections({
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center gap-9 py-6 sm:py-10">
       <ol
         aria-label="Setup progress"
-        className="mx-auto grid w-full max-w-2xl grid-cols-4 gap-2"
+        className="mx-auto grid w-full max-w-2xl grid-cols-5 gap-2"
       >
         {steps.map((item, index) => (
           <li
@@ -174,7 +175,7 @@ export function SetupConnections({
           <SetupIllustration stage={step} />
           <div className="flex flex-col gap-3">
             <p className="text-sm text-primary">
-              Step {current + 1} of 4 · Optional
+              Step {current + 1} of {steps.length} · Optional
             </p>
             <h1 className="font-display text-3xl leading-tight font-medium tracking-tight sm:text-4xl">
               {step === "email"
@@ -526,7 +527,7 @@ export function SetupConnections({
               <Button
                 variant="ghost"
                 disabled={Boolean(pending)}
-                onClick={() => go(step === "calendar" ? "email" : "calendar")}
+                onClick={() => go(step === "calendar" ? "email" : "plan")}
               >
                 <ArrowLeft data-icon="inline-start" aria-hidden="true" />
                 Back
@@ -541,7 +542,7 @@ export function SetupConnections({
                 onClick={() =>
                   step === "search"
                     ? finish()
-                    : go(step === "email" ? "calendar" : "search")
+                    : go(step === "email" ? "calendar" : "plan")
                 }
               >
                 Skip for now
@@ -549,7 +550,7 @@ export function SetupConnections({
               {step !== "search" && (
                 <Button
                   disabled={Boolean(pending)}
-                  onClick={() => go(step === "email" ? "calendar" : "search")}
+                  onClick={() => go(step === "email" ? "calendar" : "plan")}
                 >
                   Continue
                   <ArrowRight data-icon="inline-end" aria-hidden="true" />

@@ -12,6 +12,12 @@ export function createBillingHttp(options: {
   const body = createJsonBodyReader(options.origin, 256 * 1024);
   const app = options.application;
   return {
+    confirm: (request: Request, id: string) =>
+      respond(async () =>
+        dataResponse(
+          await app.confirm(request.headers, id, await body(request)),
+        ),
+      ),
     get: (request: Request, id: string) =>
       respond(async () =>
         dataResponse(await app.workspace(request.headers, id)),

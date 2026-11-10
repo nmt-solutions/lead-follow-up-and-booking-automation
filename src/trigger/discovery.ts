@@ -1,3 +1,4 @@
+import { productionCron } from "./cron";
 import { capacityDeployment, capacityLimits } from "../discovery/capacity";
 import {
   AbortTaskRunError,
@@ -110,7 +111,7 @@ export const scheduledDiscovery = task({
 // No cadence is invented: operator configuration is required before activation.
 export const recoverDiscoveryDispatches = schedules.task({
   id: "recover-discovery-dispatches",
-  cron: process.env.TRIGGER_DISCOVERY_RECOVERY_CRON,
+  cron: productionCron(process.env.TRIGGER_DISCOVERY_RECOVERY_CRON),
   retry: { maxAttempts: 3 },
   run: async () => {
     try {

@@ -37,6 +37,8 @@ function configuredSinglePayments(
     const review = razorpayAccountReviewSchema.parse(
       JSON.parse(env.RAZORPAY_ACCOUNT_REVIEW ?? "null"),
     );
+    if (env.NODE_ENV === "production" && review.mode !== "live")
+      throw new Error("Live payment configuration required");
     if ((path === "upi") !== Boolean(review.upiPath))
       throw new Error("method path");
     const keyId = env.RAZORPAY_KEY_ID,

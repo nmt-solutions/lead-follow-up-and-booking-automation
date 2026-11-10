@@ -1,3 +1,4 @@
+import { productionCron } from "./cron";
 import { schedules } from "@trigger.dev/sdk";
 import { drainMetaIntake } from "../whatsapp/worker";
 import { recoverMetaSends } from "../whatsapp/sending-worker";
@@ -12,7 +13,7 @@ const metaSchedulingEnabled = [
 
 export const recoverWhatsAppSends = schedules.task({
   id: "recover-whatsapp-sends",
-  cron: metaSchedulingEnabled ? "* * * * *" : undefined,
+  cron: productionCron(metaSchedulingEnabled ? "* * * * *" : undefined),
   queue: { concurrencyLimit: 1 },
   retry: { maxAttempts: 3 },
   maxDuration: 120,
@@ -29,7 +30,7 @@ export const recoverWhatsAppSends = schedules.task({
 /** Durable poll discovers accepted receipts after web/worker interruption without carrying private payloads in jobs. */
 export const recoverWhatsAppIntake = schedules.task({
   id: "recover-whatsapp-intake",
-  cron: metaSchedulingEnabled ? "* * * * *" : undefined,
+  cron: productionCron(metaSchedulingEnabled ? "* * * * *" : undefined),
   queue: { concurrencyLimit: 1 },
   retry: { maxAttempts: 3 },
   maxDuration: 120,

@@ -128,7 +128,11 @@ export function BillingStatus({ state }: { state: BillingWorkspace }) {
         <h2 id="billing-status" className="text-xl font-semibold">
           Billing readiness
         </h2>
-        <Badge>{billingStatuses[state.status]}</Badge>
+        <Badge>
+          {state.current?.profile.declaration && state.status === "reviewed"
+            ? "Details confirmed by customer"
+            : billingStatuses[state.status]}
+        </Badge>
       </div>
       <p>
         Billing country classification:{" "}
