@@ -3,11 +3,11 @@ import { headers } from "next/headers";
 import { ArrowUpRight, Plus } from "lucide-react";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
-import { ProfileForm } from "@/components/profile-form";
+import { OnboardingForm } from "@/components/onboarding-form";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Your Businesses" };
+export const metadata = { title: "Your businesses" };
 
 export default async function BusinessesPage() {
   const operationsLink = await (async () => {
@@ -238,63 +238,62 @@ export default async function BusinessesPage() {
       return null;
     }
   })();
+  const hasPlatformAccess = Boolean(
+    operationsLink ||
+    recoveryLink ||
+    billingReviewLink ||
+    pricingLink ||
+    capacityLink ||
+    refundsLink ||
+    paymentsLink ||
+    documentsLink ||
+    costsLink ||
+    notificationsLink ||
+    senderHealthLink ||
+    whatsAppReviewLink,
+  );
   if (!businesses.length)
     return (
-      <div className="mx-auto max-w-2xl space-y-8">
-        {billingReviewLink}
-        {pricingLink}
-        {capacityLink}
-        {refundsLink}
-        {paymentsLink}
-        {documentsLink}
-        {costsLink}
-        {notificationsLink}
-        {whatsAppReviewLink}
-        {senderHealthLink}
-        <div>
-          <p className="mb-3 text-sm font-medium text-primary">
-            Getting started
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Start with your Business.
-          </h1>
-          <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-            Add your name and what you offer. You can edit these details
-            whenever they change.
-          </p>
-        </div>
-        {operationsLink}
-        {recoveryLink}
-        <ProfileForm />
+      <div className="space-y-8">
+        <OnboardingForm />
+        {hasPlatformAccess && (
+          <details className="rounded-xl border border-border bg-card p-5">
+            <summary className="cursor-pointer text-sm font-medium">
+              Platform administration
+            </summary>
+            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
+              {operationsLink}
+              {recoveryLink}
+              {billingReviewLink}
+              {pricingLink}
+              {capacityLink}
+              {refundsLink}
+              {paymentsLink}
+              {documentsLink}
+              {costsLink}
+              {notificationsLink}
+              {senderHealthLink}
+              {whatsAppReviewLink}
+            </div>
+          </details>
+        )}
       </div>
     );
   return (
     <div className="space-y-8">
-      {operationsLink}
-      {recoveryLink}
-      {billingReviewLink}
-      {pricingLink}
-      {capacityLink}
-      {refundsLink}
-      {paymentsLink}
-      {documentsLink}
-      {costsLink}
-      {notificationsLink}
-      {senderHealthLink}
-      {whatsAppReviewLink}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">
-            Your Businesses
+            Your businesses
           </h1>
           <p className="mt-3 text-muted-foreground">
-            Choose a Business to view and edit its profile.
+            Choose a business to find prospects and manage your sales.
           </p>
         </div>
         <Button asChild variant="outline">
           <Link href="/businesses/new">
             <Plus aria-hidden="true" />
-            Add a Business
+            Add business
           </Link>
         </Button>
       </div>
@@ -326,6 +325,27 @@ export default async function BusinessesPage() {
           </li>
         ))}
       </ul>
+      {hasPlatformAccess && (
+        <details className="rounded-xl border border-border bg-card p-5">
+          <summary className="cursor-pointer text-sm font-medium">
+            Platform administration
+          </summary>
+          <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
+            {operationsLink}
+            {recoveryLink}
+            {billingReviewLink}
+            {pricingLink}
+            {capacityLink}
+            {refundsLink}
+            {paymentsLink}
+            {documentsLink}
+            {costsLink}
+            {notificationsLink}
+            {senderHealthLink}
+            {whatsAppReviewLink}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

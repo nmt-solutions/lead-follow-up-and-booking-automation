@@ -4,7 +4,11 @@ import type {
   BusinessProfileInput,
   Clock,
 } from "../models/business";
-import { businessIdSchema, profileSchema } from "../models/business";
+import {
+  businessIdSchema,
+  createBusinessSchema,
+  profileSchema,
+} from "../models/business";
 import { ApplicationError } from "../models/application-error";
 import type { z } from "zod";
 import {
@@ -25,6 +29,7 @@ export type BusinessRepository = {
     actor: Actor,
     profile: BusinessProfileInput,
     at: Date,
+    configuration?: ConfigurationInput,
   ): Promise<BusinessProfile>;
   list(actor: Actor): Promise<BusinessProfile[]>;
   get(actor: Actor, businessId: string): Promise<BusinessProfile>;
@@ -54,10 +59,15 @@ export function createBusinessApplication<Credentials>(dependencies: {
       input: unknown,
     ): Promise<BusinessProfile> {
       const actor = await dependencies.authenticatePrivileged(credentials);
+      const { configuration, ...profile } = validate(
+        createBusinessSchema,
+        input,
+      );
       return dependencies.repository.create(
         actor,
-        validate(profileSchema, input),
+        profile,
         dependencies.clock.now(),
+        configuration,
       );
     },
     async listBusinesses(credentials: Credentials) {

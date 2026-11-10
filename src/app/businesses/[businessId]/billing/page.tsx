@@ -5,7 +5,7 @@ import { pageFailure } from "@/server/page";
 import { BillingManager } from "@/components/billing-manager";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Billing profile and evidence" };
+export const metadata = { title: "Billing details" };
 export default async function BillingPage({
   params,
 }: {
@@ -33,12 +33,12 @@ export default async function BillingPage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
-          Back to Business profile
+          Back to overview
         </Link>
         <p className="mb-3 font-medium text-primary wrap-anywhere">
           {data.profile.name}
         </p>
-        <h1 className="page-title">Billing profile and evidence</h1>
+        <h1 className="page-title">Billing details</h1>
         <Link
           href={`/businesses/${businessId}/tax`}
           className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
@@ -55,6 +55,10 @@ export default async function BillingPage({
         businessId={businessId}
         initial={data.state}
         initialFiles={data.files}
+        businessProfile={{
+          name: data.profile.name,
+          configuration: data.profile.configuration,
+        }}
       />
     </div>
   );

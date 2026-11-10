@@ -26,7 +26,7 @@ export default async function WhatsAppPage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
-          Back to Business
+          Back to overview
         </Link>
         <h1 className="page-title">WhatsApp identity</h1>
         <p className="mt-3 text-muted-foreground">

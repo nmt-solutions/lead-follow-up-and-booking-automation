@@ -215,7 +215,7 @@ export function ProfileForm({
         </div>
         <div className="space-y-2">
           <Label htmlFor="homeMarket">
-            Home market{" "}
+            Default search area{" "}
             <span className="font-normal text-muted-foreground">
               (optional)
             </span>
@@ -235,8 +235,8 @@ export function ProfileForm({
             className="text-sm leading-relaxed text-muted-foreground"
           >
             The city, region or country where you operate or provide your
-            services. Confirm it in Offerings, buyers and geography. Changing it
-            here requires a new confirmation there.
+            services. If you change it, review and confirm the new area in
+            Business setup.
           </p>
           <p
             id="market-error"

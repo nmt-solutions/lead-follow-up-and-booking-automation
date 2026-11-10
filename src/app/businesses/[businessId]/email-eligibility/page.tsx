@@ -26,7 +26,7 @@ export default async function EmailEligibilityPage({
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
           href={`/businesses/${businessId}`}
         >
-          Back to Business
+          Back to overview
         </Link>
         <h1 className="page-title">Email eligibility and opt-outs</h1>
         <p className="mt-3 text-muted-foreground">

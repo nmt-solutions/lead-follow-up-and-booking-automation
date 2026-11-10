@@ -31,7 +31,7 @@ export default async function SubscriptionPaymentsPage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline"
         >
-          Back to Business profile
+          Back to overview
         </Link>
         <p className="mb-3 font-medium text-primary wrap-anywhere">
           {data.profile.name}

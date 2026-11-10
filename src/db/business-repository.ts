@@ -5,12 +5,13 @@ import { ApplicationError } from "../models/application-error";
 import type { Database } from "./runtime";
 import { business, membership } from "./schema";
 import { scoped, requireCapability } from "./scope";
+import { confirmedConfiguration } from "../models/configuration";
 
 export function createBusinessRepository(
   database: Database,
 ): BusinessRepository {
   return {
-    create(actor, profile, at) {
+    create(actor, profile, at, configuration) {
       const id = randomUUID();
       return scoped(database, actor, id, async (tx) => {
         // The deferred FK allows membership first; both records commit together.
@@ -19,7 +20,15 @@ export function createBusinessRepository(
           .values({ businessId: id, userId: actor.userId, role: "owner" });
         const [created] = await tx
           .insert(business)
-          .values({ id, ...profile, createdAt: at, updatedAt: at })
+          .values({
+            id,
+            ...profile,
+            configuration: configuration
+              ? confirmedConfiguration(configuration, at)
+              : null,
+            createdAt: at,
+            updatedAt: at,
+          })
           .returning();
         return created;
       });

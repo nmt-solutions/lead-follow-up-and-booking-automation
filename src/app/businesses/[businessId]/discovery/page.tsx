@@ -5,7 +5,7 @@ import { pageFailure } from "@/server/page";
 import { DiscoveryManager } from "@/components/discovery-manager";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Prospect discovery" };
+export const metadata = { title: "Find prospects" };
 export default async function DiscoveryPage({
   params,
 }: {
@@ -31,15 +31,15 @@ export default async function DiscoveryPage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
-          Back to Business profile
+          Back to overview
         </Link>
         <p className="mb-3 text-sm font-medium text-primary wrap-anywhere">
           {state.profile.name}
         </p>
-        <h1 className="page-title">Prospect discovery</h1>
+        <h1 className="page-title">Find prospects</h1>
         <p className="mt-3 text-muted-foreground">
-          Research potential buyers within your approved scope and allowance.
-          Review the evidence and uncertainty behind each match.
+          Find potential customers in your search areas. Review the sources
+          behind each match before choosing who to contact.
         </p>
       </div>
       <DiscoveryManager

@@ -1,9 +1,11 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { Building2, LockKeyhole } from "lucide-react";
+import { ArrowRight, LockKeyhole } from "lucide-react";
+import { Brand } from "@/components/brand";
+import { IsometricView } from "@/components/isometric-view";
 import { getServices } from "@/server/services";
 import { SignInForm } from "@/components/sign-in-form";
-import { APP_NAME } from "@/lib/brand";
+
 import {
   Card,
   CardContent,
@@ -34,61 +36,73 @@ export default async function SignInPage({
   }
   if (signedIn) redirect("/security");
   return (
-    <main className="page-container flex min-h-svh flex-col justify-center gap-10 py-10 sm:py-16 md:flex-row md:items-center md:gap-20">
-      <section className="min-w-0 flex-1 space-y-6">
-        <div className="inline-flex items-center gap-3 text-sm font-semibold">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Building2 className="size-5" aria-hidden="true" />
-          </span>
-          {APP_NAME}
-        </div>
-        <h1 className="max-w-lg text-4xl leading-tight font-semibold tracking-tight sm:text-5xl">
-          Your Business.
-          <br />
-          The right people.
-          <br />
-          <span className="text-primary">Access you control.</span>
-        </h1>
-        <p className="max-w-md text-lg leading-relaxed text-muted-foreground">
-          Keep your Business profile, team permissions and secure access in one
-          place.
-        </p>
-        <p className="flex items-start gap-2 text-sm leading-relaxed text-muted-foreground">
-          <LockKeyhole className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          Business records stay within your team’s permissions. Owners and
-          Admins verify a second factor before protected access.
-        </p>
-      </section>
-      <Card
-        aria-labelledby="sign-in-title"
-        className="w-full min-w-0 md:max-w-md"
-      >
-        <CardHeader>
-          <p className="eyebrow">Welcome</p>
-          <CardTitle id="sign-in-title" className="text-2xl">
-            Sign in or get started
-          </CardTitle>
-          <CardDescription>
-            We’ll send a one-time sign-in link to your email. Then we’ll help
-            you check your account security.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {available ? (
-            <SignInForm linkFailed={Boolean((await searchParams).error)} />
-          ) : (
-            <Alert>
-              <AlertDescription>
-                Sign-in is not available yet. Please try again later.
-              </AlertDescription>
-            </Alert>
-          )}
-          <p className="mt-6 border-t border-border pt-5 text-xs leading-relaxed text-muted-foreground">
-            Use the same email each time to return to your saved Businesses.
-            Your sign-in link expires after 10 minutes.
+    <main className="page-container flex min-h-svh flex-col justify-center gap-10 py-8 sm:py-12">
+      <header>
+        <Brand />
+      </header>
+      <div className="grid items-center gap-10 lg:grid-cols-[1.15fr_1fr] lg:gap-16">
+        <section className="min-w-0 space-y-6">
+          <p className="eyebrow">Prospect discovery and sales follow-up</p>
+          <h1 className="max-w-xl text-4xl leading-[1.1] font-semibold tracking-[-0.04em] sm:text-5xl">
+            Find buyers.
+            <br />
+            <span className="text-primary">Keep conversations moving.</span>
+          </h1>
+          <p className="max-w-lg text-base leading-relaxed text-muted-foreground">
+            Find potential customers for your business, review your outreach,
+            and manage the replies with your team.
           </p>
-        </CardContent>
-      </Card>
+          <IsometricView />
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <ArrowRight
+              className="size-4 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            Start with your business. We&apos;ll guide you through setup.
+          </p>
+        </section>
+        <Card aria-labelledby="sign-in-title" className="w-full min-w-0">
+          <CardHeader>
+            <p className="eyebrow">Welcome to LeadRelay</p>
+            <CardTitle id="sign-in-title" className="text-2xl">
+              Sign in or get started
+            </CardTitle>
+            <CardDescription>
+              Enter your email to receive a secure sign-in link.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {available ? (
+              <SignInForm linkFailed={Boolean((await searchParams).error)} />
+            ) : (
+              <Alert>
+                <AlertDescription>
+                  Sign-in is temporarily unavailable. Please try again later.
+                </AlertDescription>
+              </Alert>
+            )}
+            <p className="mt-6 flex items-start gap-2 border-t border-border pt-5 text-sm leading-relaxed text-muted-foreground">
+              <LockKeyhole
+                className="mt-0.5 size-4 shrink-0"
+                aria-hidden="true"
+              />
+              Your link expires in 10 minutes. Use the same email to return to
+              your businesses.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      <footer className="text-xs text-muted-foreground">
+        A product of{" "}
+        <a
+          href="https://nmtsolutions.in"
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-4"
+        >
+          NMT Solutions OPC PVT LTD
+        </a>
+      </footer>
     </main>
   );
 }

@@ -1,6 +1,6 @@
 # LeadRelay UI
 
-The interface helps people identify their Business, understand their access and complete the next setup action. Its character comes from a quiet slate surface, a teal primary action, explicit operational status and one translucent navigation layer. Product copy describes capabilities that exist.
+The interface helps people identify their Business, understand their access and complete the next setup action. Its character comes from a pale indigo background, an indigo primary action inspired by NMT Solutions, explicit status, and one translucent header. Product copy describes capabilities that exist.
 
 ## Theme
 
@@ -21,11 +21,19 @@ Opaque fallback is automatic without backdrop-filter support, with reduced trans
 
 ## Components and flows
 
-Reuse `src/components/ui`: shadcn-style Button, Input, Textarea, Label, NativeSelect, Card, Alert and Badge; Radix-backed Checkbox, Tabs and AlertDialog preserve their keyboard and focus behavior. Use semantic links for navigation and buttons for commands. Native selects remain appropriate for short role lists.
+Reuse `src/components/ui`: shadcn Button, Input, Textarea, Label, NativeSelect, Select, DropdownMenu, Sidebar, Sheet, Skeleton, Card, Alert and Badge; Radix-backed Checkbox, Tabs, Collapsible and AlertDialog preserve their keyboard and focus behavior. Use semantic links for navigation and buttons for commands. Native selects remain appropriate for short role lists.
 
 Controls have 44px minimum height, visible focus, persistent labels and appropriate autocomplete/input mode. Validate external responses before using them. Keep one prominent task per section. Destructive security changes use AlertDialog with a named consequence and cancel action.
 
 Status appears next to the affected action. Reserve alert semantics for errors and status semantics for completion. Preserve unsaved forms through expired sessions; link to Security when MFA is required. Loading, empty, denied, error and success states each explain a next action. Distinguish authenticator enrollment, current-session verification and overall production readiness.
+
+## Navigation and setup
+
+Use the shared shadcn sidebar and business dropdown. Keep sales actions separate from business settings. The business landing page is an overview; profile editing lives at `/businesses/[businessId]/profile`.
+
+New business setup has four steps: business, customers, location, and review. Save the profile and confirmed configuration in one transaction. Customer types require explicit selection. Use the entered address as the default search area and offer a separate area only when the user needs it. Billing can prefill the same address, with an explicit review before saving legal details.
+
+Use Framer Motion for brief step changes, with reduced-motion support. The welcome illustration uses a lazy-loaded React Three Fiber scene with demand rendering and a fallback. Keep it out of forms and sales records. Route loading uses shared skeletons.
 
 ## Review
 

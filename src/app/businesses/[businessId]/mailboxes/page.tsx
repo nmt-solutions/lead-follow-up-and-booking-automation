@@ -4,7 +4,7 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { MailboxManager } from "@/components/mailbox-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Mailbox processing" };
+export const metadata = { title: "Email inboxes" };
 export default async function MailboxesPage({
   params,
 }: PageProps<"/businesses/[businessId]/mailboxes">) {
@@ -57,9 +57,9 @@ export default async function MailboxesPage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
-          Back to Business
+          Back to overview
         </Link>
-        <h1 className="page-title">Mailbox processing</h1>
+        <h1 className="page-title">Email inboxes</h1>
       </header>
       <MailboxManager
         businessId={businessId}

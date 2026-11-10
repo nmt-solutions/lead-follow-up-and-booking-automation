@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SavedConfiguration } from "./configuration";
+import { configurationInputSchema } from "./configuration";
 
 export const businessIdSchema = z.uuid();
 export const profileSchema = z.strictObject({
@@ -8,6 +9,23 @@ export const profileSchema = z.strictObject({
   homeMarket: z.string().trim().max(200),
   website: z.union([z.literal(""), z.url({ protocol: /^https?$/ }).max(2048)]),
 });
+
+export const createBusinessSchema = profileSchema
+  .extend({ configuration: configurationInputSchema.optional() })
+  .superRefine((input, context) => {
+    if (
+      input.configuration &&
+      (input.configuration.offering !== input.offering ||
+        input.configuration.homeMarket !== input.homeMarket)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["configuration"],
+        message:
+          "The setup must use the same products and search area as the business profile.",
+      });
+    }
+  });
 
 export type BusinessProfileInput = z.infer<typeof profileSchema>;
 export type BusinessProfile = BusinessProfileInput & {

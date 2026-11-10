@@ -5,7 +5,7 @@ import { pageFailure } from "@/server/page";
 import { KnowledgeManager } from "@/components/knowledge-manager";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Approved answers and qualification" };
+export const metadata = { title: "Saved answers" };
 export default async function KnowledgePage({
   params,
 }: {
@@ -31,12 +31,12 @@ export default async function KnowledgePage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
-          Back to Business profile
+          Back to overview
         </Link>
         <p className="mb-3 text-sm font-medium text-primary wrap-anywhere">
           {state.profile.name}
         </p>
-        <h1 className="page-title">Approved answers and qualification</h1>
+        <h1 className="page-title">Saved answers</h1>
         <p className="mt-3 text-muted-foreground">
           Review the information sales conversations can use. Profile
           descriptions and private files become authoritative only after an

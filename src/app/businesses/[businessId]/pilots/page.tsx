@@ -134,7 +134,7 @@ export default async function PilotPage({
           className="inline-flex min-h-11 items-center text-primary underline"
           href={`/businesses/${businessId}`}
         >
-          Back to Business
+          Back to overview
         </Link>
         <h1 className="page-title">Paid pilot preparation and evidence</h1>
         <p className="mt-3 max-w-3xl text-muted-foreground">

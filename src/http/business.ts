@@ -28,7 +28,7 @@ export function createBusinessHttp(options: {
         dataResponse(
           await options.application.createBusiness(
             request.headers,
-            await body(request),
+            await configurationBody(request),
           ),
           201,
         ),

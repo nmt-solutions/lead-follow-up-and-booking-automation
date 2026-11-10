@@ -11,6 +11,15 @@ import {
   type BillingProfile,
   type BillingWorkspace,
 } from "@/models/billing";
+import type { BusinessProfile } from "@/models/business";
+import { countryCode, countries } from "@/lib/countries";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import type { FileListing } from "@/models/files";
 import { FileManager } from "./file-manager";
 import {
@@ -92,14 +101,33 @@ export function BillingManager({
   initial,
   initialFiles,
   operator = false,
+  businessProfile,
 }: {
   businessId: string;
   initial: BillingWorkspace;
   initialFiles: FileListing;
   operator?: boolean;
+  businessProfile?: Pick<BusinessProfile, "name" | "configuration">;
 }) {
   const [state, setState] = useState(initial);
-  const [profile, setProfile] = useState(initial.current?.profile ?? empty);
+  const businessAddress = businessProfile?.configuration?.address;
+  const addressFromSetup = businessAddress
+    ? {
+        line1: businessAddress.street.slice(0, 300),
+        line2: businessAddress.street.slice(300),
+        city: businessAddress.locality,
+        region: businessAddress.region,
+        postalCode: businessAddress.postalCode,
+        country: countryCode(businessAddress.country),
+      }
+    : null;
+  const [profile, setProfile] = useState(
+    initial.current?.profile ?? {
+      ...empty,
+      legalName: businessProfile?.name ?? "",
+      address: addressFromSetup ?? empty.address,
+    },
+  );
   const [files, setFiles] = useState(initialFiles);
   const [note, setNote] = useState("");
   const [findings, setFindings] = useState("");
@@ -292,6 +320,27 @@ export function BillingManager({
                 review. Upload billing documents above, then attach them to the
                 claims they support.
               </p>
+              {addressFromSetup && (
+                <div className="rounded-xl bg-muted p-4 text-sm">
+                  <p className="text-muted-foreground">
+                    {initial.current
+                      ? "Use your saved business address if it is also your billing address."
+                      : "Filled from your business setup. Check the legal name and billing address before saving."}
+                  </p>
+                  {initial.current && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-3"
+                      onClick={() =>
+                        setProfile({ ...profile, address: addressFromSetup })
+                      }
+                    >
+                      Use business address
+                    </Button>
+                  )}
+                </div>
+              )}
               <div className="grid gap-5 sm:grid-cols-2">
                 <Field
                   label="Legal name"
@@ -317,7 +366,6 @@ export function BillingManager({
                     ["city", "City", "address-level2"],
                     ["region", "State, province or region", "address-level1"],
                     ["postalCode", "Postal code", "postal-code"],
-                    ["country", "Billing country (two-letter code)", "country"],
                   ] as const
                 ).map(([key, label, autoComplete]) => (
                   <Field
@@ -325,20 +373,46 @@ export function BillingManager({
                     label={label}
                     id={`billing-${key}`}
                     autoComplete={autoComplete}
-                    maxLength={key === "country" ? 2 : 300}
+                    maxLength={300}
                     value={profile.address[key]}
                     onChange={(value) =>
                       setProfile({
                         ...profile,
                         address: {
                           ...profile.address,
-                          [key]:
-                            key === "country" ? value.toUpperCase() : value,
+                          [key]: value,
                         },
                       })
                     }
                   />
                 ))}
+                <div className="space-y-2">
+                  <Label htmlFor="billing-country">Billing country</Label>
+                  <Select
+                    value={profile.address.country || "unknown"}
+                    onValueChange={(value) =>
+                      setProfile({
+                        ...profile,
+                        address: {
+                          ...profile.address,
+                          country: value === "unknown" ? "" : value,
+                        },
+                      })
+                    }
+                  >
+                    <SelectTrigger id="billing-country" className="w-full">
+                      <SelectValue placeholder="Choose country" />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      <SelectItem value="unknown">Not provided</SelectItem>
+                      {countries.map((country) => (
+                        <SelectItem key={country.code} value={country.code}>
+                          {country.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Field
                   label="Invoice contact name"
                   id="invoice-name"

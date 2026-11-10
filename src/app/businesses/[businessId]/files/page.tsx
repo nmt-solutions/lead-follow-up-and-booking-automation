@@ -31,7 +31,7 @@ export default async function FilesPage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
-          Back to Business profile
+          Back to overview
         </Link>
         <p className="mb-3 text-sm font-medium text-primary wrap-anywhere">
           {state.profile.name}

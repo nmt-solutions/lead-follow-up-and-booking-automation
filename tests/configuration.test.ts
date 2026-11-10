@@ -364,4 +364,51 @@ describe("Business offerings, buyers and Home market", () => {
         ?.specifications,
     ).toBe("鋼".repeat(4000));
   });
+  it("creates a business with its reviewed setup and reuses its address and search area", async () => {
+    const owner = await harness.signIn("onboarding-owner@example.com");
+    const created = await harness.application.createBusiness(owner, {
+      name: "Hudson Steel",
+      offering: steel.offering,
+      homeMarket: steel.homeMarket,
+      website: "",
+      configuration: steel,
+    });
+    await harness.signOut(owner);
+    const returning = await harness.signIn("onboarding-owner@example.com");
+    const saved = await harness.application.getProfile(returning, created.id);
+    expect(saved).toMatchObject({
+      offering: steel.offering,
+      homeMarket: steel.homeMarket,
+      configuration: {
+        address: steel.address,
+        buyerCategories: steel.buyerCategories,
+        homeMarketConfirmedAt: "2026-11-05T09:00:00.000Z",
+        buyersReviewedAt: "2026-11-05T09:00:00.000Z",
+      },
+    });
+    expect(await harness.application.listBusinesses(returning)).toHaveLength(1);
+  });
+
+  it("rejects incomplete or conflicting onboarding before creating any business", async () => {
+    const owner = await harness.signIn("onboarding-invalid@example.com");
+    const input = {
+      name: "Hudson Steel",
+      offering: steel.offering,
+      homeMarket: steel.homeMarket,
+      website: "",
+      configuration: steel,
+    };
+    for (const configuration of [
+      { ...steel, buyersReviewed: false },
+      { ...steel, homeMarketConfirmed: false },
+      { ...steel, offering: "Different product" },
+      { ...steel, homeMarket: "Different area" },
+      { ...steel, buyerCategories: [] },
+    ]) {
+      await expect(
+        harness.application.createBusiness(owner, { ...input, configuration }),
+      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    }
+    expect(await harness.application.listBusinesses(owner)).toEqual([]);
+  });
 });

@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Shared sales inbox" };
+export const metadata = { title: "Sales inbox" };
 export default async function InboxPage({
   params,
 }: PageProps<"/businesses/[businessId]/inbox">) {
@@ -37,24 +37,22 @@ export default async function InboxPage({
           href={`/businesses/${businessId}`}
           className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
-          Back to Business profile
+          Back to overview
         </Link>
         <p className="mb-3 text-sm font-medium text-primary wrap-anywhere">
           {state.profile.name}
         </p>
-        <h1 className="page-title">Shared sales inbox</h1>
+        <h1 className="page-title">Sales inbox</h1>
         <p className="mt-3 text-muted-foreground">
-          Direct inquiries and buying-interest replies from any geography. Each
-          conversation retains its sources. Review purchasing needs and
-          explicitly associate messages across verified channels.
+          Read inquiries and replies from potential customers. Review a
+          conversation to see what they need and choose the next step.
         </p>
       </header>
       <Card>
         <CardHeader>
           <CardTitle>Incoming conversations</CardTitle>
           <CardDescription>
-            Incoming messages require review. Intake does not authorize sending,
-            prices, spending, booking or orders.
+            Review each inquiry before responding or taking a sales action.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -92,9 +90,9 @@ export default async function InboxPage({
             </ul>
           ) : (
             <p className="text-muted-foreground">
-              No incoming inquiries yet. An Owner or Admin can add an import
-              connection below and import a received inquiry. Public discovery
-              signals stay in prospect discovery.
+              No inquiries yet. Connect a sales inbox to receive customer
+              conversations, or ask an owner or admin to import an inquiry
+              below.
             </p>
           )}
         </CardContent>

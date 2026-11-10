@@ -34,7 +34,7 @@ export default async function Notifications({
           href={`/businesses/${businessId}`}
           className="inline-flex min-h-11 items-center text-primary underline"
         >
-          Back to Business
+          Back to overview
         </Link>
         <h1 className="page-title">Notification delivery</h1>
         <p>

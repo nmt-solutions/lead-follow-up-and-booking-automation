@@ -89,6 +89,26 @@ export type ConfigurationInput = z.infer<typeof configurationInputSchema>;
 export type SavedConfiguration = z.infer<typeof savedConfigurationSchema>;
 export type BuyerCategory = z.infer<typeof buyerCategorySchema>;
 
+export function confirmedConfiguration(
+  input: ConfigurationInput,
+  at: Date,
+): SavedConfiguration {
+  const {
+    offering,
+    homeMarket,
+    homeMarketConfirmed,
+    buyersReviewed,
+    ...details
+  } = input;
+  void offering;
+  void homeMarket;
+  return {
+    ...details,
+    homeMarketConfirmedAt: homeMarketConfirmed ? at.toISOString() : null,
+    buyersReviewedAt: buyersReviewed ? at.toISOString() : null,
+  };
+}
+
 // Industry-neutral starting points. These are suggestions, never selected targeting.
 export const buyerSuggestions: readonly BuyerCategory[] = [
   {

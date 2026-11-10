@@ -4,7 +4,7 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { BusinessDataPanel } from "@/components/business-data-panel";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Data export and offboarding" };
+export const metadata = { title: "Export or remove data" };
 export default async function BusinessDataPage({
   params,
 }: PageProps<"/businesses/[businessId]/data">) {
@@ -28,9 +28,9 @@ export default async function BusinessDataPage({
           className="mb-5 inline-flex min-h-11 items-center text-primary underline"
           href={`/businesses/${businessId}`}
         >
-          Back to Business
+          Back to overview
         </Link>
-        <h1 className="page-title">Data export and offboarding</h1>
+        <h1 className="page-title">Export or remove data</h1>
         <p className="mt-3 text-muted-foreground">
           Keep agreed records and review each step of stopping the service.
         </p>
