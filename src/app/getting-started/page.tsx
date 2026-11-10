@@ -75,7 +75,7 @@ const steps = [
     tasks: [
       "Add accurate product or service information, qualification questions, and approved answers.",
       "Review and approve the relevant knowledge revision. Draft or outdated information may not be available to an AI workflow.",
-      "Use Sales approval rules in Business settings to define who may quote, discount, or make a commercial commitment. An AI draft does not grant those permissions.",
+      "Open Sales approval rules in More settings to choose who may quote, discount, or make a commercial commitment. An AI draft does not grant those permissions.",
     ],
     outcome:
       "Your team and enabled AI workflows have approved information to work from.",
@@ -87,7 +87,7 @@ const steps = [
     description:
       "Open Email accounts or Calendar in the sidebar. Connect the services your team needs. WhatsApp setup is in More settings.",
     tasks: [
-      "For email, choose Connect Google or Connect Microsoft. Choose your account and approve access on the provider page. Lead Relay saves the connection and prepares your ordinary sales reply identity.",
+      "For email, choose Connect Google or Connect Microsoft. Choose your account and approve access on the provider page. Lead Relay saves the connection using the email address confirmed by your provider.",
       "Your connection starts with new email. To import older messages or change the selection, open Advanced email settings. Choose the date range and message limit before importing.",
       "For bookings, connect Google Calendar or Microsoft Calendar, approve access, and choose your work calendar. You can change that calendar later.",
       "Check the connection status. A saved account name alone does not mean that reading, sending, or reply capture is ready.",
@@ -168,7 +168,7 @@ const questions = [
   ],
   [
     "How do I leave or export my information?",
-    "Owners and admins can open Export or remove data in Business settings. Export, offboarding, provider consent removal, and subscription cancellation are separate steps. Follow the status shown for each action or contact NMT Solutions for help.",
+    "Owners and admins can open Export or remove data in More settings. Export, ending business access, removing provider permissions, and cancelling a subscription are separate steps. Follow the status shown for each action or contact NMT Solutions for help.",
   ],
 ];
 
