@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { indiaStateCode, validGstin } from "./india-gst";
 
 const field = z.string().trim().max(300);
 // ISO 3166-1 alpha-2 country identifiers; no tax coverage or treatment is implied.
@@ -23,6 +24,7 @@ export const declarationReviewNote =
   "Customer-declared billing details; no independent identity or tax verification.";
 const billingProfileObjectSchema = z.strictObject({
   declaration: billingDeclarationSchema.optional(),
+  indiaTaxTreatment: z.enum(["standard", "needs_review"]).optional(),
   legalName: field,
   registrationNumber: field,
   address: z.strictObject({
@@ -115,13 +117,26 @@ export const billingConfirmSchema = z
         message: "Complete the Indian billing details.",
       });
     if (
+      !indiaStateCode(profile.address.region) ||
+      !/^[1-9][0-9]{5}$/.test(profile.address.postalCode)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Choose a state and enter a six-digit PIN code.",
+      });
+    if (profile.indiaTaxTreatment !== "standard")
+      ctx.addIssue({
+        code: "custom",
+        message: "SEZ and special tax cases need a separate review.",
+      });
+    if (
       profile.taxIdentifierStatus === "provided" &&
       (profile.taxIdentifiers.length !== 1 ||
         profile.taxIdentifiers[0]?.country !== "IN" ||
         profile.taxIdentifiers[0]?.kind !== "GSTIN" ||
-        !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(
-          profile.taxIdentifiers[0]?.value ?? "",
-        ))
+        !validGstin(profile.taxIdentifiers[0]?.value ?? "") ||
+        profile.taxIdentifiers[0]?.value.slice(0, 2) !==
+          indiaStateCode(profile.address.region))
     )
       ctx.addIssue({
         code: "custom",

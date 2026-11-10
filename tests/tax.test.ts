@@ -197,7 +197,15 @@ describe("Subscription tax at the public application seam", () => {
       expectedVersion: 1,
       expectedReviewVersion: 1,
       acceptedTerms: true,
-      profile: facts,
+      profile: {
+        ...facts,
+        indiaTaxTreatment: "standard",
+        address: {
+          ...facts.address,
+          region: "Maharashtra",
+          postalCode: "411001",
+        },
+      },
     });
     await approve(operator, "declaration-tax");
     const input = () => ({

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight, Loader2, LockKeyhole } from "lucide-react";
 import type { BillingProfile, BillingWorkspace } from "@/models/billing";
 import { billingWorkspaceSchema } from "@/models/billing";
+import { indiaStates, indiaStateCode, validGstin } from "@/models/india-gst";
 import {
   paymentActionSchema,
   type PaymentAction,
@@ -76,7 +77,17 @@ export function SubscriptionSetup({
     const data = new FormData(form);
     const text = (key: string) => String(data.get(key) ?? "").trim();
     const gstin = text("gstin").toUpperCase();
+    if (
+      gstin &&
+      (!validGstin(gstin) ||
+        gstin.slice(0, 2) !== indiaStateCode(text("region")))
+    )
+      throw new Error(
+        "Check the GSTIN and choose its registered billing state.",
+      );
     const facts = {
+      indiaTaxTreatment:
+        data.get("standardDomestic") === "on" ? "standard" : "needs_review",
       legalName: text("legalName"),
       registrationNumber: defaults.registrationNumber,
       address: {
@@ -379,12 +390,6 @@ export function SubscriptionSetup({
                 <div className="grid gap-5 sm:grid-cols-2">
                   {[
                     ["city", "City", "Pune", "address-level2"],
-                    [
-                      "region",
-                      "State or union territory",
-                      "Maharashtra",
-                      "address-level1",
-                    ],
                     ["postalCode", "PIN code", "411001", "postal-code"],
                   ].map(([key, label, placeholder, autoComplete]) => (
                     <Field key={key}>
@@ -401,13 +406,34 @@ export function SubscriptionSetup({
                         defaultValue={
                           key === "city"
                             ? defaults.address.city
-                            : key === "region"
-                              ? defaults.address.region
-                              : defaults.address.postalCode
+                            : defaults.address.postalCode
                         }
                       />
                     </Field>
                   ))}
+                  <Field>
+                    <FieldLabel htmlFor="billing-region">
+                      State or union territory
+                    </FieldLabel>
+                    <NativeSelect
+                      id="billing-region"
+                      name="region"
+                      required
+                      autoComplete="address-level1"
+                      defaultValue={
+                        indiaStateCode(defaults.address.region) ?? ""
+                      }
+                    >
+                      <option value="" disabled>
+                        Choose your state
+                      </option>
+                      {indiaStates.map((state) => (
+                        <option key={state.code} value={state.code}>
+                          {state.name}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
                   <Field>
                     <FieldLabel>Country</FieldLabel>
                     <Input
@@ -475,12 +501,17 @@ export function SubscriptionSetup({
                   </p>
                 </Field>
                 <Field orientation="horizontal">
-                  <Checkbox id="billing-accuracy" required />
+                  <Checkbox
+                    id="billing-accuracy"
+                    name="standardDomestic"
+                    required
+                  />
                   <FieldLabel
                     htmlFor="billing-accuracy"
                     className="text-sm leading-6"
                   >
-                    I confirm these billing details are accurate and accept the{" "}
+                    These details are accurate. This is not an SEZ purchase or a
+                    claim for special GST treatment. I accept the{" "}
                     <Link
                       className="underline"
                       href="/terms"
@@ -492,6 +523,13 @@ export function SubscriptionSetup({
                     .
                   </FieldLabel>
                 </Field>
+                <p className="text-xs leading-6 text-muted-foreground">
+                  For an SEZ purchase or another special GST case,{" "}
+                  <Link href="/contact" className="text-primary underline">
+                    contact us
+                  </Link>{" "}
+                  before paying.
+                </p>
                 {!available && (
                   <Alert>
                     <AlertDescription>

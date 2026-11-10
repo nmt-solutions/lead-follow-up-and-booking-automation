@@ -1,5 +1,6 @@
 import type { BillingWorkspace } from "../models/billing";
 import { hasBillingDeclaration } from "../models/billing";
+import { indiaStateCode } from "../models/india-gst";
 import type {
   TaxCalculation,
   TaxCalculationInput,
@@ -78,7 +79,11 @@ export function evaluateTax(
         (!rule.effectiveUntil || new Date(rule.effectiveUntil) > at) &&
         rule.customerCountry === profile?.address.country &&
         (rule.customerRegion === null ||
-          rule.customerRegion === profile.address.region) &&
+          rule.customerRegion === profile.address.region ||
+          (rule.customerCountry === "IN" &&
+            indiaStateCode(rule.customerRegion) !== null &&
+            indiaStateCode(rule.customerRegion) ===
+              indiaStateCode(profile.address.region))) &&
         rule.buyerStatus === profile.businessStatus &&
         rule.currency === input.currency &&
         rule.productCode === line.productCode

@@ -46,6 +46,7 @@ describe("Production subscription launch boundaries", () => {
   });
   it("does not accept key presence as evidence of a promoted worker or verified seller", () => {
     const issues = productionSubscriptionIssues({
+      SELLER_PUBLIC_PROFILE: "{}",
       TRIGGER_SECRET_KEY: "tr_prod_fixture",
       TRIGGER_PROJECT_REF: "proj_fixture",
       TRIGGER_PAYMENT_RECOVERY_CRON: "* * * * *",

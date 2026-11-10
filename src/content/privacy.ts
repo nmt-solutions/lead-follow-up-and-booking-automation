@@ -1,12 +1,14 @@
 import type { PolicySection } from "@/components/policy-document";
+import { sellerDetails } from "./seller";
 
 export const privacySections: PolicySection[] = [
   {
     id: "who-we-are",
     title: "Who we are",
     paragraphs: [
-      "Lead Relay is a prospect discovery and sales follow-up service operated by NMT Solutions OPC PVT LTD, India. This policy covers leadrelay.nmtsolutions.in and the Lead Relay service. It explains how we handle information about business users, team members, prospects, and people who contact our customers.",
+      `Lead Relay is a prospect discovery and sales follow-up service operated by ${sellerDetails.legalName}, India. Our registered address is ${sellerDetails.address}. CIN: ${sellerDetails.cin}. This policy covers leadrelay.nmtsolutions.in and the Lead Relay service. It explains how we handle information about business users, team members, prospects, and people who contact our customers.`,
       "For privacy questions or requests, email wafa.khan@nmtsolutions.in. Include the business name and enough information for us to find the relevant record. Do not email passwords, authenticator codes, payment credentials, or private access tokens.",
+      `Our designated grievance officer is ${sellerDetails.grievanceOfficer}, Director. Contact ${sellerDetails.grievanceEmail} or ${sellerDetails.phone}. We acknowledge grievances within 48 hours and aim to resolve them within one month.`,
     ],
   },
   {

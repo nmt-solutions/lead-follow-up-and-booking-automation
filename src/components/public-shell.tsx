@@ -17,7 +17,7 @@ export function PublicFooter() {
             target="_blank"
             rel="noreferrer"
           >
-            NMT Solutions OPC PVT LTD
+            {seller?.legalName ?? "NMT Solutions (OPC) Private Limited"}
           </a>
         </p>
         {seller && (

@@ -181,6 +181,8 @@ export function BillingManager({
     }
   }
   async function save() {
+    const { declaration: priorDeclaration, ...editableProfile } = profile;
+    void priorDeclaration;
     const input = operator
       ? billingReviewInputSchema.safeParse({
           expectedVersion: state.version,
@@ -194,7 +196,7 @@ export function BillingManager({
         })
       : billingSaveSchema.safeParse({
           expectedVersion: state.version,
-          profile,
+          profile: editableProfile,
           note,
         });
     if (!input.success) {

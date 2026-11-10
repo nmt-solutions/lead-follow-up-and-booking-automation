@@ -25,6 +25,7 @@ describe("Business billing profiles at the application seam", () => {
   afterEach(async () => h?.close());
 
   const details = {
+    indiaTaxTreatment: "standard",
     legalName: "Example legal entity",
     registrationNumber: "",
     address: {

@@ -4,6 +4,8 @@ import { publishedOffers, type PlanId } from "../content/plans";
 import type { SubscriptionOffer } from "../models/subscription-quotes";
 import { razorpayAccountReviewSchema } from "../models/razorpay-account";
 import { lifecyclePolicySchema } from "../models/subscription-lifecycle";
+import { sellerDetails } from "../content/seller";
+import { validGstin } from "../models/india-gst";
 
 export const sellerPublicProfileSchema = z
   .strictObject({
@@ -17,17 +19,19 @@ export const sellerPublicProfileSchema = z
     gstStatus: z.enum(["registered", "not_registered"]),
     gstin: z.string().trim().max(30),
   })
-  .refine(
-    (value) =>
-      value.gstStatus !== "registered" ||
-      /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(value.gstin),
+  .refine((value) =>
+    value.gstStatus === "registered"
+      ? validGstin(value.gstin)
+      : value.gstin === "",
   );
 export function sellerPublicProfile(
   env: Record<string, string | undefined> = process.env,
 ) {
   try {
     return sellerPublicProfileSchema.parse(
-      JSON.parse(env.SELLER_PUBLIC_PROFILE ?? "null"),
+      env.SELLER_PUBLIC_PROFILE
+        ? JSON.parse(env.SELLER_PUBLIC_PROFILE)
+        : sellerDetails,
     );
   } catch {
     return null;

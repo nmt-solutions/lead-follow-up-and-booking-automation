@@ -30,7 +30,7 @@ export default function ContactPage() {
         <Card>
           <CardContent className="flex flex-col gap-5 p-6 sm:p-8">
             <h2 className="font-display text-xl">
-              {seller?.legalName ?? "NMT Solutions OPC PVT LTD"}
+              {seller?.legalName ?? "NMT Solutions (OPC) Private Limited"}
             </h2>
             {seller ? (
               <>
@@ -46,7 +46,7 @@ export default function ContactPage() {
                     : ""}
                 </p>
                 <p className="text-sm leading-7">
-                  Grievance contact: {seller.grievanceOfficer} ·{" "}
+                  Grievance officer: {seller.grievanceOfficer} (Director) ·{" "}
                   <a
                     className="text-primary underline"
                     href={`mailto:${seller.grievanceEmail}`}

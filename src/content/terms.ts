@@ -1,11 +1,12 @@
 import type { PolicySection } from "@/components/policy-document";
+import { sellerDetails } from "./seller";
 
 export const termsSections: PolicySection[] = [
   {
     id: "agreement",
     title: "Using Lead Relay",
     paragraphs: [
-      "These terms govern your use of Lead Relay at leadrelay.nmtsolutions.in, operated by NMT Solutions OPC PVT LTD, India. By using the service, you agree to these terms. If you use Lead Relay for a business, you confirm that you are authorized to act for that business.",
+      `These terms govern your use of Lead Relay at leadrelay.nmtsolutions.in, operated by ${sellerDetails.legalName}, India. Registered address: ${sellerDetails.address}. CIN: ${sellerDetails.cin}. GSTIN: ${sellerDetails.gstin}. By using the service, you agree to these terms. If you use Lead Relay for a business, you confirm that you are authorized to act for that business.`,
       "You must be at least 18 years old and provide accurate account and business information. Our privacy policy explains how we handle personal information. A separate signed agreement or accepted order can set additional commercial terms for your subscription.",
     ],
   },
@@ -104,7 +105,7 @@ export const termsSections: PolicySection[] = [
     title: "Changes and contact",
     paragraphs: [
       "We may update these terms as the service changes. We will post the updated version here and provide additional notice when law or an applicable agreement requires it. Continued use after changes take effect is subject to the updated terms, except where a further agreement is legally required.",
-      "For service, billing, or legal questions, contact NMT Solutions OPC PVT LTD at wafa.khan@nmtsolutions.in.",
+      `For service, billing or legal questions, contact ${sellerDetails.legalName} at ${sellerDetails.supportEmail} or ${sellerDetails.phone}. Our designated grievance officer is ${sellerDetails.grievanceOfficer}, Director, reachable at the same contact details.`,
     ],
   },
 ];
