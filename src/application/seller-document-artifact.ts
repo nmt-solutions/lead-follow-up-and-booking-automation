@@ -1,5 +1,6 @@
 import type { DocumentSnapshot } from "../models/seller-documents";
 import { formatTaxMoney } from "../models/tax";
+import { renderIndiaInvoice } from "./india-invoice-artifact";
 
 /** Deterministic UTF-8 attachment. A template version never changes after issuance. */
 export function renderSellerDocument(document: {
@@ -12,6 +13,8 @@ export function renderSellerDocument(document: {
 }) {
   const s = document.snapshot,
     c = s.issuer.revision.configuration;
+  if (c.template.format === "india_gst_text_v2")
+    return renderIndiaInvoice(document);
   const money = (v: string) => formatTaxMoney(v, s.currency);
   const customer = s.financial.tax.billing.current!.profile;
   const lines = [

@@ -139,3 +139,21 @@ export function indiaIssuerDraft(at: Date) {
     ],
   });
 }
+
+/** Versioned customer-facing format, selected only after the merchant facts are confirmed. */
+export function indiaIssuerConfiguration(at: Date) {
+  const draft = indiaIssuerDraft(at);
+  return issuerConfigurationSchema.parse({
+    ...draft,
+    template: { ...draft.template, format: "india_gst_text_v2" },
+    evidence: [
+      draft.evidence[0],
+      {
+        title: "Domestic invoice configuration",
+        reference:
+          "Standard domestic GST configuration released at the account holder's request. Merchant scheme and e-invoice applicability declarations are retained in the private release record. This is not a GST return filing or remittance.",
+        checkedAt: at.toISOString(),
+      },
+    ],
+  });
+}

@@ -157,6 +157,52 @@ describe("Seller documents at the public application seam", () => {
       note: "Synthetic exact approval",
     });
   }
+  it("issues a private India GST v2 invoice with local dates and original credit-note references", async () => {
+    const f = await reviewedPurchase(),
+      op = await operator(),
+      { app, storage } = compose();
+    await approve(app, op, {
+      ...issuer,
+      legalFields: [
+        ...issuer.legalFields,
+        { label: "SAC", value: "998315" },
+        { label: "Reverse charge", value: "No" },
+      ],
+      template: { ...issuer.template, format: "india_gst_text_v2" },
+    });
+    const invoice = await app.issue(f.owner, f.business.id, {
+      periodId: f.period.id,
+      requestKey: randomUUID(),
+    });
+    expect(invoice.artifact.state).toBe("ready");
+    const artifact = [...storage.objects.values()][0];
+    const body = new TextDecoder().decode(artifact.bytes);
+    expect(body).toContain("Issue date (India): 2026-11-05");
+    expect(body).toContain("SAC 998315");
+    expect(body).toContain("Place of supply:");
+    expect(body).toContain("Total: INR 110.06");
+    expect(body).not.toContain("Issued by:");
+    expect(body).not.toContain("Issuer configuration:");
+    expect(body).not.toContain("Tax rule:");
+    expect(body).not.toContain("Seller review:");
+    expect(body).not.toContain("Customer evidence:");
+    const credit = await app.adjust(op, f.business.id, {
+      invoiceId: invoice.id,
+      periodId: f.period.id,
+      paymentId: f.period.paymentId,
+      requestKey: randomUUID(),
+      adjustmentId: randomUUID(),
+      source: { kind: "manual", reference: "fixture-credit" },
+      reason: "Fixture billing correction",
+      evidence: ["fixture:credit-approval"],
+      lines: [{ lineId: invoice.snapshot.lines[0].input.id, netMinor: "100" }],
+    });
+    const creditArtifact = [...storage.objects.values()][1];
+    expect(new TextDecoder().decode(creditArtifact.bytes)).toContain(
+      "Original invoice date (India): 2026-11-05",
+    );
+    expect(credit.snapshot.original?.at).toBe(invoice.at);
+  });
   it("requires a current document operator with MFA and records exact-version issuer approval", async () => {
     const op = await operator(),
       { app } = compose();

@@ -646,7 +646,7 @@ function IssuerForm({
           {select(
             "format",
             "Artifact format",
-            ["text_v1"],
+            ["text_v1", "india_gst_text_v2"],
             seed?.template.format,
           )}
           {field("invoice-title", "Invoice title", seed?.template.invoiceTitle)}

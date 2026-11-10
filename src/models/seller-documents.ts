@@ -59,7 +59,7 @@ export const issuerConfigurationSchema = z
       .min(1)
       .max(2),
     template: z.strictObject({
-      format: z.literal("text_v1"),
+      format: z.enum(["text_v1", "india_gst_text_v2"]),
       invoiceTitle: text,
       creditTitle: text,
       footer: text,
@@ -189,7 +189,12 @@ export const documentSnapshotSchema = z.object({
   lines: taxCalculationSchema.shape.lines,
   totals: taxCalculationSchema.shape.totals.unwrap(),
   original: z
-    .object({ id: z.uuid(), number: z.string(), issuer: issuerSnapshotSchema })
+    .object({
+      id: z.uuid(),
+      number: z.string(),
+      issuer: issuerSnapshotSchema,
+      at: z.iso.datetime().optional(),
+    })
     .nullable(),
   adjustment: z
     .object(adjustDocumentSchema.shape)

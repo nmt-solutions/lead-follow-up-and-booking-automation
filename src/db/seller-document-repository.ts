@@ -502,6 +502,7 @@ export function createSellerDocumentRepository(database: Database) {
                 id: original.id,
                 number: original.number,
                 issuer: original.snapshot.issuer,
+                at: original.at.toISOString(),
               },
               adjustment: {
                 ...adjustment,
