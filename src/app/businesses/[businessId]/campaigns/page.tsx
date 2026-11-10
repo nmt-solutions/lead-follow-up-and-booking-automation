@@ -1,11 +1,12 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { CampaignManager } from "@/components/campaign-manager";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "First-outreach campaigns" };
+export const metadata = { title: "Outreach" };
 export default async function CampaignsPage({
   params,
 }: PageProps<"/businesses/[businessId]/campaigns">) {
@@ -24,20 +25,16 @@ export default async function CampaignsPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to overview
-        </Link>
-        <h1 className="page-title">First-outreach campaigns</h1>
-        <p className="mt-3 text-muted-foreground">
-          Review sourced recipients and a bounded message plan before first
-          contact. Approval, current permission and execution remain separate.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Outreach</>}
+        description={
+          <>
+            Choose recipients, prepare messages, and review the campaign before
+            it runs.
+          </>
+        }
+      ></PageHeader>
       <CampaignManager
         businessId={businessId}
         initialState={state.campaigns}

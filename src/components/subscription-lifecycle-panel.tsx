@@ -60,7 +60,7 @@ export function SubscriptionLifecyclePanel({
       (l.provider.currentEnd && new Date(l.provider.currentEnd) > new Date()));
   return (
     <section
-      className="space-y-4 rounded-xl border border-border p-4 wrap-anywhere"
+      className="flex flex-col gap-4 rounded-xl border border-border p-4 wrap-anywhere"
       aria-label="Subscription lifecycle"
     >
       <div className="flex flex-wrap items-center gap-3">
@@ -192,7 +192,7 @@ export function SubscriptionLifecyclePanel({
           <summary className="min-h-11 cursor-pointer py-3 text-primary">
             Subscription notifications
           </summary>
-          <ul className="space-y-3">
+          <ul className="flex flex-col gap-3">
             {action.lifecycleEvents
               .filter((e) => e.notice)
               .toReversed()

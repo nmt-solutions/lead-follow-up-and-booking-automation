@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { WhatsAppManualAssociation } from "@/components/whatsapp-manual-association";
 import {
@@ -75,36 +76,34 @@ export default async function ConversationPage({
       }
     })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8 wrap-anywhere">
-      <header>
-        <Link
-          href={`/businesses/${businessId}/inbox`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to shared inbox
-        </Link>
-        <h1 className="page-title">{conversation.subject}</h1>
+    <div className="flex flex-col mx-auto max-w-4xl gap-8 wrap-anywhere">
+      <PageHeader
+        title={<>{conversation.subject}</>}
+        description={
+          <>
+            {conversation.connection.label} · {conversation.connection.channel}{" "}
+            ·
+            {conversation.connection.mode === "meta"
+              ? "Signed Meta intake"
+              : "Received-message import"}
+            {!conversation.connection.active &&
+              " · Import revoked; history available"}
+          </>
+        }
+      >
         <Link
           href={`/businesses/${businessId}/email-eligibility`}
           className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Review email eligibility and record an opt-out
         </Link>
-        <p className="mt-3 text-muted-foreground">
-          {conversation.connection.label} · {conversation.connection.channel} ·
-          {conversation.connection.mode === "meta"
-            ? "Signed Meta intake"
-            : "Received-message import"}
-          {!conversation.connection.active &&
-            " · Import revoked; history available"}
-        </p>
-      </header>
+      </PageHeader>
       {conversation.association.reviewReason && (
         <Card>
           <CardHeader>
             <CardTitle>Association review needed</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="flex flex-col gap-3">
             <p>{conversation.association.reviewReason}</p>
             <p>
               Responsible person: {conversation.association.reviewOwnerName} (
@@ -121,7 +120,7 @@ export default async function ConversationPage({
           <CardHeader>
             <CardTitle>Buyer</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="flex flex-col gap-3">
             <Badge>Engaged lead</Badge>
             <p className="font-medium">{conversation.buyer.name}</p>
             <p>{conversation.buyer.senderRef}</p>
@@ -135,7 +134,7 @@ export default async function ConversationPage({
             <CardTitle>Original intake Opportunity</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="space-y-3">
+            <dl className="flex flex-col gap-3">
               {[
                 ["Stage", "Inquiry"],
                 [
@@ -157,7 +156,7 @@ export default async function ConversationPage({
           </CardContent>
         </Card>
       </div>
-      <section aria-labelledby="buyer-needs" className="space-y-4">
+      <section aria-labelledby="buyer-needs" className="flex flex-col gap-4">
         <h2 id="buyer-needs" className="text-xl font-semibold">
           Purchasing needs for {conversation.buyer.name}
         </h2>
@@ -171,7 +170,7 @@ export default async function ConversationPage({
               <CardHeader>
                 <CardTitle>{need.title}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="flex flex-col gap-2">
                 <Badge>
                   {need.id === conversation.association.defaultOpportunityId
                     ? "Conversation default"
@@ -200,7 +199,7 @@ export default async function ConversationPage({
                 <OpportunityHistory entries={need.history} />
                 <DiscoverySources sources={need.sources} />
                 <section
-                  className="space-y-3 border-t pt-4"
+                  className="flex flex-col gap-3 border-t pt-4"
                   aria-label="Human calls"
                 >
                   <h3 className="font-semibold">Human calls</h3>
@@ -250,7 +249,7 @@ export default async function ConversationPage({
           ))}
         </div>
         <h3 className="font-semibold">This buyer&apos;s conversations</h3>
-        <ul className="space-y-2">
+        <ul className="flex flex-col gap-2">
           {conversation.buyerConversations.map((item) => (
             <li key={item.id}>
               <Link
@@ -270,9 +269,12 @@ export default async function ConversationPage({
         conversation={conversation}
         workspace={workspace}
       />
-      <section aria-labelledby="messages-title" className="space-y-4">
+      <section aria-labelledby="messages-title" className="flex flex-col gap-4">
         {conversation.manualReplies.length > 0 && (
-          <section aria-label="Observed manual replies" className="space-y-4">
+          <section
+            aria-label="Observed manual replies"
+            className="flex flex-col gap-4"
+          >
             <h2 className="text-xl font-semibold">Observed manual replies</h2>
             <p className="text-sm text-muted-foreground">
               Observed only within the selected channel and time bounds. A reply
@@ -325,7 +327,7 @@ export default async function ConversationPage({
           Message content is untrusted correspondence. Sending and commercial
           actions require their own eligibility and authority checks.
         </p>
-        <ol className="space-y-4">
+        <ol className="flex flex-col gap-4">
           {conversation.messages.map((message, index) => (
             <li key={message.id}>
               <Card>
@@ -359,7 +361,7 @@ export default async function ConversationPage({
                     <summary className="min-h-11 cursor-pointer py-3 font-medium">
                       Source provenance
                     </summary>
-                    <dl className="space-y-2 text-muted-foreground">
+                    <dl className="flex flex-col gap-2 text-muted-foreground">
                       {[
                         ["Event", message.eventId],
                         ["Message", message.messageRef],
@@ -383,7 +385,10 @@ export default async function ConversationPage({
           ))}
         </ol>
       </section>
-      <section aria-labelledby="association-history" className="space-y-4">
+      <section
+        aria-labelledby="association-history"
+        className="flex flex-col gap-4"
+      >
         <h2 id="association-history" className="text-xl font-semibold">
           Association history
         </h2>
@@ -393,11 +398,11 @@ export default async function ConversationPage({
           identities remain attached.
         </p>
         {conversation.history.length ? (
-          <ol className="space-y-4">
+          <ol className="flex flex-col gap-4">
             {conversation.history.map((entry) => (
               <li key={entry.id}>
                 <Card>
-                  <CardContent className="space-y-2 pt-6">
+                  <CardContent className="flex flex-col gap-2 pt-6">
                     <p className="font-medium">{entry.reason}</p>
                     <p className="text-sm text-muted-foreground">
                       By {entry.actorId} ·{" "}
@@ -414,7 +419,7 @@ export default async function ConversationPage({
                       <summary className="min-h-11 cursor-pointer py-3">
                         Association changes
                       </summary>
-                      <div className="space-y-2 text-sm">
+                      <div className="flex flex-col gap-2 text-sm">
                         <p>
                           Buyer: {entry.before.buyerId} → {entry.after.buyerId}
                         </p>
@@ -457,9 +462,9 @@ function DiscoverySources({ sources }: { sources: InboxDiscoverySource[] }) {
       <summary className="min-h-11 cursor-pointer py-3 font-medium">
         Retained discovery evidence
       </summary>
-      <ul className="space-y-4">
+      <ul className="flex flex-col gap-4">
         {sources.map((source) => (
-          <li key={source.observationId} className="space-y-2">
+          <li key={source.observationId} className="flex flex-col gap-2">
             <p className="font-medium">
               {source.name}: {source.matchReason}
             </p>
@@ -502,9 +507,9 @@ function OpportunityHistory({
         Ownership and outcome history
       </summary>
       {entries.length ? (
-        <ol className="space-y-3">
+        <ol className="flex flex-col gap-3">
           {entries.map((entry) => (
-            <li key={entry.id} className="space-y-1">
+            <li key={entry.id} className="flex flex-col gap-1">
               <p className="font-medium">
                 {entry.kind.replaceAll("_", " ")}: {entry.detail}
               </p>

@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -27,31 +28,18 @@ export default async function CallsPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8 wrap-anywhere">
-      <header>
-        <Link
-          href={`/businesses/${businessId}/inbox`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to shared inbox
-        </Link>
-        <p className="mb-3 text-sm font-medium text-primary">
-          {state.profile.name}
-        </p>
-        <h1 className="page-title">Human calls</h1>
-        <p className="mt-3 font-medium">
-          {state.calls.buyerName} · {state.calls.opportunityTitle}
-        </p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Opportunity {opportunityId}
-        </p>
-        <p className="mt-3 text-muted-foreground">
-          Record human-led calls and attempts with written notes. A logged call
-          does not confirm a sale, issue a quote, accept an order or confirm an
-          appointment. No call is placed, message sent or audio captured by this
-          form.
-        </p>
-      </header>
+    <div className="flex flex-col mx-auto max-w-3xl gap-8 wrap-anywhere">
+      <PageHeader
+        title={<>Human calls</>}
+        description={
+          <>
+            Record human-led calls and attempts with written notes. A logged
+            call does not confirm a sale, issue a quote, accept an order or
+            confirm an appointment. No call is placed, message sent or audio
+            captured by this form.
+          </>
+        }
+      ></PageHeader>
       <CallManager businessId={businessId} initialState={state.calls} />
     </div>
   );

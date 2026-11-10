@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -25,26 +26,23 @@ export default async function BillingReviewPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href="/platform/billing"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to evidence review queue
-        </Link>
-        <h1 className="page-title">Review billing evidence</h1>
+    <div className="app-page">
+      <PageHeader
+        title={<>Review billing evidence</>}
+        description={
+          <>
+            {data.state.current?.profile.legalName || "Legal name missing"} ·
+            Business {businessId}
+          </>
+        }
+      >
         <Link
           href={`/platform/tax/${businessId}`}
           className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Review this Business’s tax calculations
         </Link>
-        <p className="mt-3 text-muted-foreground wrap-anywhere">
-          {data.state.current?.profile.legalName || "Legal name missing"} ·
-          Business {businessId}
-        </p>
-      </header>
+      </PageHeader>
       <BillingManager
         businessId={businessId}
         initial={data.state}

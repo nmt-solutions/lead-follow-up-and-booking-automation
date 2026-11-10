@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import {
@@ -109,7 +110,7 @@ export function SecurityManager({
   function verifyForm(recovery: boolean) {
     return (
       <form
-        className="space-y-4"
+        className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault();
           const code = String(
@@ -131,41 +132,45 @@ export function SecurityManager({
           });
         }}
       >
-        <div className="space-y-2">
-          <Label htmlFor={recovery ? "recovery-code" : "authenticator-code"}>
-            {recovery ? "Recovery code" : "Authenticator code"}
-          </Label>
-          <Input
-            id={recovery ? "recovery-code" : "authenticator-code"}
-            name="code"
-            type={recovery ? "password" : "text"}
-            inputMode={recovery ? "text" : "numeric"}
-            autoComplete={recovery ? "off" : "one-time-code"}
-            pattern={recovery ? "[A-Za-z0-9]{5}-[A-Za-z0-9]{5}" : "[0-9]{6}"}
-            maxLength={recovery ? 11 : 6}
-            minLength={recovery ? 11 : 6}
-            required
-            disabled={pending}
-            aria-describedby={recovery ? "recovery-hint" : "authenticator-hint"}
-            className="font-mono text-lg tracking-widest"
-          />
-          <p
-            id={recovery ? "recovery-hint" : "authenticator-hint"}
-            className="text-sm text-muted-foreground"
-          >
-            {recovery
-              ? "Enter one unused code, including the hyphen. Each code works once."
-              : "Enter the six-digit code from your authenticator app."}
-          </p>
-        </div>
-        <Button type="submit" disabled={pending}>
-          <ShieldCheck aria-hidden="true" />
-          {pending
-            ? "Verifying…"
-            : recovery
-              ? "Use recovery code"
-              : "Verify authenticator"}
-        </Button>
+        <FieldGroup className="gap-4">
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={recovery ? "recovery-code" : "authenticator-code"}>
+              {recovery ? "Recovery code" : "Authenticator code"}
+            </Label>
+            <Input
+              id={recovery ? "recovery-code" : "authenticator-code"}
+              name="code"
+              type={recovery ? "password" : "text"}
+              inputMode={recovery ? "text" : "numeric"}
+              autoComplete={recovery ? "off" : "one-time-code"}
+              pattern={recovery ? "[A-Za-z0-9]{5}-[A-Za-z0-9]{5}" : "[0-9]{6}"}
+              maxLength={recovery ? 11 : 6}
+              minLength={recovery ? 11 : 6}
+              required
+              disabled={pending}
+              aria-describedby={
+                recovery ? "recovery-hint" : "authenticator-hint"
+              }
+              className="font-mono text-lg tracking-widest"
+            />
+            <p
+              id={recovery ? "recovery-hint" : "authenticator-hint"}
+              className="text-sm text-muted-foreground"
+            >
+              {recovery
+                ? "Enter one unused code, including the hyphen. Each code works once."
+                : "Enter the six-digit code from your authenticator app."}
+            </p>
+          </Field>
+          <Button type="submit" disabled={pending}>
+            <ShieldCheck aria-hidden="true" />
+            {pending
+              ? "Verifying…"
+              : recovery
+                ? "Use recovery code"
+                : "Verify authenticator"}
+          </Button>
+        </FieldGroup>
       </form>
     );
   }
@@ -174,7 +179,7 @@ export function SecurityManager({
       className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
       aria-busy={pending}
     >
-      <div className="min-w-0 space-y-6">
+      <div className="flex flex-col min-w-0 gap-6">
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -199,7 +204,7 @@ export function SecurityManager({
               recovery code before using protected capabilities.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="flex flex-col gap-6">
             <dl className="grid gap-4 rounded-xl bg-muted p-4 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-muted-foreground">Authenticator</dt>
@@ -221,7 +226,7 @@ export function SecurityManager({
               </div>
             </dl>
             {!status.enrolled && !setupKey && (
-              <div className="space-y-5">
+              <div className="flex flex-col gap-5">
                 <p className="text-sm leading-relaxed text-muted-foreground">
                   Add this account to an authenticator app, then save your
                   recovery codes somewhere private. Your email sign-in link
@@ -255,8 +260,8 @@ export function SecurityManager({
               </div>
             )}
             {setupKey && (
-              <div className="space-y-5">
-                <div className="space-y-3">
+              <div className="flex flex-col gap-5">
+                <Field className="flex flex-col gap-3">
                   <h3 className="font-semibold">Add your account</h3>
                   <p className="text-sm leading-relaxed text-muted-foreground">
                     In your authenticator app, choose to enter a setup key. Use{" "}
@@ -283,7 +288,7 @@ export function SecurityManager({
                     <Copy aria-hidden="true" />
                     Copy setup key
                   </Button>
-                </div>
+                </Field>
                 {verifyForm(false)}
               </div>
             )}
@@ -320,7 +325,7 @@ export function SecurityManager({
                 leave.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="flex flex-col gap-5">
               <ul
                 aria-label="Recovery codes"
                 className="grid gap-2 rounded-xl bg-muted p-4 font-mono text-sm sm:grid-cols-2"
@@ -364,7 +369,7 @@ export function SecurityManager({
         <div
           ref={feedback}
           tabIndex={-1}
-          className="space-y-3 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
+          className="flex flex-col gap-3 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
         >
           {error && (
             <Alert variant="destructive">
@@ -469,7 +474,7 @@ export function SecurityManager({
           </Card>
         )}
       </div>
-      <aside className="space-y-5 rounded-2xl border border-border bg-card p-6 text-sm leading-relaxed">
+      <aside className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 text-sm leading-relaxed">
         <ShieldCheck className="size-6 text-primary" aria-hidden="true" />
         <h2 className="text-base font-semibold">Your access, explained</h2>
         <p className="text-muted-foreground">

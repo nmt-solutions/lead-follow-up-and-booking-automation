@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -19,20 +20,16 @@ export default async function Page({
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}/whatsapp`}
-          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to WhatsApp identity
-        </Link>
-        <h1 className="page-title mt-5">WhatsApp messages</h1>
-        <p className="mt-3 text-muted-foreground">
-          Review recipient permission, exact messages and saved outcomes. Your
-          Business pays Meta separately.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>WhatsApp messages</>}
+        description={
+          <>
+            Review recipient permission, exact messages and saved outcomes. Your
+            Business pays Meta separately.
+          </>
+        }
+      ></PageHeader>
       <WhatsAppSendingManager businessId={businessId} initialState={state} />
     </div>
   );

@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -138,11 +139,10 @@ export function MailboxManager({
     }
   }
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <p className="text-muted-foreground">
-        Select the sales mail this Business may process. Reading and sending are
-        separate requests; provider authorization is checked separately.
-        Calendar permissions have no effect here.
+        Choose the sales mail LeadRelay can process. Review read and send
+        permissions separately before connecting an account.
       </p>
       {state.providerMode === "unconfigured" && (
         <Alert>
@@ -201,7 +201,7 @@ export function MailboxManager({
               boundary: {new Date(mailbox.incrementalSince).toLocaleString()}
             </p>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="flex flex-col gap-5">
             {mailbox.provider === "microsoft" && state.canManage && (
               <MicrosoftMailConnection
                 businessId={businessId}
@@ -387,7 +387,7 @@ export function MailboxManager({
                 </Button>
               </div>
             )}
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <h3 className="font-semibold">Sync and import activity</h3>
               {mailbox.jobs.length === 0 && (
                 <p className="text-sm text-muted-foreground">
@@ -401,7 +401,7 @@ export function MailboxManager({
               {mailbox.jobs.map((job) => (
                 <div
                   key={job.id}
-                  className="space-y-2 rounded-xl border border-border p-4"
+                  className="flex flex-col gap-2 rounded-xl border border-border p-4"
                 >
                   <p>
                     <Badge>{job.status}</Badge>{" "}
@@ -529,203 +529,208 @@ function MailboxForm({
     await onSave(parsed.data);
   }
   return (
-    <form onSubmit={submit} className="space-y-5">
-      <fieldset disabled={disabled} className="space-y-5">
-        <legend className="mb-3 font-semibold">
-          {mailbox ? "Processing selection" : "New mailbox selection"}
-        </legend>
-        {!mailbox && (
-          <div className="space-y-2">
-            <Label htmlFor={`${prefix}-connection`}>
-              Business mailbox identity
-            </Label>
-            <NativeSelect
-              id={`${prefix}-connection`}
-              name="connectionId"
-              required
-              defaultValue=""
-            >
-              <option value="" disabled>
-                Choose a mailbox
-              </option>
-              {state.connections
-                .filter(
-                  (c) =>
-                    !state.mailboxes.some(
-                      (m) => m.configuration.connectionId === c.id,
-                    ),
-                )
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label} · {c.account}
-                  </option>
-                ))}
-            </NativeSelect>
+    <form onSubmit={submit} className="flex flex-col gap-5">
+      <FieldGroup className="gap-5">
+        <fieldset disabled={disabled} className="flex flex-col gap-5">
+          <legend className="mb-3 font-semibold">
+            {mailbox ? "Processing selection" : "New mailbox selection"}
+          </legend>
+          {!mailbox && (
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`${prefix}-connection`}>
+                Business mailbox identity
+              </Label>
+              <NativeSelect
+                id={`${prefix}-connection`}
+                name="connectionId"
+                required
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Choose a mailbox
+                </option>
+                {state.connections
+                  .filter(
+                    (c) =>
+                      !state.mailboxes.some(
+                        (m) => m.configuration.connectionId === c.id,
+                      ),
+                  )
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label} · {c.account}
+                    </option>
+                  ))}
+              </NativeSelect>
+            </Field>
+          )}
+          <div className="flex flex-col gap-1">
+            {[
+              ["enabled", "Process this mailbox", config?.enabled ?? true],
+              [
+                "read",
+                "Request reading of selected sales mail",
+                config?.requestedRead ?? false,
+              ],
+              [
+                "send",
+                "Request sending permission separately",
+                config?.requestedSend ?? false,
+              ],
+            ].map(([name, label, checked]) => (
+              <label
+                key={String(name)}
+                className="flex min-h-11 items-center gap-3"
+              >
+                <input
+                  type="checkbox"
+                  name={String(name)}
+                  defaultChecked={Boolean(checked)}
+                  className="size-5 accent-primary"
+                />
+                {String(label)}
+              </label>
+            ))}
           </div>
-        )}
-        <div className="space-y-1">
-          {[
-            ["enabled", "Process this mailbox", config?.enabled ?? true],
-            [
-              "read",
-              "Request reading of selected sales mail",
-              config?.requestedRead ?? false,
-            ],
-            [
-              "send",
-              "Request sending permission separately",
-              config?.requestedSend ?? false,
-            ],
-          ].map(([name, label, checked]) => (
-            <label
-              key={String(name)}
-              className="flex min-h-11 items-center gap-3"
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-scope`}>Mail to process</Label>
+            <NativeSelect
+              id={`${prefix}-scope`}
+              value={scope}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (
+                  value === "mailbox" ||
+                  value === "folders" ||
+                  value === "threads"
+                )
+                  setScope(value);
+              }}
             >
-              <input
-                type="checkbox"
-                name={String(name)}
-                defaultChecked={Boolean(checked)}
-                className="size-5 accent-primary"
+              <option value="folders">Selected sales folders or labels</option>
+              <option value="threads">Selected conversations (threads)</option>
+              <option value="mailbox">Sales mail across this mailbox</option>
+            </NativeSelect>
+          </Field>
+          {scope !== "mailbox" && (
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`${prefix}-refs`}>
+                {scope === "folders"
+                  ? "Provider folder or label IDs"
+                  : "Provider conversation/thread IDs"}{" "}
+                — one per line
+              </Label>
+              <Textarea
+                id={`${prefix}-refs`}
+                name="refs"
+                required
+                defaultValue={
+                  config?.scope.kind !== "mailbox"
+                    ? config?.scope.refs.join("\n")
+                    : ""
+                }
               />
-              {String(label)}
-            </label>
-          ))}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-scope`}>Mail to process</Label>
-          <NativeSelect
-            id={`${prefix}-scope`}
-            value={scope}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (
-                value === "mailbox" ||
-                value === "folders" ||
-                value === "threads"
-              )
-                setScope(value);
-            }}
-          >
-            <option value="folders">Selected sales folders or labels</option>
-            <option value="threads">Selected conversations (threads)</option>
-            <option value="mailbox">Sales mail across this mailbox</option>
-          </NativeSelect>
-        </div>
-        {scope !== "mailbox" && (
-          <div className="space-y-2">
-            <Label htmlFor={`${prefix}-refs`}>
-              {scope === "folders"
-                ? "Provider folder or label IDs"
-                : "Provider conversation/thread IDs"}{" "}
-              — one per line
+              <p className="text-sm text-muted-foreground">
+                Use exact IDs from the selected provider. Access is checked
+                before sync; names or permissions for another mailbox cannot
+                authorize this selection.
+              </p>
+            </Field>
+          )}
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-sales-terms`}>
+              Sales subject phrases — one per line
             </Label>
             <Textarea
-              id={`${prefix}-refs`}
-              name="refs"
-              required
-              defaultValue={
-                config?.scope.kind !== "mailbox"
-                  ? config?.scope.refs.join("\n")
-                  : ""
-              }
+              id={`${prefix}-sales-terms`}
+              name="salesSubjectTerms"
+              defaultValue={config?.salesSubjectTerms?.join("\n") ?? ""}
             />
             <p className="text-sm text-muted-foreground">
-              Use exact IDs from the selected provider. Access is checked before
-              sync; names or permissions for another mailbox cannot authorize
-              this selection.
+              For new inquiries in selected folders or labels, require an
+              addressed, non-automated message whose subject contains one of
+              these phrases (3–80 characters; up to 20 phrases). Folder
+              selection alone does not prove sales relevance. Empty means new
+              folder-only inquiries stay excluded. Exact selected threads and
+              already imported threads supply explicit sales context.
+              Whole-mailbox mode processes established threads only. Bodies of
+              unknown mail are never fetched.
             </p>
-          </div>
-        )}
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-sales-terms`}>
-            Sales subject phrases — one per line
-          </Label>
-          <Textarea
-            id={`${prefix}-sales-terms`}
-            name="salesSubjectTerms"
-            defaultValue={config?.salesSubjectTerms?.join("\n") ?? ""}
-          />
+          </Field>
+          <fieldset className="flex flex-col gap-4 rounded-xl border border-border p-4">
+            <legend className="px-2 font-medium">Optional history</legend>
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                name="history"
+                type="checkbox"
+                checked={history}
+                onChange={(event) => setHistory(event.target.checked)}
+                className="size-5 accent-primary"
+              />
+              Opt into a bounded historical import
+            </label>
+            <p className="text-sm text-muted-foreground">
+              History is off by default. New-mail sync starts at the saved
+              selection time and never imports earlier correspondence. Saving
+              history bounds does not start the import.
+            </p>
+            {history && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor={`${prefix}-from`}>
+                    From, inclusive (UTC)
+                  </Label>
+                  <Input
+                    id={`${prefix}-from`}
+                    name="from"
+                    type="datetime-local"
+                    required
+                    defaultValue={config?.history?.from.slice(0, 16)}
+                  />
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor={`${prefix}-to`}>Until, exclusive (UTC)</Label>
+                  <Input
+                    id={`${prefix}-to`}
+                    name="to"
+                    type="datetime-local"
+                    required
+                    defaultValue={config?.history?.to.slice(0, 16)}
+                  />
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor={`${prefix}-limit`}>
+                    Maximum selected messages
+                  </Label>
+                  <Input
+                    id={`${prefix}-limit`}
+                    name="maxMessages"
+                    type="number"
+                    required
+                    min={1}
+                    max={10000}
+                    defaultValue={config?.history?.maxMessages ?? 100}
+                  />
+                </Field>
+                <p className="self-center text-sm text-muted-foreground">
+                  One shared limit across pages, retries and resumes. Duplicate
+                  imports cannot create another purchasing need.
+                </p>
+              </div>
+            )}
+          </fieldset>
           <p className="text-sm text-muted-foreground">
-            For new inquiries in selected folders or labels, require an
-            addressed, non-automated message whose subject contains one of these
-            phrases (3–80 characters; up to 20 phrases). Folder selection alone
-            does not prove sales relevance. Empty means new folder-only
-            inquiries stay excluded. Exact selected threads and already imported
-            threads supply explicit sales context. Whole-mailbox mode processes
-            established threads only. Bodies of unknown mail are never fetched.
+            Changing processing scope, subject phrases or read access stops
+            older queued work and starts a new-mail boundary. Already authorized
+            correspondence remains in your inbox. Unrelated and unselected
+            content is excluded from future automated processing.
           </p>
-        </div>
-        <fieldset className="space-y-4 rounded-xl border border-border p-4">
-          <legend className="px-2 font-medium">Optional history</legend>
-          <label className="flex min-h-11 items-center gap-3">
-            <input
-              name="history"
-              type="checkbox"
-              checked={history}
-              onChange={(event) => setHistory(event.target.checked)}
-              className="size-5 accent-primary"
-            />
-            Opt into a bounded historical import
-          </label>
-          <p className="text-sm text-muted-foreground">
-            History is off by default. New-mail sync starts at the saved
-            selection time and never imports earlier correspondence. Saving
-            history bounds does not start the import.
-          </p>
-          {history && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor={`${prefix}-from`}>From, inclusive (UTC)</Label>
-                <Input
-                  id={`${prefix}-from`}
-                  name="from"
-                  type="datetime-local"
-                  required
-                  defaultValue={config?.history?.from.slice(0, 16)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor={`${prefix}-to`}>Until, exclusive (UTC)</Label>
-                <Input
-                  id={`${prefix}-to`}
-                  name="to"
-                  type="datetime-local"
-                  required
-                  defaultValue={config?.history?.to.slice(0, 16)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor={`${prefix}-limit`}>
-                  Maximum selected messages
-                </Label>
-                <Input
-                  id={`${prefix}-limit`}
-                  name="maxMessages"
-                  type="number"
-                  required
-                  min={1}
-                  max={10000}
-                  defaultValue={config?.history?.maxMessages ?? 100}
-                />
-              </div>
-              <p className="self-center text-sm text-muted-foreground">
-                One shared limit across pages, retries and resumes. Duplicate
-                imports cannot create another purchasing need.
-              </p>
-            </div>
-          )}
+          <Button type="submit">
+            {disabled ? "Save unavailable" : "Save processing selection"}
+          </Button>
         </fieldset>
-        <p className="text-sm text-muted-foreground">
-          Changing processing scope, subject phrases or read access stops older
-          queued work and starts a new-mail boundary. Already authorized
-          correspondence remains in your inbox. Unrelated and unselected content
-          is excluded from future automated processing.
-        </p>
-        <Button type="submit">
-          {disabled ? "Save unavailable" : "Save processing selection"}
-        </Button>
-      </fieldset>
-      {error && <Alert variant="destructive">{error}</Alert>}
+        {error && <Alert variant="destructive">{error}</Alert>}
+      </FieldGroup>
     </form>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 import { useId, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
@@ -57,7 +58,7 @@ function Field({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
@@ -68,7 +69,7 @@ function Field({
         max={max}
         step={step ?? (type === "number" ? "any" : undefined)}
       />
-    </div>
+    </UiField>
   );
 }
 function Choice({
@@ -84,7 +85,7 @@ function Choice({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <NativeSelect id={id} name={name} required={required}>
         <option value="">
@@ -98,7 +99,7 @@ function Choice({
           </option>
         ))}
       </NativeSelect>
-    </div>
+    </UiField>
   );
 }
 const date = (value: FormDataEntryValue | null) =>
@@ -243,7 +244,7 @@ export function PilotManager({
     });
   }
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       {error && (
         <Alert role="alert">
           {error}{" "}
@@ -289,224 +290,229 @@ export function PilotManager({
               the exact plan.
             </p>
           )}
-          <form onSubmit={prepare} className="space-y-6">
-            <Choice
-              name="paymentActionId"
-              label="Reviewed pilot or paid monthly continuation"
-              required
-              options={choices.payments}
-            />
-            <Field name="goal" label="Actual conversion goal" />
-            <Field name="scope" label="Approved workflow scope" />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                name="startsAt"
-                label="Operating start"
-                type="datetime-local"
+          <form onSubmit={prepare} className="flex flex-col gap-6">
+            <FieldGroup className="gap-6">
+              <Choice
+                name="paymentActionId"
+                label="Reviewed pilot or paid monthly continuation"
+                required
+                options={choices.payments}
               />
-              <Field
-                name="endsAt"
-                label="Operating end"
-                type="datetime-local"
-              />
-            </div>
-            <fieldset className="space-y-3">
-              <legend className="font-medium">Selected capabilities</legend>
-              {pilotCapabilitySchema.options.map((c) => (
-                <label key={c} className="flex min-h-11 items-center gap-3">
+              <Field name="goal" label="Actual conversion goal" />
+              <Field name="scope" label="Approved workflow scope" />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  name="startsAt"
+                  label="Operating start"
+                  type="datetime-local"
+                />
+                <Field
+                  name="endsAt"
+                  label="Operating end"
+                  type="datetime-local"
+                />
+              </div>
+              <fieldset className="flex flex-col gap-3">
+                <legend className="font-medium">Selected capabilities</legend>
+                {pilotCapabilitySchema.options.map((c) => (
+                  <label key={c} className="flex min-h-11 items-center gap-3">
+                    <input
+                      className="size-5"
+                      name="capabilities"
+                      type="checkbox"
+                      value={c}
+                    />
+                    {capabilities[c]}
+                  </label>
+                ))}
+              </fieldset>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Choice
+                  name="senderId"
+                  label="Exact sending identity"
+                  options={choices.senders}
+                />
+                <Choice
+                  name="mailboxId"
+                  label="Exact mailbox scope"
+                  options={choices.mailboxes}
+                />
+                <Choice
+                  name="calendar"
+                  label="Exact native calendar account"
+                  options={choices.calendars}
+                />
+                <Choice
+                  name="whatsAppConnectionId"
+                  label="Exact customer-owned Meta connection"
+                  options={choices.whatsapp}
+                />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Selected email actions are checked individually for market,
+                recipient, purpose and current permission. Prepare and approve
+                those actions in the existing email workflow before activation.
+              </p>
+              {choices.emailActions?.map((a) => (
+                <label key={a.id} className="flex min-h-11 items-center gap-3">
                   <input
-                    className="size-5"
-                    name="capabilities"
                     type="checkbox"
-                    value={c}
+                    name="emailActions"
+                    value={a.id}
+                    className="size-5"
                   />
-                  {capabilities[c]}
+                  {a.label}
                 </label>
               ))}
-            </fieldset>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Choice
-                name="senderId"
-                label="Exact sending identity"
-                options={choices.senders}
-              />
-              <Choice
-                name="mailboxId"
-                label="Exact mailbox scope"
-                options={choices.mailboxes}
-              />
-              <Choice
-                name="calendar"
-                label="Exact native calendar account"
-                options={choices.calendars}
-              />
-              <Choice
-                name="whatsAppConnectionId"
-                label="Exact customer-owned Meta connection"
-                options={choices.whatsapp}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Selected email actions are checked individually for market,
-              recipient, purpose and current permission. Prepare and approve
-              those actions in the existing email workflow before activation.
-            </p>
-            {choices.emailActions?.map((a) => (
-              <label key={a.id} className="flex min-h-11 items-center gap-3">
-                <input
-                  type="checkbox"
-                  name="emailActions"
-                  value={a.id}
-                  className="size-5"
+              <fieldset className="flex flex-col gap-4">
+                <legend className="font-medium">
+                  Baseline with original evidence
+                </legend>
+                {Array.from({ length: baselineCount }, (_, i) => (
+                  <div
+                    className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2"
+                    key={i}
+                  >
+                    <Field
+                      name={`baseline-metric-${i}`}
+                      label="Canonical metric identifier"
+                    />
+                    <Field
+                      name={`baseline-value-${i}`}
+                      label="Measured baseline"
+                      type="number"
+                    />
+                    <Field
+                      name={`baseline-unit-${i}`}
+                      label="Population and unit"
+                    />
+                    <Field
+                      name={`baseline-evidence-${i}`}
+                      label="Baseline evidence reference"
+                    />
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={baselineCount >= 30}
+                  onClick={() => setBaselineCount((n) => n + 1)}
+                >
+                  Add baseline measure
+                </Button>
+              </fieldset>
+              <fieldset className="flex flex-col gap-4">
+                <legend className="font-medium">
+                  Numeric success criteria
+                </legend>
+                {Array.from({ length: criteriaCount }, (_, i) => (
+                  <div
+                    className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2"
+                    key={i}
+                  >
+                    <Choice
+                      name={`criterion-metric-${i}`}
+                      required
+                      label="Measured outcome"
+                      options={choices.metrics}
+                    />
+                    <Field
+                      name={`criterion-value-${i}`}
+                      label="Numeric target"
+                      type="number"
+                    />
+                    <Choice
+                      name={`criterion-comparison-${i}`}
+                      required
+                      label="Comparison"
+                      options={[
+                        { id: "at_least", label: "At least" },
+                        { id: "at_most", label: "At most" },
+                      ]}
+                    />
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={criteriaCount >= 30}
+                  onClick={() => setCriteriaCount((n) => n + 1)}
+                >
+                  Add success criterion
+                </Button>
+              </fieldset>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field
+                  name="cashLimitMinor"
+                  label="Approved cash ceiling (billing-currency minor units)"
                 />
-                {a.label}
-              </label>
-            ))}
-            <fieldset className="space-y-4">
-              <legend className="font-medium">
-                Baseline with original evidence
-              </legend>
-              {Array.from({ length: baselineCount }, (_, i) => (
-                <div
-                  className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2"
-                  key={i}
-                >
-                  <Field
-                    name={`baseline-metric-${i}`}
-                    label="Canonical metric identifier"
-                  />
-                  <Field
-                    name={`baseline-value-${i}`}
-                    label="Measured baseline"
-                    type="number"
-                  />
-                  <Field
-                    name={`baseline-unit-${i}`}
-                    label="Population and unit"
-                  />
-                  <Field
-                    name={`baseline-evidence-${i}`}
-                    label="Baseline evidence reference"
-                  />
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                disabled={baselineCount >= 30}
-                onClick={() => setBaselineCount((n) => n + 1)}
-              >
-                Add baseline measure
+                <Field
+                  name="spendLimitMinor"
+                  label="Approved spend ceiling (billing-currency minor units)"
+                />
+                <Field
+                  name="timeLimitSeconds"
+                  label="Approved founder time ceiling (seconds)"
+                  type="number"
+                />
+              </div>
+              <details className="rounded-xl border border-border p-4">
+                <summary className="min-h-11 cursor-pointer font-medium">
+                  Approved operation ceilings
+                </summary>
+                <p className="mb-4 text-muted-foreground">
+                  Provide evidenced maximum cash, spend and duration per
+                  operation unit. These reserve limits before work; they are not
+                  measured actual costs or hours. An unpriced or
+                  unknown-duration path stays unavailable. Customer-paid Meta
+                  consumption is separate. Discovery uses the selected source
+                  policy unit. Automation uses one dispatch. Mailbox work
+                  reserves each provider phase: inspection, listing, each
+                  message read and grant recheck. Its ceiling must cover every
+                  native request and credential refresh within that phase.
+                  Calendar work reserves one bounded operation, including its
+                  native reads and existing request timeouts.
+                </p>
+                {["discovery", "automation", "mailbox", "calendar"].map((c) => (
+                  <fieldset key={c} className="my-5 grid gap-4 sm:grid-cols-2">
+                    <legend className="font-medium capitalize">{c}</legend>
+                    <Field
+                      name={`${c}-cash`}
+                      label="Maximum cash per unit (minor units)"
+                      required={false}
+                    />
+                    <Field
+                      name={`${c}-spend`}
+                      label="Maximum spend per unit (minor units)"
+                      required={false}
+                    />
+                    <Field
+                      name={`${c}-seconds`}
+                      label="Maximum duration per unit (seconds)"
+                      type="number"
+                      required={false}
+                    />
+                    <Field
+                      name={`${c}-global`}
+                      label="USD paths: approved maximum INR exposure (millionths; independent of actual FX)"
+                      required={false}
+                    />
+                    <Field
+                      name={`${c}-evidence`}
+                      label="Approved upper-bound evidence"
+                      required={false}
+                    />
+                  </fieldset>
+                ))}
+              </details>
+              <Field
+                name="approvalEvidence"
+                label="Actual scope and founder approval reference"
+              />
+              <Button disabled={busy || !state.canRecord}>
+                {busy ? "Saving..." : "Save pilot for exact review"}
               </Button>
-            </fieldset>
-            <fieldset className="space-y-4">
-              <legend className="font-medium">Numeric success criteria</legend>
-              {Array.from({ length: criteriaCount }, (_, i) => (
-                <div
-                  className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2"
-                  key={i}
-                >
-                  <Choice
-                    name={`criterion-metric-${i}`}
-                    required
-                    label="Measured outcome"
-                    options={choices.metrics}
-                  />
-                  <Field
-                    name={`criterion-value-${i}`}
-                    label="Numeric target"
-                    type="number"
-                  />
-                  <Choice
-                    name={`criterion-comparison-${i}`}
-                    required
-                    label="Comparison"
-                    options={[
-                      { id: "at_least", label: "At least" },
-                      { id: "at_most", label: "At most" },
-                    ]}
-                  />
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                disabled={criteriaCount >= 30}
-                onClick={() => setCriteriaCount((n) => n + 1)}
-              >
-                Add success criterion
-              </Button>
-            </fieldset>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Field
-                name="cashLimitMinor"
-                label="Approved cash ceiling (billing-currency minor units)"
-              />
-              <Field
-                name="spendLimitMinor"
-                label="Approved spend ceiling (billing-currency minor units)"
-              />
-              <Field
-                name="timeLimitSeconds"
-                label="Approved founder time ceiling (seconds)"
-                type="number"
-              />
-            </div>
-            <details className="rounded-xl border border-border p-4">
-              <summary className="min-h-11 cursor-pointer font-medium">
-                Approved operation ceilings
-              </summary>
-              <p className="mb-4 text-muted-foreground">
-                Provide evidenced maximum cash, spend and duration per operation
-                unit. These reserve limits before work; they are not measured
-                actual costs or hours. An unpriced or unknown-duration path
-                stays unavailable. Customer-paid Meta consumption is separate.
-                Discovery uses the selected source policy unit. Automation uses
-                one dispatch. Mailbox work reserves each provider phase:
-                inspection, listing, each message read and grant recheck. Its
-                ceiling must cover every native request and credential refresh
-                within that phase. Calendar work reserves one bounded operation,
-                including its native reads and existing request timeouts.
-              </p>
-              {["discovery", "automation", "mailbox", "calendar"].map((c) => (
-                <fieldset key={c} className="my-5 grid gap-4 sm:grid-cols-2">
-                  <legend className="font-medium capitalize">{c}</legend>
-                  <Field
-                    name={`${c}-cash`}
-                    label="Maximum cash per unit (minor units)"
-                    required={false}
-                  />
-                  <Field
-                    name={`${c}-spend`}
-                    label="Maximum spend per unit (minor units)"
-                    required={false}
-                  />
-                  <Field
-                    name={`${c}-seconds`}
-                    label="Maximum duration per unit (seconds)"
-                    type="number"
-                    required={false}
-                  />
-                  <Field
-                    name={`${c}-global`}
-                    label="USD paths: approved maximum INR exposure (millionths; independent of actual FX)"
-                    required={false}
-                  />
-                  <Field
-                    name={`${c}-evidence`}
-                    label="Approved upper-bound evidence"
-                    required={false}
-                  />
-                </fieldset>
-              ))}
-            </details>
-            <Field
-              name="approvalEvidence"
-              label="Actual scope and founder approval reference"
-            />
-            <Button disabled={busy || !state.canRecord}>
-              {busy ? "Saving..." : "Save pilot for exact review"}
-            </Button>
+            </FieldGroup>
           </form>
         </CardContent>
       </Card>
@@ -523,7 +529,7 @@ export function PilotManager({
               <Badge>{p.status.replaceAll("_", " ")}</Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-6 wrap-anywhere">
+          <CardContent className="flex flex-col gap-6 wrap-anywhere">
             <p>{p.business.offering}</p>
             {p.payment.term.kind === "calendar_month" && (
               <p className="font-medium">
@@ -570,7 +576,7 @@ export function PilotManager({
               <summary className="min-h-11 cursor-pointer font-medium">
                 Original baseline, criteria and allowances
               </summary>
-              <ul className="list-inside list-disc space-y-2">
+              <ul className="flex flex-col list-inside list-disc gap-2">
                 {p.plan.baseline.map((b, i) => (
                   <li key={i}>
                     {b.metric}: {b.value} {b.unit}; evidence: {b.evidence}
@@ -596,7 +602,7 @@ export function PilotManager({
               <p>{p.payment.quote.renewal.terms}</p>
             </details>
             <section
-              className="space-y-3"
+              className="flex flex-col gap-3"
               aria-label="Current financial evidence"
             >
               <h3 className="text-lg font-semibold">
@@ -638,7 +644,7 @@ export function PilotManager({
                 cancellation evidence can make an earlier renewal ineligible.
               </p>
             </section>
-            <section className="space-y-3">
+            <section className="flex flex-col gap-3">
               <h3 className="text-lg font-semibold">Current preflight</h3>
               {p.gates.map((g) => (
                 <div
@@ -718,7 +724,7 @@ export function PilotManager({
                 stopped or expired operating phase needs a new bounded plan.
               </p>
               <form
-                className="space-y-4"
+                className="flex flex-col gap-4"
                 onSubmit={(event) => {
                   event.preventDefault();
                   const data = new FormData(event.currentTarget);
@@ -734,57 +740,59 @@ export function PilotManager({
                   );
                 }}
               >
-                <p>
-                  Selected mailbox:{" "}
-                  {choices.mailboxes.find(
-                    (mailbox) => mailbox.id === p.plan.mailboxId,
-                  )?.label ?? "Select a supported mailbox in a new plan."}
-                </p>
-                <Field
-                  name="setup-calls"
-                  min={1}
-                  max={100}
-                  step={1}
-                  label="Maximum guarded phases and native requests (1–100)"
-                  type="number"
-                />
-                <Field
-                  name="setup-duration"
-                  min={1}
-                  max={900}
-                  step={1}
-                  label="Setup allowance duration in seconds (1–900)"
-                  type="number"
-                />
-                <Field
-                  name="setup-evidence"
-                  label="Explicit setup approval evidence"
-                />
-                <Label
-                  htmlFor={`pilot-setup-${p.id}`}
-                  className="flex min-h-11 items-center gap-3"
-                >
-                  <Checkbox
-                    id={`pilot-setup-${p.id}`}
-                    name="setup-accept"
-                    required
+                <FieldGroup className="gap-4">
+                  <p>
+                    Selected mailbox:{" "}
+                    {choices.mailboxes.find(
+                      (mailbox) => mailbox.id === p.plan.mailboxId,
+                    )?.label ?? "Select a supported mailbox in a new plan."}
+                  </p>
+                  <Field
+                    name="setup-calls"
+                    min={1}
+                    max={100}
+                    step={1}
+                    label="Maximum guarded phases and native requests (1–100)"
+                    type="number"
                   />
-                  Approve these bounded selected-mailbox reads against this
-                  plan’s remaining limits.
-                </Label>
-                <Button
-                  disabled={
-                    busy ||
-                    !p.canRecord ||
-                    !p.plan.mailboxId ||
-                    p.status === "stopped" ||
-                    p.status === "expired"
-                  }
-                >
-                  Authorize mailbox setup
-                </Button>
+                  <Field
+                    name="setup-duration"
+                    min={1}
+                    max={900}
+                    step={1}
+                    label="Setup allowance duration in seconds (1–900)"
+                    type="number"
+                  />
+                  <Field
+                    name="setup-evidence"
+                    label="Explicit setup approval evidence"
+                  />
+                  <Label
+                    htmlFor={`pilot-setup-${p.id}`}
+                    className="flex min-h-11 items-center gap-3"
+                  >
+                    <Checkbox
+                      id={`pilot-setup-${p.id}`}
+                      name="setup-accept"
+                      required
+                    />
+                    Approve these bounded selected-mailbox reads against this
+                    plan’s remaining limits.
+                  </Label>
+                  <Button
+                    disabled={
+                      busy ||
+                      !p.canRecord ||
+                      !p.plan.mailboxId ||
+                      p.status === "stopped" ||
+                      p.status === "expired"
+                    }
+                  >
+                    Authorize mailbox setup
+                  </Button>
+                </FieldGroup>
               </form>
-              <ul className="mt-4 space-y-3">
+              <ul className="flex flex-col mt-4 gap-3">
                 {p.events
                   .filter((event) => event.kind === "setup_authorized")
                   .map((event) => {
@@ -796,7 +804,7 @@ export function PilotManager({
                     return (
                       <li
                         key={event.id}
-                        className="space-y-2 rounded-xl border border-border p-3"
+                        className="flex flex-col gap-2 rounded-xl border border-border p-3"
                       >
                         <p>
                           Original setup deadline:{" "}
@@ -845,7 +853,7 @@ export function PilotManager({
                 Record measured effort
               </summary>
               <form
-                className="space-y-4"
+                className="flex flex-col gap-4"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const data = new FormData(e.currentTarget);
@@ -862,46 +870,48 @@ export function PilotManager({
                   );
                 }}
               >
-                <Choice
-                  name="effort-kind"
-                  required
-                  label="Actual effort category"
-                  options={[
-                    "setup",
-                    "support",
-                    "sales",
-                    "billing_tax",
-                    "maintenance",
-                  ].map((v) => ({ id: v, label: v.replaceAll("_", " ") }))}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Record actual human effort and its separately attributable
-                  expense. Provider charges stay separate. Cost operators
-                  normalize these attributed inputs before further work; no
-                  hourly rate or bank settlement is inferred.
-                </p>
-                <Field
-                  name="effort-seconds"
-                  label="Actual measured seconds"
-                  type="number"
-                />
-                <Field name="effort-cash" label="Actual cash (minor units)" />
-                <Field
-                  name="effort-spend"
-                  label="Actual expense (minor units)"
-                />
-                <Field
-                  name="effort-evidence"
-                  label="Timesheet or statement evidence"
-                />
-                <Field
-                  name="effort-at"
-                  label="When effort occurred"
-                  type="datetime-local"
-                />
-                <Button disabled={busy || !p.canRecord}>
-                  Save actual effort
-                </Button>
+                <FieldGroup className="gap-4">
+                  <Choice
+                    name="effort-kind"
+                    required
+                    label="Actual effort category"
+                    options={[
+                      "setup",
+                      "support",
+                      "sales",
+                      "billing_tax",
+                      "maintenance",
+                    ].map((v) => ({ id: v, label: v.replaceAll("_", " ") }))}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Record actual human effort and its separately attributable
+                    expense. Provider charges stay separate. Cost operators
+                    normalize these attributed inputs before further work; no
+                    hourly rate or bank settlement is inferred.
+                  </p>
+                  <Field
+                    name="effort-seconds"
+                    label="Actual measured seconds"
+                    type="number"
+                  />
+                  <Field name="effort-cash" label="Actual cash (minor units)" />
+                  <Field
+                    name="effort-spend"
+                    label="Actual expense (minor units)"
+                  />
+                  <Field
+                    name="effort-evidence"
+                    label="Timesheet or statement evidence"
+                  />
+                  <Field
+                    name="effort-at"
+                    label="When effort occurred"
+                    type="datetime-local"
+                  />
+                  <Button disabled={busy || !p.canRecord}>
+                    Save actual effort
+                  </Button>
+                </FieldGroup>
               </form>
             </details>
             <details className="rounded-xl border border-border p-4">
@@ -909,7 +919,7 @@ export function PilotManager({
                 Record canonical measured results and contribution inputs
               </summary>
               <form
-                className="space-y-4"
+                className="flex flex-col gap-4"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const data = new FormData(e.currentTarget);
@@ -932,56 +942,59 @@ export function PilotManager({
                   );
                 }}
               >
-                <Field
-                  name="result-from"
-                  label="Measured cohort from"
-                  type="datetime-local"
-                />
-                <Field
-                  name="result-to"
-                  label="Measured cohort through"
-                  type="datetime-local"
-                />
-                <Field
-                  name="result-revenue"
-                  label="Actual revenue excluding collected tax (minor units)"
-                />
-                <Field
-                  name="result-provider"
-                  label="Actual allocated provider expense (minor units)"
-                />
-                <Field
-                  name="result-effort"
-                  label="Actual effort expense (minor units)"
-                />
-                <Field
-                  name="result-meta"
-                  label="Customer-paid Meta amount, if known (separate minor units)"
-                  required={false}
-                />
-                <Field
-                  name="result-evidence"
-                  label="Actual statements and allocation evidence"
-                />
-                <Field
-                  name="result-assessment"
-                  label="Measured assessment and incomplete coverage"
-                />
-                <label className="flex min-h-11 items-center gap-3">
-                  <input
-                    type="checkbox"
-                    name="result-complete"
-                    className="size-5"
+                <FieldGroup className="gap-4">
+                  <Field
+                    name="result-from"
+                    label="Measured cohort from"
+                    type="datetime-local"
                   />
-                  I have recorded the complete attributable contribution inputs
-                </label>
-                <Button disabled={busy || !p.canRecord}>
-                  Save measured results
-                </Button>
+                  <Field
+                    name="result-to"
+                    label="Measured cohort through"
+                    type="datetime-local"
+                  />
+                  <Field
+                    name="result-revenue"
+                    label="Actual revenue excluding collected tax (minor units)"
+                  />
+                  <Field
+                    name="result-provider"
+                    label="Actual allocated provider expense (minor units)"
+                  />
+                  <Field
+                    name="result-effort"
+                    label="Actual effort expense (minor units)"
+                  />
+                  <Field
+                    name="result-meta"
+                    label="Customer-paid Meta amount, if known (separate minor units)"
+                    required={false}
+                  />
+                  <Field
+                    name="result-evidence"
+                    label="Actual statements and allocation evidence"
+                  />
+                  <Field
+                    name="result-assessment"
+                    label="Measured assessment and incomplete coverage"
+                  />
+                  <label className="flex min-h-11 items-center gap-3">
+                    <input
+                      type="checkbox"
+                      name="result-complete"
+                      className="size-5"
+                    />
+                    I have recorded the complete attributable contribution
+                    inputs
+                  </label>
+                  <Button disabled={busy || !p.canRecord}>
+                    Save measured results
+                  </Button>
+                </FieldGroup>
               </form>
             </details>
             {p.report && (
-              <section className="space-y-3">
+              <section className="flex flex-col gap-3">
                 <h3 className="font-semibold">Retained measured cohort</h3>
                 <p>
                   {p.report.from} through {p.report.to}
@@ -1014,7 +1027,7 @@ export function PilotManager({
                 Record a materially different workflow after paid renewal
               </summary>
               <form
-                className="space-y-4"
+                className="flex flex-col gap-4"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const data = new FormData(e.currentTarget);
@@ -1036,95 +1049,99 @@ export function PilotManager({
                   );
                 }}
               >
-                <Label htmlFor={`second-business-${p.id}`}>
-                  Second Business
-                </Label>
-                <NativeSelect
-                  name="second-business"
-                  disabled={busy}
-                  required
-                  id={`second-business-${p.id}`}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    selectedBusinesses.current.set(p.id, id);
-                    setOtherPilots((prior) => ({ ...prior, [p.id]: [] }));
-                    if (!id) return;
-                    void run(async () => {
-                      const selected = await readCommercialResponse(
-                        await fetch(`/api/businesses/${id}/pilots`, {
-                          cache: "no-store",
-                        }),
-                        pilotWorkspaceSchema,
-                      );
-                      if (selectedBusinesses.current.get(p.id) !== id) return;
-                      setOtherPilots((prior) => ({
-                        ...prior,
-                        [p.id]: selected.pilots,
-                      }));
-                    });
-                  }}
-                >
-                  <option value="">Choose the other configured Business</option>
-                  {choices.businesses
-                    .filter((b) => b.id !== businessId)
-                    .map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.label}
-                      </option>
-                    ))}
-                </NativeSelect>
-                <Choice
-                  name="second-pilot"
-                  required
-                  label="Actual second pilot"
-                  options={(otherPilots[p.id] ?? []).map((s) => ({
-                    id: s.id,
-                    label: s.plan.goal,
-                  }))}
-                />
-                <Field
-                  name="second-need"
-                  label="Materially different purchasing workflow"
-                />
-                <Choice
-                  name="first-field"
-                  required
-                  label="Original configuration to compare"
-                  options={[
-                    "scope",
-                    "goal",
-                    "capabilities",
-                    "criteria",
-                    "ceilings",
-                  ].map((v) => ({ id: v, label: v }))}
-                />
-                <Choice
-                  name="second-field"
-                  required
-                  label="Second configuration to compare"
-                  options={[
-                    "scope",
-                    "goal",
-                    "capabilities",
-                    "criteria",
-                    "ceilings",
-                  ].map((v) => ({ id: v, label: v }))}
-                />
-                <Field
-                  name="reuse-evidence"
-                  label="Actual configuration-reuse evidence"
-                />
-                <Field
-                  name="second-adaptations"
-                  label="Adaptations and observed reuse"
-                />
-                <Button
-                  disabled={
-                    busy || !p.canRecord || !p.financialEvidence.renewalPaid
-                  }
-                >
-                  Record contrasting workflow evidence
-                </Button>
+                <FieldGroup className="gap-4">
+                  <Label htmlFor={`second-business-${p.id}`}>
+                    Second Business
+                  </Label>
+                  <NativeSelect
+                    name="second-business"
+                    disabled={busy}
+                    required
+                    id={`second-business-${p.id}`}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      selectedBusinesses.current.set(p.id, id);
+                      setOtherPilots((prior) => ({ ...prior, [p.id]: [] }));
+                      if (!id) return;
+                      void run(async () => {
+                        const selected = await readCommercialResponse(
+                          await fetch(`/api/businesses/${id}/pilots`, {
+                            cache: "no-store",
+                          }),
+                          pilotWorkspaceSchema,
+                        );
+                        if (selectedBusinesses.current.get(p.id) !== id) return;
+                        setOtherPilots((prior) => ({
+                          ...prior,
+                          [p.id]: selected.pilots,
+                        }));
+                      });
+                    }}
+                  >
+                    <option value="">
+                      Choose the other configured Business
+                    </option>
+                    {choices.businesses
+                      .filter((b) => b.id !== businessId)
+                      .map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.label}
+                        </option>
+                      ))}
+                  </NativeSelect>
+                  <Choice
+                    name="second-pilot"
+                    required
+                    label="Actual second pilot"
+                    options={(otherPilots[p.id] ?? []).map((s) => ({
+                      id: s.id,
+                      label: s.plan.goal,
+                    }))}
+                  />
+                  <Field
+                    name="second-need"
+                    label="Materially different purchasing workflow"
+                  />
+                  <Choice
+                    name="first-field"
+                    required
+                    label="Original configuration to compare"
+                    options={[
+                      "scope",
+                      "goal",
+                      "capabilities",
+                      "criteria",
+                      "ceilings",
+                    ].map((v) => ({ id: v, label: v }))}
+                  />
+                  <Choice
+                    name="second-field"
+                    required
+                    label="Second configuration to compare"
+                    options={[
+                      "scope",
+                      "goal",
+                      "capabilities",
+                      "criteria",
+                      "ceilings",
+                    ].map((v) => ({ id: v, label: v }))}
+                  />
+                  <Field
+                    name="reuse-evidence"
+                    label="Actual configuration-reuse evidence"
+                  />
+                  <Field
+                    name="second-adaptations"
+                    label="Adaptations and observed reuse"
+                  />
+                  <Button
+                    disabled={
+                      busy || !p.canRecord || !p.financialEvidence.renewalPaid
+                    }
+                  >
+                    Record contrasting workflow evidence
+                  </Button>
+                </FieldGroup>
               </form>
             </details>
             <details>
@@ -1134,7 +1151,7 @@ export function PilotManager({
               {p.events.map((e) => (
                 <div
                   key={e.id}
-                  className="space-y-2 border-b border-border py-4"
+                  className="flex flex-col gap-2 border-b border-border py-4"
                 >
                   <p className="font-medium">
                     {e.kind.replaceAll("_", " ")}:{" "}
@@ -1209,7 +1226,7 @@ function EventEvidence({ data }: { data: Record<string, unknown> }) {
         </p>
       )}
       {result.success && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <p>{result.data.assessment}</p>
           <p>
             Attributed revenue excluding tax{" "}

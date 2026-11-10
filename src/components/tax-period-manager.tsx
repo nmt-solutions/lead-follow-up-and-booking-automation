@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
 import { z } from "zod";
@@ -45,7 +46,7 @@ function Field({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
@@ -54,7 +55,7 @@ function Field({
         defaultValue={value}
         required={required}
       />
-    </div>
+    </UiField>
   );
 }
 function Choice({
@@ -70,13 +71,13 @@ function Choice({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <NativeSelect id={id} name={name} defaultValue={value} required>
         <option value="">Choose explicitly</option>
         {children}
       </NativeSelect>
-    </div>
+    </UiField>
   );
 }
 function Evidence({
@@ -90,10 +91,10 @@ function Evidence({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Textarea id={id} name={name} defaultValue={value} required />
-    </div>
+    </UiField>
   );
 }
 const text = (data: FormData, name: string) =>
@@ -310,7 +311,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
     }
   }
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       {error && (
         <Alert>
           <p>{error}</p>
@@ -328,7 +329,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
         </p>
       )}
       <section
-        className="space-y-4 rounded-2xl border border-border bg-card p-6"
+        className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
         aria-labelledby="tax-due-title"
       >
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -364,7 +365,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
             its exact dates below.
           </p>
         )}
-        <ul className="space-y-6">
+        <ul className="flex flex-col gap-6">
           {workspace.periods.map(
             ({
               period,
@@ -376,7 +377,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
             }) => (
               <li
                 key={period.id}
-                className="space-y-4 rounded-xl border border-border p-4 wrap-anywhere"
+                className="flex flex-col gap-4 rounded-xl border border-border p-4 wrap-anywhere"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -461,23 +462,25 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
                     );
                   }}
                 >
-                  <fieldset
-                    disabled={busy || state === "superseded"}
-                    className="grid gap-4 md:grid-cols-2"
-                  >
-                    <Field
-                      name="cutoff"
-                      label="Evidence cutoff (UTC, ending in Z)"
-                    />
-                    <Field name="note" label="Preparation reason" />
-                    <div className="md:col-span-2">
-                      <Button type="submit">
-                        {report
-                          ? "Prepare successor revision"
-                          : "Prepare report"}
-                      </Button>
-                    </div>
-                  </fieldset>
+                  <FieldGroup className="gap-5">
+                    <fieldset
+                      disabled={busy || state === "superseded"}
+                      className="grid gap-4 md:grid-cols-2"
+                    >
+                      <Field
+                        name="cutoff"
+                        label="Evidence cutoff (UTC, ending in Z)"
+                      />
+                      <Field name="note" label="Preparation reason" />
+                      <div className="md:col-span-2">
+                        <Button type="submit">
+                          {report
+                            ? "Prepare successor revision"
+                            : "Prepare report"}
+                        </Button>
+                      </div>
+                    </fieldset>
+                  </FieldGroup>
                 </form>
                 {report && (
                   <ReportDetails
@@ -524,7 +527,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
         </ul>
       </section>
       <section
-        className="space-y-4 rounded-2xl border border-border bg-card p-6"
+        className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
         aria-labelledby="tax-reminder-title"
       >
         <h2 id="tax-reminder-title" className="text-xl font-semibold">
@@ -553,7 +556,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
             ? "Use in-app reminders only"
             : "Enable my tax reminder emails"}
         </Button>
-        <ul className="space-y-2">
+        <ul className="flex flex-col gap-2">
           {workspace.reminders.map((r) => (
             <li key={r.id} className="rounded-xl bg-muted p-4 wrap-anywhere">
               <Badge>
@@ -568,7 +571,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
         </ul>
       </section>
       <section
-        className="space-y-5 rounded-2xl border border-border bg-card p-6"
+        className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6"
         aria-labelledby="tax-obligation-title"
       >
         <h2 id="tax-obligation-title" className="text-xl font-semibold">
@@ -595,164 +598,170 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
           ))}
         </NativeSelect>
         <form key={selected?.id ?? "new"} onSubmit={saveObligation}>
-          <fieldset disabled={busy} className="grid gap-4 md:grid-cols-2">
-            <Field
-              name="key"
-              label="Stable obligation reference (lowercase letters, numbers, hyphens)"
-              value={selected?.key}
-            />
-            <Field
-              name="name"
-              label="Obligation name"
-              value={definition?.name}
-            />
-            <Choice name="mode" label="Evidence mode" value={definition?.mode}>
-              <option value="fixture">Fixture</option>
-              <option value="live">Live</option>
-            </Choice>
-            <Field
-              name="jurisdiction"
-              label="Exact jurisdiction reference from original tax rules"
-              value={definition?.jurisdiction}
-            />
-            <Field
-              name="timeZone"
-              label="Reporting timezone (IANA name)"
-              value={definition?.timeZone}
-            />
-            <Choice
-              name="currency"
-              label="Reporting currency"
-              value={definition?.currency}
-            >
-              <option>INR</option>
-              <option>USD</option>
-            </Choice>
-            <Field
-              name="effectiveFrom"
-              label="Obligation starts (UTC)"
-              value={definition?.effectiveFrom}
-            />
-            <Field
-              name="effectiveUntil"
-              label="Obligation ends (UTC, optional)"
-              value={definition?.effectiveUntil ?? ""}
-              required={false}
-            />
-            <Field
-              name="registrationKey"
-              label="Registration record reference"
-              value={definition?.registration.key}
-            />
-            <Field
-              name="registrationId"
-              label="Original registration identifier or reviewed non-requirement reference"
-              value={definition?.registration.identifier}
-            />
-            <Choice
-              name="registrationStatus"
-              label="Reviewed registration status"
-              value={definition?.registration.status}
-            >
-              <option value="registered">Registered</option>
-              <option value="not_required">
-                Evidence-backed non-requirement
-              </option>
-            </Choice>
-            <Evidence
-              name="registrationEvidence"
-              label="Registration review evidence (one reference per line)"
-              value={definition?.registration.evidence.join("\n")}
-            />
-            <Field
-              name="registrationFrom"
-              label="Registration starts (UTC)"
-              value={definition?.registration.effectiveFrom}
-            />
-            <Field
-              name="registrationUntil"
-              label="Registration ends (UTC, optional)"
-              value={definition?.registration.effectiveUntil ?? ""}
-              required={false}
-            />
-            <Choice
-              name="basis"
-              label="Reviewed reporting basis"
-              value={definition?.basis}
-            >
-              <option value="document_issue_date">
-                Original invoice/credit issue dates
-              </option>
-            </Choice>
-            <Choice
-              name="unissuedCharges"
-              label="Captured charges without invoices"
-              value={definition?.unissuedCharges}
-            >
-              <option value="require_invoice">
-                Require a permanent invoice before approval
-              </option>
-              <option value="review_exclusion">
-                Require evidenced review of exclusion under this basis
-              </option>
-            </Choice>
-            <Choice
-              name="reviewPolicy"
-              label="Approving reviewer policy"
-              value={
-                definition
-                  ? definition.distinctReviewer
-                    ? "distinct"
-                    : "same_allowed"
-                  : ""
-              }
-            >
-              <option value="distinct">Must differ from the preparer</option>
-              <option value="same_allowed">Same person permitted</option>
-            </Choice>
-            <Field name="note" label="Configuration change reason" />
-            {(["preparer", "reviewer"] as const).map((role) => (
-              <fieldset
-                key={role}
-                className="space-y-3 rounded-xl border border-border p-4"
+          <FieldGroup className="gap-5">
+            <fieldset disabled={busy} className="grid gap-4 md:grid-cols-2">
+              <Field
+                name="key"
+                label="Stable obligation reference (lowercase letters, numbers, hyphens)"
+                value={selected?.key}
+              />
+              <Field
+                name="name"
+                label="Obligation name"
+                value={definition?.name}
+              />
+              <Choice
+                name="mode"
+                label="Evidence mode"
+                value={definition?.mode}
               >
-                <legend className="px-1 font-medium">
-                  {role === "preparer" ? "Preparers" : "Reviewers"}
-                </legend>
-                {workspace.operators.map((person) => (
-                  <Label
-                    key={person.id}
-                    className="flex min-h-11 items-center gap-3"
-                  >
-                    <Checkbox
-                      name={role}
-                      value={person.id}
-                      defaultChecked={Boolean(
-                        definition &&
-                        (role === "preparer"
-                          ? definition.preparerIds
-                          : definition.reviewerIds
-                        ).includes(person.id),
-                      )}
-                    />
-                    <span className="wrap-anywhere">{person.name}</span>
-                  </Label>
-                ))}
-              </fieldset>
-            ))}
-            <div className="md:col-span-2">
-              <Evidence value={definition?.evidence.join("\n")} />
-            </div>
-            <div className="md:col-span-2">
-              <Button type="submit">Save obligation revision</Button>
-            </div>
-          </fieldset>
+                <option value="fixture">Fixture</option>
+                <option value="live">Live</option>
+              </Choice>
+              <Field
+                name="jurisdiction"
+                label="Exact jurisdiction reference from original tax rules"
+                value={definition?.jurisdiction}
+              />
+              <Field
+                name="timeZone"
+                label="Reporting timezone (IANA name)"
+                value={definition?.timeZone}
+              />
+              <Choice
+                name="currency"
+                label="Reporting currency"
+                value={definition?.currency}
+              >
+                <option>INR</option>
+                <option>USD</option>
+              </Choice>
+              <Field
+                name="effectiveFrom"
+                label="Obligation starts (UTC)"
+                value={definition?.effectiveFrom}
+              />
+              <Field
+                name="effectiveUntil"
+                label="Obligation ends (UTC, optional)"
+                value={definition?.effectiveUntil ?? ""}
+                required={false}
+              />
+              <Field
+                name="registrationKey"
+                label="Registration record reference"
+                value={definition?.registration.key}
+              />
+              <Field
+                name="registrationId"
+                label="Original registration identifier or reviewed non-requirement reference"
+                value={definition?.registration.identifier}
+              />
+              <Choice
+                name="registrationStatus"
+                label="Reviewed registration status"
+                value={definition?.registration.status}
+              >
+                <option value="registered">Registered</option>
+                <option value="not_required">
+                  Evidence-backed non-requirement
+                </option>
+              </Choice>
+              <Evidence
+                name="registrationEvidence"
+                label="Registration review evidence (one reference per line)"
+                value={definition?.registration.evidence.join("\n")}
+              />
+              <Field
+                name="registrationFrom"
+                label="Registration starts (UTC)"
+                value={definition?.registration.effectiveFrom}
+              />
+              <Field
+                name="registrationUntil"
+                label="Registration ends (UTC, optional)"
+                value={definition?.registration.effectiveUntil ?? ""}
+                required={false}
+              />
+              <Choice
+                name="basis"
+                label="Reviewed reporting basis"
+                value={definition?.basis}
+              >
+                <option value="document_issue_date">
+                  Original invoice/credit issue dates
+                </option>
+              </Choice>
+              <Choice
+                name="unissuedCharges"
+                label="Captured charges without invoices"
+                value={definition?.unissuedCharges}
+              >
+                <option value="require_invoice">
+                  Require a permanent invoice before approval
+                </option>
+                <option value="review_exclusion">
+                  Require evidenced review of exclusion under this basis
+                </option>
+              </Choice>
+              <Choice
+                name="reviewPolicy"
+                label="Approving reviewer policy"
+                value={
+                  definition
+                    ? definition.distinctReviewer
+                      ? "distinct"
+                      : "same_allowed"
+                    : ""
+                }
+              >
+                <option value="distinct">Must differ from the preparer</option>
+                <option value="same_allowed">Same person permitted</option>
+              </Choice>
+              <Field name="note" label="Configuration change reason" />
+              {(["preparer", "reviewer"] as const).map((role) => (
+                <fieldset
+                  key={role}
+                  className="flex flex-col gap-3 rounded-xl border border-border p-4"
+                >
+                  <legend className="px-1 font-medium">
+                    {role === "preparer" ? "Preparers" : "Reviewers"}
+                  </legend>
+                  {workspace.operators.map((person) => (
+                    <Label
+                      key={person.id}
+                      className="flex min-h-11 items-center gap-3"
+                    >
+                      <Checkbox
+                        name={role}
+                        value={person.id}
+                        defaultChecked={Boolean(
+                          definition &&
+                          (role === "preparer"
+                            ? definition.preparerIds
+                            : definition.reviewerIds
+                          ).includes(person.id),
+                        )}
+                      />
+                      <span className="wrap-anywhere">{person.name}</span>
+                    </Label>
+                  ))}
+                </fieldset>
+              ))}
+              <div className="md:col-span-2">
+                <Evidence value={definition?.evidence.join("\n")} />
+              </div>
+              <div className="md:col-span-2">
+                <Button type="submit">Save obligation revision</Button>
+              </div>
+            </fieldset>
+          </FieldGroup>
         </form>
         <details>
           <summary className="cursor-pointer py-3 font-medium">
             Versioned obligations and exact decisions
           </summary>
-          <ul className="space-y-4">
+          <ul className="flex flex-col gap-4">
             {workspace.obligations.map((r) => {
               const ds = workspace.decisions.filter(
                   (d) => d.revisionId === r.id,
@@ -761,7 +770,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
               return (
                 <li
                   key={r.id}
-                  className="space-y-3 rounded-xl border border-border p-4 wrap-anywhere"
+                  className="flex flex-col gap-3 rounded-xl border border-border p-4 wrap-anywhere"
                 >
                   <p className="font-medium">
                     {r.definition.name} · {r.definition.mode} · revision{" "}
@@ -800,23 +809,25 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
                       );
                     }}
                   >
-                    <fieldset
-                      disabled={busy}
-                      className="grid gap-3 md:grid-cols-2"
-                    >
-                      <Choice name="outcome" label="Decision">
-                        <option value="approved">
-                          Approve this exact revision
-                        </option>
-                        <option value="withdrawn">
-                          Withdraw this revision
-                        </option>
-                      </Choice>
-                      <Field name="note" label="Decision reason" />
-                      <Button variant="outline" type="submit">
-                        Record configuration decision
-                      </Button>
-                    </fieldset>
+                    <FieldGroup className="gap-5">
+                      <fieldset
+                        disabled={busy}
+                        className="grid gap-3 md:grid-cols-2"
+                      >
+                        <Choice name="outcome" label="Decision">
+                          <option value="approved">
+                            Approve this exact revision
+                          </option>
+                          <option value="withdrawn">
+                            Withdraw this revision
+                          </option>
+                        </Choice>
+                        <Field name="note" label="Decision reason" />
+                        <Button variant="outline" type="submit">
+                          Record configuration decision
+                        </Button>
+                      </fieldset>
+                    </FieldGroup>
                   </form>
                 </li>
               );
@@ -825,7 +836,7 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
         </details>
       </section>
       <section
-        className="space-y-4 rounded-2xl border border-border bg-card p-6"
+        className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
         aria-labelledby="tax-period-add"
       >
         <h2 id="tax-period-add" className="text-xl font-semibold">
@@ -855,74 +866,77 @@ export function TaxPeriodManager({ initial }: { initial: TaxPeriodScreen }) {
             );
           }}
         >
-          <fieldset disabled={busy} className="grid gap-4 md:grid-cols-2">
-            <Choice name="obligationId" label="Approved current obligation">
-              {current
-                .filter(
-                  (r) =>
-                    workspace.decisions
-                      .filter((d) => d.revisionId === r.id)
-                      .at(-1)?.outcome === "approved",
-                )
-                .map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.definition.name} · {r.definition.mode}
-                  </option>
-                ))}
-            </Choice>
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="tax-timing-successor">
-                Correct timing for an existing period (optional)
-              </Label>
-              <NativeSelect
-                id="tax-timing-successor"
-                name="supersedesId"
-                defaultValue=""
-              >
-                <option value="">New coverage period</option>
-                {workspace.periods
-                  .filter((p) => p.status !== "superseded")
-                  .map((p) => (
-                    <option key={p.period.id} value={p.period.id}>
-                      {p.period.obligationKey}: {p.period.startDate} to{" "}
-                      {p.period.endDate}
+          <FieldGroup className="gap-5">
+            <fieldset disabled={busy} className="grid gap-4 md:grid-cols-2">
+              <Choice name="obligationId" label="Approved current obligation">
+                {current
+                  .filter(
+                    (r) =>
+                      workspace.decisions
+                        .filter((d) => d.revisionId === r.id)
+                        .at(-1)?.outcome === "approved",
+                  )
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.definition.name} · {r.definition.mode}
                     </option>
                   ))}
-              </NativeSelect>
-              <p className="text-sm text-muted-foreground">
-                A timing correction must keep the same obligation and local
-                boundaries. It preserves the old period and approval, supersedes
-                old reminders and requires a newly prepared report with explicit
-                correction evidence.
-              </p>
-            </div>
-            <Field name="dueAt" label="Configured due date and time (UTC)" />
-            <Field
-              name="startDate"
-              label="First local date (included)"
-              type="date"
-            />
-            <Field
-              name="endDate"
-              label="Next local date (excluded)"
-              type="date"
-            />
-            <Evidence label="Due-date and boundary evidence (one reference per line)" />
-            <Field name="note" label="Period preparation instruction" />
-            <div className="md:col-span-2 space-y-2">
-              <Label htmlFor="tax-reminder-schedule">
-                Optional reminder schedule: stage-label | UTC time, one per line
-              </Label>
-              <Textarea id="tax-reminder-schedule" name="reminders" />
-              <p className="text-sm text-muted-foreground">
-                Leave blank for no reminders. Every stage needs an explicit
-                label and time; no legal interval is inferred.
-              </p>
-            </div>
-            <div className="md:col-span-2">
-              <Button type="submit">Add reporting period</Button>
-            </div>
-          </fieldset>
+              </Choice>
+              <UiField className="flex flex-col gap-2 md:col-span-2">
+                <Label htmlFor="tax-timing-successor">
+                  Correct timing for an existing period (optional)
+                </Label>
+                <NativeSelect
+                  id="tax-timing-successor"
+                  name="supersedesId"
+                  defaultValue=""
+                >
+                  <option value="">New coverage period</option>
+                  {workspace.periods
+                    .filter((p) => p.status !== "superseded")
+                    .map((p) => (
+                      <option key={p.period.id} value={p.period.id}>
+                        {p.period.obligationKey}: {p.period.startDate} to{" "}
+                        {p.period.endDate}
+                      </option>
+                    ))}
+                </NativeSelect>
+                <p className="text-sm text-muted-foreground">
+                  A timing correction must keep the same obligation and local
+                  boundaries. It preserves the old period and approval,
+                  supersedes old reminders and requires a newly prepared report
+                  with explicit correction evidence.
+                </p>
+              </UiField>
+              <Field name="dueAt" label="Configured due date and time (UTC)" />
+              <Field
+                name="startDate"
+                label="First local date (included)"
+                type="date"
+              />
+              <Field
+                name="endDate"
+                label="Next local date (excluded)"
+                type="date"
+              />
+              <Evidence label="Due-date and boundary evidence (one reference per line)" />
+              <Field name="note" label="Period preparation instruction" />
+              <UiField className="flex flex-col md:col-span-2 gap-2">
+                <Label htmlFor="tax-reminder-schedule">
+                  Optional reminder schedule: stage-label | UTC time, one per
+                  line
+                </Label>
+                <Textarea id="tax-reminder-schedule" name="reminders" />
+                <p className="text-sm text-muted-foreground">
+                  Leave blank for no reminders. Every stage needs an explicit
+                  label and time; no legal interval is inferred.
+                </p>
+              </UiField>
+              <div className="md:col-span-2">
+                <Button type="submit">Add reporting period</Button>
+              </div>
+            </fieldset>
+          </FieldGroup>
         </form>
       </section>
       <p className="text-muted-foreground">
@@ -952,7 +966,7 @@ function ReportDetails({
   const [kind, setKind] = useState("review"),
     snapshot = report.snapshot;
   return (
-    <div className="space-y-4 rounded-xl bg-muted p-4 wrap-anywhere">
+    <div className="flex flex-col gap-4 rounded-xl bg-muted p-4 wrap-anywhere">
       <h4 className="font-semibold">
         Report revision {report.revision} · {readable(report.status)}
       </h4>
@@ -1000,7 +1014,7 @@ function ReportDetails({
         Report {report.id} · SHA-256 {report.digest}
       </p>
       {report.unresolved.length > 0 && (
-        <ul className="space-y-2">
+        <ul className="flex flex-col gap-2">
           {report.unresolved.map((i) => (
             <li key={i.id}>
               <Badge>Required review</Badge> {readable(i.code)} ·{" "}
@@ -1016,7 +1030,7 @@ function ReportDetails({
           Original tax components and complete source population (
           {snapshot.sources.length})
         </summary>
-        <ul className="space-y-4">
+        <ul className="flex flex-col gap-4">
           {snapshot.components.map((c, index) => (
             <li key={index}>
               {c.name}: {money(c.amountMinor, snapshot.currency)} ·{" "}
@@ -1025,7 +1039,7 @@ function ReportDetails({
             </li>
           ))}
         </ul>
-        <ul className="mt-4 space-y-3">
+        <ul className="flex flex-col mt-4 gap-3">
           {snapshot.sources.map((s) => (
             <li
               key={s.id}
@@ -1094,7 +1108,7 @@ function ReportDetails({
           <summary className="cursor-pointer py-2 font-medium">
             Confirmed cash and linked credits
           </summary>
-          <ul className="space-y-3">
+          <ul className="flex flex-col gap-3">
             {snapshot.adjustments.map((a) => (
               <li key={a.id}>
                 Actual cash: {money(a.actualMinor, a.currency)} · Permanent
@@ -1120,7 +1134,7 @@ function ReportDetails({
         <summary className="cursor-pointer py-2 font-medium">
           Attributable review history ({report.actions.length})
         </summary>
-        <ol className="space-y-3">
+        <ol className="flex flex-col gap-3">
           {report.actions.map((a) => (
             <li key={a.id}>
               {readable(a.kind)} · {a.actorName || a.actorId || "System"} ·{" "}
@@ -1143,56 +1157,58 @@ function ReportDetails({
           });
         }}
       >
-        <fieldset
-          disabled={
-            busy ||
-            !canReview ||
-            !report.current ||
-            report.status === "superseded"
-          }
-          className="grid gap-4 md:grid-cols-2"
-        >
-          <div className="space-y-2">
-            <Label htmlFor={`review-kind-${report.id}`}>Review action</Label>
-            <NativeSelect
-              id={`review-kind-${report.id}`}
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
-            >
-              <option value="review">Record review</option>
-              <option value="raise_issue">Raise a required issue</option>
-              <option value="resolve_issue">
-                Resolve an evidenced review issue
-              </option>
-              <option value="approve">Approve this frozen revision</option>
-            </NativeSelect>
-          </div>
-          {kind === "resolve_issue" ? (
-            <Choice name="issueId" label="Issue to resolve">
-              {report.unresolved
-                .filter((i) => i.resolvable)
-                .map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {readable(i.code)} · {i.sourceId}
+        <FieldGroup className="gap-5">
+          <fieldset
+            disabled={
+              busy ||
+              !canReview ||
+              !report.current ||
+              report.status === "superseded"
+            }
+            className="grid gap-4 md:grid-cols-2"
+          >
+            <UiField className="flex flex-col gap-2">
+              <Label htmlFor={`review-kind-${report.id}`}>Review action</Label>
+              <NativeSelect
+                id={`review-kind-${report.id}`}
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
+              >
+                <option value="review">Record review</option>
+                <option value="raise_issue">Raise a required issue</option>
+                <option value="resolve_issue">
+                  Resolve an evidenced review issue
+                </option>
+                <option value="approve">Approve this frozen revision</option>
+              </NativeSelect>
+            </UiField>
+            {kind === "resolve_issue" ? (
+              <Choice name="issueId" label="Issue to resolve">
+                {report.unresolved
+                  .filter((i) => i.resolvable)
+                  .map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {readable(i.code)} · {i.sourceId}
+                    </option>
+                  ))}
+              </Choice>
+            ) : kind === "raise_issue" ? (
+              <Choice name="issueId" label="Source to review">
+                <option value="period">Entire reporting period</option>
+                {snapshot.sources.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.number ?? s.nativePaymentId ?? s.id}
                   </option>
                 ))}
-            </Choice>
-          ) : kind === "raise_issue" ? (
-            <Choice name="issueId" label="Source to review">
-              <option value="period">Entire reporting period</option>
-              {snapshot.sources.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.number ?? s.nativePaymentId ?? s.id}
-                </option>
-              ))}
-            </Choice>
-          ) : null}
-          <Field name="note" label="Review findings or resolution reason" />
-          <Evidence />
-          <div className="md:col-span-2">
-            <Button type="submit">Record review action</Button>
-          </div>
-        </fieldset>
+              </Choice>
+            ) : null}
+            <Field name="note" label="Review findings or resolution reason" />
+            <Evidence />
+            <div className="md:col-span-2">
+              <Button type="submit">Record review action</Button>
+            </div>
+          </fieldset>
+        </FieldGroup>
       </form>
       <Button
         variant="outline"

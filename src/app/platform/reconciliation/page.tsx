@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -26,20 +27,16 @@ export default async function ReconciliationPage() {
     }
   })();
   return (
-    <div className="mx-auto max-w-5xl space-y-8">
-      <header className="space-y-4">
-        <Link
-          href="/businesses"
-          className="inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Subscription money reconciliation</h1>
-        <p className="text-muted-foreground">
-          Trace original charges and tax through provider deductions,
-          settlements and independent bank observations.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Subscription money reconciliation</>}
+        description={
+          <>
+            Trace original charges and tax through provider deductions,
+            settlements and independent bank observations.
+          </>
+        }
+      ></PageHeader>
       <ReconciliationManager initial={initial} />
     </div>
   );

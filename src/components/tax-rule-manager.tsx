@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import {
@@ -65,7 +66,7 @@ function Field({
   date?: boolean;
 }) {
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>
         {label}
         {date && " (UTC)"}
@@ -82,7 +83,7 @@ function Field({
           change(date && raw ? new Date(`${raw}Z`).toISOString() : raw);
         }}
       />
-    </div>
+    </UiField>
   );
 }
 function Choice({
@@ -99,7 +100,7 @@ function Choice({
   change(value: string): void;
 }) {
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <NativeSelect
         id={id}
@@ -112,7 +113,7 @@ function Choice({
           </option>
         ))}
       </NativeSelect>
-    </div>
+    </UiField>
   );
 }
 export function TaxRuleManager({ initial }: { initial: TaxCatalog }) {
@@ -211,7 +212,7 @@ export function TaxRuleManager({ initial }: { initial: TaxCatalog }) {
     );
   }
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <div className="flex flex-wrap gap-4">
         <Button
           variant="outline"
@@ -253,405 +254,424 @@ export function TaxRuleManager({ initial }: { initial: TaxCatalog }) {
           event.preventDefault();
           void act(save);
         }}
-        className="space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
+        className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
         aria-busy={busy}
       >
-        <h2 className="text-xl font-semibold">Draft rule revision</h2>
-        <p className="text-muted-foreground">
-          No legal rates or jurisdictions are preconfigured. Supply evidence for
-          supported customer coverage, seller registration and treatment.
-          Amounts are exclusive of tax. Fixture configuration is excluded from
-          live calculations.
-        </p>
-        <fieldset className="grid gap-4 sm:grid-cols-2">
-          <legend className="mb-4 font-semibold">
-            Coverage and effective dates
-          </legend>
-          <Field
-            id="rule-key"
-            label="Rule key (lowercase letters, numbers, hyphens)"
-            value={key}
-            change={setKey}
-          />
-          <p className="self-center text-sm text-muted-foreground">
-            Base version {expectedVersion}. To revise an existing rule, load its
-            starting point below. Saving always appends a new draft.
+        <FieldGroup className="gap-6">
+          <h2 className="text-xl font-semibold">Draft rule revision</h2>
+          <p className="text-muted-foreground">
+            No legal rates or jurisdictions are preconfigured. Supply evidence
+            for supported customer coverage, seller registration and treatment.
+            Amounts are exclusive of tax. Fixture configuration is excluded from
+            live calculations.
           </p>
-          <Choice
-            id="rule-mode"
-            label="Configuration use"
-            value={rule.mode}
-            choices={["live", "fixture"]}
-            change={(value) => {
-              if (value === "live" || value === "fixture") field("mode", value);
-            }}
-          />
-          <Field
-            id="rule-country"
-            label="Customer country code"
-            value={rule.customerCountry}
-            change={(value) => field("customerCountry", value.toUpperCase())}
-          />
-          <Field
-            id="rule-region"
-            label="Exact customer region; blank covers entire country"
-            optional
-            value={rule.customerRegion ?? ""}
-            change={(value) => field("customerRegion", value || null)}
-          />
-          <Choice
-            id="rule-buyer"
-            label="Purchasing status"
-            value={rule.buyerStatus}
-            choices={["business", "individual"]}
-            change={(value) => {
-              if (value === "business" || value === "individual")
-                field("buyerStatus", value);
-            }}
-          />
-          <Choice
-            id="rule-currency"
-            label="Billing currency"
-            value={rule.currency}
-            choices={["INR", "USD"]}
-            change={(value) => {
-              if (value === "INR" || value === "USD") field("currency", value);
-            }}
-          />
-          <Field
-            id="rule-product"
-            label="Product code"
-            value={rule.productCode}
-            change={(value) => field("productCode", value)}
-          />
-          <Field
-            id="rule-from"
-            label="Effective from"
-            date
-            value={rule.effectiveFrom}
-            change={(value) => field("effectiveFrom", value)}
-          />
-          <Field
-            id="rule-until"
-            label="Effective until, end excluded"
-            date
-            optional
-            value={rule.effectiveUntil ?? ""}
-            change={(value) => field("effectiveUntil", value || null)}
-          />
-        </fieldset>
-        <fieldset className="grid gap-4 sm:grid-cols-2">
-          <legend className="mb-4 font-semibold">
-            Jurisdiction and seller registration
-          </legend>
-          {(
-            [
-              ["code", "Jurisdiction code"],
-              ["name", "Jurisdiction name"],
-              ["country", "Jurisdiction country code"],
-            ] as const
-          ).map(([name, label]) => (
+          <fieldset className="grid gap-4 sm:grid-cols-2">
+            <legend className="mb-4 font-semibold">
+              Coverage and effective dates
+            </legend>
             <Field
-              key={name}
-              id={`jurisdiction-${name}`}
-              label={label}
-              value={rule.jurisdiction[name]}
+              id="rule-key"
+              label="Rule key (lowercase letters, numbers, hyphens)"
+              value={key}
+              change={setKey}
+            />
+            <p className="self-center text-sm text-muted-foreground">
+              Base version {expectedVersion}. To revise an existing rule, load
+              its starting point below. Saving always appends a new draft.
+            </p>
+            <Choice
+              id="rule-mode"
+              label="Configuration use"
+              value={rule.mode}
+              choices={["live", "fixture"]}
+              change={(value) => {
+                if (value === "live" || value === "fixture")
+                  field("mode", value);
+              }}
+            />
+            <Field
+              id="rule-country"
+              label="Customer country code"
+              value={rule.customerCountry}
+              change={(value) => field("customerCountry", value.toUpperCase())}
+            />
+            <Field
+              id="rule-region"
+              label="Exact customer region; blank covers entire country"
+              optional
+              value={rule.customerRegion ?? ""}
+              change={(value) => field("customerRegion", value || null)}
+            />
+            <Choice
+              id="rule-buyer"
+              label="Purchasing status"
+              value={rule.buyerStatus}
+              choices={["business", "individual"]}
+              change={(value) => {
+                if (value === "business" || value === "individual")
+                  field("buyerStatus", value);
+              }}
+            />
+            <Choice
+              id="rule-currency"
+              label="Billing currency"
+              value={rule.currency}
+              choices={["INR", "USD"]}
+              change={(value) => {
+                if (value === "INR" || value === "USD")
+                  field("currency", value);
+              }}
+            />
+            <Field
+              id="rule-product"
+              label="Product code"
+              value={rule.productCode}
+              change={(value) => field("productCode", value)}
+            />
+            <Field
+              id="rule-from"
+              label="Effective from"
+              date
+              value={rule.effectiveFrom}
+              change={(value) => field("effectiveFrom", value)}
+            />
+            <Field
+              id="rule-until"
+              label="Effective until, end excluded"
+              date
+              optional
+              value={rule.effectiveUntil ?? ""}
+              change={(value) => field("effectiveUntil", value || null)}
+            />
+          </fieldset>
+          <fieldset className="grid gap-4 sm:grid-cols-2">
+            <legend className="mb-4 font-semibold">
+              Jurisdiction and seller registration
+            </legend>
+            {(
+              [
+                ["code", "Jurisdiction code"],
+                ["name", "Jurisdiction name"],
+                ["country", "Jurisdiction country code"],
+              ] as const
+            ).map(([name, label]) => (
+              <Field
+                key={name}
+                id={`jurisdiction-${name}`}
+                label={label}
+                value={rule.jurisdiction[name]}
+                change={(value) =>
+                  field("jurisdiction", {
+                    ...rule.jurisdiction,
+                    [name]: name === "country" ? value.toUpperCase() : value,
+                  })
+                }
+              />
+            ))}
+            <Choice
+              id="registration-status"
+              label="Reviewed registration position"
+              value={rule.registration.status}
+              choices={["registered", "not_required"]}
+              change={(value) => {
+                if (value === "registered" || value === "not_required")
+                  field("registration", {
+                    ...rule.registration,
+                    status: value,
+                  });
+              }}
+            />
+            <Field
+              id="registration-reference"
+              label="Seller registration number or non-requirement evidence reference"
+              value={rule.registration.identifier}
               change={(value) =>
-                field("jurisdiction", {
-                  ...rule.jurisdiction,
-                  [name]: name === "country" ? value.toUpperCase() : value,
+                field("registration", {
+                  ...rule.registration,
+                  identifier: value,
                 })
               }
             />
-          ))}
-          <Choice
-            id="registration-status"
-            label="Reviewed registration position"
-            value={rule.registration.status}
-            choices={["registered", "not_required"]}
-            change={(value) => {
-              if (value === "registered" || value === "not_required")
-                field("registration", { ...rule.registration, status: value });
-            }}
-          />
-          <Field
-            id="registration-reference"
-            label="Seller registration number or non-requirement evidence reference"
-            value={rule.registration.identifier}
-            change={(value) =>
-              field("registration", { ...rule.registration, identifier: value })
-            }
-          />
-          <Field
-            id="registration-from"
-            label="Registration effective from"
-            date
-            value={rule.registration.effectiveFrom}
-            change={(value) =>
-              field("registration", {
-                ...rule.registration,
-                effectiveFrom: value,
-              })
-            }
-          />
-          <Field
-            id="registration-until"
-            label="Registration effective until, end excluded"
-            date
-            optional
-            value={rule.registration.effectiveUntil ?? ""}
-            change={(value) =>
-              field("registration", {
-                ...rule.registration,
-                effectiveUntil: value || null,
-              })
-            }
-          />
-        </fieldset>
-        <fieldset className="space-y-4">
-          <legend className="mb-4 font-semibold">
-            Treatment and required evidence
-          </legend>
-          <Choice
-            id="rule-treatment"
-            label="Reviewed treatment"
-            value={rule.treatment}
-            choices={[
-              "taxable",
-              "zero_rated",
-              "exempt",
-              "reverse_charge",
-              "export",
-            ]}
-            change={(value) => {
-              if (
-                value === "taxable" ||
-                value === "zero_rated" ||
-                value === "exempt" ||
-                value === "reverse_charge" ||
-                value === "export"
-              )
-                field("treatment", value);
-            }}
-          />
-          <Field
-            id="rule-rationale"
-            label="Treatment and registration rationale"
-            value={rule.rationale}
-            change={(value) => field("rationale", value)}
-          />
-          <p className="text-sm text-muted-foreground">
-            Legal identity, address and purchasing status are always required by
-            billing review. Add tax-identifier evidence when this treatment
-            requires it.
-          </p>
-          <div className="flex min-h-11 items-center gap-3">
-            <Checkbox
-              id="rule-tax-claim"
-              checked={rule.requiredEvidence.includes("tax_identifier")}
-              onCheckedChange={(checked) =>
-                field(
-                  "requiredEvidence",
-                  checked === true
-                    ? [
-                        "legal_identity",
-                        "billing_address",
-                        "business_status",
-                        "tax_identifier",
-                      ]
-                    : ["legal_identity", "billing_address", "business_status"],
-                )
+            <Field
+              id="registration-from"
+              label="Registration effective from"
+              date
+              value={rule.registration.effectiveFrom}
+              change={(value) =>
+                field("registration", {
+                  ...rule.registration,
+                  effectiveFrom: value,
+                })
               }
             />
-            <Label htmlFor="rule-tax-claim">
-              Require reviewed tax-identifier evidence
-            </Label>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Enter each additive tax as an exact fraction of the amount before
-            tax. Non-taxable treatments must have no rate rows.
-          </p>
-          {rule.rates.map((rate, index) => (
-            <fieldset
-              key={index}
-              className="space-y-4 rounded-xl border border-border p-4"
+            <Field
+              id="registration-until"
+              label="Registration effective until, end excluded"
+              date
+              optional
+              value={rule.registration.effectiveUntil ?? ""}
+              change={(value) =>
+                field("registration", {
+                  ...rule.registration,
+                  effectiveUntil: value || null,
+                })
+              }
+            />
+          </fieldset>
+          <fieldset className="flex flex-col gap-4">
+            <legend className="mb-4 font-semibold">
+              Treatment and required evidence
+            </legend>
+            <Choice
+              id="rule-treatment"
+              label="Reviewed treatment"
+              value={rule.treatment}
+              choices={[
+                "taxable",
+                "zero_rated",
+                "exempt",
+                "reverse_charge",
+                "export",
+              ]}
+              change={(value) => {
+                if (
+                  value === "taxable" ||
+                  value === "zero_rated" ||
+                  value === "exempt" ||
+                  value === "reverse_charge" ||
+                  value === "export"
+                )
+                  field("treatment", value);
+              }}
+            />
+            <Field
+              id="rule-rationale"
+              label="Treatment and registration rationale"
+              value={rule.rationale}
+              change={(value) => field("rationale", value)}
+            />
+            <p className="text-sm text-muted-foreground">
+              Legal identity, address and purchasing status are always required
+              by billing review. Add tax-identifier evidence when this treatment
+              requires it.
+            </p>
+            <div className="flex min-h-11 items-center gap-3">
+              <Checkbox
+                id="rule-tax-claim"
+                checked={rule.requiredEvidence.includes("tax_identifier")}
+                onCheckedChange={(checked) =>
+                  field(
+                    "requiredEvidence",
+                    checked === true
+                      ? [
+                          "legal_identity",
+                          "billing_address",
+                          "business_status",
+                          "tax_identifier",
+                        ]
+                      : [
+                          "legal_identity",
+                          "billing_address",
+                          "business_status",
+                        ],
+                  )
+                }
+              />
+              <Label htmlFor="rule-tax-claim">
+                Require reviewed tax-identifier evidence
+              </Label>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Enter each additive tax as an exact fraction of the amount before
+              tax. Non-taxable treatments must have no rate rows.
+            </p>
+            {rule.rates.map((rate, index) => (
+              <fieldset
+                key={index}
+                className="flex flex-col gap-4 rounded-xl border border-border p-4"
+              >
+                <legend className="px-2">Tax component {index + 1}</legend>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {(
+                    [
+                      ["name", "Tax name"],
+                      ["numerator", "Fraction numerator"],
+                      ["denominator", "Fraction denominator"],
+                    ] as const
+                  ).map(([name, label]) => (
+                    <Field
+                      key={name}
+                      id={`rate-${index}-${name}`}
+                      label={label}
+                      value={rate[name]}
+                      change={(value) =>
+                        field(
+                          "rates",
+                          rule.rates.map((row, i) =>
+                            i === index ? { ...row, [name]: value } : row,
+                          ),
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    field(
+                      "rates",
+                      rule.rates.filter((_, i) => i !== index),
+                    )
+                  }
+                >
+                  Remove tax component {index + 1}
+                </Button>
+              </fieldset>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={rule.rates.length >= 10}
+              onClick={() =>
+                field("rates", [
+                  ...rule.rates,
+                  { name: "", numerator: "", denominator: "" },
+                ])
+              }
             >
-              <legend className="px-2">Tax component {index + 1}</legend>
-              <div className="grid gap-4 sm:grid-cols-3">
+              Add tax component
+            </Button>
+          </fieldset>
+          <fieldset className="grid gap-4 sm:grid-cols-3">
+            <legend className="mb-4 font-semibold">
+              Tax rounding (INR and USD have two decimal places)
+            </legend>
+            <Choice
+              id="rounding-mode"
+              label="Rounding mode"
+              value={rule.rounding.mode}
+              choices={["half_up", "half_even", "down"]}
+              change={(value) => {
+                if (
+                  value === "half_up" ||
+                  value === "half_even" ||
+                  value === "down"
+                )
+                  field("rounding", { ...rule.rounding, mode: value });
+              }}
+            />
+            <Choice
+              id="rounding-scope"
+              label="Round each tax component by"
+              value={rule.rounding.scope}
+              choices={["per_line", "subtotal"]}
+              change={(value) => {
+                if (value === "per_line" || value === "subtotal")
+                  field("rounding", { ...rule.rounding, scope: value });
+              }}
+            />
+            <Choice
+              id="rounding-increment"
+              label="Rounding increment in minor units (1 = 0.01)"
+              value={rule.rounding.incrementMinor}
+              choices={["1", "5", "10", "100"]}
+              change={(value) => {
+                if (
+                  value === "1" ||
+                  value === "5" ||
+                  value === "10" ||
+                  value === "100"
+                )
+                  field("rounding", {
+                    ...rule.rounding,
+                    incrementMinor: value,
+                  });
+              }}
+            />
+          </fieldset>
+          <fieldset className="flex flex-col gap-4">
+            <legend className="mb-4 font-semibold">
+              Configuration evidence
+            </legend>
+            <p className="text-sm text-muted-foreground">
+              Record the verified source or retained document reference and
+              check time for coverage, registration, rates and treatment. A
+              fixture reference is synthetic evidence only.
+            </p>
+            {rule.evidence.map((evidence, index) => (
+              <fieldset
+                key={index}
+                className="flex flex-col gap-4 rounded-xl border border-border p-4"
+              >
+                <legend className="px-2">Evidence {index + 1}</legend>
                 {(
                   [
-                    ["name", "Tax name"],
-                    ["numerator", "Fraction numerator"],
-                    ["denominator", "Fraction denominator"],
+                    ["title", "Source title"],
+                    ["reference", "Source or document reference"],
+                    ["checkedAt", "Verified at"],
                   ] as const
                 ).map(([name, label]) => (
                   <Field
                     key={name}
-                    id={`rate-${index}-${name}`}
+                    id={`evidence-${index}-${name}`}
                     label={label}
-                    value={rate[name]}
+                    date={name === "checkedAt"}
+                    value={evidence[name]}
                     change={(value) =>
                       field(
-                        "rates",
-                        rule.rates.map((row, i) =>
+                        "evidence",
+                        rule.evidence.map((row, i) =>
                           i === index ? { ...row, [name]: value } : row,
                         ),
                       )
                     }
                   />
                 ))}
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  field(
-                    "rates",
-                    rule.rates.filter((_, i) => i !== index),
-                  )
-                }
-              >
-                Remove tax component {index + 1}
-              </Button>
-            </fieldset>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={rule.rates.length >= 10}
-            onClick={() =>
-              field("rates", [
-                ...rule.rates,
-                { name: "", numerator: "", denominator: "" },
-              ])
-            }
-          >
-            Add tax component
-          </Button>
-        </fieldset>
-        <fieldset className="grid gap-4 sm:grid-cols-3">
-          <legend className="mb-4 font-semibold">
-            Tax rounding (INR and USD have two decimal places)
-          </legend>
-          <Choice
-            id="rounding-mode"
-            label="Rounding mode"
-            value={rule.rounding.mode}
-            choices={["half_up", "half_even", "down"]}
-            change={(value) => {
-              if (
-                value === "half_up" ||
-                value === "half_even" ||
-                value === "down"
-              )
-                field("rounding", { ...rule.rounding, mode: value });
-            }}
-          />
-          <Choice
-            id="rounding-scope"
-            label="Round each tax component by"
-            value={rule.rounding.scope}
-            choices={["per_line", "subtotal"]}
-            change={(value) => {
-              if (value === "per_line" || value === "subtotal")
-                field("rounding", { ...rule.rounding, scope: value });
-            }}
-          />
-          <Choice
-            id="rounding-increment"
-            label="Rounding increment in minor units (1 = 0.01)"
-            value={rule.rounding.incrementMinor}
-            choices={["1", "5", "10", "100"]}
-            change={(value) => {
-              if (
-                value === "1" ||
-                value === "5" ||
-                value === "10" ||
-                value === "100"
-              )
-                field("rounding", { ...rule.rounding, incrementMinor: value });
-            }}
-          />
-        </fieldset>
-        <fieldset className="space-y-4">
-          <legend className="mb-4 font-semibold">Configuration evidence</legend>
-          <p className="text-sm text-muted-foreground">
-            Record the verified source or retained document reference and check
-            time for coverage, registration, rates and treatment. A fixture
-            reference is synthetic evidence only.
-          </p>
-          {rule.evidence.map((evidence, index) => (
-            <fieldset
-              key={index}
-              className="space-y-4 rounded-xl border border-border p-4"
-            >
-              <legend className="px-2">Evidence {index + 1}</legend>
-              {(
-                [
-                  ["title", "Source title"],
-                  ["reference", "Source or document reference"],
-                  ["checkedAt", "Verified at"],
-                ] as const
-              ).map(([name, label]) => (
-                <Field
-                  key={name}
-                  id={`evidence-${index}-${name}`}
-                  label={label}
-                  date={name === "checkedAt"}
-                  value={evidence[name]}
-                  change={(value) =>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
                     field(
                       "evidence",
-                      rule.evidence.map((row, i) =>
-                        i === index ? { ...row, [name]: value } : row,
-                      ),
+                      rule.evidence.filter((_, i) => i !== index),
                     )
                   }
-                />
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  field(
-                    "evidence",
-                    rule.evidence.filter((_, i) => i !== index),
-                  )
-                }
-              >
-                Remove evidence {index + 1}
-              </Button>
-            </fieldset>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={rule.evidence.length >= 20}
-            onClick={() =>
-              field("evidence", [
-                ...rule.evidence,
-                { title: "", reference: "", checkedAt: "" },
-              ])
-            }
-          >
-            Add evidence reference
+                >
+                  Remove evidence {index + 1}
+                </Button>
+              </fieldset>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={rule.evidence.length >= 20}
+              onClick={() =>
+                field("evidence", [
+                  ...rule.evidence,
+                  { title: "", reference: "", checkedAt: "" },
+                ])
+              }
+            >
+              Add evidence reference
+            </Button>
+          </fieldset>
+          <UiField className="flex flex-col gap-2">
+            <Label htmlFor="rule-note">Revision reason</Label>
+            <Textarea
+              id="rule-note"
+              required
+              maxLength={1000}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </UiField>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Saving…" : "Save draft revision"}
           </Button>
-        </fieldset>
-        <div className="space-y-2">
-          <Label htmlFor="rule-note">Revision reason</Label>
-          <Textarea
-            id="rule-note"
-            required
-            maxLength={1000}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </div>
-        <Button type="submit" disabled={busy}>
-          {busy ? "Saving…" : "Save draft revision"}
-        </Button>
+        </FieldGroup>
       </form>
-      <section className="space-y-5">
+      <section className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold">
           Rule revisions and approval history
         </h2>
@@ -675,7 +695,7 @@ export function TaxRuleManager({ initial }: { initial: TaxCatalog }) {
           return (
             <article
               key={revision.id}
-              className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8 wrap-anywhere"
+              className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8 wrap-anywhere"
             >
               <div className="flex flex-wrap justify-between gap-3">
                 <h3 className="text-lg font-semibold">
@@ -725,7 +745,7 @@ export function TaxRuleManager({ initial }: { initial: TaxCatalog }) {
                   </div>
                 </AlertDialogContent>
               </AlertDialog>
-              <ul className="space-y-2">
+              <ul className="flex flex-col gap-2">
                 {decisions.map((decision) => (
                   <li key={decision.id}>
                     Decision {decision.version}: {decision.outcome} ·{" "}
@@ -733,7 +753,7 @@ export function TaxRuleManager({ initial }: { initial: TaxCatalog }) {
                   </li>
                 ))}
               </ul>
-              <div className="space-y-2">
+              <UiField className="flex flex-col gap-2">
                 <Label htmlFor={`decision-${revision.id}`}>
                   Approval or withdrawal reason for this exact revision
                 </Label>
@@ -748,7 +768,7 @@ export function TaxRuleManager({ initial }: { initial: TaxCatalog }) {
                     }))
                   }
                 />
-              </div>
+              </UiField>
               <div className="flex flex-wrap gap-3">
                 <Button
                   disabled={busy || !decisionNotes[revision.id]?.trim()}

@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -131,12 +132,12 @@ export function CommercialActionsManager({
     }
   };
   return (
-    <div className="space-y-6 wrap-anywhere">
+    <div className="flex flex-col gap-6 wrap-anywhere">
       <Card>
         <CardHeader>
           <CardTitle>Current authority and ownership</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="flex flex-col gap-3">
           <p>
             Responsible person: {state.ownerName ?? "Unassigned"} ·{" "}
             {state.controlState === "human"
@@ -216,7 +217,10 @@ export function CommercialActionsManager({
           approved.
         </p>
       )}
-      <section className="space-y-4" aria-labelledby="commercial-history">
+      <section
+        className="flex flex-col gap-4"
+        aria-labelledby="commercial-history"
+      >
         <h2 id="commercial-history" className="text-xl font-semibold">
           Commercial action history
         </h2>
@@ -239,7 +243,10 @@ export function CommercialActionsManager({
           />
         ))}
       </section>
-      <section className="space-y-3" aria-labelledby="commercial-outcomes">
+      <section
+        className="flex flex-col gap-3"
+        aria-labelledby="commercial-outcomes"
+      >
         <h2 id="commercial-outcomes" className="text-xl font-semibold">
           Authoritative outcomes
         </h2>
@@ -254,7 +261,7 @@ export function CommercialActionsManager({
         )}
         {state.outcomes.map((o) => (
           <Card key={o.id}>
-            <CardContent className="space-y-2 pt-6">
+            <CardContent className="flex flex-col gap-2 pt-6">
               <Badge>{outcomeLabels[o.kind]}</Badge>
               <p>
                 {o.reference} · {o.occurredAt}
@@ -340,161 +347,165 @@ function ProposalForm({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <form className="space-y-4" onSubmit={submit}>
-          <p className="text-sm text-muted-foreground">
-            Enter Business-authorized prices and complete terms. The buyer and
-            conversation come from the selected received message. A custom
-            quotation needs a complete, current RFQ.
-          </p>
-          <fieldset disabled={pending} className="space-y-4">
-            <div>
-              <Label htmlFor="commercial-action">Action</Label>
-              <NativeSelect
-                id="commercial-action"
-                name="action"
-                defaultValue={p?.action ?? ""}
-                required
-              >
-                <option value="">Choose an action</option>
-                {commercialActions.map((a) => (
-                  <option key={a} value={a}>
-                    {commercialActionLabels[a]}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-            <div>
-              <Label htmlFor="commercial-mode">Execution control</Label>
-              <NativeSelect
-                id="commercial-mode"
-                name="mode"
-                defaultValue={p?.mode ?? "manual"}
-              >
-                <option value="manual">Manual review and execution</option>
-                <option
-                  value="automation"
-                  disabled={state.controlState !== "automation"}
-                >
-                  Automation, when explicitly returned and permitted
-                </option>
-              </NativeSelect>
-            </div>
-            <div>
-              <Label htmlFor="commercial-offering">Approved offering</Label>
-              <NativeSelect
-                id="commercial-offering"
-                name="offering"
-                defaultValue={p?.offering ?? ""}
-                required
-              >
-                <option value="">Choose an offering</option>
-                {state.offerings.map((o) => (
-                  <option key={o.name}>{o.name}</option>
-                ))}
-              </NativeSelect>
-            </div>
-            <div>
-              <Label htmlFor="commercial-message">Buyer message</Label>
-              <NativeSelect
-                id="commercial-message"
-                name="message"
-                defaultValue={p?.messageId ?? ""}
-                required
-              >
-                <option value="">Choose the exact conversation</option>
-                {state.messages.map((m, i) => (
-                  <option key={m.id} value={m.id}>
-                    {i + 1}. {m.recipientRef}: {m.text.slice(0, 90)}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-            <div>
-              <Label htmlFor="commercial-description">
-                Goods or services and quantities
-              </Label>
-              <Textarea
-                id="commercial-description"
-                name="description"
-                defaultValue={p?.description}
-                maxLength={4000}
-                required
-              />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+        <form className="flex flex-col gap-4" onSubmit={submit}>
+          <FieldGroup className="gap-4">
+            <p className="text-sm text-muted-foreground">
+              Enter Business-authorized prices and complete terms. The buyer and
+              conversation come from the selected received message. A custom
+              quotation needs a complete, current RFQ.
+            </p>
+            <fieldset disabled={pending} className="flex flex-col gap-4">
               <div>
-                <Label htmlFor="commercial-currency">Currency</Label>
+                <Label htmlFor="commercial-action">Action</Label>
                 <NativeSelect
-                  id="commercial-currency"
-                  name="currency"
-                  defaultValue={p?.grossAmount.currency ?? ""}
+                  id="commercial-action"
+                  name="action"
+                  defaultValue={p?.action ?? ""}
                   required
                 >
-                  <option value="">Choose currency</option>
-                  {commercialCurrencies.map((c) => (
-                    <option key={c}>{c}</option>
+                  <option value="">Choose an action</option>
+                  {commercialActions.map((a) => (
+                    <option key={a} value={a}>
+                      {commercialActionLabels[a]}
+                    </option>
                   ))}
                 </NativeSelect>
               </div>
               <div>
-                <Label htmlFor="commercial-amount">Total before discount</Label>
-                <Input
-                  id="commercial-amount"
-                  name="amount"
-                  inputMode="decimal"
-                  defaultValue={p ? decimalMoney(p.grossAmount) : ""}
+                <Label htmlFor="commercial-mode">Execution control</Label>
+                <NativeSelect
+                  id="commercial-mode"
+                  name="mode"
+                  defaultValue={p?.mode ?? "manual"}
+                >
+                  <option value="manual">Manual review and execution</option>
+                  <option
+                    value="automation"
+                    disabled={state.controlState !== "automation"}
+                  >
+                    Automation, when explicitly returned and permitted
+                  </option>
+                </NativeSelect>
+              </div>
+              <div>
+                <Label htmlFor="commercial-offering">Approved offering</Label>
+                <NativeSelect
+                  id="commercial-offering"
+                  name="offering"
+                  defaultValue={p?.offering ?? ""}
+                  required
+                >
+                  <option value="">Choose an offering</option>
+                  {state.offerings.map((o) => (
+                    <option key={o.name}>{o.name}</option>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div>
+                <Label htmlFor="commercial-message">Buyer message</Label>
+                <NativeSelect
+                  id="commercial-message"
+                  name="message"
+                  defaultValue={p?.messageId ?? ""}
+                  required
+                >
+                  <option value="">Choose the exact conversation</option>
+                  {state.messages.map((m, i) => (
+                    <option key={m.id} value={m.id}>
+                      {i + 1}. {m.recipientRef}: {m.text.slice(0, 90)}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div>
+                <Label htmlFor="commercial-description">
+                  Goods or services and quantities
+                </Label>
+                <Textarea
+                  id="commercial-description"
+                  name="description"
+                  defaultValue={p?.description}
+                  maxLength={4000}
                   required
                 />
               </div>
-            </div>
-            <div>
-              <Label htmlFor="commercial-discount">
-                Discount percent (enter 0 for none)
-              </Label>
-              <Input
-                id="commercial-discount"
-                name="discount"
-                inputMode="decimal"
-                defaultValue={p ? percentDiscount(p.discountBps) : ""}
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="commercial-terms">
-                Complete commercial terms, including applicable tax and delivery
-                treatment
-              </Label>
-              <Textarea
-                id="commercial-terms"
-                name="terms"
-                defaultValue={p?.terms}
-                maxLength={4000}
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="commercial-note">
-                Preparation or revision reason
-              </Label>
-              <Textarea
-                id="commercial-note"
-                name="note"
-                maxLength={1000}
-                required
-              />
-            </div>
-            {error && <Alert variant="destructive">{error}</Alert>}
-            <div className="flex flex-wrap gap-3">
-              <Button type="submit">
-                {pending ? "Saving…" : "Save immutable proposal"}
-              </Button>
-              {revision && (
-                <Button type="button" variant="outline" onClick={cancel}>
-                  Cancel revision
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="commercial-currency">Currency</Label>
+                  <NativeSelect
+                    id="commercial-currency"
+                    name="currency"
+                    defaultValue={p?.grossAmount.currency ?? ""}
+                    required
+                  >
+                    <option value="">Choose currency</option>
+                    {commercialCurrencies.map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <div>
+                  <Label htmlFor="commercial-amount">
+                    Total before discount
+                  </Label>
+                  <Input
+                    id="commercial-amount"
+                    name="amount"
+                    inputMode="decimal"
+                    defaultValue={p ? decimalMoney(p.grossAmount) : ""}
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="commercial-discount">
+                  Discount percent (enter 0 for none)
+                </Label>
+                <Input
+                  id="commercial-discount"
+                  name="discount"
+                  inputMode="decimal"
+                  defaultValue={p ? percentDiscount(p.discountBps) : ""}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="commercial-terms">
+                  Complete commercial terms, including applicable tax and
+                  delivery treatment
+                </Label>
+                <Textarea
+                  id="commercial-terms"
+                  name="terms"
+                  defaultValue={p?.terms}
+                  maxLength={4000}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="commercial-note">
+                  Preparation or revision reason
+                </Label>
+                <Textarea
+                  id="commercial-note"
+                  name="note"
+                  maxLength={1000}
+                  required
+                />
+              </div>
+              {error && <Alert variant="destructive">{error}</Alert>}
+              <div className="flex flex-wrap gap-3">
+                <Button type="submit">
+                  {pending ? "Saving…" : "Save immutable proposal"}
                 </Button>
-              )}
-            </div>
-          </fieldset>
+                {revision && (
+                  <Button type="button" variant="outline" onClick={cancel}>
+                    Cancel revision
+                  </Button>
+                )}
+              </div>
+            </fieldset>
+          </FieldGroup>
         </form>
       </CardContent>
     </Card>
@@ -551,8 +562,8 @@ function ActionCard({
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <dl className="space-y-3">
+      <CardContent className="flex flex-col gap-4">
+        <dl className="flex flex-col gap-3">
           {[
             ["Buyer", a.payload.recipientRef],
             ["Offering", a.payload.offering],
@@ -616,7 +627,7 @@ function ActionCard({
           </p>
         )}
         {canAct && state.canApprove && !a.decision && (
-          <div className="space-y-3">
+          <Field className="flex flex-col gap-3">
             <Label htmlFor={`decision-${a.id}`}>
               Approval or rejection reason for these exact terms
             </Label>
@@ -645,7 +656,7 @@ function ActionCard({
                 Reject action
               </Button>
             </div>
-          </div>
+          </Field>
         )}
         {canExecute && state.providerAvailable && (
           <AlertDialog>
@@ -687,7 +698,7 @@ function ActionCard({
                 Record authoritative Business evidence
               </summary>
               <form
-                className="mt-3 space-y-3"
+                className="flex flex-col mt-3 gap-3"
                 onSubmit={async (e) => {
                   e.preventDefault();
                   const date = new Date(occurred);
@@ -701,79 +712,81 @@ function ActionCard({
                   });
                 }}
               >
-                <p className="text-sm text-muted-foreground">
-                  Record only an action already completed externally on these
-                  exact terms. A buyer request, AI text, RFQ, appointment or
-                  delivery receipt is insufficient. This records evidence
-                  without sending to the buyer.
-                </p>
-                <Label htmlFor={`kind-${a.id}`}>Verified outcome</Label>
-                <NativeSelect
-                  id={`kind-${a.id}`}
-                  value={kind}
-                  onChange={(e) => setKind(e.target.value)}
-                  required
-                >
-                  <option value="">Choose outcome</option>
-                  {a.payload.action === "quotations" ? (
-                    <option value="issued_quote">Issued quote</option>
-                  ) : (
-                    <>
-                      <option value="accepted_order">Accepted order</option>
-                      {state.outcomes.some(
-                        (o) =>
-                          o.actionId === a.id && o.kind === "accepted_order",
-                      ) && (
-                        <option value="confirmed_sale">
-                          Confirmed sale, separately verified
-                        </option>
-                      )}
-                    </>
-                  )}
-                </NativeSelect>
-                <Label htmlFor={`reference-${a.id}`}>
-                  Authoritative document or system reference
-                </Label>
-                <Input
-                  id={`reference-${a.id}`}
-                  value={reference}
-                  maxLength={256}
-                  onChange={(e) => setReference(e.target.value)}
-                  required
-                />
-                <Label htmlFor={`occurred-${a.id}`}>
-                  Confirmed at (your local time)
-                </Label>
-                <Input
-                  id={`occurred-${a.id}`}
-                  type="datetime-local"
-                  step="1"
-                  value={occurred}
-                  onChange={(e) => setOccurred(e.target.value)}
-                  required
-                />
-                <Label htmlFor={`evidence-${a.id}`}>
-                  Evidence and verification notes for the exact action
-                </Label>
-                <Textarea
-                  id={`evidence-${a.id}`}
-                  value={evidenceNote}
-                  maxLength={2000}
-                  onChange={(e) => setEvidenceNote(e.target.value)}
-                  required
-                />
-                <Label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
+                <FieldGroup className="gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    Record only an action already completed externally on these
+                    exact terms. A buyer request, AI text, RFQ, appointment or
+                    delivery receipt is insufficient. This records evidence
+                    without sending to the buyer.
+                  </p>
+                  <Label htmlFor={`kind-${a.id}`}>Verified outcome</Label>
+                  <NativeSelect
+                    id={`kind-${a.id}`}
+                    value={kind}
+                    onChange={(e) => setKind(e.target.value)}
                     required
-                    className="mt-1 size-5 accent-primary"
+                  >
+                    <option value="">Choose outcome</option>
+                    {a.payload.action === "quotations" ? (
+                      <option value="issued_quote">Issued quote</option>
+                    ) : (
+                      <>
+                        <option value="accepted_order">Accepted order</option>
+                        {state.outcomes.some(
+                          (o) =>
+                            o.actionId === a.id && o.kind === "accepted_order",
+                        ) && (
+                          <option value="confirmed_sale">
+                            Confirmed sale, separately verified
+                          </option>
+                        )}
+                      </>
+                    )}
+                  </NativeSelect>
+                  <Label htmlFor={`reference-${a.id}`}>
+                    Authoritative document or system reference
+                  </Label>
+                  <Input
+                    id={`reference-${a.id}`}
+                    value={reference}
+                    maxLength={256}
+                    onChange={(e) => setReference(e.target.value)}
+                    required
                   />
-                  I verified this outcome against authoritative Business records
-                  for these exact terms.
-                </Label>
-                <Button disabled={pending} type="submit">
-                  Record verified evidence
-                </Button>
+                  <Label htmlFor={`occurred-${a.id}`}>
+                    Confirmed at (your local time)
+                  </Label>
+                  <Input
+                    id={`occurred-${a.id}`}
+                    type="datetime-local"
+                    step="1"
+                    value={occurred}
+                    onChange={(e) => setOccurred(e.target.value)}
+                    required
+                  />
+                  <Label htmlFor={`evidence-${a.id}`}>
+                    Evidence and verification notes for the exact action
+                  </Label>
+                  <Textarea
+                    id={`evidence-${a.id}`}
+                    value={evidenceNote}
+                    maxLength={2000}
+                    onChange={(e) => setEvidenceNote(e.target.value)}
+                    required
+                  />
+                  <Label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      required
+                      className="mt-1 size-5 accent-primary"
+                    />
+                    I verified this outcome against authoritative Business
+                    records for these exact terms.
+                  </Label>
+                  <Button disabled={pending} type="submit">
+                    Record verified evidence
+                  </Button>
+                </FieldGroup>
               </form>
             </details>
           )}

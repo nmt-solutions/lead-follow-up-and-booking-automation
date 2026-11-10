@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -27,26 +28,23 @@ export default async function OperatorAlertsPage() {
     if (id.success) redirect(`/platform/sender-health/${id.data}`);
   }
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <header>
-        <Link
-          href="/businesses"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Operator sender alerts</h1>
-        <p className="mt-3 text-muted-foreground">
-          Durable in-app alerts across customer Businesses. Review the exact
-          sender, underlying evidence and repair. No external messages are sent.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Operator sender alerts</>}
+        description={
+          <>
+            Durable in-app alerts across customer Businesses. Review the exact
+            sender, underlying evidence and repair. No external messages are
+            sent.
+          </>
+        }
+      ></PageHeader>
       <Card>
         <CardHeader>
           <CardTitle>Open a customer Business</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={open} className="space-y-4">
+          <form action={open} className="flex flex-col gap-4">
             <Label htmlFor="health-business">Business ID</Label>
             <Input
               id="health-business"
@@ -59,11 +57,11 @@ export default async function OperatorAlertsPage() {
           </form>
         </CardContent>
       </Card>
-      <section className="space-y-4" aria-label="Sender incidents">
+      <section className="flex flex-col gap-4" aria-label="Sender incidents">
         {!state.alerts.length && <p>No sender incidents have been reported.</p>}
         {state.alerts.map((a) => (
           <Card key={a.id}>
-            <CardContent className="space-y-2 pt-6">
+            <CardContent className="flex flex-col gap-2 pt-6">
               <p>
                 {a.acknowledged ? "Acknowledged" : "Needs review"} · {a.at}
               </p>

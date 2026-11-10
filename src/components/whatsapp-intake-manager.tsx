@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -133,7 +134,7 @@ export function WhatsAppIntakeManager({
       <CardHeader>
         <CardTitle>Incoming messages and manual activity</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-5 wrap-anywhere">
+      <CardContent className="flex flex-col gap-5 wrap-anywhere">
         <div className="flex flex-wrap gap-2">
           <Badge>
             {state.enabled
@@ -204,34 +205,36 @@ export function WhatsAppIntakeManager({
         {canManage && !state.enabled && (
           <form
             onSubmit={save}
-            className="space-y-3 border-t pt-5"
+            className="flex flex-col gap-3 border-t pt-5"
             aria-busy={pending}
           >
-            <Label htmlFor="meta-receipt-retention">
-              Approved provider-receipt retention (seconds)
-            </Label>
-            <Input
-              id="meta-receipt-retention"
-              name="retention"
-              type="number"
-              min="60"
-              max="2147483647"
-              step="1"
-              required
-              defaultValue={state.receiptRetentionSeconds ?? ""}
-              aria-describedby="meta-retention-note"
-            />
-            <p
-              id="meta-retention-note"
-              className="text-sm text-muted-foreground"
-            >
-              Use your agreed data policy. Provider staging content expires
-              after this period; captured shared-inbox records follow the
-              Business record policy. No retention period is assumed.
-            </p>
-            <Button type="submit" disabled={pending || !version}>
-              {pending ? "Enabling capture…" : "Enable incoming capture"}
-            </Button>
+            <FieldGroup className="gap-3">
+              <Label htmlFor="meta-receipt-retention">
+                Approved provider-receipt retention (seconds)
+              </Label>
+              <Input
+                id="meta-receipt-retention"
+                name="retention"
+                type="number"
+                min="60"
+                max="2147483647"
+                step="1"
+                required
+                defaultValue={state.receiptRetentionSeconds ?? ""}
+                aria-describedby="meta-retention-note"
+              />
+              <p
+                id="meta-retention-note"
+                className="text-sm text-muted-foreground"
+              >
+                Use your agreed data policy. Provider staging content expires
+                after this period; captured shared-inbox records follow the
+                Business record policy. No retention period is assumed.
+              </p>
+              <Button type="submit" disabled={pending || !version}>
+                {pending ? "Enabling capture…" : "Enable incoming capture"}
+              </Button>
+            </FieldGroup>
           </form>
         )}
         {notice && (
@@ -259,7 +262,7 @@ export function WhatsAppIntakeManager({
           <summary className="min-h-11 cursor-pointer py-3 font-medium">
             Recent provider receipts
           </summary>
-          <ul className="space-y-3">
+          <ul className="flex flex-col gap-3">
             {state.receipts.map((r) => (
               <li key={r.id} className="rounded-lg border p-3 text-sm">
                 {r.kind.replaceAll("_", " ")} · {r.state} · {r.at}

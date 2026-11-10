@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { TeamManager } from "@/components/team-manager";
@@ -28,24 +29,13 @@ export default async function TeamPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <div>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-sm text-primary underline underline-offset-4"
-        >
-          Back to overview
-        </Link>
-        <p className="mb-3 text-sm font-medium text-primary">
-          {data.profile.name}
-        </p>
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-          Team access
-        </h1>
-        <p className="mt-3 leading-relaxed text-muted-foreground">
-          Invite people and control what they can do in this Business.
-        </p>
-      </div>
+    <div className="app-page">
+      <PageHeader
+        title={<>Team access</>}
+        description={
+          <>Invite people and control what they can do in this Business.</>
+        }
+      ></PageHeader>
       <TeamManager
         businessId={businessId}
         team={data.team}

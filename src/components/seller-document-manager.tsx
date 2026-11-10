@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import { z } from "zod";
@@ -75,7 +76,7 @@ function Detail({ document: d }: { document: SellerDocument }) {
       <summary className="min-h-11 cursor-pointer py-3 text-primary">
         Review frozen legal details, lines and evidence
       </summary>
-      <div className="space-y-4 wrap-anywhere">
+      <div className="flex flex-col gap-4 wrap-anywhere">
         <dl className="grid gap-4 sm:grid-cols-2">
           <div>
             <dt className="text-sm text-muted-foreground">
@@ -120,7 +121,7 @@ function Detail({ document: d }: { document: SellerDocument }) {
           Issued {d.at} by {d.actorId}. Retained at least until {d.retainUntil};
           protected financial history has no automatic deletion.
         </p>
-        <ul className="space-y-4">
+        <ul className="flex flex-col gap-4">
           {s.lines.map((l) => (
             <li key={l.input.id} className="rounded-lg bg-muted p-4">
               <p className="font-medium">{l.input.description}</p>
@@ -247,7 +248,7 @@ export function SellerDocumentManager({
     setStatus(`${d.number} downloaded.`);
   };
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center gap-4">
         <Button
           variant="outline"
@@ -281,7 +282,7 @@ export function SellerDocumentManager({
       )}
       {status && <p role="status">{status}</p>}
       {busy && <p role="status">Saving or retrieving the document…</p>}
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">Confirmed payments</h2>
         {!state.periods.length && (
           <p>
@@ -345,7 +346,7 @@ export function SellerDocumentManager({
           );
         })}
       </section>
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">Invoices and credit notes</h2>
         <p className="text-muted-foreground">
           Seller documents preserve the original transaction. Gateway receipts
@@ -502,7 +503,7 @@ function CreditForm({
     }
   })();
   return (
-    <section className="space-y-4 rounded-xl border border-border bg-card p-6">
+    <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6">
       <h2 className="text-xl font-semibold">Record a linked credit note</h2>
       <p>
         Choose the original invoice, explain the correction and credit exact
@@ -537,7 +538,7 @@ function CreditForm({
       {invoice && (
         <form
           key={invoice.id}
-          className="space-y-4"
+          className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             setError("");
@@ -576,67 +577,69 @@ function CreditForm({
             }
           }}
         >
-          {invoice.snapshot.lines.map((l) => {
-            const used = prior
-              .flatMap((d) => d.snapshot.lines)
-              .filter((c) => c.input.id === l.input.id)
-              .reduce((s, c) => s + BigInt(c.netMinor), 0n);
-            return (
-              <div key={l.input.id} className="space-y-2">
-                <Label htmlFor={`credit-${l.input.id}`}>
-                  {l.input.description} · remaining net{" "}
-                  {formatTaxMoney(
-                    String(BigInt(l.netMinor) - used),
-                    invoice.snapshot.currency,
-                  )}
-                </Label>
-                <Input
-                  id={`credit-${l.input.id}`}
-                  name={l.input.id}
-                  inputMode="numeric"
-                  pattern="[1-9][0-9]*"
-                  placeholder="Exact minor units; leave blank to omit"
-                />
-                <p className="text-sm text-muted-foreground">
-                  Minor units have {invoice.snapshot.precision} decimal places.
-                  Tax is allocated from the original document.
-                </p>
-              </div>
-            );
-          })}
-          <Label htmlFor="credit-kind">Adjustment source</Label>
-          <NativeSelect required id="credit-kind" name="kind" defaultValue="">
-            <option value="" disabled>
-              Choose a source
-            </option>
-            <option value="manual">Manual correction</option>
-            <option value="refund">Approved refund record</option>
-            <option value="dispute">Dispute record</option>
-          </NativeSelect>
-          <Label htmlFor="credit-reference">Stable source reference</Label>
-          <Input
-            required
-            id="credit-reference"
-            name="reference"
-            maxLength={1000}
-          />
-          <Label htmlFor="credit-reason">Correction reason</Label>
-          <Textarea
-            required
-            id="credit-reason"
-            name="reason"
-            maxLength={1000}
-          />
-          <Label htmlFor="credit-evidence">
-            Supporting evidence references · one per line
-          </Label>
-          <Textarea required id="credit-evidence" name="evidence" />
-          {error && (
-            <Alert role="alert" variant="destructive">
-              {error}
-            </Alert>
-          )}
-          <Button disabled={busy}>Review credit note</Button>
+          <FieldGroup className="gap-4">
+            {invoice.snapshot.lines.map((l) => {
+              const used = prior
+                .flatMap((d) => d.snapshot.lines)
+                .filter((c) => c.input.id === l.input.id)
+                .reduce((s, c) => s + BigInt(c.netMinor), 0n);
+              return (
+                <Field key={l.input.id} className="flex flex-col gap-2">
+                  <Label htmlFor={`credit-${l.input.id}`}>
+                    {l.input.description} · remaining net{" "}
+                    {formatTaxMoney(
+                      String(BigInt(l.netMinor) - used),
+                      invoice.snapshot.currency,
+                    )}
+                  </Label>
+                  <Input
+                    id={`credit-${l.input.id}`}
+                    name={l.input.id}
+                    inputMode="numeric"
+                    pattern="[1-9][0-9]*"
+                    placeholder="Exact minor units; leave blank to omit"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Minor units have {invoice.snapshot.precision} decimal
+                    places. Tax is allocated from the original document.
+                  </p>
+                </Field>
+              );
+            })}
+            <Label htmlFor="credit-kind">Adjustment source</Label>
+            <NativeSelect required id="credit-kind" name="kind" defaultValue="">
+              <option value="" disabled>
+                Choose a source
+              </option>
+              <option value="manual">Manual correction</option>
+              <option value="refund">Approved refund record</option>
+              <option value="dispute">Dispute record</option>
+            </NativeSelect>
+            <Label htmlFor="credit-reference">Stable source reference</Label>
+            <Input
+              required
+              id="credit-reference"
+              name="reference"
+              maxLength={1000}
+            />
+            <Label htmlFor="credit-reason">Correction reason</Label>
+            <Textarea
+              required
+              id="credit-reason"
+              name="reason"
+              maxLength={1000}
+            />
+            <Label htmlFor="credit-evidence">
+              Supporting evidence references · one per line
+            </Label>
+            <Textarea required id="credit-evidence" name="evidence" />
+            {error && (
+              <Alert role="alert" variant="destructive">
+                {error}
+              </Alert>
+            )}
+            <Button disabled={busy}>Review credit note</Button>
+          </FieldGroup>
         </form>
       )}
       <AlertDialog
@@ -646,7 +649,7 @@ function CreditForm({
         }}
       >
         <AlertDialogContent>
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             <AlertDialogTitle>Record this credit note?</AlertDialogTitle>
             <AlertDialogDescription>
               Original invoice {invoice?.number}. Credit{" "}

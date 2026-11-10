@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -16,22 +17,15 @@ export default async function IssuerConfiguration() {
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href="/platform/seller-documents"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to seller document review
-        </Link>
-        <h1 className="page-title">Seller issuer configuration</h1>
+    <div className="app-page">
+      <PageHeader title={<>Seller issuer configuration</>}>
         <Link
           href="/security"
           className="mt-3 inline-flex min-h-11 items-center text-primary underline"
         >
           Verify in Security
         </Link>
-      </header>
+      </PageHeader>
       <SellerIssuerManager initial={catalog} />
     </div>
   );

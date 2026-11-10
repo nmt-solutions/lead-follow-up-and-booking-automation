@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -147,7 +148,7 @@ export function RfqManager({
   }
   return (
     <section
-      className="space-y-4 border-t pt-5"
+      className="flex flex-col gap-4 border-t pt-5"
       aria-labelledby={`${prefix}-title`}
     >
       <h3 id={`${prefix}-title`} className="font-semibold">
@@ -238,155 +239,160 @@ export function RfqManager({
             ? "Review and update requirements"
             : "Capture requirements"}
         </summary>
-        <form onSubmit={save} className="space-y-5 pt-3">
-          <p className="text-sm text-muted-foreground">
-            Approved qualification fields define completeness. Blank values
-            remain missing. Sourced inquiry facts are prefilled for review.
-            Saving keeps this Opportunity under human control and pauses pending
-            automation.
-          </p>
-          <fieldset
-            disabled={pending || !state.canSave}
-            className="min-w-0 space-y-5"
-          >
-            <div className="space-y-2">
-              <Label htmlFor={`${prefix}-offering`}>Product or service</Label>
-              <NativeSelect
-                id={`${prefix}-offering`}
-                required
-                value={offering}
-                onChange={(e) => setOffering(e.target.value)}
-              >
-                <option value="">Choose an approved offering</option>
-                {state.offerings.map((o) => (
-                  <option key={o.name} value={o.name}>
-                    {o.name}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-            {state.requirements.map((rule) => {
-              const field = fields.find((f) => f.key === rule.key)!;
-              const fieldId = `${prefix}-${rule.key}`;
-              return (
-                <div key={rule.key} className="space-y-2 rounded-xl border p-4">
-                  <Label htmlFor={fieldId}>
-                    {rule.label}{" "}
-                    {rule.required
-                      ? "(required for completeness)"
-                      : "(optional)"}
-                  </Label>
-                  {rule.type === "text" ? (
-                    <Textarea
-                      id={fieldId}
-                      value={field.value}
-                      maxLength={4000}
-                      onChange={(e) =>
-                        change(rule.key, {
-                          value: e.target.value,
-                          messageId: null,
-                          quote: null,
-                        })
-                      }
-                    />
-                  ) : (
-                    <Input
-                      id={fieldId}
-                      type={rule.type}
-                      step={rule.type === "number" ? "any" : undefined}
-                      value={field.value}
-                      maxLength={4000}
-                      onChange={(e) =>
-                        change(rule.key, {
-                          value: e.target.value,
-                          messageId: null,
-                          quote: null,
-                        })
-                      }
-                    />
-                  )}
-                  {!field.value.trim() && rule.required && (
-                    <p className="text-sm text-muted-foreground">
-                      Missing requirement; you can save progress.
-                    </p>
-                  )}
-                  <Label htmlFor={`${fieldId}-source`}>
-                    Supporting message
-                  </Label>
-                  <NativeSelect
-                    id={`${fieldId}-source`}
-                    value={field.messageId ?? ""}
-                    onChange={(e) =>
-                      change(rule.key, {
-                        messageId: e.target.value || null,
-                        quote: e.target.value ? "" : null,
-                      })
-                    }
-                  >
-                    <option value="">
-                      Manual entry attributed to this review
+        <form onSubmit={save} className="flex flex-col gap-5 pt-3">
+          <FieldGroup className="gap-5">
+            <p className="text-sm text-muted-foreground">
+              Approved qualification fields define completeness. Blank values
+              remain missing. Sourced inquiry facts are prefilled for review.
+              Saving keeps this Opportunity under human control and pauses
+              pending automation.
+            </p>
+            <fieldset
+              disabled={pending || !state.canSave}
+              className="flex flex-col min-w-0 gap-5"
+            >
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor={`${prefix}-offering`}>Product or service</Label>
+                <NativeSelect
+                  id={`${prefix}-offering`}
+                  required
+                  value={offering}
+                  onChange={(e) => setOffering(e.target.value)}
+                >
+                  <option value="">Choose an approved offering</option>
+                  {state.offerings.map((o) => (
+                    <option key={o.name} value={o.name}>
+                      {o.name}
                     </option>
-                    {state.messages.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.text.slice(0, 90)} · {m.id}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                  {field.messageId && (
-                    <>
-                      <Label htmlFor={`${fieldId}-quote`}>
-                        Exact evidence excerpt
-                      </Label>
+                  ))}
+                </NativeSelect>
+              </Field>
+              {state.requirements.map((rule) => {
+                const field = fields.find((f) => f.key === rule.key)!;
+                const fieldId = `${prefix}-${rule.key}`;
+                return (
+                  <Field
+                    key={rule.key}
+                    className="flex flex-col gap-2 rounded-xl border p-4"
+                  >
+                    <Label htmlFor={fieldId}>
+                      {rule.label}{" "}
+                      {rule.required
+                        ? "(required for completeness)"
+                        : "(optional)"}
+                    </Label>
+                    {rule.type === "text" ? (
                       <Textarea
-                        id={`${fieldId}-quote`}
-                        value={field.quote ?? ""}
+                        id={fieldId}
+                        value={field.value}
                         maxLength={4000}
-                        required={!!field.value.trim()}
                         onChange={(e) =>
-                          change(rule.key, { quote: e.target.value })
+                          change(rule.key, {
+                            value: e.target.value,
+                            messageId: null,
+                            quote: null,
+                          })
                         }
                       />
-                      <p
-                        className="whitespace-pre-wrap text-sm text-muted-foreground"
-                        dir="auto"
-                      >
-                        {state.messages.find((m) => m.id === field.messageId)
-                          ?.text ??
-                          "This source is no longer associated with this need. Choose current evidence or review as a manual entry."}
+                    ) : (
+                      <Input
+                        id={fieldId}
+                        type={rule.type}
+                        step={rule.type === "number" ? "any" : undefined}
+                        value={field.value}
+                        maxLength={4000}
+                        onChange={(e) =>
+                          change(rule.key, {
+                            value: e.target.value,
+                            messageId: null,
+                            quote: null,
+                          })
+                        }
+                      />
+                    )}
+                    {!field.value.trim() && rule.required && (
+                      <p className="text-sm text-muted-foreground">
+                        Missing requirement; you can save progress.
                       </p>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-            <div className="space-y-2">
-              <Label htmlFor={`${prefix}-note`}>Review note</Label>
-              <Textarea
-                id={`${prefix}-note`}
-                required
-                maxLength={1000}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={`${prefix}-next`}>Next action</Label>
-              <Textarea
-                id={`${prefix}-next`}
-                required
-                maxLength={1000}
-                value={nextAction}
-                onChange={(e) => setNextAction(e.target.value)}
-              />
-            </div>
-            <Button type="submit" aria-busy={pending}>
-              {pending
-                ? "Saving request…"
-                : state.current
-                  ? "Save RFQ review"
-                  : "Capture quotation request"}
-            </Button>
-          </fieldset>
+                    )}
+                    <Label htmlFor={`${fieldId}-source`}>
+                      Supporting message
+                    </Label>
+                    <NativeSelect
+                      id={`${fieldId}-source`}
+                      value={field.messageId ?? ""}
+                      onChange={(e) =>
+                        change(rule.key, {
+                          messageId: e.target.value || null,
+                          quote: e.target.value ? "" : null,
+                        })
+                      }
+                    >
+                      <option value="">
+                        Manual entry attributed to this review
+                      </option>
+                      {state.messages.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.text.slice(0, 90)} · {m.id}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                    {field.messageId && (
+                      <>
+                        <Label htmlFor={`${fieldId}-quote`}>
+                          Exact evidence excerpt
+                        </Label>
+                        <Textarea
+                          id={`${fieldId}-quote`}
+                          value={field.quote ?? ""}
+                          maxLength={4000}
+                          required={!!field.value.trim()}
+                          onChange={(e) =>
+                            change(rule.key, { quote: e.target.value })
+                          }
+                        />
+                        <p
+                          className="whitespace-pre-wrap text-sm text-muted-foreground"
+                          dir="auto"
+                        >
+                          {state.messages.find((m) => m.id === field.messageId)
+                            ?.text ??
+                            "This source is no longer associated with this need. Choose current evidence or review as a manual entry."}
+                        </p>
+                      </>
+                    )}
+                  </Field>
+                );
+              })}
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor={`${prefix}-note`}>Review note</Label>
+                <Textarea
+                  id={`${prefix}-note`}
+                  required
+                  maxLength={1000}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor={`${prefix}-next`}>Next action</Label>
+                <Textarea
+                  id={`${prefix}-next`}
+                  required
+                  maxLength={1000}
+                  value={nextAction}
+                  onChange={(e) => setNextAction(e.target.value)}
+                />
+              </Field>
+              <Button type="submit" aria-busy={pending}>
+                {pending
+                  ? "Saving request…"
+                  : state.current
+                    ? "Save RFQ review"
+                    : "Capture quotation request"}
+              </Button>
+            </fieldset>
+          </FieldGroup>
         </form>
       </details>
       <Button
@@ -402,11 +408,11 @@ export function RfqManager({
           <summary className="min-h-11 cursor-pointer py-3 font-medium">
             Request review history ({state.history.length})
           </summary>
-          <ol className="space-y-4">
+          <ol className="flex flex-col gap-4">
             {state.history.map((revision) => (
               <li
                 key={revision.revisionId}
-                className="space-y-2 rounded-xl border p-4 text-sm"
+                className="flex flex-col gap-2 rounded-xl border p-4 text-sm"
               >
                 <p className="font-medium">
                   Revision {revision.version}: {revision.offering.name} ·{" "}
@@ -422,7 +428,7 @@ export function RfqManager({
                   Approved knowledge revision {revision.knowledgeVersion}.
                   Status reflects this historical review.
                 </p>
-                <dl className="space-y-2">
+                <dl className="flex flex-col gap-2">
                   {revision.fields.map((field) => (
                     <div key={field.key}>
                       <dt className="font-medium">

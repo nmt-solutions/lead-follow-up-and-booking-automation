@@ -1,4 +1,5 @@
 "use client";
+import { Field } from "./ui/field";
 
 import { useState } from "react";
 import { MapPin } from "lucide-react";
@@ -6,17 +7,10 @@ import {
   suggestHomeMarket,
   type ConfigurationInput,
 } from "@/models/configuration";
-import { countries } from "@/lib/countries";
+import { CountryPicker } from "./country-picker";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Checkbox } from "./ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
 
 type Address = ConfigurationInput["address"];
 export const emptyAddress: Address = {
@@ -46,12 +40,12 @@ export function LocationFields({
     onChange(next, different ? homeMarket : (suggestHomeMarket(next) ?? ""));
   }
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <fieldset className="grid min-w-0 gap-5 sm:grid-cols-2">
         <legend className="mb-4 text-sm text-muted-foreground">
           Your business address. Street and postal code are optional.
         </legend>
-        <div className="space-y-2 sm:col-span-2">
+        <Field className="flex flex-col gap-2 sm:col-span-2">
           <Label htmlFor="address-street">
             Street address{" "}
             <span className="font-normal text-muted-foreground">optional</span>
@@ -65,8 +59,8 @@ export function LocationFields({
             onChange={(event) => update("street", event.target.value)}
             placeholder="Building and street"
           />
-        </div>
-        <div className="space-y-2">
+        </Field>
+        <Field className="flex flex-col gap-2">
           <Label htmlFor="address-locality">City</Label>
           <Input
             id="address-locality"
@@ -76,8 +70,8 @@ export function LocationFields({
             value={address.locality}
             onChange={(event) => update("locality", event.target.value)}
           />
-        </div>
-        <div className="space-y-2">
+        </Field>
+        <Field className="flex flex-col gap-2">
           <Label htmlFor="address-region">State or region</Label>
           <Input
             id="address-region"
@@ -87,35 +81,16 @@ export function LocationFields({
             value={address.region}
             onChange={(event) => update("region", event.target.value)}
           />
-        </div>
-        <div className="space-y-2">
+        </Field>
+        <Field className="flex flex-col gap-2">
           <Label htmlFor="address-country">Country</Label>
-          <Select
+          <CountryPicker
+            id="address-country"
             value={address.country}
-            onValueChange={(value) => update("country", value)}
-            name="address.country"
-          >
-            <SelectTrigger id="address-country" className="w-full bg-card">
-              <SelectValue placeholder="Choose country" />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              {address.country &&
-                !countries.some(
-                  (country) => country.name === address.country,
-                ) && (
-                  <SelectItem value={address.country}>
-                    {address.country}
-                  </SelectItem>
-                )}
-              {countries.map((country) => (
-                <SelectItem key={country.code} value={country.name}>
-                  {country.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
+            onChange={(value) => update("country", value)}
+          />
+        </Field>
+        <Field className="flex flex-col gap-2">
           <Label htmlFor="address-postalCode">
             Postal code{" "}
             <span className="font-normal text-muted-foreground">optional</span>
@@ -128,7 +103,7 @@ export function LocationFields({
             value={address.postalCode}
             onChange={(event) => update("postalCode", event.target.value)}
           />
-        </div>
+        </Field>
       </fieldset>
       {!different && (
         <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/50 p-4">
@@ -159,7 +134,7 @@ export function LocationFields({
         I serve a different area or work remotely
       </Label>
       {different && (
-        <div className="space-y-2">
+        <Field className="flex flex-col gap-2">
           <Label htmlFor="homeMarket">
             Where do you want to find customers?
           </Label>
@@ -176,7 +151,7 @@ export function LocationFields({
           <p className="text-sm text-muted-foreground">
             Enter a city, region, or country. You can add more markets later.
           </p>
-        </div>
+        </Field>
       )}
       <p
         id="location-error"

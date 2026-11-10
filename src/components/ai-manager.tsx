@@ -1,4 +1,7 @@
 "use client";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState } from "react";
 import Link from "next/link";
@@ -139,7 +142,7 @@ export function AiManager({
     ? (state.executions.find((row) => row.id === preview.id) ?? preview)
     : null;
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       {error && (
         <Alert variant="destructive">
           <AlertDescription>
@@ -159,508 +162,555 @@ export function AiManager({
           {status}
         </p>
       )}
-      <section
-        className="space-y-4 rounded-2xl border border-border bg-card p-6 sm:p-8"
-        aria-labelledby="ai-setup"
-      >
-        <h2 id="ai-setup" className="text-xl font-semibold">
-          Readiness and funding
-        </h2>
-        <p>
-          Active shared profile:{" "}
-          <strong>
-            {state.profiles.find((row) => row.id === state.activation.profileId)
-              ?.profile.name ?? "None approved"}
-          </strong>
-        </p>
-        {state.setup.length > 0 && (
-          <ul className="list-inside list-disc space-y-2 text-muted-foreground">
-            {state.setup.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        )}
-        <dl className="space-y-3 text-sm">
-          <div>
-            <dt className="font-medium">OpenAI API funding</dt>
-            <dd className="wrap-anywhere text-muted-foreground">
-              {state.configuration
-                ? `${state.configuration.openaiFunding.source.replaceAll("_", " ")} · ${state.configuration.openaiFunding.state} · ${state.configuration.openaiFunding.reference}`
-                : "Not configured"}
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium">Existing subscription allocation</dt>
-            <dd className="text-muted-foreground">
-              Separate from API funding. This application does not consume or
-              estimate ChatGPT or Codex subscription allocation.
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium">Gateway credit and fallback charges</dt>
-            <dd className="wrap-anywhere text-muted-foreground">
-              {state.configuration
-                ? `${state.configuration.gatewayFunding.state} · ${state.configuration.gatewayFunding.reference}`
-                : "Not configured"}
-              . System fallback requires an approved numeric allowance.
-            </dd>
-          </div>
-        </dl>
-        <p className="text-sm text-muted-foreground">
-          Funding evidence records operator confirmation; a successful request
-          does not prove which API credit grant funded it. Exa retrieval and
-          source permissions remain independent of model selection.
-        </p>
-        <Button
-          variant="outline"
-          disabled={busy}
-          onClick={() =>
-            act(async () => {
-              await refresh();
-            }, "AI workspace refreshed.")
-          }
+      <Tabs defaultValue="preview" className="flex flex-col gap-6">
+        <TabsList>
+          <TabsTrigger value="preview">Try the assistant</TabsTrigger>
+          <TabsTrigger value="profiles">AI profiles</TabsTrigger>
+          <TabsTrigger value="setup">Provider status</TabsTrigger>
+          <TabsTrigger value="history">Activity</TabsTrigger>
+        </TabsList>
+        <TabsContent
+          forceMount
+          value="preview"
+          className="data-[state=inactive]:hidden"
         >
-          Refresh status
-        </Button>
-        <details>
-          <summary className="min-h-11 cursor-pointer py-2 font-medium">
-            This Business’s profile activation history
-          </summary>
-          {state.activationHistory.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No profile activation has been reviewed through this Business.
-            </p>
-          ) : (
-            <ul className="space-y-3 text-sm">
-              {state.activationHistory.map((row) => (
-                <li key={row.version} className="wrap-anywhere">
-                  Activation {row.version} · {row.at} · Operator {row.actorId}
-                  <p className="text-muted-foreground">{row.note}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </details>
-      </section>
-      <section
-        className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
-        aria-labelledby="ai-draft"
-      >
-        <h2 id="ai-draft" className="text-xl font-semibold">
-          Prepare a shared profile
-        </h2>
-        <p className="text-muted-foreground">
-          Each save creates a version. Limits apply to all Businesses using that
-          version, including previews and failed or uncertain attempts. Saving
-          never replaces the active version.
-        </p>
-        <form
-          key={selected?.id ?? "new"}
-          className="space-y-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveDraft(event.currentTarget);
-          }}
-        >
-          <fieldset
-            disabled={busy || !state.configuration}
-            className="space-y-5"
+          <section
+            className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+            aria-labelledby="ai-preview"
           >
-            <div className="space-y-2">
-              <Label htmlFor="ai-name">Profile name</Label>
-              <Input
-                id="ai-name"
-                name="name"
-                required
-                maxLength={120}
-                defaultValue={selected?.profile.name ?? ""}
-              />
-            </div>
-            <div className="grid gap-5 sm:grid-cols-2">
-              {(["extraction", "drafting"] as const).map((value) => (
-                <div className="space-y-2" key={value}>
-                  <Label htmlFor={`ai-${value}`}>
-                    {value === "extraction"
-                      ? "Extraction model"
-                      : "Drafting model"}
-                  </Label>
-                  <NativeSelect
-                    id={`ai-${value}`}
-                    name={value}
-                    required
-                    defaultValue={selected?.profile[value].model ?? ""}
-                  >
-                    <option value="">Select an approved model</option>
-                    {state.configuration?.models
-                      .filter((model) => model.tasks.includes(value))
-                      .map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.id}
-                        </option>
-                      ))}
-                  </NativeSelect>
-                </div>
-              ))}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Approved provider: OpenAI. Extraction uses the evidence-review
-              schema; drafting uses the sales-draft schema. Other providers and
-              capabilities require operator configuration.
-            </p>
-            <div className="grid gap-5 sm:grid-cols-2">
-              {limitFields.map(([key, title]) => (
-                <div className="space-y-2" key={key}>
-                  <Label htmlFor={`ai-${key}`}>{title}</Label>
-                  <Input
-                    id={`ai-${key}`}
-                    name={key}
-                    type="number"
-                    step="1"
-                    min={
-                      key.includes("Fallback") ||
-                      key === "fallbackAllowanceAttempts"
-                        ? 0
-                        : 1
-                    }
-                    required
-                    defaultValue={selected?.profile.limits[key] ?? ""}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ai-draft-note">Reason for this version</Label>
-              <Textarea
-                id="ai-draft-note"
-                name="draftNote"
-                required
-                maxLength={1000}
-              />
-            </div>
-            <Button disabled={busy || !state.configuration}>
-              {busy ? "Working…" : "Save profile draft"}
-            </Button>
-          </fieldset>
-        </form>
-      </section>
-      <section
-        className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
-        aria-labelledby="ai-preview"
-      >
-        <h2 id="ai-preview" className="text-xl font-semibold">
-          Preview reviewed inputs
-        </h2>
-        <div className="space-y-2">
-          <Label htmlFor="ai-version">Profile version</Label>
-          <NativeSelect
-            id="ai-version"
-            value={selectedId}
-            disabled={busy}
-            onChange={(event) => {
-              setSelectedId(event.target.value);
-              setPreview(null);
-            }}
-          >
-            <option value="">Select a profile</option>
-            {state.profiles.map((row) => (
-              <option key={row.id} value={row.id}>
-                Version {row.version} · {row.profile.name}
-                {row.id === state.activation.profileId ? " · Active" : ""}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
-        {selected && (
-          <p className="text-sm text-muted-foreground">
-            Used {selected.usedAttempts} of{" "}
-            {selected.profile.limits.allowanceAttempts} combined attempts;{" "}
-            {selected.usedFallbackAttempts} of{" "}
-            {selected.profile.limits.fallbackAllowanceAttempts} system fallback
-            attempts. Per task: at most {selected.profile.limits.maxAttempts}{" "}
-            combined attempts, including at most{" "}
-            {selected.profile.limits.maxFallbackAttempts} fallback attempts.
-          </p>
-        )}
-        <form
-          className="space-y-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void act(async () => {
-              const input = {
-                profileId: selectedId,
-                expectedKnowledgeVersion: state.knowledgeVersion,
-                confirmReviewedInput: reviewed,
-                confirmBusinessContext: authorized,
-                sample: { task, label, text },
-              };
-              const content = JSON.stringify(input);
-              if (previewKey.current?.content !== content)
-                previewKey.current = { content, key: crypto.randomUUID() };
-              const response = z
-                .object({
-                  success: z.literal(true),
-                  data: aiExecutionViewSchema,
-                })
-                .safeParse(
-                  await request("/preview", {
-                    ...input,
-                    requestKey: previewKey.current.key,
-                  }),
-                );
-              if (!response.success)
-                throw new Error(
-                  "The preview response was invalid. Refresh status before retrying.",
-                );
-              setPreview(response.data.data);
-              await refresh();
-            }, "Preview recorded. Review the output and usage below; no message was sent.");
-          }}
-        >
-          <div className="space-y-2">
-            <Label htmlFor="ai-task">Representative task</Label>
-            <NativeSelect
-              id="ai-task"
-              value={task}
-              disabled={busy}
-              onChange={(event) => {
-                if (
-                  event.target.value === "extraction" ||
-                  event.target.value === "drafting"
-                )
-                  setTask(event.target.value);
-                setReviewed(false);
-              }}
-            >
-              <option value="extraction">Evidence extraction</option>
-              <option value="drafting">Sales reply draft</option>
-            </NativeSelect>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="ai-label">Sample label</Label>
-            <Input
-              id="ai-label"
-              required
-              maxLength={120}
-              value={label}
-              onChange={(event) => {
-                setLabel(event.target.value);
-                setReviewed(false);
-              }}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="ai-text">
-              Reviewed source text or inquiry sample
-            </Label>
-            <Textarea
-              id="ai-text"
-              required
-              maxLength={40000}
-              rows={6}
-              value={text}
-              onChange={(event) => {
-                setText(event.target.value);
-                setReviewed(false);
-              }}
-            />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Uses current approved Business knowledge, version{" "}
-            {state.knowledgeVersion ?? "not available"}. Sample instructions
-            cannot change policies or trigger messages.
-          </p>
-          <label className="flex min-h-11 items-start gap-3">
-            <input
-              className="mt-1 size-5"
-              type="checkbox"
-              required
-              checked={reviewed}
-              onChange={(event) => setReviewed(event.target.checked)}
-            />
-            <span>
-              I reviewed this representative sample and its use with the
-              approved Business knowledge.
-            </span>
-          </label>
-          <label className="flex min-h-11 items-start gap-3">
-            <input
-              className="mt-1 size-5"
-              type="checkbox"
-              required
-              checked={authorized}
-              onChange={(event) => setAuthorized(event.target.checked)}
-            />
-            <span>
-              I authorize this Business context to be sent to the approved AI
-              provider for this preview.
-            </span>
-          </label>
-          <Button
-            disabled={
-              busy ||
-              !selected ||
-              !state.knowledgeVersion ||
-              !reviewed ||
-              !authorized
-            }
-          >
-            {busy ? "Working…" : "Run preview without sending"}
-          </Button>
-        </form>
-        {displayed && <ExecutionResult execution={displayed} />}
-        <Button
-          variant="outline"
-          disabled={busy || !displayed}
-          onClick={() => {
-            previewKey.current = null;
-            setPreview(null);
-            setReviewed(false);
-            setStatus(
-              "Review the sample again before authorizing a new preview and its attempt allowance.",
-            );
-          }}
-        >
-          Prepare another preview
-        </Button>
-        <div className="space-y-2">
-          <Label htmlFor="ai-review-note">
-            Output review or activation note
-          </Label>
-          <Textarea
-            id="ai-review-note"
-            value={note}
-            maxLength={1000}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <Button
-            variant="outline"
-            disabled={
-              busy ||
-              !displayed ||
-              displayed.status !== "succeeded" ||
-              Boolean(displayed.review) ||
-              !note.trim()
-            }
-            onClick={() =>
-              act(async () => {
-                await request("/review", {
-                  executionId: displayed?.id,
-                  accepted: true,
-                  confirmRepresentative: true,
-                  note,
-                });
-                await refresh();
-              }, "Representative output accepted for this exact profile and knowledge version.")
-            }
-          >
-            Accept representative output
-          </Button>
-          <Button
-            variant="outline"
-            disabled={
-              busy ||
-              !displayed ||
-              displayed.status !== "succeeded" ||
-              Boolean(displayed.review) ||
-              !note.trim()
-            }
-            onClick={() =>
-              act(async () => {
-                await request("/review", {
-                  executionId: displayed?.id,
-                  accepted: false,
-                  confirmRepresentative: true,
-                  note,
-                });
-                await refresh();
-              }, "Output rejected. Run a new preview or prepare a revised profile.")
-            }
-          >
-            Reject output
-          </Button>
-          <Button
-            disabled={
-              busy ||
-              !selected ||
-              !note.trim() ||
-              !(["extraction", "drafting"] as const).every((value) =>
-                state.executions.some(
-                  (row) =>
-                    row.profileId === selected.id &&
-                    row.task === value &&
-                    row.kind === "preview" &&
-                    row.status === "succeeded" &&
-                    row.review?.accepted &&
-                    row.knowledgeVersion === state.knowledgeVersion,
-                ),
-              )
-            }
-            onClick={() =>
-              act(async () => {
-                await request("/activate", {
-                  profileId: selectedId,
-                  expectedActivationVersion: state.activation.version,
-                  note,
-                });
-                await refresh();
-              }, "Shared profile activated after both representative output reviews.")
-            }
-          >
-            Activate reviewed profile
-          </Button>
-        </div>
-      </section>
-      <section className="space-y-4" aria-labelledby="ai-history">
-        <h2 id="ai-history" className="text-xl font-semibold">
-          This Business’s task history
-        </h2>
-        {state.executions.length === 0 ? (
-          <p className="text-muted-foreground">
-            No previews or workflow tasks recorded. Prepare a profile and
-            preview a reviewed sample.
-          </p>
-        ) : (
-          state.executions.map((row) => (
-            <div
-              key={row.id}
-              className="space-y-3 rounded-xl border border-border bg-card p-5"
-            >
-              <div className="flex flex-wrap items-center gap-3">
-                <Badge>
-                  {row.kind} · {row.task}
-                </Badge>
-                <span className="wrap-anywhere">{row.sample.label}</span>
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => {
-                    setSelectedId(row.profileId);
-                    setPreview(row);
-                  }}
-                >
-                  Inspect result
-                </Button>
-              </div>
+            <h2 id="ai-preview" className="text-xl font-semibold">
+              Try the AI assistant
+            </h2>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="ai-version">AI profile</Label>
+              <NativeSelect
+                id="ai-version"
+                value={selectedId}
+                disabled={busy}
+                onChange={(event) => {
+                  setSelectedId(event.target.value);
+                  setPreview(null);
+                }}
+              >
+                <option value="">Select a profile</option>
+                {state.profiles.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    Version {row.version} · {row.profile.name}
+                    {row.id === state.activation.profileId ? " · Active" : ""}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            {selected && (
               <p className="text-sm text-muted-foreground">
-                {row.at} · {row.status.replaceAll("_", " ")} ·{" "}
-                {row.attempts.length} attempts
-                {row.review
-                  ? ` · ${row.review.accepted ? "Accepted" : "Rejected"}: ${row.review.note}`
-                  : " · Output not reviewed"}
+                Used {selected.usedAttempts} of{" "}
+                {selected.profile.limits.allowanceAttempts} combined attempts;{" "}
+                {selected.usedFallbackAttempts} of{" "}
+                {selected.profile.limits.fallbackAllowanceAttempts} system
+                fallback attempts. Per task: at most{" "}
+                {selected.profile.limits.maxAttempts} combined attempts,
+                including at most {selected.profile.limits.maxFallbackAttempts}{" "}
+                fallback attempts.
               </p>
+            )}
+            <form
+              className="flex flex-col gap-5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void act(async () => {
+                  const input = {
+                    profileId: selectedId,
+                    expectedKnowledgeVersion: state.knowledgeVersion,
+                    confirmReviewedInput: reviewed,
+                    confirmBusinessContext: authorized,
+                    sample: { task, label, text },
+                  };
+                  const content = JSON.stringify(input);
+                  if (previewKey.current?.content !== content)
+                    previewKey.current = { content, key: crypto.randomUUID() };
+                  const response = z
+                    .object({
+                      success: z.literal(true),
+                      data: aiExecutionViewSchema,
+                    })
+                    .safeParse(
+                      await request("/preview", {
+                        ...input,
+                        requestKey: previewKey.current.key,
+                      }),
+                    );
+                  if (!response.success)
+                    throw new Error(
+                      "The preview response was invalid. Refresh status before retrying.",
+                    );
+                  setPreview(response.data.data);
+                  await refresh();
+                }, "Preview recorded. Review the output and usage below; no message was sent.");
+              }}
+            >
+              <FieldGroup className="gap-5">
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="ai-task">Representative task</Label>
+                  <NativeSelect
+                    id="ai-task"
+                    value={task}
+                    disabled={busy}
+                    onChange={(event) => {
+                      if (
+                        event.target.value === "extraction" ||
+                        event.target.value === "drafting"
+                      )
+                        setTask(event.target.value);
+                      setReviewed(false);
+                    }}
+                  >
+                    <option value="extraction">Review source evidence</option>
+                    <option value="drafting">Draft a sales reply</option>
+                  </NativeSelect>
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="ai-label">Name this preview</Label>
+                  <Input
+                    id="ai-label"
+                    required
+                    maxLength={120}
+                    value={label}
+                    onChange={(event) => {
+                      setLabel(event.target.value);
+                      setReviewed(false);
+                    }}
+                  />
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="ai-text">
+                    Source text or customer inquiry
+                  </Label>
+                  <Textarea
+                    id="ai-text"
+                    required
+                    maxLength={40000}
+                    rows={6}
+                    value={text}
+                    onChange={(event) => {
+                      setText(event.target.value);
+                      setReviewed(false);
+                    }}
+                  />
+                </Field>
+                <p className="text-sm text-muted-foreground">
+                  Uses current approved Business knowledge, version{" "}
+                  {state.knowledgeVersion ?? "not available"}. Sample
+                  instructions cannot change policies or trigger messages.
+                </p>
+                <label className="flex min-h-11 items-start gap-3">
+                  <input
+                    className="mt-1 size-5"
+                    type="checkbox"
+                    required
+                    checked={reviewed}
+                    onChange={(event) => setReviewed(event.target.checked)}
+                  />
+                  <span>
+                    I reviewed this representative sample and its use with the
+                    approved Business knowledge.
+                  </span>
+                </label>
+                <label className="flex min-h-11 items-start gap-3">
+                  <input
+                    className="mt-1 size-5"
+                    type="checkbox"
+                    required
+                    checked={authorized}
+                    onChange={(event) => setAuthorized(event.target.checked)}
+                  />
+                  <span>
+                    I authorize this Business context to be sent to the approved
+                    AI provider for this preview.
+                  </span>
+                </label>
+                <Button
+                  disabled={
+                    busy ||
+                    !selected ||
+                    !state.knowledgeVersion ||
+                    !reviewed ||
+                    !authorized
+                  }
+                >
+                  {busy ? "Working…" : "Run preview without sending"}
+                </Button>
+              </FieldGroup>
+            </form>
+            {displayed && <ExecutionResult execution={displayed} />}
+            <Button
+              variant="outline"
+              disabled={busy || !displayed}
+              onClick={() => {
+                previewKey.current = null;
+                setPreview(null);
+                setReviewed(false);
+                setStatus(
+                  "Review the sample again before authorizing a new preview and its attempt allowance.",
+                );
+              }}
+            >
+              Prepare another preview
+            </Button>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="ai-review-note">
+                Output review or activation note
+              </Label>
+              <Textarea
+                id="ai-review-note"
+                value={note}
+                maxLength={1000}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </Field>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="outline"
+                disabled={
+                  busy ||
+                  !displayed ||
+                  displayed.status !== "succeeded" ||
+                  Boolean(displayed.review) ||
+                  !note.trim()
+                }
+                onClick={() =>
+                  act(async () => {
+                    await request("/review", {
+                      executionId: displayed?.id,
+                      accepted: true,
+                      confirmRepresentative: true,
+                      note,
+                    });
+                    await refresh();
+                  }, "Representative output accepted for this exact profile and knowledge version.")
+                }
+              >
+                Accept representative output
+              </Button>
+              <Button
+                variant="outline"
+                disabled={
+                  busy ||
+                  !displayed ||
+                  displayed.status !== "succeeded" ||
+                  Boolean(displayed.review) ||
+                  !note.trim()
+                }
+                onClick={() =>
+                  act(async () => {
+                    await request("/review", {
+                      executionId: displayed?.id,
+                      accepted: false,
+                      confirmRepresentative: true,
+                      note,
+                    });
+                    await refresh();
+                  }, "Output rejected. Run a new preview or prepare a revised profile.")
+                }
+              >
+                Reject output
+              </Button>
+              <Button
+                disabled={
+                  busy ||
+                  !selected ||
+                  !note.trim() ||
+                  !(["extraction", "drafting"] as const).every((value) =>
+                    state.executions.some(
+                      (row) =>
+                        row.profileId === selected.id &&
+                        row.task === value &&
+                        row.kind === "preview" &&
+                        row.status === "succeeded" &&
+                        row.review?.accepted &&
+                        row.knowledgeVersion === state.knowledgeVersion,
+                    ),
+                  )
+                }
+                onClick={() =>
+                  act(async () => {
+                    await request("/activate", {
+                      profileId: selectedId,
+                      expectedActivationVersion: state.activation.version,
+                      note,
+                    });
+                    await refresh();
+                  }, "Shared profile activated after both representative output reviews.")
+                }
+              >
+                Activate reviewed profile
+              </Button>
             </div>
-          ))
-        )}
-      </section>
+          </section>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="profiles"
+          className="data-[state=inactive]:hidden"
+        >
+          <section
+            className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+            aria-labelledby="ai-draft"
+          >
+            <h2 id="ai-draft" className="text-xl font-semibold">
+              Configure an AI profile
+            </h2>
+            <p className="text-muted-foreground">
+              Each save creates a version. Limits apply to all Businesses using
+              that version, including previews and failed or uncertain attempts.
+              Saving never replaces the active version.
+            </p>
+            <form
+              key={selected?.id ?? "new"}
+              className="flex flex-col gap-5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveDraft(event.currentTarget);
+              }}
+            >
+              <FieldGroup className="gap-5">
+                <fieldset
+                  disabled={busy || !state.configuration}
+                  className="flex flex-col gap-5"
+                >
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor="ai-name">Profile name</Label>
+                    <Input
+                      id="ai-name"
+                      name="name"
+                      required
+                      maxLength={120}
+                      defaultValue={selected?.profile.name ?? ""}
+                    />
+                  </Field>
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    {(["extraction", "drafting"] as const).map((value) => (
+                      <Field className="flex flex-col gap-2" key={value}>
+                        <Label htmlFor={`ai-${value}`}>
+                          {value === "extraction"
+                            ? "Extraction model"
+                            : "Drafting model"}
+                        </Label>
+                        <NativeSelect
+                          id={`ai-${value}`}
+                          name={value}
+                          required
+                          defaultValue={selected?.profile[value].model ?? ""}
+                        >
+                          <option value="">Select an approved model</option>
+                          {state.configuration?.models
+                            .filter((model) => model.tasks.includes(value))
+                            .map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.id}
+                              </option>
+                            ))}
+                        </NativeSelect>
+                      </Field>
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Approved provider: OpenAI. Extraction uses the
+                    evidence-review schema; drafting uses the sales-draft
+                    schema. Other providers and capabilities require operator
+                    configuration.
+                  </p>
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    {limitFields.map(([key, title]) => (
+                      <Field className="flex flex-col gap-2" key={key}>
+                        <Label htmlFor={`ai-${key}`}>{title}</Label>
+                        <Input
+                          id={`ai-${key}`}
+                          name={key}
+                          type="number"
+                          step="1"
+                          min={
+                            key.includes("Fallback") ||
+                            key === "fallbackAllowanceAttempts"
+                              ? 0
+                              : 1
+                          }
+                          required
+                          defaultValue={selected?.profile.limits[key] ?? ""}
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor="ai-draft-note">
+                      Reason for this version
+                    </Label>
+                    <Textarea
+                      id="ai-draft-note"
+                      name="draftNote"
+                      required
+                      maxLength={1000}
+                    />
+                  </Field>
+                  <Button disabled={busy || !state.configuration}>
+                    {busy ? "Working…" : "Save profile draft"}
+                  </Button>
+                </fieldset>
+              </FieldGroup>
+            </form>
+          </section>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="setup"
+          className="data-[state=inactive]:hidden"
+        >
+          <section
+            className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:p-8"
+            aria-labelledby="ai-setup"
+          >
+            <h2 id="ai-setup" className="text-xl font-semibold">
+              AI provider status
+            </h2>
+            <p>
+              Active shared profile:{" "}
+              <strong>
+                {state.profiles.find(
+                  (row) => row.id === state.activation.profileId,
+                )?.profile.name ?? "None approved"}
+              </strong>
+            </p>
+            {state.setup.length > 0 && (
+              <ul className="flex flex-col list-inside list-disc gap-2 text-muted-foreground">
+                {state.setup.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
+            <dl className="flex flex-col gap-3 text-sm">
+              <div>
+                <dt className="font-medium">OpenAI API funding</dt>
+                <dd className="wrap-anywhere text-muted-foreground">
+                  {state.configuration
+                    ? `${state.configuration.openaiFunding.source.replaceAll("_", " ")} · ${state.configuration.openaiFunding.state} · ${state.configuration.openaiFunding.reference}`
+                    : "Not configured"}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">
+                  Existing subscription allocation
+                </dt>
+                <dd className="text-muted-foreground">
+                  Separate from API funding. This application does not consume
+                  or estimate ChatGPT or Codex subscription allocation.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">
+                  Gateway credit and fallback charges
+                </dt>
+                <dd className="wrap-anywhere text-muted-foreground">
+                  {state.configuration
+                    ? `${state.configuration.gatewayFunding.state} · ${state.configuration.gatewayFunding.reference}`
+                    : "Not configured"}
+                  . System fallback requires an approved numeric allowance.
+                </dd>
+              </div>
+            </dl>
+            <p className="text-sm text-muted-foreground">
+              Funding evidence records operator confirmation; a successful
+              request does not prove which API credit grant funded it. Exa
+              retrieval and source permissions remain independent of model
+              selection.
+            </p>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                act(async () => {
+                  await refresh();
+                }, "AI workspace refreshed.")
+              }
+            >
+              Refresh status
+            </Button>
+            <details>
+              <summary className="min-h-11 cursor-pointer py-2 font-medium">
+                This Business’s profile activation history
+              </summary>
+              {state.activationHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No profile activation has been reviewed through this Business.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-3 text-sm">
+                  {state.activationHistory.map((row) => (
+                    <li key={row.version} className="wrap-anywhere">
+                      Activation {row.version} · {row.at} · Operator{" "}
+                      {row.actorId}
+                      <p className="text-muted-foreground">{row.note}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+          </section>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="history"
+          className="data-[state=inactive]:hidden"
+        >
+          <section className="flex flex-col gap-4" aria-labelledby="ai-history">
+            <h2 id="ai-history" className="text-xl font-semibold">
+              This Business’s task history
+            </h2>
+            {state.executions.length === 0 ? (
+              <p className="text-muted-foreground">
+                No previews or workflow tasks recorded. Prepare a profile and
+                preview a reviewed sample.
+              </p>
+            ) : (
+              state.executions.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5"
+                >
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge>
+                      {row.kind} · {row.task}
+                    </Badge>
+                    <span className="wrap-anywhere">{row.sample.label}</span>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setSelectedId(row.profileId);
+                        setPreview(row);
+                      }}
+                    >
+                      Inspect result
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {row.at} · {row.status.replaceAll("_", " ")} ·{" "}
+                    {row.attempts.length} attempts
+                    {row.review
+                      ? ` · ${row.review.accepted ? "Accepted" : "Rejected"}: ${row.review.note}`
+                      : " · Output not reviewed"}
+                  </p>
+                </div>
+              ))
+            )}
+          </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
 
 function ExecutionResult({ execution }: { execution: AiExecutionView }) {
   return (
-    <div className="space-y-4 rounded-xl border border-border bg-muted p-5 wrap-anywhere">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-muted p-5 wrap-anywhere">
       <h3 className="font-semibold">
         {execution.sample.label} · {execution.status.replaceAll("_", " ")}
       </h3>
@@ -690,7 +740,7 @@ function ExecutionResult({ execution }: { execution: AiExecutionView }) {
             in the associated inbox Opportunity.
           </p>
         ) : (
-          <dl className="space-y-3">
+          <dl className="flex flex-col gap-3">
             <div>
               <dt className="font-medium">Fit assessment</dt>
               <dd>{execution.output.reason}</dd>
@@ -718,7 +768,7 @@ function ExecutionResult({ execution }: { execution: AiExecutionView }) {
       {execution.attempts.map((row) => (
         <div
           key={row.id}
-          className="space-y-1 border-t border-border pt-3 text-sm"
+          className="flex flex-col gap-1 border-t border-border pt-3 text-sm"
         >
           <p className="font-medium">
             Attempt {row.number}:{" "}

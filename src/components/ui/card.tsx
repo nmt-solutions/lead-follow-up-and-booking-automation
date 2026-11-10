@@ -20,7 +20,7 @@ export function CardHeader({
   return (
     <div
       data-slot="card-header"
-      className={cn("space-y-2 p-6 sm:p-8", className)}
+      className={cn("flex flex-col gap-1.5 p-5 sm:p-6", className)}
       {...props}
     />
   );
@@ -29,7 +29,7 @@ export function CardTitle({ className, ...props }: React.ComponentProps<"h2">) {
   return (
     <h2
       data-slot="card-title"
-      className={cn("text-xl font-semibold tracking-tight", className)}
+      className={cn("text-base font-medium tracking-tight", className)}
       {...props}
     />
   );
@@ -53,7 +53,7 @@ export function CardContent({
   return (
     <div
       data-slot="card-content"
-      className={cn("px-6 pb-6 sm:px-8 sm:pb-8", className)}
+      className={cn("px-5 pb-5 sm:px-6 sm:pb-6", className)}
       {...props}
     />
   );

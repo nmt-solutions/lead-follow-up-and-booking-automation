@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -23,21 +24,17 @@ export default async function RecoveryPage() {
     }
   })();
   return (
-    <div className="space-y-8">
-      <header>
-        <Link
-          href="/businesses"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Infrastructure recovery</h1>
-        <p className="mt-3 text-muted-foreground">
-          Restore and inspect a reviewed Business snapshot in a private
-          disposable environment. Track verified records, file coverage and
-          unresolved work.
-        </p>
-      </header>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        title={<>Infrastructure recovery</>}
+        description={
+          <>
+            Restore and inspect a reviewed Business snapshot in a private
+            disposable environment. Track verified records, file coverage and
+            unresolved work.
+          </>
+        }
+      ></PageHeader>
       <RecoveryPanel state={state} canReconcileCosts={canReconcileCosts} />
     </div>
   );

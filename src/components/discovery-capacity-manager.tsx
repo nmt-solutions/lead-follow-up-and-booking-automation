@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState } from "react";
 import Link from "next/link";
@@ -100,12 +101,12 @@ export function DiscoveryCapacityManager({
     };
   }
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <Card>
         <CardHeader>
           <CardTitle>Approve provider allocation</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <p className="text-sm text-muted-foreground">
             Reserve concurrent discovery runs within a paid, reviewed provider
             environment. Names and queue keys alone do not purchase compute.
@@ -115,7 +116,7 @@ export function DiscoveryCapacityManager({
             the allocated concurrent runs.
           </p>
           <form
-            className="space-y-5"
+            className="flex flex-col gap-5"
             onSubmit={(event) => {
               event.preventDefault();
               void (async () => {
@@ -192,239 +193,246 @@ export function DiscoveryCapacityManager({
               })();
             }}
           >
-            <fieldset className="grid gap-4 sm:grid-cols-2" disabled={busy}>
-              {(
-                [
-                  ["projectRef", "Trigger project reference", "text"],
-                  ["environmentId", "Trigger environment ID", "text"],
+            <FieldGroup className="gap-5">
+              <fieldset className="grid gap-4 sm:grid-cols-2" disabled={busy}>
+                {(
                   [
-                    "allocationKey",
-                    "Allocation UUID (new for each deployment)",
-                    "text",
-                  ],
-                  [
-                    "deploymentRef",
-                    "Build external ID (deploy --external-id)",
-                    "text",
-                  ],
-                  [
-                    "deploymentId",
-                    "Native deployment ID (after deployment)",
-                    "text",
-                  ],
-                  [
-                    "deploymentVersion",
-                    "Native deployed version (after deployment)",
-                    "text",
-                  ],
-                  [
-                    "validUntil",
-                    "Approval expires at (UTC ISO date and time)",
-                    "text",
-                  ],
-                  ["total", "Approved provider concurrency", "number"],
-                  [
-                    "pooled",
-                    "Concurrency allocated to pooled discovery",
-                    "number",
-                  ],
-                  [
-                    "maxObservationAgeMs",
-                    "Maximum observation age (milliseconds, 100–30000)",
-                    "number",
-                  ],
-                ] as const
-              ).map(([key, label, type]) => (
-                <div key={key} className="space-y-2">
-                  <Label htmlFor={`capacity-${key}`}>{label}</Label>
-                  <Input
-                    id={`capacity-${key}`}
-                    value={draft[key]}
-                    type={type}
-                    min={type === "number" ? 1 : undefined}
-                    step={type === "number" ? 1 : undefined}
+                    ["projectRef", "Trigger project reference", "text"],
+                    ["environmentId", "Trigger environment ID", "text"],
+                    [
+                      "allocationKey",
+                      "Allocation UUID (new for each deployment)",
+                      "text",
+                    ],
+                    [
+                      "deploymentRef",
+                      "Build external ID (deploy --external-id)",
+                      "text",
+                    ],
+                    [
+                      "deploymentId",
+                      "Native deployment ID (after deployment)",
+                      "text",
+                    ],
+                    [
+                      "deploymentVersion",
+                      "Native deployed version (after deployment)",
+                      "text",
+                    ],
+                    [
+                      "validUntil",
+                      "Approval expires at (UTC ISO date and time)",
+                      "text",
+                    ],
+                    ["total", "Approved provider concurrency", "number"],
+                    [
+                      "pooled",
+                      "Concurrency allocated to pooled discovery",
+                      "number",
+                    ],
+                    [
+                      "maxObservationAgeMs",
+                      "Maximum observation age (milliseconds, 100–30000)",
+                      "number",
+                    ],
+                  ] as const
+                ).map(([key, label, type]) => (
+                  <Field key={key} className="flex flex-col gap-2">
+                    <Label htmlFor={`capacity-${key}`}>{label}</Label>
+                    <Input
+                      id={`capacity-${key}`}
+                      value={draft[key]}
+                      type={type}
+                      min={type === "number" ? 1 : undefined}
+                      step={type === "number" ? 1 : undefined}
+                      required
+                      onChange={(e) => edit(key, e.target.value)}
+                    />
+                  </Field>
+                ))}
+                <Field className="flex flex-col gap-2 sm:col-span-2">
+                  <Label htmlFor="capacity-evidence">
+                    Reviewed provider purchase and allocation evidence
+                  </Label>
+                  <Textarea
+                    id="capacity-evidence"
                     required
-                    onChange={(e) => edit(key, e.target.value)}
+                    maxLength={2000}
+                    value={draft.providerEvidence}
+                    onChange={(e) => edit("providerEvidence", e.target.value)}
                   />
-                </div>
-              ))}
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="capacity-evidence">
-                  Reviewed provider purchase and allocation evidence
-                </Label>
-                <Textarea
-                  id="capacity-evidence"
-                  required
-                  maxLength={2000}
-                  value={draft.providerEvidence}
-                  onChange={(e) => edit("providerEvidence", e.target.value)}
-                />
-              </div>
-            </fieldset>
-            <div className="space-y-3 rounded-xl border border-border p-4">
-              <p className="text-sm">
-                Prepare the declaration, deploy it under the build external ID,
-                then enter the resulting native deployment ID and version above.
-                Preparing a declaration grants no execution authority.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => edit("allocationKey", crypto.randomUUID())}
-              >
-                Generate new allocation UUID
-              </Button>{" "}
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  const parsed = capacityDeclarationSchema
-                    .strip()
-                    .safeParse(draftPolicy());
-                  if (!parsed.success) {
-                    setError(
-                      "Complete the allocation fields before preparing its declaration. Native deployment ID and version are supplied after deployment.",
-                    );
-                    return;
-                  }
-                  setError("");
-                  setManifest(JSON.stringify({ policy: parsed.data }, null, 2));
-                }}
-              >
-                Prepare deployment declaration
-              </Button>
-              {manifest && (
-                <pre className="overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-4 text-xs">
-                  {manifest}
-                </pre>
-              )}
-            </div>
-            <fieldset className="space-y-4" disabled={busy}>
-              <legend className="mb-3 font-semibold">
-                Reserved allocations
-              </legend>
-              {allocations.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No reserved allocations. Paid Businesses without a reserved
-                  option use the pooled lane.
+                </Field>
+              </fieldset>
+              <div className="flex flex-col gap-3 rounded-xl border border-border p-4">
+                <p className="text-sm">
+                  Prepare the declaration, deploy it under the build external
+                  ID, then enter the resulting native deployment ID and version
+                  above. Preparing a declaration grants no execution authority.
                 </p>
-              )}
-              {allocations.map((row, index) => (
-                <div
-                  key={row.key}
-                  className="space-y-4 rounded-xl border border-border p-4"
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => edit("allocationKey", crypto.randomUUID())}
                 >
-                  <h3 className="font-medium">Allocation {index + 1}</h3>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {(
-                      [
-                        ["businessId", "Business ID"],
-                        ["offerId", "Subscription offer ID"],
-                        ["reservedCapacityId", "Reserved option ID"],
-                        ["quantity", "Contract capacity quantity"],
-                        ["unit", "Exact contract capacity unit"],
-                        [
-                          "concurrentRuns",
-                          "Allocated concurrent discovery runs",
-                        ],
-                        [
-                          "mappingEvidence",
-                          "Reviewed contract-to-concurrency mapping evidence",
-                        ],
-                      ] as const
-                    ).map(([field, label]) => (
-                      <div key={field} className="space-y-2">
-                        <Label htmlFor={`${row.key}-${field}`}>{label}</Label>
-                        <Input
-                          id={`${row.key}-${field}`}
-                          required
-                          type={
-                            field === "quantity" || field === "concurrentRuns"
-                              ? "number"
-                              : "text"
-                          }
-                          min={
-                            field === "quantity" || field === "concurrentRuns"
-                              ? 1
-                              : undefined
-                          }
-                          step={
-                            field === "quantity" || field === "concurrentRuns"
-                              ? 1
-                              : undefined
-                          }
-                          value={row[field]}
-                          onChange={(e) =>
-                            editAllocation(row.key, field, e.target.value)
-                          }
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setAllocations((rows) =>
-                        rows.filter((r) => r.key !== row.key),
+                  Generate new allocation UUID
+                </Button>{" "}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    const parsed = capacityDeclarationSchema
+                      .strip()
+                      .safeParse(draftPolicy());
+                    if (!parsed.success) {
+                      setError(
+                        "Complete the allocation fields before preparing its declaration. Native deployment ID and version are supplied after deployment.",
                       );
-                      setApproved(false);
-                      setManifest("");
-                    }}
+                      return;
+                    }
+                    setError("");
+                    setManifest(
+                      JSON.stringify({ policy: parsed.data }, null, 2),
+                    );
+                  }}
+                >
+                  Prepare deployment declaration
+                </Button>
+                {manifest && (
+                  <pre className="overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-4 text-xs">
+                    {manifest}
+                  </pre>
+                )}
+              </div>
+              <fieldset className="flex flex-col gap-4" disabled={busy}>
+                <legend className="mb-3 font-semibold">
+                  Reserved allocations
+                </legend>
+                {allocations.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No reserved allocations. Paid Businesses without a reserved
+                    option use the pooled lane.
+                  </p>
+                )}
+                {allocations.map((row, index) => (
+                  <div
+                    key={row.key}
+                    className="flex flex-col gap-4 rounded-xl border border-border p-4"
                   >
-                    Remove allocation {index + 1}
-                  </Button>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setAllocations((rows) => [
-                    ...rows,
-                    {
-                      key: crypto.randomUUID(),
-                      businessId: "",
-                      offerId: "",
-                      reservedCapacityId: "",
-                      quantity: "",
-                      unit: "",
-                      concurrentRuns: "",
-                      mappingEvidence: "",
-                    },
-                  ]);
-                  setApproved(false);
-                  setManifest("");
-                }}
-              >
-                Add reserved allocation
+                    <h3 className="font-medium">Allocation {index + 1}</h3>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {(
+                        [
+                          ["businessId", "Business ID"],
+                          ["offerId", "Subscription offer ID"],
+                          ["reservedCapacityId", "Reserved option ID"],
+                          ["quantity", "Contract capacity quantity"],
+                          ["unit", "Exact contract capacity unit"],
+                          [
+                            "concurrentRuns",
+                            "Allocated concurrent discovery runs",
+                          ],
+                          [
+                            "mappingEvidence",
+                            "Reviewed contract-to-concurrency mapping evidence",
+                          ],
+                        ] as const
+                      ).map(([field, label]) => (
+                        <Field key={field} className="flex flex-col gap-2">
+                          <Label htmlFor={`${row.key}-${field}`}>{label}</Label>
+                          <Input
+                            id={`${row.key}-${field}`}
+                            required
+                            type={
+                              field === "quantity" || field === "concurrentRuns"
+                                ? "number"
+                                : "text"
+                            }
+                            min={
+                              field === "quantity" || field === "concurrentRuns"
+                                ? 1
+                                : undefined
+                            }
+                            step={
+                              field === "quantity" || field === "concurrentRuns"
+                                ? 1
+                                : undefined
+                            }
+                            value={row[field]}
+                            onChange={(e) =>
+                              editAllocation(row.key, field, e.target.value)
+                            }
+                          />
+                        </Field>
+                      ))}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setAllocations((rows) =>
+                          rows.filter((r) => r.key !== row.key),
+                        );
+                        setApproved(false);
+                        setManifest("");
+                      }}
+                    >
+                      Remove allocation {index + 1}
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setAllocations((rows) => [
+                      ...rows,
+                      {
+                        key: crypto.randomUUID(),
+                        businessId: "",
+                        offerId: "",
+                        reservedCapacityId: "",
+                        quantity: "",
+                        unit: "",
+                        concurrentRuns: "",
+                        mappingEvidence: "",
+                      },
+                    ]);
+                    setApproved(false);
+                    setManifest("");
+                  }}
+                >
+                  Add reserved allocation
+                </Button>
+              </fieldset>
+              <p className="text-sm text-muted-foreground">
+                When capacity is busy, queued runs wait under the same approved
+                budget. Unavailable, stale or changed allocations pause
+                execution. Moving reserved work to the pooled lane is
+                unsupported. Reapproval and explicit run resume are required
+                after a policy change. Capacity does not guarantee leads or
+                throughput.
+              </p>
+              <label className="flex min-h-11 items-start gap-3">
+                <Checkbox
+                  className="mt-1"
+                  checked={approved}
+                  disabled={busy}
+                  onCheckedChange={(value) => setApproved(value === true)}
+                />
+                <span>
+                  I reviewed the finite provider capacity, evidence and
+                  allocations, and approve this configuration. A new revision
+                  stops execution under earlier revisions.
+                </span>
+              </label>
+              <Button disabled={busy || !approved} type="submit">
+                {busy
+                  ? "Recording approval…"
+                  : "Approve capacity configuration"}
               </Button>
-            </fieldset>
-            <p className="text-sm text-muted-foreground">
-              When capacity is busy, queued runs wait under the same approved
-              budget. Unavailable, stale or changed allocations pause execution.
-              Moving reserved work to the pooled lane is unsupported. Reapproval
-              and explicit run resume are required after a policy change.
-              Capacity does not guarantee leads or throughput.
-            </p>
-            <label className="flex min-h-11 items-start gap-3">
-              <Checkbox
-                className="mt-1"
-                checked={approved}
-                disabled={busy}
-                onCheckedChange={(value) => setApproved(value === true)}
-              />
-              <span>
-                I reviewed the finite provider capacity, evidence and
-                allocations, and approve this configuration. A new revision
-                stops execution under earlier revisions.
-              </span>
-            </label>
-            <Button disabled={busy || !approved} type="submit">
-              {busy ? "Recording approval…" : "Approve capacity configuration"}
-            </Button>
+            </FieldGroup>
           </form>
           {error && (
             <Alert variant="destructive">
@@ -448,7 +456,7 @@ export function DiscoveryCapacityManager({
           )}
         </CardContent>
       </Card>
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">Approved revisions</h2>
         {!configuration.revisions.length && (
           <p>
@@ -459,7 +467,7 @@ export function DiscoveryCapacityManager({
         {configuration.revisions.map((revision, index) => (
           <article
             key={revision.id}
-            className="space-y-3 rounded-xl border border-border bg-card p-6"
+            className="flex flex-col gap-3 rounded-xl border border-border bg-card p-6"
           >
             <h3 className="font-semibold">
               Revision {revision.version}

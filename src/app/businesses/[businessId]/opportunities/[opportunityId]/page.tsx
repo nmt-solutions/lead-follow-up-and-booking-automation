@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -19,22 +20,18 @@ export default async function OpportunityPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8 wrap-anywhere">
-      <header>
-        <Link
-          href={`/businesses/${businessId}/campaigns`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to campaigns
-        </Link>
-        <h1 className="page-title">Opportunity control</h1>
-        <p className="mt-3 font-medium">{control.title}</p>
-        <p className="mt-3 text-muted-foreground">
-          Takeover pauses this purchasing need across channels. Other
-          Opportunities continue. After explicit handback, return to the
-          sequence and resume for current policy and remaining allowance checks.
-        </p>
-      </header>
+    <div className="flex flex-col mx-auto max-w-3xl gap-8 wrap-anywhere">
+      <PageHeader
+        title={<>Opportunity control</>}
+        description={
+          <>
+            Takeover pauses this purchasing need across channels. Other
+            Opportunities continue. After explicit handback, return to the
+            sequence and resume for current policy and remaining allowance
+            checks.
+          </>
+        }
+      ></PageHeader>
       <OpportunityControl businessId={businessId} control={control} />
     </div>
   );

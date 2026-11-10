@@ -24,7 +24,7 @@ export function quoteMoney(
 }
 export function QuoteIssues({ issues }: { issues: string[] }) {
   return issues.length ? (
-    <ul className="list-disc space-y-2 pl-5 text-sm">
+    <ul className="flex flex-col list-disc gap-2 pl-5 text-sm">
       {issues.map((issue) => (
         <li key={issue}>
           {quoteIssueLabels[issue] ??
@@ -37,7 +37,7 @@ export function QuoteIssues({ issues }: { issues: string[] }) {
 export function SubscriptionDisclosures() {
   return (
     <section
-      className="space-y-3 rounded-2xl border border-border bg-muted p-6"
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-muted p-6"
       aria-label="Separate charges and scope"
     >
       <h2 className="text-xl font-semibold">Two separate bills</h2>
@@ -53,7 +53,7 @@ export function SubscriptionDisclosures() {
 }
 export function OfferScope({ offer }: { offer: SubscriptionOffer }) {
   return (
-    <div className="space-y-2 text-sm wrap-anywhere">
+    <div className="flex flex-col gap-2 text-sm wrap-anywhere">
       <p>Discovery reach: {offer.markets.join(", ")}</p>
       <p>
         Monthly discovery:{" "}
@@ -88,10 +88,10 @@ export function SubscriptionQuoteSummary({ review }: { review: QuoteReview }) {
   const reserved = q.pricing.reservedCapacity;
   return (
     <article
-      className="space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
+      className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
       aria-labelledby={`quote-${q.id}`}
     >
-      <header className="space-y-3">
+      <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3
             id={`quote-${q.id}`}
@@ -123,13 +123,16 @@ export function SubscriptionQuoteSummary({ review }: { review: QuoteReview }) {
         allocation; it does not guarantee leads or throughput.
       </p>
       <div className="grid gap-6 sm:grid-cols-2">
-        <section className="space-y-3" aria-label="Initial platform charges">
+        <section
+          className="flex flex-col gap-3"
+          aria-label="Initial platform charges"
+        >
           <h4 className="font-semibold">
             {q.initial.kind === "paid_pilot"
               ? `${q.initial.days}-day paid pilot`
               : "Initial month"}
           </h4>
-          <ul className="space-y-2">
+          <ul className="flex flex-col gap-2">
             {q.initial.lines.map((line) => (
               <li
                 key={line.kind}
@@ -149,9 +152,12 @@ export function SubscriptionQuoteSummary({ review }: { review: QuoteReview }) {
             this {q.initial.kind === "paid_pilot" ? "pilot" : "month"}.
           </p>
         </section>
-        <section className="space-y-3" aria-label="Monthly renewal charges">
+        <section
+          className="flex flex-col gap-3"
+          aria-label="Monthly renewal charges"
+        >
           <h4 className="font-semibold">Monthly renewal</h4>
-          <ul className="space-y-2">
+          <ul className="flex flex-col gap-2">
             {q.renewal.lines.map((line) => (
               <li
                 key={line.kind}

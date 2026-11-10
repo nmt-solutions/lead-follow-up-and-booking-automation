@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -32,27 +33,23 @@ export default async function ReviewsPage() {
     redirect(`/platform/whatsapp/${id.data}`);
   }
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <header>
-        <Link
-          href="/businesses"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">WhatsApp evidence</h1>
-        <p className="mt-3 text-muted-foreground">
-          Open the Business ID provided by the customer for an assisted control
-          and direct-payment review.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>WhatsApp evidence</>}
+        description={
+          <>
+            Open the Business ID provided by the customer for an assisted
+            control and direct-payment review.
+          </>
+        }
+      ></PageHeader>
       <Card>
         <CardHeader>
           <CardTitle>Select a customer Business</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={select} className="space-y-4">
-            <div className="space-y-2">
+          <form action={select} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="businessId">Business ID</Label>
               <Input
                 id="businessId"

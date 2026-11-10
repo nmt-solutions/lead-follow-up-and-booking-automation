@@ -1,4 +1,7 @@
 "use client";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -157,7 +160,7 @@ function RunControls({
     Number(budget) <= run.maxBudget;
   return (
     <section
-      className="space-y-4 rounded-xl border border-border bg-muted p-5"
+      className="flex flex-col gap-4 rounded-xl border border-border bg-muted p-5"
       aria-label="Run allowance and recovery"
     >
       <p className="text-sm text-muted-foreground">
@@ -169,56 +172,62 @@ function RunControls({
       {run.status === "stopped" && enabled && (
         <>
           <form
-            className="space-y-3"
+            className="flex flex-col gap-3"
             onSubmit={(event) => {
               event.preventDefault();
               void act("allowance");
             }}
           >
-            <Label htmlFor={`allowance-${run.id}`}>
-              New total allowance ({run.allowanceUnit})
-            </Label>
-            <Input
-              id={`allowance-${run.id}`}
-              inputMode="numeric"
-              value={budget}
-              disabled={busy}
-              aria-describedby={`limit-${run.id}`}
-              onChange={(event) => {
-                setBudget(event.target.value);
-                setExtraApproved(false);
-                delete keys.current.allowance;
-              }}
-            />
-            <p id={`limit-${run.id}`} className="text-sm text-muted-foreground">
-              Current total: {run.budget}. Configured maximum: {run.maxBudget}.{" "}
-              {validBudget
-                ? `You are approving ${Number(budget) - run.budget} extra ${run.allowanceUnit}.`
-                : "Enter a higher whole-number total within the configured maximum."}
-            </p>
-            <Label className="flex min-h-11 items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-1 size-5 accent-primary"
-                checked={extraApproved}
-                disabled={busy || !validBudget}
-                onChange={(event) => setExtraApproved(event.target.checked)}
+            <FieldGroup className="gap-3">
+              <Label htmlFor={`allowance-${run.id}`}>
+                New total allowance ({run.allowanceUnit})
+              </Label>
+              <Input
+                id={`allowance-${run.id}`}
+                inputMode="numeric"
+                value={budget}
+                disabled={busy}
+                aria-describedby={`limit-${run.id}`}
+                onChange={(event) => {
+                  setBudget(event.target.value);
+                  setExtraApproved(false);
+                  delete keys.current.allowance;
+                }}
               />
-              <span>
-                I approve this bounded allowance increase. It will not resume
-                the run until I request it separately.
-              </span>
-            </Label>
-            <Button
-              type="submit"
-              variant="outline"
-              disabled={busy || !validBudget || !extraApproved}
-            >
-              {busy ? "Saving…" : "Approve allowance increase"}
-            </Button>
+              <p
+                id={`limit-${run.id}`}
+                className="text-sm text-muted-foreground"
+              >
+                Current total: {run.budget}. Configured maximum: {run.maxBudget}
+                .{" "}
+                {validBudget
+                  ? `You are approving ${Number(budget) - run.budget} extra ${run.allowanceUnit}.`
+                  : "Enter a higher whole-number total within the configured maximum."}
+              </p>
+              <Label className="flex min-h-11 items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-5 accent-primary"
+                  checked={extraApproved}
+                  disabled={busy || !validBudget}
+                  onChange={(event) => setExtraApproved(event.target.checked)}
+                />
+                <span>
+                  I approve this bounded allowance increase. It will not resume
+                  the run until I request it separately.
+                </span>
+              </Label>
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={busy || !validBudget || !extraApproved}
+              >
+                {busy ? "Saving…" : "Approve allowance increase"}
+              </Button>
+            </FieldGroup>
           </form>
           {run.resumable ? (
-            <div className="space-y-3 border-t border-border pt-4">
+            <div className="flex flex-col gap-3 border-t border-border pt-4">
               <Label className="flex min-h-11 items-start gap-3">
                 <input
                   type="checkbox"
@@ -269,7 +278,7 @@ function RunControls({
         </p>
       )}
       {enabled && (run.status === "queued" || run.status === "running") && (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           <p className="text-sm text-muted-foreground">
             Cancellation stops further reservations. Calls already reserved may
             finish; unsettled outcomes remain consumed as uncertain. Resuming
@@ -311,7 +320,7 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
   return (
     <article
       id={`run-${run.id}`}
-      className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+      className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-semibold wrap-anywhere">
@@ -440,7 +449,7 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
         <summary className="min-h-11 cursor-pointer font-medium">
           Reviewed brief and usage
         </summary>
-        <dl className="mt-4 space-y-3 text-sm">
+        <dl className="flex flex-col mt-4 gap-3 text-sm">
           <div>
             <dt className="font-medium">Offering</dt>
             <dd className="whitespace-pre-wrap wrap-anywhere">
@@ -473,7 +482,7 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
             <dd>{run.brief.exclusions.join("; ") || "None configured"}</dd>
           </div>
         </dl>
-        <ul className="mt-4 space-y-2 text-sm">
+        <ul className="flex flex-col mt-4 gap-2 text-sm">
           {run.usage.map((usage) => (
             <li key={usage.id} className="wrap-anywhere">
               {usage.kind === "search"
@@ -488,7 +497,7 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
         </ul>
         <h4 className="mt-4 font-medium">Allowance and recovery history</h4>
         {run.audit.length ? (
-          <ul className="mt-3 space-y-2 text-sm">
+          <ul className="flex flex-col mt-3 gap-2 text-sm">
             {run.audit.map((entry) => (
               <li key={entry.id} className="wrap-anywhere">
                 {entry.action === "increase"
@@ -510,7 +519,10 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
           </p>
         )}
       </details>
-      <section className="space-y-4" aria-labelledby={`open-${run.id}`}>
+      <section
+        className="flex flex-col gap-4"
+        aria-labelledby={`open-${run.id}`}
+      >
         <h4 id={`open-${run.id}`} className="text-lg font-semibold">
           Open buying requests ({run.counts.openBuyingRequests})
         </h4>
@@ -520,7 +532,7 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
           no automatic revalidation is assumed.
         </p>
         {openRequests.length ? (
-          <ul className="space-y-4">
+          <ul className="flex flex-col gap-4">
             {openRequests.map((prospect) => (
               <DiscoveryProspectCard key={prospect.id} prospect={prospect} />
             ))}
@@ -531,7 +543,10 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
           </p>
         )}
       </section>
-      <section className="space-y-4" aria-labelledby={`potential-${run.id}`}>
+      <section
+        className="flex flex-col gap-4"
+        aria-labelledby={`potential-${run.id}`}
+      >
         <h4 id={`potential-${run.id}`} className="text-lg font-semibold">
           Potential buyers ({run.counts.potentialBuyers})
         </h4>
@@ -541,7 +556,7 @@ function RunResults({ run, children }: { run: RunView; children: ReactNode }) {
           status.
         </p>
         {potentialBuyers.length ? (
-          <ul className="space-y-4">
+          <ul className="flex flex-col gap-4">
             {potentialBuyers.map((prospect) => (
               <DiscoveryProspectCard key={prospect.id} prospect={prospect} />
             ))}
@@ -626,298 +641,25 @@ export function DiscoveryManager({
   function edit() {
     requestKey.current = null;
   }
+  const [view, setView] = useState(
+    initialState.prospects.length ? "prospects" : "search",
+  );
   const validBudget =
     /^\d+$/.test(budget) &&
     Number(budget) > 0 &&
     Number(budget) <= (state.policy?.maxRunBudget ?? 0);
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       {state.setup.length > 0 && (
         <section className="rounded-xl border border-border bg-muted p-5">
-          <h2 className="font-semibold">Discovery setup needed</h2>
-          <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">
+          <h2 className="font-semibold">Complete search setup</h2>
+          <ul className="flex flex-col mt-3 list-disc gap-2 pl-5 text-sm">
             {state.setup.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
         </section>
       )}
-      <section className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
-        <h2 className="text-lg font-semibold">Review your discovery brief</h2>
-        <p className="text-sm text-muted-foreground">
-          AI reviews source evidence against your saved offering, product
-          requirements, buyer categories and exclusions. Search receives only
-          the public offering phrase, buyer category and selected market.
-          Private files, approved answers and mailbox content are never
-          included.
-        </p>
-        <Link
-          href={`/businesses/${businessId}/configuration`}
-          className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Review offerings, buyers and geography
-        </Link>
-        {state.brief && (
-          <dl className="space-y-3 text-sm">
-            <div>
-              <dt className="font-medium">Requirements</dt>
-              <dd className="whitespace-pre-wrap wrap-anywhere">
-                {Object.values(state.brief.requirements)
-                  .filter(Boolean)
-                  .join(" · ") || "Not specified"}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium">Buyer categories</dt>
-              <dd>
-                {state.brief.buyers.map((buyer) => buyer.label).join("; ")}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium">Exclusions</dt>
-              <dd>{state.brief.exclusions.join("; ") || "None configured"}</dd>
-            </div>
-          </dl>
-        )}
-        {state.policy && (
-          <p className="text-sm text-muted-foreground">
-            Coverage:{" "}
-            {state.policy.coverage
-              .map((coverage) => `${coverage.market} (public web)`)
-              .join("; ")}
-            . Active reach: {state.policy.activeMarkets.join("; ")}. Search:{" "}
-            {state.policy.searchUnits}; AI review: {state.policy.reviewUnits}{" "}
-            {state.policy.allowanceUnit} per call. At most{" "}
-            {state.policy.maxResults} results per search.
-            {state.policy.exa && (
-              <>
-                {" "}
-                Exa retrieves at most {
-                  state.policy.exa.maxContentsPerSearch
-                }{" "}
-                shortlisted URLs per search as {state.policy.exa.contentsType}{" "}
-                excerpts, at {state.policy.exa.contentsUnits}{" "}
-                {state.policy.allowanceUnit} per URL. The whole run allows at
-                most {state.policy.exa.maxCalls} Exa calls and{" "}
-                {state.policy.exa.maxAttemptsPerStep} attempts per step,
-                including explicit resumes. No automatic source retries.
-              </>
-            )}
-          </p>
-        )}
-        {state.capacity && (
-          <section
-            className="space-y-2 rounded-xl border border-border bg-muted p-4"
-            aria-label="Execution capacity"
-          >
-            <h3 className="font-medium">
-              {state.capacity.mode === "reserved"
-                ? "Reserved discovery capacity"
-                : state.capacity.mode === "pooled"
-                  ? "Pooled discovery capacity"
-                  : "Discovery capacity setup required"}
-            </h3>
-            <p className="text-sm">
-              {
-                {
-                  available: "Available",
-                  busy: "Busy — queued work waits for capacity",
-                  setup_required:
-                    "Current paid entitlement, approved allocation and worker deployment are required",
-                  unavailable:
-                    "Provider capacity could not be verified — queued work waits",
-                  stale:
-                    "Provider observation is stale — refresh to check again",
-                  entitlement_changed:
-                    "Entitlement changed — review configuration before resuming",
-                }[state.capacity.status]
-              }
-            </p>
-            {state.capacity.mode && (
-              <p className="text-sm">
-                {state.capacity.slots} concurrent discovery runs allocated.{" "}
-                {state.capacity.running !== null
-                  ? `${state.capacity.running} running · ${state.capacity.queued} queued in this lane.`
-                  : "Current running and queued counts are unknown."}
-              </p>
-            )}
-            {state.capacity.observedAt && (
-              <p className="text-xs text-muted-foreground">
-                Observed {new Date(state.capacity.observedAt).toLocaleString()}.
-                Refresh runs for a current observation.
-              </p>
-            )}
-            <p className="text-sm text-muted-foreground">
-              Capacity does not guarantee leads or throughput. Privacy, source
-              permissions and approved budgets apply in both modes. Reserved
-              work waits in its approved lane; it never silently moves to pooled
-              execution.
-            </p>
-          </section>
-        )}
-        {!state.canRun ? (
-          <p className="text-sm text-muted-foreground">
-            You can review sourced prospects. Ask an Owner or Admin to authorize
-            a run.
-          </p>
-        ) : (
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void perform(async () => {
-                requestKey.current ??= crypto.randomUUID();
-                const payload = startDiscoverySchema.parse({
-                  markets,
-                  publicOffering,
-                  confirmPublicQuery: confirmed,
-                  budget: Number(budget),
-                  requestKey: requestKey.current,
-                });
-                const result = await request("POST", payload);
-                z.object({
-                  success: z.literal(true),
-                  data: z.object({
-                    id: z.uuid(),
-                    status: z.enum([
-                      "queued",
-                      "running",
-                      "completed",
-                      "stopped",
-                    ]),
-                  }),
-                }).parse(result);
-                requestKey.current = null;
-                setConfirmed(false);
-                await refresh();
-                setMessage(
-                  "Run accepted. Refresh to review progress and saved evidence.",
-                );
-              });
-            }}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="public-offering">Public offering phrase</Label>
-              {state.policy?.exa ? (
-                <NativeSelect
-                  id="public-offering"
-                  value={publicOffering}
-                  required
-                  onChange={(event) => {
-                    edit();
-                    setPublicOffering(event.target.value);
-                    setConfirmed(false);
-                  }}
-                >
-                  {state.policy.exa.publicOfferings.map((phrase) => (
-                    <option key={phrase} value={phrase}>
-                      {phrase}
-                    </option>
-                  ))}
-                </NativeSelect>
-              ) : (
-                <Input
-                  id="public-offering"
-                  value={publicOffering}
-                  maxLength={400}
-                  required
-                  onChange={(event) => {
-                    edit();
-                    setPublicOffering(event.target.value);
-                    setConfirmed(false);
-                  }}
-                />
-              )}
-              <p className="text-sm text-muted-foreground">
-                Review this phrase for public search. Omit private requirements
-                or personal information.
-              </p>
-            </div>
-            <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm font-medium">
-                Selected markets within active reach and coverage
-              </legend>
-              {state.availableMarkets.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No eligible markets configured.
-                </p>
-              )}
-              {state.availableMarkets.map((market) => (
-                <Label
-                  key={market}
-                  className="flex min-h-11 items-center gap-3"
-                >
-                  <Input
-                    type="checkbox"
-                    className="size-5 min-h-5 shrink-0"
-                    checked={markets.includes(market)}
-                    onChange={(event) => {
-                      edit();
-                      setMarkets(
-                        event.target.checked
-                          ? [...markets, market]
-                          : markets.filter((value) => value !== market),
-                      );
-                    }}
-                  />
-                  {market}
-                </Label>
-              ))}
-            </fieldset>
-            <div className="space-y-2">
-              <Label htmlFor="discovery-budget">
-                Initial run allowance
-                {state.policy ? ` (${state.policy.allowanceUnit})` : ""}
-              </Label>
-              <Input
-                id="discovery-budget"
-                type="number"
-                min={1}
-                max={state.policy?.maxRunBudget}
-                step={1}
-                value={budget}
-                required
-                onChange={(event) => {
-                  edit();
-                  setBudget(event.target.value);
-                }}
-              />
-              <p className="text-sm text-muted-foreground">
-                {state.policy
-                  ? `Maximum ${state.policy.maxRunBudget} ${state.policy.allowanceUnit}. `
-                  : ""}
-                No automatic increase or guaranteed result count. Failed or
-                uncertain operations retain their reservation.
-              </p>
-            </div>
-            <Label className="flex min-h-11 items-start gap-3">
-              <Input
-                type="checkbox"
-                className="mt-1 size-5 min-h-5 shrink-0"
-                checked={confirmed}
-                onChange={(event) => setConfirmed(event.target.checked)}
-              />
-              <span>
-                I reviewed the public search phrase and brief and authorize this
-                initial allowance.
-              </span>
-            </Label>
-            <Button
-              type="submit"
-              disabled={
-                busy ||
-                state.setup.length > 0 ||
-                !validBudget ||
-                !confirmed ||
-                !publicOffering.trim() ||
-                markets.length === 0
-              }
-            >
-              {busy ? "Submitting…" : "Authorize and run discovery"}
-            </Button>
-          </form>
-        )}
-      </section>
       {error && (
         <Alert variant="destructive">
           <AlertDescription>
@@ -936,116 +678,444 @@ export function DiscoveryManager({
           {message}
         </p>
       )}
-      <DiscoverySchedules
-        businessId={businessId}
-        state={state}
-        refresh={refresh}
-      />
-      <section className="space-y-5" aria-labelledby="retained-prospects">
-        <h2 id="retained-prospects" className="text-lg font-semibold">
-          Retained prospects ({state.counts.evidenceBacked})
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Consolidated within this Business across saved runs. Exact evidenced
-          company identities and purchasing needs stay separate; a name or
-          shared mailbox alone does not establish a match.{" "}
-          {state.counts.contactable} contactable · {state.counts.namedBuyers}{" "}
-          with evidenced named buyers. Conflicting roles are unverified until
-          reviewed. Reloading saved evidence makes no provider calls.
-        </p>
-        {[
-          {
-            key: "open",
-            title: "Open buying requests",
-            prospects: state.prospects.filter((p) => p.requestState === "open"),
-          },
-          {
-            key: "potential",
-            title: "Potential buyers",
-            prospects: state.prospects.filter((p) => p.requestState !== "open"),
-          },
-        ].map((section) => (
-          <div key={section.key} className="space-y-4">
-            <h3 className="font-semibold">
-              {section.title} ({section.prospects.length})
-            </h3>
-            {section.prospects.length ? (
-              <ul className="space-y-4">
-                {section.prospects.map((prospect) => (
-                  <DiscoveryProspectCard
-                    key={prospect.id}
-                    prospect={prospect}
-                  />
-                ))}
-              </ul>
-            ) : (
+      <Tabs
+        value={view}
+        onValueChange={setView}
+        className="flex flex-col gap-6"
+      >
+        <TabsList>
+          <TabsTrigger value="search">New search</TabsTrigger>
+          <TabsTrigger value="prospects">
+            Prospects ({state.counts.evidenceBacked})
+          </TabsTrigger>
+          <TabsTrigger value="saved">Saved searches</TabsTrigger>
+          <TabsTrigger value="history">Search history</TabsTrigger>
+        </TabsList>
+        <TabsContent
+          forceMount
+          value="search"
+          className="data-[state=inactive]:hidden"
+        >
+          <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
+            <h2 className="text-lg font-semibold">Start a prospect search</h2>
+            <p className="text-sm text-muted-foreground">
+              AI reviews source evidence against your saved offering, product
+              requirements, buyer categories and exclusions. Search receives
+              only the public offering phrase, buyer category and selected
+              market. Private files, approved answers and mailbox content are
+              never included.
+            </p>
+            <Link
+              href={`/businesses/${businessId}/configuration`}
+              className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+            >
+              Edit products, customers, and location
+            </Link>
+            {state.brief && (
+              <dl className="flex flex-col gap-3 text-sm">
+                <div>
+                  <dt className="font-medium">Requirements</dt>
+                  <dd className="whitespace-pre-wrap wrap-anywhere">
+                    {Object.values(state.brief.requirements)
+                      .filter(Boolean)
+                      .join(" · ") || "Not specified"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-medium">Buyer categories</dt>
+                  <dd>
+                    {state.brief.buyers.map((buyer) => buyer.label).join("; ")}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-medium">Exclusions</dt>
+                  <dd>
+                    {state.brief.exclusions.join("; ") || "None configured"}
+                  </dd>
+                </div>
+              </dl>
+            )}
+            {state.policy && (
               <p className="text-sm text-muted-foreground">
-                No retained {section.title.toLowerCase()}.
+                Coverage:{" "}
+                {state.policy.coverage
+                  .map((coverage) => `${coverage.market} (public web)`)
+                  .join("; ")}
+                . Active reach: {state.policy.activeMarkets.join("; ")}. Search:{" "}
+                {state.policy.searchUnits}; AI review:{" "}
+                {state.policy.reviewUnits} {state.policy.allowanceUnit} per
+                call. At most {state.policy.maxResults} results per search.
+                {state.policy.exa && (
+                  <>
+                    {" "}
+                    Exa retrieves at most{" "}
+                    {state.policy.exa.maxContentsPerSearch} shortlisted URLs per
+                    search as {state.policy.exa.contentsType} excerpts, at{" "}
+                    {state.policy.exa.contentsUnits}{" "}
+                    {state.policy.allowanceUnit} per URL. The whole run allows
+                    at most {state.policy.exa.maxCalls} Exa calls and{" "}
+                    {state.policy.exa.maxAttemptsPerStep} attempts per step,
+                    including explicit resumes. No automatic source retries.
+                  </>
+                )}
               </p>
             )}
-          </div>
-        ))}
-      </section>
-      <section className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">
-            Discovery runs and potential buyers
-          </h2>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              void perform(async () => {
-                await refresh();
-                setMessage("Run list refreshed.");
-              })
-            }
-          >
-            {busy ? "Loading…" : "Refresh runs"}
-          </Button>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Research results remain potential buyers. Discovery does not send
-          messages or create engagement. AI match reasons may contain errors;
-          inspect the dated source evidence.
-        </p>
-        {state.runs.length === 0 ? (
-          <p className="rounded-xl border border-border bg-card p-6 text-muted-foreground">
-            No discovery runs yet. Review your brief and setup above to begin.
-          </p>
-        ) : (
-          state.runs.map((run) => (
-            <RunResults key={run.id} run={run}>
-              <RunControls
-                run={run}
-                enabled={state.canRun}
-                ready={state.setup.length === 0}
-                command={async (action, input) => {
-                  const result = await request("POST", input, action);
-                  z.object({
-                    success: z.literal(true),
-                    data: z.object({
-                      id: z.uuid(),
-                      status: z.enum([
-                        "queued",
-                        "running",
-                        "completed",
-                        "stopped",
-                      ]),
-                    }),
-                  }).parse(result);
-                  await refresh();
+            {state.capacity && (
+              <section
+                className="flex flex-col gap-2 rounded-xl border border-border bg-muted p-4"
+                aria-label="Execution capacity"
+              >
+                <h3 className="font-medium">
+                  {state.capacity.mode === "reserved"
+                    ? "Reserved discovery capacity"
+                    : state.capacity.mode === "pooled"
+                      ? "Pooled discovery capacity"
+                      : "Discovery capacity setup required"}
+                </h3>
+                <p className="text-sm">
+                  {
+                    {
+                      available: "Available",
+                      busy: "Busy — queued work waits for capacity",
+                      setup_required:
+                        "Current paid entitlement, approved allocation and worker deployment are required",
+                      unavailable:
+                        "Provider capacity could not be verified — queued work waits",
+                      stale:
+                        "Provider observation is stale — refresh to check again",
+                      entitlement_changed:
+                        "Entitlement changed — review configuration before resuming",
+                    }[state.capacity.status]
+                  }
+                </p>
+                {state.capacity.mode && (
+                  <p className="text-sm">
+                    {state.capacity.slots} concurrent discovery runs allocated.{" "}
+                    {state.capacity.running !== null
+                      ? `${state.capacity.running} running · ${state.capacity.queued} queued in this lane.`
+                      : "Current running and queued counts are unknown."}
+                  </p>
+                )}
+                {state.capacity.observedAt && (
+                  <p className="text-xs text-muted-foreground">
+                    Observed{" "}
+                    {new Date(state.capacity.observedAt).toLocaleString()}.
+                    Refresh runs for a current observation.
+                  </p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  Capacity does not guarantee leads or throughput. Privacy,
+                  source permissions and approved budgets apply in both modes.
+                  Reserved work waits in its approved lane; it never silently
+                  moves to pooled execution.
+                </p>
+              </section>
+            )}
+            {!state.canRun ? (
+              <p className="text-sm text-muted-foreground">
+                You can review sourced prospects. Ask an Owner or Admin to
+                authorize a run.
+              </p>
+            ) : (
+              <form
+                className="flex flex-col gap-5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void perform(async () => {
+                    requestKey.current ??= crypto.randomUUID();
+                    const payload = startDiscoverySchema.parse({
+                      markets,
+                      publicOffering,
+                      confirmPublicQuery: confirmed,
+                      budget: Number(budget),
+                      requestKey: requestKey.current,
+                    });
+                    const result = await request("POST", payload);
+                    z.object({
+                      success: z.literal(true),
+                      data: z.object({
+                        id: z.uuid(),
+                        status: z.enum([
+                          "queued",
+                          "running",
+                          "completed",
+                          "stopped",
+                        ]),
+                      }),
+                    }).parse(result);
+                    requestKey.current = null;
+                    setConfirmed(false);
+                    setView("history");
+                    await refresh();
+                    setMessage(
+                      "Search accepted. Open Search history to review its progress and saved results.",
+                    );
+                  });
                 }}
-              />
-            </RunResults>
-          ))
-        )}
-        {state.runs.length === 50 && (
-          <p className="text-sm text-muted-foreground">
-            Showing the most recent 50 runs.
-          </p>
-        )}
-      </section>
+              >
+                <FieldGroup className="gap-5">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="public-offering">
+                      What are you looking for buyers of?
+                    </Label>
+                    {state.policy?.exa ? (
+                      <NativeSelect
+                        id="public-offering"
+                        value={publicOffering}
+                        required
+                        onChange={(event) => {
+                          edit();
+                          setPublicOffering(event.target.value);
+                          setConfirmed(false);
+                        }}
+                      >
+                        {state.policy.exa.publicOfferings.map((phrase) => (
+                          <option key={phrase} value={phrase}>
+                            {phrase}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    ) : (
+                      <Input
+                        id="public-offering"
+                        value={publicOffering}
+                        maxLength={400}
+                        required
+                        onChange={(event) => {
+                          edit();
+                          setPublicOffering(event.target.value);
+                          setConfirmed(false);
+                        }}
+                      />
+                    )}
+                    <p className="text-sm text-muted-foreground">
+                      Review this phrase for public search. Omit private
+                      requirements or personal information.
+                    </p>
+                  </div>
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="mb-2 text-sm font-medium">
+                      Where should we search?
+                    </legend>
+                    {state.availableMarkets.length === 0 && (
+                      <p className="text-sm text-muted-foreground">
+                        No eligible markets configured.
+                      </p>
+                    )}
+                    {state.availableMarkets.map((market) => (
+                      <Label
+                        key={market}
+                        className="flex min-h-11 items-center gap-3"
+                      >
+                        <Input
+                          type="checkbox"
+                          className="size-5 min-h-5 shrink-0"
+                          checked={markets.includes(market)}
+                          onChange={(event) => {
+                            edit();
+                            setMarkets(
+                              event.target.checked
+                                ? [...markets, market]
+                                : markets.filter((value) => value !== market),
+                            );
+                          }}
+                        />
+                        {market}
+                      </Label>
+                    ))}
+                  </fieldset>
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor="discovery-budget">
+                      Search allowance
+                      {state.policy ? ` (${state.policy.allowanceUnit})` : ""}
+                    </Label>
+                    <Input
+                      id="discovery-budget"
+                      type="number"
+                      min={1}
+                      max={state.policy?.maxRunBudget}
+                      step={1}
+                      value={budget}
+                      required
+                      onChange={(event) => {
+                        edit();
+                        setBudget(event.target.value);
+                      }}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      {state.policy
+                        ? `Maximum ${state.policy.maxRunBudget} ${state.policy.allowanceUnit}. `
+                        : ""}
+                      No automatic increase or guaranteed result count. Failed
+                      or uncertain operations retain their reservation.
+                    </p>
+                  </Field>
+                  <Label className="flex min-h-11 items-start gap-3">
+                    <Input
+                      type="checkbox"
+                      className="mt-1 size-5 min-h-5 shrink-0"
+                      checked={confirmed}
+                      onChange={(event) => setConfirmed(event.target.checked)}
+                    />
+                    <span>
+                      I reviewed the public search phrase and brief and
+                      authorize this initial allowance.
+                    </span>
+                  </Label>
+                  <Button
+                    type="submit"
+                    disabled={
+                      busy ||
+                      state.setup.length > 0 ||
+                      !validBudget ||
+                      !confirmed ||
+                      !publicOffering.trim() ||
+                      markets.length === 0
+                    }
+                  >
+                    {busy ? "Submitting…" : "Approve and start search"}
+                  </Button>
+                </FieldGroup>
+              </form>
+            )}
+          </section>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="prospects"
+          className="data-[state=inactive]:hidden"
+        >
+          <section
+            className="flex flex-col gap-5"
+            aria-labelledby="retained-prospects"
+          >
+            <h2 id="retained-prospects" className="text-lg font-semibold">
+              Saved prospects ({state.counts.evidenceBacked})
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Consolidated within this Business across saved runs. Exact
+              evidenced company identities and purchasing needs stay separate; a
+              name or shared mailbox alone does not establish a match.{" "}
+              {state.counts.contactable} contactable ·{" "}
+              {state.counts.namedBuyers} with evidenced named buyers.
+              Conflicting roles are unverified until reviewed. Reloading saved
+              evidence makes no provider calls.
+            </p>
+            {[
+              {
+                key: "open",
+                title: "Open buying requests",
+                prospects: state.prospects.filter(
+                  (p) => p.requestState === "open",
+                ),
+              },
+              {
+                key: "potential",
+                title: "Potential buyers",
+                prospects: state.prospects.filter(
+                  (p) => p.requestState !== "open",
+                ),
+              },
+            ].map((section) => (
+              <div key={section.key} className="flex flex-col gap-4">
+                <h3 className="font-semibold">
+                  {section.title} ({section.prospects.length})
+                </h3>
+                {section.prospects.length ? (
+                  <ul className="flex flex-col gap-4">
+                    {section.prospects.map((prospect) => (
+                      <DiscoveryProspectCard
+                        key={prospect.id}
+                        prospect={prospect}
+                      />
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No retained {section.title.toLowerCase()}.
+                  </p>
+                )}
+              </div>
+            ))}
+          </section>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="saved"
+          className="data-[state=inactive]:hidden"
+        >
+          <DiscoverySchedules
+            businessId={businessId}
+            state={state}
+            refresh={refresh}
+          />
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="history"
+          className="data-[state=inactive]:hidden"
+        >
+          <section className="flex flex-col gap-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">Search history</h2>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  void perform(async () => {
+                    await refresh();
+                    setMessage("Run list refreshed.");
+                  })
+                }
+              >
+                {busy ? "Loading…" : "Refresh runs"}
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Research results remain potential buyers. Discovery does not send
+              messages or create engagement. AI match reasons may contain
+              errors; inspect the dated source evidence.
+            </p>
+            {state.runs.length === 0 ? (
+              <p className="rounded-xl border border-border bg-card p-6 text-muted-foreground">
+                No discovery runs yet. Review your brief and setup above to
+                begin.
+              </p>
+            ) : (
+              state.runs.map((run) => (
+                <RunResults key={run.id} run={run}>
+                  <RunControls
+                    run={run}
+                    enabled={state.canRun}
+                    ready={state.setup.length === 0}
+                    command={async (action, input) => {
+                      const result = await request("POST", input, action);
+                      z.object({
+                        success: z.literal(true),
+                        data: z.object({
+                          id: z.uuid(),
+                          status: z.enum([
+                            "queued",
+                            "running",
+                            "completed",
+                            "stopped",
+                          ]),
+                        }),
+                      }).parse(result);
+                      await refresh();
+                    }}
+                  />
+                </RunResults>
+              ))
+            )}
+            {state.runs.length === 50 && (
+              <p className="text-sm text-muted-foreground">
+                Showing the most recent 50 runs.
+              </p>
+            )}
+          </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

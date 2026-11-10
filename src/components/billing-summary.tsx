@@ -100,7 +100,7 @@ export function BillingProfileSummary({
         <dt className="text-sm text-muted-foreground">Supporting evidence</dt>
         <dd>
           {profile.evidence.length ? (
-            <ul className="space-y-2">
+            <ul className="flex flex-col gap-2">
               {profile.evidence.map((entry, i) => (
                 <li key={i}>
                   {evidenceKinds[entry.kind]} ·{" "}
@@ -121,7 +121,7 @@ export function BillingProfileSummary({
 export function BillingStatus({ state }: { state: BillingWorkspace }) {
   return (
     <section
-      className="space-y-4 rounded-2xl border border-border bg-card p-6 sm:p-8"
+      className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:p-8"
       aria-labelledby="billing-status"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -145,7 +145,7 @@ export function BillingStatus({ state }: { state: BillingWorkspace }) {
         treatment.
       </p>
       {state.issues.length > 0 && (
-        <ul className="list-inside list-disc space-y-2 wrap-anywhere">
+        <ul className="flex flex-col list-inside list-disc gap-2 wrap-anywhere">
           {state.issues.map((issue, i) => (
             <li key={i}>{issueLabels[issue] ?? issue}</li>
           ))}
@@ -156,7 +156,7 @@ export function BillingStatus({ state }: { state: BillingWorkspace }) {
 }
 export function BillingHistory({ state }: { state: BillingWorkspace }) {
   return (
-    <section className="space-y-4" aria-labelledby="billing-history">
+    <section className="flex flex-col gap-4" aria-labelledby="billing-history">
       <h2 id="billing-history" className="text-xl font-semibold">
         Profile and review history
       </h2>
@@ -175,13 +175,13 @@ export function BillingHistory({ state }: { state: BillingWorkspace }) {
             Revision {revision.version} · {revision.actorName} ·{" "}
             {revision.at.replace("T", " ").replace(".000Z", " UTC")}
           </summary>
-          <div className="mt-4 space-y-5">
+          <div className="flex flex-col mt-4 gap-5">
             <p className="whitespace-pre-wrap wrap-anywhere">{revision.note}</p>
             <BillingProfileSummary
               profile={revision.profile}
               evidence={revision.evidence}
             />
-            <ul className="space-y-3 text-sm">
+            <ul className="flex flex-col gap-3 text-sm">
               {revision.evidence.map((entry) => (
                 <li key={entry.fileId} className="wrap-anywhere">
                   {entry.name} · Document retention until {entry.retentionUntil}
@@ -195,7 +195,7 @@ export function BillingHistory({ state }: { state: BillingWorkspace }) {
               .map((entry) => (
                 <div
                   key={entry.id}
-                  className="space-y-2 rounded-xl border border-border p-4 wrap-anywhere"
+                  className="flex flex-col gap-2 rounded-xl border border-border p-4 wrap-anywhere"
                 >
                   <p className="font-medium">
                     {billingStatuses[entry.outcome]} · {entry.actorName} ·{" "}

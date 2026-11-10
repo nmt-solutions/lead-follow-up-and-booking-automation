@@ -198,7 +198,7 @@ export function ReachChangeManager({
     );
   }
   return (
-    <div className="space-y-6" aria-busy={busy}>
+    <div className="flex flex-col gap-6" aria-busy={busy}>
       {error && (
         <Alert role="alert">
           {error}{" "}
@@ -213,7 +213,7 @@ export function ReachChangeManager({
         </p>
       )}
       {!operator && (
-        <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
+        <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
           <h2 className="text-xl font-semibold">Preview a reach change</h2>
           {stopped ? (
             <p role="status" className="rounded-lg bg-muted p-4">
@@ -363,7 +363,7 @@ export function ReachChangeManager({
         return (
           <section
             key={c.id}
-            className="space-y-4 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+            className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <h2 className="text-xl font-semibold">
@@ -373,7 +373,7 @@ export function ReachChangeManager({
             </div>
             {operator && <p>Business {c.businessId}</p>}
             {s.target.upi && (
-              <div className="space-y-2 rounded-lg bg-muted p-4">
+              <div className="flex flex-col gap-2 rounded-lg bg-muted p-4">
                 <p className="font-medium">
                   UPI AutoPay · separate payment and new mandate
                 </p>
@@ -402,7 +402,7 @@ export function ReachChangeManager({
                   <summary className="cursor-pointer py-2">
                     Review payment identities
                   </summary>
-                  <dl className="space-y-2 wrap-anywhere">
+                  <dl className="flex flex-col gap-2 wrap-anywhere">
                     <div>
                       <dt>Original merchant and customer</dt>
                       <dd>
@@ -626,7 +626,7 @@ export function ReachChangeManager({
                 {s.proration.numerator}/{s.proration.denominator}. Request
                 actor: {c.actorId}.
               </p>
-              <ul className="mt-3 space-y-2">
+              <ul className="flex flex-col mt-3 gap-2">
                 {c.events.map((e) => (
                   <li key={e.id}>
                     {time(e.at)} · {e.fact.kind.replaceAll("_", " ")}

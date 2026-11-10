@@ -106,7 +106,7 @@ export function InvitationAcceptance({
     );
   if (!signedIn)
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <p className="text-sm leading-relaxed text-muted-foreground">
           Sign in with the email that received this invitation. You can review
           the Business and role before joining.
@@ -118,9 +118,9 @@ export function InvitationAcceptance({
       </div>
     );
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {preview ? (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           <h2 className="text-2xl font-semibold tracking-tight wrap-anywhere">
             Join {preview.businessName}
           </h2>

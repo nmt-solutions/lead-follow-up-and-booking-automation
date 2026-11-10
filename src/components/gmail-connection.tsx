@@ -130,7 +130,7 @@ export function GmailConnection({
   return (
     <section
       aria-label="Gmail connection"
-      className="space-y-4 rounded-xl border border-border p-4"
+      className="flex flex-col gap-4 rounded-xl border border-border p-4"
     >
       <h3 className="font-semibold">Gmail connection</h3>
       <Badge

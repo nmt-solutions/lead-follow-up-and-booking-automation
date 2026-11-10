@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 import { openPilotCheckout } from "./razorpay-pilot-checkout";
 import { openReachCheckout } from "./razorpay-reach-checkout";
 import { Input } from "./ui/input";
@@ -76,7 +77,7 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
     t = a.snapshot.tax;
   const collection = a.snapshot.collection;
   return (
-    <div className="space-y-4 wrap-anywhere">
+    <div className="flex flex-col gap-4 wrap-anywhere">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-semibold">
           {a.snapshot.adjustment ? "Reach adjustment · " : ""}
@@ -404,7 +405,7 @@ export function SubscriptionPaymentManager({
     );
   }
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       <div className="flex flex-wrap gap-4">
         <Link
           href={`/businesses/${businessId}/subscription-quotes`}
@@ -425,7 +426,7 @@ export function SubscriptionPaymentManager({
           Security
         </RecoveryLink>
       </div>
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-6">
+      <section className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6">
         <h2 className="text-xl font-semibold">
           {state.access.active ? "Paid access active" : "Paid access inactive"}
         </h2>
@@ -468,7 +469,7 @@ export function SubscriptionPaymentManager({
       )}
       {state.gateway.key === "razorpay" && (
         <section
-          className="space-y-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+          className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
           aria-label="Recurring card readiness"
         >
           <h2 className="text-xl font-semibold">Recurring card readiness</h2>
@@ -493,7 +494,7 @@ export function SubscriptionPaymentManager({
           </p>
         </section>
       )}
-      <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
+      <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
         <h2 className="text-xl font-semibold">Review tax and checkout</h2>
         <p>
           Select a saved current quote. The server calculates tax from trusted
@@ -553,12 +554,15 @@ export function SubscriptionPaymentManager({
       )}
       <SubscriptionDisclosures />
       {state.periods.length > 0 && (
-        <section className="space-y-4" aria-label="Confirmed charge periods">
+        <section
+          className="flex flex-col gap-4"
+          aria-label="Confirmed charge periods"
+        >
           <h2 className="text-xl font-semibold">Confirmed charge periods</h2>
           {state.periods.toReversed().map((p) => (
             <article
               key={p.id}
-              className="space-y-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+              className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
             >
               <h3 className="font-semibold">
                 {paymentTime(p.start)} through {paymentTime(p.end)}
@@ -612,7 +616,7 @@ export function SubscriptionPaymentManager({
           ))}
         </section>
       )}
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">Payment history</h2>
         {!state.actions.length && (
           <p>No checkout reviews yet. Choose a quote above.</p>
@@ -620,7 +624,7 @@ export function SubscriptionPaymentManager({
         {state.actions.toReversed().map((a) => (
           <article
             key={a.id}
-            className="space-y-4 rounded-2xl border border-border bg-card p-6"
+            className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
           >
             <PaymentDetail action={a} />
             {a.snapshot.term.kind === "days" && a.state === "confirmed" && (
@@ -642,44 +646,46 @@ export function SubscriptionPaymentManager({
                   renewal.
                 </p>
                 <form
-                  className="space-y-4"
+                  className="flex flex-col gap-4"
                   onSubmit={(e) => {
                     e.preventDefault();
                     const form = e.currentTarget;
                     void run(() => prepareMonthly(a, form));
                   }}
                 >
-                  <Label htmlFor={`monthly-start-${a.id}`}>
-                    Monthly start (your local time)
-                  </Label>
-                  <Input
-                    id={`monthly-start-${a.id}`}
-                    name="startAt"
-                    type="datetime-local"
-                    required
-                  />
-                  <Label htmlFor={`monthly-expiry-${a.id}`}>
-                    Approval expiry before monthly start (your local time)
-                  </Label>
-                  <Input
-                    id={`monthly-expiry-${a.id}`}
-                    name="expiresAt"
-                    type="datetime-local"
-                    required
-                  />
-                  <label className="flex min-h-11 items-center gap-3">
-                    <input
-                      type="checkbox"
-                      name="agree"
+                  <FieldGroup className="gap-4">
+                    <Label htmlFor={`monthly-start-${a.id}`}>
+                      Monthly start (your local time)
+                    </Label>
+                    <Input
+                      id={`monthly-start-${a.id}`}
+                      name="startAt"
+                      type="datetime-local"
                       required
-                      className="size-5"
                     />
-                    I approve this separate mandate for the original agreed
-                    monthly price and allowances at the selected start.
-                  </label>
-                  <Button disabled={busy}>
-                    Prepare monthly mandate review
-                  </Button>
+                    <Label htmlFor={`monthly-expiry-${a.id}`}>
+                      Approval expiry before monthly start (your local time)
+                    </Label>
+                    <Input
+                      id={`monthly-expiry-${a.id}`}
+                      name="expiresAt"
+                      type="datetime-local"
+                      required
+                    />
+                    <label className="flex min-h-11 items-center gap-3">
+                      <input
+                        type="checkbox"
+                        name="agree"
+                        required
+                        className="size-5"
+                      />
+                      I approve this separate mandate for the original agreed
+                      monthly price and allowances at the selected start.
+                    </label>
+                    <Button disabled={busy}>
+                      Prepare monthly mandate review
+                    </Button>
+                  </FieldGroup>
                 </form>
               </details>
             )}
@@ -760,7 +766,7 @@ export function SubscriptionPaymentOperator({
     [error, setError] = useState("");
   const pending = useRef(false);
   return (
-    <div className="space-y-6" aria-busy={busy}>
+    <div className="flex flex-col gap-6" aria-busy={busy}>
       <p>
         Reconciliation uses the payment provider&apos;s authoritative state. It
         cannot manually mark a payment as paid or grant access. Tax review
@@ -781,7 +787,7 @@ export function SubscriptionPaymentOperator({
       {actions.toReversed().map((a) => (
         <article
           key={a.id}
-          className="space-y-4 rounded-2xl border border-border bg-card p-6"
+          className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
         >
           <h2 className="text-xl font-semibold wrap-anywhere">
             {a.snapshot.quote.profile.profile.legalName}

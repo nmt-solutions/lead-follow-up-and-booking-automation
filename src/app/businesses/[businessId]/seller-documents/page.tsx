@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -27,29 +28,23 @@ export default async function SellerDocuments({
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to overview
-        </Link>
-        <p className="mb-3 font-medium text-primary wrap-anywhere">
-          {data.profile.name}
-        </p>
-        <h1 className="page-title">Invoices and credit notes</h1>
-        <p className="mt-3 text-muted-foreground">
-          Review your numbered seller documents and their original transaction
-          details.
-        </p>
+    <div className="app-page">
+      <PageHeader
+        title={<>Invoices and credit notes</>}
+        description={
+          <>
+            Review your numbered seller documents and their original transaction
+            details.
+          </>
+        }
+      >
         <Link
           href={`/businesses/${businessId}/subscription-payments`}
           className="mt-3 inline-flex min-h-11 items-center text-primary underline"
         >
           Review subscription payments
         </Link>
-      </header>
+      </PageHeader>
       <SellerDocumentManager businessId={businessId} initial={data.state} />
     </div>
   );

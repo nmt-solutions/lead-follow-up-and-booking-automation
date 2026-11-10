@@ -42,7 +42,7 @@ export async function readTaxResponse<T>(
 }
 export function TaxRuleDetails({ rule }: { rule: TaxRule }) {
   return (
-    <div className="space-y-4 wrap-anywhere">
+    <div className="flex flex-col gap-4 wrap-anywhere">
       <dl className="grid gap-4 sm:grid-cols-2">
         <div>
           <dt className="text-sm text-muted-foreground">Coverage</dt>
@@ -97,7 +97,7 @@ export function TaxRuleDetails({ rule }: { rule: TaxRule }) {
         Required reviewed claims:{" "}
         {rule.requiredEvidence.join(", ").replaceAll("_", " ")}
       </p>
-      <ul className="space-y-2">
+      <ul className="flex flex-col gap-2">
         {rule.rates.map((rate) => (
           <li key={rate.name}>
             {rate.name}: {rate.numerator} / {rate.denominator} of amount before
@@ -105,7 +105,7 @@ export function TaxRuleDetails({ rule }: { rule: TaxRule }) {
           </li>
         ))}
       </ul>
-      <ul className="space-y-2">
+      <ul className="flex flex-col gap-2">
         {rule.evidence.map((evidence, index) => (
           <li key={index}>
             {evidence.title} · {evidence.reference} · checked{" "}
@@ -133,7 +133,7 @@ const reasonLabels: Record<string, string> = {
 };
 export function TaxRecord({ record }: { record: TaxCalculation }) {
   return (
-    <article className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8 wrap-anywhere">
+    <article className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8 wrap-anywhere">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-semibold">Calculation {record.version}</h3>
         <Badge>
@@ -167,7 +167,7 @@ export function TaxRecord({ record }: { record: TaxCalculation }) {
         </p>
       )}
       {!!record.reasons.length && (
-        <ul className="list-disc space-y-2 pl-5">
+        <ul className="flex flex-col list-disc gap-2 pl-5">
           {record.reasons.map((reason, index) => (
             <li key={index}>
               {reason.kind}:{" "}
@@ -188,7 +188,7 @@ export function TaxRecord({ record }: { record: TaxCalculation }) {
         <summary className="cursor-pointer py-2 font-medium focus-visible:outline-2 focus-visible:outline-ring">
           Amounts, evidence and approval snapshots
         </summary>
-        <div className="mt-5 space-y-6">
+        <div className="flex flex-col mt-5 gap-6">
           <p className="text-sm text-muted-foreground">
             Record {record.id} · Profile revision {record.billing.version} ·
             Evidence review {record.billing.reviewVersion}
@@ -199,7 +199,7 @@ export function TaxRecord({ record }: { record: TaxCalculation }) {
               evidence={record.billing.current.evidence}
             />
           )}
-          <ul className="space-y-3">
+          <ul className="flex flex-col gap-3">
             {record.billing.reviews
               .filter(
                 (review) => review.profileId === record.billing.current?.id,
@@ -213,7 +213,7 @@ export function TaxRecord({ record }: { record: TaxCalculation }) {
                 </li>
               ))}
           </ul>
-          <ul className="space-y-4">
+          <ul className="flex flex-col gap-4">
             {record.input.lines.map((line) => (
               <li key={line.id}>
                 {line.description} · {line.productCode} · {line.quantity} ×{" "}
@@ -225,7 +225,7 @@ export function TaxRecord({ record }: { record: TaxCalculation }) {
           {record.lines.map((line) => (
             <section
               key={line.input.id}
-              className="space-y-3 border-t border-border pt-4"
+              className="flex flex-col gap-3 border-t border-border pt-4"
             >
               <h4 className="font-semibold">
                 {line.input.description}:{" "}
@@ -248,7 +248,7 @@ export function TaxRecord({ record }: { record: TaxCalculation }) {
             </section>
           ))}
           {record.status === "review_required" && (
-            <section className="space-y-4">
+            <section className="flex flex-col gap-4">
               <h4 className="font-semibold">
                 Configuration considered at this request
               </h4>
@@ -258,7 +258,7 @@ export function TaxRecord({ record }: { record: TaxCalculation }) {
               {record.configuration.revisions.map((revision) => (
                 <div
                   key={revision.id}
-                  className="space-y-3 border-t border-border pt-4"
+                  className="flex flex-col gap-3 border-t border-border pt-4"
                 >
                   <p>
                     {revision.key} v{revision.version} · {revision.actorName} ·{" "}

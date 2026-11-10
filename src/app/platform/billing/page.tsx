@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -16,38 +17,35 @@ export default async function BillingQueuePage() {
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href="/businesses"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Billing evidence review</h1>
+    <div className="app-page">
+      <PageHeader
+        title={<>Billing evidence review</>}
+        description={
+          <>
+            Submitted profiles needing tax-operator review. Missing and
+            conflicting evidence remains unresolved until a recorded review of
+            the exact revision.
+          </>
+        }
+      >
         <Link
           href="/platform/tax"
           className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Tax calculation review and rule approvals
         </Link>
-        <p className="mt-3 text-muted-foreground">
-          Submitted profiles needing tax-operator review. Missing and
-          conflicting evidence remains unresolved until a recorded review of the
-          exact revision.
-        </p>
-      </header>
+      </PageHeader>
       {!queue.length && (
         <p className="rounded-2xl border border-border bg-card p-6">
           No submitted profiles currently need review.
         </p>
       )}
-      <ul className="space-y-4">
+      <ul className="flex flex-col gap-4">
         {queue.map((entry) => (
           <li key={entry.businessId}>
             <Link
               href={`/platform/billing/${entry.businessId}`}
-              className="block space-y-3 rounded-2xl border border-border bg-card p-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="flex flex-col block gap-3 rounded-2xl border border-border bg-card p-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <h2 className="text-xl font-semibold wrap-anywhere">
                 {entry.workspace.current?.profile.legalName ||

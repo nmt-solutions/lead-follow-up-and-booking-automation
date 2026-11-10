@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -29,23 +30,16 @@ export default async function CalendarPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to overview
-        </Link>
-        <p className="mb-3 text-sm font-medium text-primary">
-          {state.profile.name}
-        </p>
-        <h1 className="page-title">Booking calendar</h1>
-        <p className="mt-3 text-muted-foreground">
-          Connect a customer-owned calendar, review its permission and choose
-          where appointments are booked.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Booking calendar</>}
+        description={
+          <>
+            Connect a customer-owned calendar, review its permission and choose
+            where appointments are booked.
+          </>
+        }
+      ></PageHeader>
       <GoogleCalendarManager
         businessId={businessId}
         initialState={state.calendar}

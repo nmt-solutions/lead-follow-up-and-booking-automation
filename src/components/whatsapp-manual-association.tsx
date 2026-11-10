@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
@@ -69,38 +70,42 @@ export function WhatsAppManualAssociation({
   return (
     <form
       onSubmit={save}
-      className="mt-5 space-y-3 border-t pt-4"
+      className="flex flex-col mt-5 gap-3 border-t pt-4"
       aria-busy={pending}
     >
-      <Label htmlFor={`meta-anchor-${receiptId}`}>
-        Which received message has the same purchasing need?
-      </Label>
-      <NativeSelect
-        id={`meta-anchor-${receiptId}`}
-        name="messageId"
-        required
-        defaultValue=""
-      >
-        <option value="" disabled>
-          Choose an associated message
-        </option>
-        {messages
-          .filter((m) => m.opportunityId)
-          .map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.text.slice(0, 100)}
-            </option>
-          ))}
-      </NativeSelect>
-      <p className="text-sm text-muted-foreground">
-        Owner/Admin review links this observed app activity to the selected
-        message&apos;s current Opportunity and pauses its automation. Associate
-        incoming messages first if the need is still unclear.
-      </p>
-      <Button type="submit" disabled={pending}>
-        {pending ? "Associating…" : "Associate activity and pause Opportunity"}
-      </Button>
-      {error && <Alert variant="destructive">{error}</Alert>}
+      <FieldGroup className="gap-3">
+        <Label htmlFor={`meta-anchor-${receiptId}`}>
+          Which received message has the same purchasing need?
+        </Label>
+        <NativeSelect
+          id={`meta-anchor-${receiptId}`}
+          name="messageId"
+          required
+          defaultValue=""
+        >
+          <option value="" disabled>
+            Choose an associated message
+          </option>
+          {messages
+            .filter((m) => m.opportunityId)
+            .map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.text.slice(0, 100)}
+              </option>
+            ))}
+        </NativeSelect>
+        <p className="text-sm text-muted-foreground">
+          Owner/Admin review links this observed app activity to the selected
+          message&apos;s current Opportunity and pauses its automation.
+          Associate incoming messages first if the need is still unclear.
+        </p>
+        <Button type="submit" disabled={pending}>
+          {pending
+            ? "Associating…"
+            : "Associate activity and pause Opportunity"}
+        </Button>
+        {error && <Alert variant="destructive">{error}</Alert>}
+      </FieldGroup>
     </form>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -293,7 +294,7 @@ export function AppointmentManager({
       requestIdentity.current = null;
   }
   return (
-    <div className="space-y-8 wrap-anywhere" aria-busy={pending}>
+    <div className="flex flex-col gap-8 wrap-anywhere" aria-busy={pending}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p>
           Assigned owner: {state.ownerId ?? "Unassigned"} ·{" "}
@@ -323,7 +324,7 @@ export function AppointmentManager({
       {notice && <p role="status">{notice}</p>}
       {state.setupReason && (
         <Card>
-          <CardContent className="space-y-3 pt-6">
+          <CardContent className="flex flex-col gap-3 pt-6">
             <Badge className="text-warning">Calendar setup needed</Badge>
             <p>{reasonText(state.setupReason)}</p>
             <p className="text-sm text-muted-foreground">
@@ -344,7 +345,7 @@ export function AppointmentManager({
         <CardHeader>
           <CardTitle>Find an appointment</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           {state.policy && (
             <p className="text-sm text-muted-foreground">
               Business zone: {state.policy.configuration.timeZone} · Duration:{" "}
@@ -354,47 +355,49 @@ export function AppointmentManager({
               {state.policy.configuration.holdSeconds} seconds.
             </p>
           )}
-          <form onSubmit={findSlots} className="space-y-4">
-            <fieldset
-              disabled={pending || !state.canAct || !!state.setupReason}
-              className="space-y-4"
-            >
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="appointment-zone">Customer time zone</Label>
-                  <Input
-                    id="appointment-zone"
-                    required
-                    value={zone}
-                    onChange={(e) => {
-                      setZone(e.target.value);
-                      setSlots(null);
-                    }}
-                    placeholder="Europe/London"
-                    maxLength={100}
-                    autoComplete="off"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Confirm the customer&apos;s IANA zone, for example
-                    Asia/Kolkata. All slot dates below use this zone.
-                  </p>
+          <form onSubmit={findSlots} className="flex flex-col gap-4">
+            <FieldGroup className="gap-4">
+              <fieldset
+                disabled={pending || !state.canAct || !!state.setupReason}
+                className="flex flex-col gap-4"
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor="appointment-zone">Customer time zone</Label>
+                    <Input
+                      id="appointment-zone"
+                      required
+                      value={zone}
+                      onChange={(e) => {
+                        setZone(e.target.value);
+                        setSlots(null);
+                      }}
+                      placeholder="Europe/London"
+                      maxLength={100}
+                      autoComplete="off"
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Confirm the customer&apos;s IANA zone, for example
+                      Asia/Kolkata. All slot dates below use this zone.
+                    </p>
+                  </Field>
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor="appointment-day">Customer local date</Label>
+                    <Input
+                      id="appointment-day"
+                      type="date"
+                      required
+                      value={day}
+                      onChange={(e) => {
+                        setDay(e.target.value);
+                        setSlots(null);
+                      }}
+                    />
+                  </Field>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="appointment-day">Customer local date</Label>
-                  <Input
-                    id="appointment-day"
-                    type="date"
-                    required
-                    value={day}
-                    onChange={(e) => {
-                      setDay(e.target.value);
-                      setSlots(null);
-                    }}
-                  />
-                </div>
-              </div>
-              <Button type="submit">Check available slots</Button>
-            </fieldset>
+                <Button type="submit">Check available slots</Button>
+              </fieldset>
+            </FieldGroup>
           </form>
           <p className="text-sm text-muted-foreground">
             Holds protect overlapping requests inside this Business. External
@@ -403,7 +406,7 @@ export function AppointmentManager({
             Ambiguous or nonexistent Business wall times are not offered.
           </p>
           {slots && (
-            <ul className="space-y-3">
+            <ul className="flex flex-col gap-3">
               {slots.values.map((slot) => (
                 <li
                   key={slot.startsAt}
@@ -436,7 +439,10 @@ export function AppointmentManager({
           )}
         </CardContent>
       </Card>
-      <section aria-labelledby="appointment-records" className="space-y-4">
+      <section
+        aria-labelledby="appointment-records"
+        className="flex flex-col gap-4"
+      >
         <h2 id="appointment-records" className="text-xl font-semibold">
           Appointment records
         </h2>
@@ -522,7 +528,7 @@ function AppointmentRecord({
           <Badge>{p.phase.replaceAll("_", " ")}</Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-col gap-4">
         <p>
           <time dateTime={p.intent.startsAt}>
             {zoned(p.intent.startsAt, p.intent.customerTimeZone)}
@@ -547,7 +553,7 @@ function AppointmentRecord({
         {p.reason && <p>{reasonText(p.reason)}</p>}
         <p className="font-medium">Next action: {p.nextAction}</p>
         {p.event && (
-          <dl className="space-y-2 text-sm">
+          <dl className="flex flex-col gap-2 text-sm">
             <div>
               <dt className="text-muted-foreground">
                 Retained original calendar event
@@ -629,7 +635,7 @@ function AppointmentRecord({
           <summary className="min-h-11 cursor-pointer py-3 font-medium">
             Retained appointment history
           </summary>
-          <ol className="space-y-3">
+          <ol className="flex flex-col gap-3">
             {p.history.map((e) => (
               <li key={e.id} className="rounded-lg bg-muted p-4">
                 <p className="font-medium">
@@ -684,72 +690,77 @@ function EvidenceForm({
       <summary className="min-h-11 cursor-pointer py-3 font-medium">
         Record explicit Business evidence
       </summary>
-      <form onSubmit={save} className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Owner/Admin evidence is a deliberate attestation. A request, message,
-          quote or elapsed time does not establish attendance or cancellation.
-        </p>
-        <fieldset disabled={pending} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor={`outcome-${appointment.id}`}>
-              Evidence establishes
-            </Label>
-            <NativeSelect
-              id={`outcome-${appointment.id}`}
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
-            >
-              <option
-                value="attended"
-                disabled={
-                  appointment.status !== "confirmed" ||
-                  appointment.phase !== "booked"
-                }
+      <form onSubmit={save} className="flex flex-col gap-4">
+        <FieldGroup className="gap-4">
+          <p className="text-sm text-muted-foreground">
+            Owner/Admin evidence is a deliberate attestation. A request,
+            message, quote or elapsed time does not establish attendance or
+            cancellation.
+          </p>
+          <fieldset disabled={pending} className="flex flex-col gap-4">
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`outcome-${appointment.id}`}>
+                Evidence establishes
+              </Label>
+              <NativeSelect
+                id={`outcome-${appointment.id}`}
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
               >
-                Attended appointment
-              </option>
-              <option value="cancelled">Confirmed external cancellation</option>
-            </NativeSelect>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`reference-${appointment.id}`}>
-              Authoritative evidence reference
-            </Label>
-            <Input
-              id={`reference-${appointment.id}`}
-              name="reference"
-              maxLength={256}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`occurred-${appointment.id}`}>
-              Evidence time with UTC offset
-            </Label>
-            <Input
-              id={`occurred-${appointment.id}`}
-              name="occurredAt"
-              required
-              placeholder="2026-11-05T14:40:00+00:00"
-            />
-            <p className="text-sm text-muted-foreground">
-              Enter an ISO timestamp with its offset. Attendance evidence must
-              be at or after the scheduled end and cannot be in the future.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`note-${appointment.id}`}>
-              What confirms this outcome?
-            </Label>
-            <Textarea
-              id={`note-${appointment.id}`}
-              name="note"
-              maxLength={2000}
-              required
-            />
-          </div>
-          <Button variant="outline">Record evidence</Button>
-        </fieldset>
+                <option
+                  value="attended"
+                  disabled={
+                    appointment.status !== "confirmed" ||
+                    appointment.phase !== "booked"
+                  }
+                >
+                  Attended appointment
+                </option>
+                <option value="cancelled">
+                  Confirmed external cancellation
+                </option>
+              </NativeSelect>
+            </Field>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`reference-${appointment.id}`}>
+                Authoritative evidence reference
+              </Label>
+              <Input
+                id={`reference-${appointment.id}`}
+                name="reference"
+                maxLength={256}
+                required
+              />
+            </Field>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`occurred-${appointment.id}`}>
+                Evidence time with UTC offset
+              </Label>
+              <Input
+                id={`occurred-${appointment.id}`}
+                name="occurredAt"
+                required
+                placeholder="2026-11-05T14:40:00+00:00"
+              />
+              <p className="text-sm text-muted-foreground">
+                Enter an ISO timestamp with its offset. Attendance evidence must
+                be at or after the scheduled end and cannot be in the future.
+              </p>
+            </Field>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`note-${appointment.id}`}>
+                What confirms this outcome?
+              </Label>
+              <Textarea
+                id={`note-${appointment.id}`}
+                name="note"
+                maxLength={2000}
+                required
+              />
+            </Field>
+            <Button variant="outline">Record evidence</Button>
+          </fieldset>
+        </FieldGroup>
       </form>
     </details>
   );
@@ -827,7 +838,7 @@ function BookingSettings({
       <CardHeader>
         <CardTitle>Business booking settings</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           Settings apply to future requests across this Business. Existing
           requests retain their original intent and event. A changed
@@ -839,221 +850,231 @@ function BookingSettings({
             selection.
           </p>
         ) : (
-          <form onSubmit={save} className="space-y-5">
-            {error && <Alert variant="destructive">{error}</Alert>}
-            <fieldset disabled={pending} className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="booking-business-zone">
-                  Business time zone
-                </Label>
-                <Input
-                  id="booking-business-zone"
-                  name="timeZone"
-                  defaultValue={config?.timeZone ?? ""}
-                  required
-                  maxLength={100}
-                  placeholder="America/New_York"
-                />
-              </div>
-              <fieldset className="space-y-3">
-                <legend className="mb-2 font-medium">
-                  Working hours in the Business zone
-                </legend>
-                <p className="text-sm text-muted-foreground">
-                  Use separate windows for each local day. Gaps, repeated times
-                  and overlapping windows cannot silently shift an appointment.
-                </p>
-                {windows.map((w, index) => (
-                  <div
-                    key={w.key}
-                    className="grid items-end gap-3 rounded-lg border p-4 sm:grid-cols-2"
-                  >
-                    <div className="space-y-2">
-                      <Label htmlFor={`weekday-${w.key}`}>
-                        Day {index + 1}
-                      </Label>
-                      <NativeSelect
-                        id={`weekday-${w.key}`}
-                        value={w.weekday}
-                        onChange={(e) =>
-                          setWindows(
-                            windows.map((v) =>
-                              v.key === w.key
-                                ? { ...v, weekday: Number(e.target.value) }
-                                : v,
-                            ),
-                          )
+          <form onSubmit={save} className="flex flex-col gap-5">
+            <FieldGroup className="gap-5">
+              {error && <Alert variant="destructive">{error}</Alert>}
+              <fieldset disabled={pending} className="flex flex-col gap-5">
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="booking-business-zone">
+                    Business time zone
+                  </Label>
+                  <Input
+                    id="booking-business-zone"
+                    name="timeZone"
+                    defaultValue={config?.timeZone ?? ""}
+                    required
+                    maxLength={100}
+                    placeholder="America/New_York"
+                  />
+                </Field>
+                <fieldset className="flex flex-col gap-3">
+                  <legend className="mb-2 font-medium">
+                    Working hours in the Business zone
+                  </legend>
+                  <p className="text-sm text-muted-foreground">
+                    Use separate windows for each local day. Gaps, repeated
+                    times and overlapping windows cannot silently shift an
+                    appointment.
+                  </p>
+                  {windows.map((w, index) => (
+                    <div
+                      key={w.key}
+                      className="grid items-end gap-3 rounded-lg border p-4 sm:grid-cols-2"
+                    >
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor={`weekday-${w.key}`}>
+                          Day {index + 1}
+                        </Label>
+                        <NativeSelect
+                          id={`weekday-${w.key}`}
+                          value={w.weekday}
+                          onChange={(e) =>
+                            setWindows(
+                              windows.map((v) =>
+                                v.key === w.key
+                                  ? { ...v, weekday: Number(e.target.value) }
+                                  : v,
+                              ),
+                            )
+                          }
+                        >
+                          {weekdays.map((day, i) => (
+                            <option key={day} value={i + 1}>
+                              {day}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      </Field>
+                      <div className="flex flex-wrap gap-3">
+                        <Field className="flex flex-col min-w-0 flex-1 gap-2">
+                          <Label htmlFor={`start-${w.key}`}>Opens</Label>
+                          <Input
+                            id={`start-${w.key}`}
+                            type="time"
+                            value={w.start}
+                            required
+                            onChange={(e) =>
+                              setWindows(
+                                windows.map((v) =>
+                                  v.key === w.key
+                                    ? { ...v, start: e.target.value }
+                                    : v,
+                                ),
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field className="flex flex-col min-w-0 flex-1 gap-2">
+                          <Label htmlFor={`end-${w.key}`}>Closes</Label>
+                          <Input
+                            id={`end-${w.key}`}
+                            type="time"
+                            value={w.end}
+                            required
+                            onChange={(e) =>
+                              setWindows(
+                                windows.map((v) =>
+                                  v.key === w.key
+                                    ? { ...v, end: e.target.value }
+                                    : v,
+                                ),
+                              )
+                            }
+                          />
+                        </Field>
+                      </div>
+                      <Button
+                        variant="outline"
+                        type="button"
+                        onClick={() =>
+                          setWindows(windows.filter((v) => v.key !== w.key))
                         }
                       >
-                        {weekdays.map((day, i) => (
-                          <option key={day} value={i + 1}>
-                            {day}
-                          </option>
-                        ))}
-                      </NativeSelect>
+                        Remove window {index + 1}
+                      </Button>
                     </div>
-                    <div className="flex flex-wrap gap-3">
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Label htmlFor={`start-${w.key}`}>Opens</Label>
-                        <Input
-                          id={`start-${w.key}`}
-                          type="time"
-                          value={w.start}
-                          required
-                          onChange={(e) =>
-                            setWindows(
-                              windows.map((v) =>
-                                v.key === w.key
-                                  ? { ...v, start: e.target.value }
-                                  : v,
-                              ),
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Label htmlFor={`end-${w.key}`}>Closes</Label>
-                        <Input
-                          id={`end-${w.key}`}
-                          type="time"
-                          value={w.end}
-                          required
-                          onChange={(e) =>
-                            setWindows(
-                              windows.map((v) =>
-                                v.key === w.key
-                                  ? { ...v, end: e.target.value }
-                                  : v,
-                              ),
-                            )
-                          }
-                        />
-                      </div>
-                    </div>
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() =>
-                        setWindows(windows.filter((v) => v.key !== w.key))
-                      }
-                    >
-                      Remove window {index + 1}
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  variant="outline"
-                  type="button"
-                  disabled={windows.length >= 28}
-                  onClick={() =>
-                    setWindows([
-                      ...windows,
-                      {
-                        key: crypto.randomUUID(),
-                        weekday: 1,
-                        start: "",
-                        end: "",
-                      },
-                    ])
-                  }
-                >
-                  Add working hours
-                </Button>
-              </fieldset>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {(
-                  [
-                    [
-                      "durationMinutes",
-                      "Appointment duration (minutes)",
-                      1,
-                      1440,
-                    ],
-                    ["bufferBeforeMinutes", "Buffer before (minutes)", 0, 1440],
-                    ["bufferAfterMinutes", "Buffer after (minutes)", 0, 1440],
-                    ["slotStepMinutes", "Slot interval (minutes)", 1, 1440],
-                    ["holdSeconds", "Local hold expiry (seconds)", 1, 86400],
-                  ] as const
-                ).map(([name, label, min, max]) => (
-                  <div key={name} className="space-y-2">
-                    <Label htmlFor={`booking-${name}`}>{label}</Label>
-                    <Input
-                      id={`booking-${name}`}
-                      name={name}
-                      type="number"
-                      inputMode="numeric"
-                      step={1}
-                      min={min}
-                      max={max}
-                      required
-                      defaultValue={config?.[name] ?? ""}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="booking-calendar">
-                  Customer-owned calendar
-                </Label>
-                <NativeSelect
-                  id="booking-calendar"
-                  value={selected}
-                  onChange={(e) => setSelected(e.target.value)}
-                >
-                  <option value="">
-                    No calendar selected — save timing only
-                  </option>
-                  {state.calendars.map((c) => (
-                    <option
-                      key={`${c.connectionId}:${c.calendarId}`}
-                      value={JSON.stringify({
-                        connectionId: c.connectionId,
-                        calendarId: c.calendarId,
-                      })}
-                    >
-                      {c.label} · {c.provider} · {c.grant}
-                    </option>
                   ))}
-                </NativeSelect>
-                <p className="text-sm text-muted-foreground">
-                  Only calendars returned by the configured provider are
-                  selectable. Read/write grants are checked again before
-                  booking. RFQs need no calendar selection.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="booking-automation">
-                  Appointment automation
-                </Label>
-                <NativeSelect
-                  id="booking-automation"
-                  value={automation ? "enabled" : "disabled"}
-                  onChange={(e) => setAutomation(e.target.value === "enabled")}
-                >
-                  <option value="disabled">Manual booking only</option>
-                  <option value="enabled">
-                    Allow authorized booking automation
-                  </option>
-                </NativeSelect>
-                <p className="text-sm text-muted-foreground">
-                  Automation also requires the current booking goal, ownership
-                  and Opportunity handback. Manual actions remain separately
-                  authorized.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="booking-note">
-                  Reason for this configuration
-                </Label>
-                <Textarea
-                  id="booking-note"
-                  name="note"
-                  maxLength={1000}
-                  required
-                />
-              </div>
-              <Button>Save Business booking settings</Button>
-            </fieldset>
+                  <Button
+                    variant="outline"
+                    type="button"
+                    disabled={windows.length >= 28}
+                    onClick={() =>
+                      setWindows([
+                        ...windows,
+                        {
+                          key: crypto.randomUUID(),
+                          weekday: 1,
+                          start: "",
+                          end: "",
+                        },
+                      ])
+                    }
+                  >
+                    Add working hours
+                  </Button>
+                </fieldset>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {(
+                    [
+                      [
+                        "durationMinutes",
+                        "Appointment duration (minutes)",
+                        1,
+                        1440,
+                      ],
+                      [
+                        "bufferBeforeMinutes",
+                        "Buffer before (minutes)",
+                        0,
+                        1440,
+                      ],
+                      ["bufferAfterMinutes", "Buffer after (minutes)", 0, 1440],
+                      ["slotStepMinutes", "Slot interval (minutes)", 1, 1440],
+                      ["holdSeconds", "Local hold expiry (seconds)", 1, 86400],
+                    ] as const
+                  ).map(([name, label, min, max]) => (
+                    <Field key={name} className="flex flex-col gap-2">
+                      <Label htmlFor={`booking-${name}`}>{label}</Label>
+                      <Input
+                        id={`booking-${name}`}
+                        name={name}
+                        type="number"
+                        inputMode="numeric"
+                        step={1}
+                        min={min}
+                        max={max}
+                        required
+                        defaultValue={config?.[name] ?? ""}
+                      />
+                    </Field>
+                  ))}
+                </div>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="booking-calendar">
+                    Customer-owned calendar
+                  </Label>
+                  <NativeSelect
+                    id="booking-calendar"
+                    value={selected}
+                    onChange={(e) => setSelected(e.target.value)}
+                  >
+                    <option value="">
+                      No calendar selected — save timing only
+                    </option>
+                    {state.calendars.map((c) => (
+                      <option
+                        key={`${c.connectionId}:${c.calendarId}`}
+                        value={JSON.stringify({
+                          connectionId: c.connectionId,
+                          calendarId: c.calendarId,
+                        })}
+                      >
+                        {c.label} · {c.provider} · {c.grant}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <p className="text-sm text-muted-foreground">
+                    Only calendars returned by the configured provider are
+                    selectable. Read/write grants are checked again before
+                    booking. RFQs need no calendar selection.
+                  </p>
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="booking-automation">
+                    Appointment automation
+                  </Label>
+                  <NativeSelect
+                    id="booking-automation"
+                    value={automation ? "enabled" : "disabled"}
+                    onChange={(e) =>
+                      setAutomation(e.target.value === "enabled")
+                    }
+                  >
+                    <option value="disabled">Manual booking only</option>
+                    <option value="enabled">
+                      Allow authorized booking automation
+                    </option>
+                  </NativeSelect>
+                  <p className="text-sm text-muted-foreground">
+                    Automation also requires the current booking goal, ownership
+                    and Opportunity handback. Manual actions remain separately
+                    authorized.
+                  </p>
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="booking-note">
+                    Reason for this configuration
+                  </Label>
+                  <Textarea
+                    id="booking-note"
+                    name="note"
+                    maxLength={1000}
+                    required
+                  />
+                </Field>
+                <Button>Save Business booking settings</Button>
+              </fieldset>
+            </FieldGroup>
           </form>
         )}
         {state.policyHistory.length > 0 && (
@@ -1061,7 +1082,7 @@ function BookingSettings({
             <summary className="min-h-11 cursor-pointer py-3 font-medium">
               Configuration history
             </summary>
-            <ol className="space-y-3">
+            <ol className="flex flex-col gap-3">
               {state.policyHistory.map((p) => (
                 <li key={p.version}>
                   <p>

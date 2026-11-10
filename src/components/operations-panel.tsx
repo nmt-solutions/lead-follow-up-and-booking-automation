@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 
 import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -227,7 +228,7 @@ export function OperationsPanel({
     });
   }
   return (
-    <div className="space-y-8" aria-busy={Boolean(busy)}>
+    <div className="flex flex-col gap-8" aria-busy={Boolean(busy)}>
       <div className="flex flex-wrap items-center gap-4">
         <Button
           disabled={Boolean(busy)}
@@ -260,7 +261,10 @@ export function OperationsPanel({
           {notice}
         </p>
       )}
-      <section aria-labelledby="operation-alerts" className="space-y-4">
+      <section
+        aria-labelledby="operation-alerts"
+        className="flex flex-col gap-4"
+      >
         <h2 id="operation-alerts" className="text-xl font-semibold">
           Responsible next actions
         </h2>
@@ -274,7 +278,7 @@ export function OperationsPanel({
           .filter((n) => !n.resolved)
           .map((n) => (
             <Card key={n.id}>
-              <CardContent className="space-y-3 pt-6">
+              <CardContent className="flex flex-col gap-3 pt-6">
                 <p className="font-medium">
                   {n.source.replaceAll("_", " ")} ·{" "}
                   {n.delivery === "available_in_app"
@@ -323,7 +327,7 @@ export function OperationsPanel({
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
         {groups.map((g) => (
-          <TabsContent value={g.id} key={g.id} className="space-y-4">
+          <TabsContent value={g.id} key={g.id} className="flex flex-col gap-4">
             <h2 className="text-xl font-semibold">{g.label}</h2>
             {!state.resources.some((r) => g.sources.includes(r.source)) && (
               <p className="text-muted-foreground">
@@ -341,7 +345,7 @@ export function OperationsPanel({
                       <Badge>{row.status.replaceAll("_", " ")}</Badge>
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
+                  <CardContent className="flex flex-col gap-4">
                     <p className="text-sm wrap-anywhere text-muted-foreground">
                       Business {row.businessId} · Responsible person{" "}
                       {row.responsibleUserId ?? "unassigned"}
@@ -409,7 +413,7 @@ export function OperationsPanel({
               ))}
           </TabsContent>
         ))}
-        <TabsContent value="history" className="space-y-4">
+        <TabsContent value="history" className="flex flex-col gap-4">
           <h2 className="text-xl font-semibold">Attributable history</h2>
           <p className="text-sm text-muted-foreground">
             Observations are separate from requested commands and confirmed
@@ -419,7 +423,7 @@ export function OperationsPanel({
           {!state.history.length && (
             <p>No actions have been observed in this scope.</p>
           )}
-          <ol className="space-y-3">
+          <ol className="flex flex-col gap-3">
             {state.history.map((e) => (
               <li
                 key={e.id}
@@ -482,7 +486,10 @@ export function OperationsPanel({
         </TabsContent>
       </Tabs>
       {state.operator && (
-        <section aria-labelledby="diagnostic-policy" className="space-y-4">
+        <section
+          aria-labelledby="diagnostic-policy"
+          className="flex flex-col gap-4"
+        >
           <h2 id="diagnostic-policy" className="text-xl font-semibold">
             Diagnostics and retention
           </h2>
@@ -493,61 +500,65 @@ export function OperationsPanel({
           </p>
           <Card>
             <CardContent className="pt-6">
-              <form onSubmit={retention} className="space-y-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <Label htmlFor="diagnostic-seconds">
-                      Diagnostic retention (seconds)
-                    </Label>
-                    <Input
-                      id="diagnostic-seconds"
-                      name="diagnosticSeconds"
-                      type="number"
-                      min="1"
-                      step="1"
-                      required
-                      defaultValue={state.retention?.diagnosticSeconds ?? ""}
-                    />
+              <form onSubmit={retention} className="flex flex-col gap-4">
+                <FieldGroup className="gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="diagnostic-seconds">
+                        Diagnostic retention (seconds)
+                      </Label>
+                      <Input
+                        id="diagnostic-seconds"
+                        name="diagnosticSeconds"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        defaultValue={state.retention?.diagnosticSeconds ?? ""}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="audit-seconds">
+                        Audit detail retention (seconds)
+                      </Label>
+                      <Input
+                        id="audit-seconds"
+                        name="auditDetailSeconds"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        defaultValue={state.retention?.auditDetailSeconds ?? ""}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="audit-seconds">
-                      Audit detail retention (seconds)
-                    </Label>
-                    <Input
-                      id="audit-seconds"
-                      name="auditDetailSeconds"
-                      type="number"
-                      min="1"
-                      step="1"
-                      required
-                      defaultValue={state.retention?.auditDetailSeconds ?? ""}
-                    />
-                  </div>
-                </div>
-                <Label htmlFor="policy-evidence">
-                  Authorized policy evidence reference
-                </Label>
-                <Input
-                  id="policy-evidence"
-                  name="evidenceRef"
-                  required
-                  autoComplete="off"
-                  defaultValue={state.retention?.evidenceRef ?? ""}
-                />
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    id="confirm-retention"
-                    name="confirmPolicy"
-                    required
-                  />
-                  <Label htmlFor="confirm-retention">
-                    I reviewed the authorized diagnostic and audit detail
-                    retention policy.
+                  <Label htmlFor="policy-evidence">
+                    Authorized policy evidence reference
                   </Label>
-                </div>
-                <Button disabled={Boolean(busy)}>
-                  {busy === "retention" ? "Saving…" : "Record reviewed policy"}
-                </Button>
+                  <Input
+                    id="policy-evidence"
+                    name="evidenceRef"
+                    required
+                    autoComplete="off"
+                    defaultValue={state.retention?.evidenceRef ?? ""}
+                  />
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      id="confirm-retention"
+                      name="confirmPolicy"
+                      required
+                    />
+                    <Label htmlFor="confirm-retention">
+                      I reviewed the authorized diagnostic and audit detail
+                      retention policy.
+                    </Label>
+                  </div>
+                  <Button disabled={Boolean(busy)}>
+                    {busy === "retention"
+                      ? "Saving…"
+                      : "Record reviewed policy"}
+                  </Button>
+                </FieldGroup>
               </form>
             </CardContent>
           </Card>
@@ -574,7 +585,7 @@ export function OperationsPanel({
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
-                <div className="space-y-3">
+                <div className="flex flex-col gap-3">
                   <AlertDialogTitle>
                     Delete expired diagnostic details?
                   </AlertDialogTitle>
@@ -605,7 +616,7 @@ export function OperationsPanel({
             </AlertDialog>
           </div>
           {diagnostics && (
-            <ul className="space-y-2">
+            <ul className="flex flex-col gap-2">
               {diagnostics.length === 0 && (
                 <li>
                   No unexpired diagnostic details are available under the
@@ -629,7 +640,7 @@ export function OperationsPanel({
         <summary className="min-h-11 cursor-pointer py-3 font-medium">
           Availability and provider-native logs
         </summary>
-        <ul className="space-y-2 text-sm text-muted-foreground">
+        <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
           {state.unavailable.map((reason) => (
             <li key={reason}>{reason}</li>
           ))}

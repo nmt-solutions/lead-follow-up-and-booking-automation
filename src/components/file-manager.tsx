@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import { z } from "zod";
@@ -138,7 +139,7 @@ export function FileManager({
       ? "Choose a nonempty file within the configured size and type rules."
       : "";
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       {listing.readiness === "setup_required" && (
         <Alert variant="warning">
           Private files are not activated. The service operator must configure
@@ -179,7 +180,7 @@ export function FileManager({
             reviewers.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           {policy && (
             <p id="file-rules" className="text-sm text-muted-foreground">
               Up to {policy.maxBytes.toLocaleString()} bytes per file. Allowed
@@ -191,7 +192,7 @@ export function FileManager({
           )}
           {listing.canManage ? (
             <form
-              className="space-y-4"
+              className="flex flex-col gap-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!file || selectionError) return;
@@ -226,30 +227,35 @@ export function FileManager({
                 });
               }}
             >
-              <Label htmlFor="business-file">Choose a file</Label>
-              <Input
-                ref={input}
-                id="business-file"
-                type="file"
-                accept={policy?.allowedTypes.join(",")}
-                aria-describedby="file-rules file-selection-error"
-                disabled={busy || listing.readiness !== "configured"}
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              />
-              <p id="file-selection-error" className="text-sm text-destructive">
-                {selectionError}
-              </p>
-              <Button
-                type="submit"
-                disabled={
-                  busy ||
-                  !file ||
-                  Boolean(selectionError) ||
-                  listing.readiness !== "configured"
-                }
-              >
-                Upload file
-              </Button>
+              <FieldGroup className="gap-4">
+                <Label htmlFor="business-file">Choose a file</Label>
+                <Input
+                  ref={input}
+                  id="business-file"
+                  type="file"
+                  accept={policy?.allowedTypes.join(",")}
+                  aria-describedby="file-rules file-selection-error"
+                  disabled={busy || listing.readiness !== "configured"}
+                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                />
+                <p
+                  id="file-selection-error"
+                  className="text-sm text-destructive"
+                >
+                  {selectionError}
+                </p>
+                <Button
+                  type="submit"
+                  disabled={
+                    busy ||
+                    !file ||
+                    Boolean(selectionError) ||
+                    listing.readiness !== "configured"
+                  }
+                >
+                  Upload file
+                </Button>
+              </FieldGroup>
             </form>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -258,7 +264,7 @@ export function FileManager({
           )}
         </CardContent>
       </Card>
-      <section className="space-y-4" aria-labelledby="files-heading">
+      <section className="flex flex-col gap-4" aria-labelledby="files-heading">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2
             id="files-heading"
@@ -284,11 +290,11 @@ export function FileManager({
             activated.
           </p>
         )}
-        <ul className="space-y-4">
+        <ul className="flex flex-col gap-4">
           {visibleFiles.map((file) => (
             <li
               key={file.id}
-              className="space-y-4 rounded-2xl border border-border bg-card p-6"
+              className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <h3 className="min-w-0 font-semibold wrap-anywhere">
@@ -443,7 +449,7 @@ export function FileManager({
             provider bill.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
+        <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
           <p>
             {listing.usage.storedBytes.toLocaleString()} bytes stored or
             awaiting confirmation/deletion. {listing.usage.putAttempts} upload,{" "}

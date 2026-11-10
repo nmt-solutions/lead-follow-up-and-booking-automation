@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -13,27 +14,24 @@ export default async function DocumentQueue() {
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href="/businesses"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Seller document review</h1>
-        <p className="mt-3 text-muted-foreground">
-          Issue payment-bound invoices, recover private artifacts and record
-          linked credit notes.
-        </p>
+    <div className="app-page">
+      <PageHeader
+        title={<>Seller document review</>}
+        description={
+          <>
+            Issue payment-bound invoices, recover private artifacts and record
+            linked credit notes.
+          </>
+        }
+      >
         <Link
           href="/platform/seller-documents/configuration"
           className="mt-3 inline-flex min-h-11 items-center text-primary underline"
         >
           Configure and review the seller issuer
         </Link>
-      </header>
-      <section className="space-y-4">
+      </PageHeader>
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">
           Businesses with confirmed payments
         </h2>

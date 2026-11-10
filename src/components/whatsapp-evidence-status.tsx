@@ -15,7 +15,7 @@ export function WhatsAppEvidenceStatus({
 }) {
   const latest = evidence.history.filter((e) => e.review).at(-1);
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <Badge>{labels[evidence.status]}</Badge>
       <p className="text-sm text-muted-foreground">
         {evidence.provenance === "assisted_review"
@@ -35,9 +35,9 @@ export function WhatsAppEvidenceStatus({
           <summary className="min-h-11 cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-ring">
             Review history ({evidence.history.length})
           </summary>
-          <ol className="mt-3 space-y-4 text-sm">
+          <ol className="flex flex-col mt-3 gap-4 text-sm">
             {evidence.history.map((event) => (
-              <li key={event.id} className="space-y-1 wrap-anywhere">
+              <li key={event.id} className="flex flex-col gap-1 wrap-anywhere">
                 <p className="font-medium">
                   {event.invalid
                     ? "Invalid record — review required"

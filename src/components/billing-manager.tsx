@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 
 import Link from "next/link";
 import { useRef, useState } from "react";
@@ -12,14 +13,9 @@ import {
   type BillingWorkspace,
 } from "@/models/billing";
 import type { BusinessProfile } from "@/models/business";
-import { countryCode, countries } from "@/lib/countries";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+import { countryCode } from "@/lib/countries";
+import { CountryPicker } from "./country-picker";
+
 import type { FileListing } from "@/models/files";
 import { FileManager } from "./file-manager";
 import {
@@ -83,7 +79,7 @@ function Field({
   maxLength?: number;
 }) {
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
@@ -93,7 +89,7 @@ function Field({
         maxLength={maxLength}
         onChange={(event) => onChange(event.target.value)}
       />
-    </div>
+    </UiField>
   );
 }
 export function BillingManager({
@@ -255,7 +251,7 @@ export function BillingManager({
     (file) => file.purpose === "billing" && file.accessAvailable,
   );
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       <BillingStatus state={state} />
       {error && (
         <Alert variant="destructive">
@@ -297,451 +293,459 @@ export function BillingManager({
         onListingChange={(listing) => void filesChanged(listing)}
       />
       <form
-        className="space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
+        className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
         onSubmit={(event) => {
           event.preventDefault();
           void act(save);
         }}
       >
-        <h2 className="text-xl font-semibold">
-          {operator ? "Review this billing revision" : "Legal billing details"}
-        </h2>
-        {operator && state.current && (
-          <BillingProfileSummary
-            profile={state.current.profile}
-            evidence={state.current.evidence}
-          />
-        )}
-        <fieldset disabled={busy} className="space-y-6">
-          {!operator && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Save the details you have. Missing fields stay visible for
-                review. Upload billing documents above, then attach them to the
-                claims they support.
-              </p>
-              {addressFromSetup && (
-                <div className="rounded-xl bg-muted p-4 text-sm">
-                  <p className="text-muted-foreground">
-                    {initial.current
-                      ? "Use your saved business address if it is also your billing address."
-                      : "Filled from your business setup. Check the legal name and billing address before saving."}
-                  </p>
-                  {initial.current && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="mt-3"
-                      onClick={() =>
-                        setProfile({ ...profile, address: addressFromSetup })
-                      }
-                    >
-                      Use business address
-                    </Button>
-                  )}
-                </div>
-              )}
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field
-                  label="Legal name"
-                  id="legal-name"
-                  value={profile.legalName}
-                  autoComplete="organization"
-                  onChange={(legalName) =>
-                    setProfile({ ...profile, legalName })
-                  }
-                />
-                <Field
-                  label="Business registration number (if applicable)"
-                  id="registration"
-                  value={profile.registrationNumber}
-                  onChange={(registrationNumber) =>
-                    setProfile({ ...profile, registrationNumber })
-                  }
-                />
-                {(
-                  [
-                    ["line1", "Address line 1", "address-line1"],
-                    ["line2", "Address line 2", "address-line2"],
-                    ["city", "City", "address-level2"],
-                    ["region", "State, province or region", "address-level1"],
-                    ["postalCode", "Postal code", "postal-code"],
-                  ] as const
-                ).map(([key, label, autoComplete]) => (
+        <FieldGroup className="gap-6">
+          <h2 className="text-xl font-semibold">
+            {operator
+              ? "Review this billing revision"
+              : "Legal billing details"}
+          </h2>
+          {operator && state.current && (
+            <BillingProfileSummary
+              profile={state.current.profile}
+              evidence={state.current.evidence}
+            />
+          )}
+          <fieldset disabled={busy} className="flex flex-col gap-6">
+            {!operator && (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Save the details you have. Missing fields stay visible for
+                  review. Upload billing documents above, then attach them to
+                  the claims they support.
+                </p>
+                {addressFromSetup && (
+                  <div className="rounded-xl bg-muted p-4 text-sm">
+                    <p className="text-muted-foreground">
+                      {initial.current
+                        ? "Use your saved business address if it is also your billing address."
+                        : "Filled from your business setup. Check the legal name and billing address before saving."}
+                    </p>
+                    {initial.current && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="mt-3"
+                        onClick={() =>
+                          setProfile({ ...profile, address: addressFromSetup })
+                        }
+                      >
+                        Use business address
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <div className="grid gap-5 sm:grid-cols-2">
                   <Field
-                    key={key}
-                    label={label}
-                    id={`billing-${key}`}
-                    autoComplete={autoComplete}
-                    maxLength={300}
-                    value={profile.address[key]}
-                    onChange={(value) =>
+                    label="Legal name"
+                    id="legal-name"
+                    value={profile.legalName}
+                    autoComplete="organization"
+                    onChange={(legalName) =>
+                      setProfile({ ...profile, legalName })
+                    }
+                  />
+                  <Field
+                    label="Business registration number (if applicable)"
+                    id="registration"
+                    value={profile.registrationNumber}
+                    onChange={(registrationNumber) =>
+                      setProfile({ ...profile, registrationNumber })
+                    }
+                  />
+                  {(
+                    [
+                      ["line1", "Address line 1", "address-line1"],
+                      ["line2", "Address line 2", "address-line2"],
+                      ["city", "City", "address-level2"],
+                      ["region", "State, province or region", "address-level1"],
+                      ["postalCode", "Postal code", "postal-code"],
+                    ] as const
+                  ).map(([key, label, autoComplete]) => (
+                    <Field
+                      key={key}
+                      label={label}
+                      id={`billing-${key}`}
+                      autoComplete={autoComplete}
+                      maxLength={300}
+                      value={profile.address[key]}
+                      onChange={(value) =>
+                        setProfile({
+                          ...profile,
+                          address: {
+                            ...profile.address,
+                            [key]: value,
+                          },
+                        })
+                      }
+                    />
+                  ))}
+                  <UiField className="flex flex-col gap-2">
+                    <Label htmlFor="billing-country">Billing country</Label>
+                    <CountryPicker
+                      id="billing-country"
+                      format="code"
+                      allowEmpty
+                      value={profile.address.country}
+                      onChange={(country) =>
+                        setProfile({
+                          ...profile,
+                          address: { ...profile.address, country },
+                        })
+                      }
+                    />
+                  </UiField>
+                  <Field
+                    label="Invoice contact name"
+                    id="invoice-name"
+                    autoComplete="section-invoice name"
+                    value={profile.invoiceContact.name}
+                    onChange={(name) =>
                       setProfile({
                         ...profile,
-                        address: {
-                          ...profile.address,
-                          [key]: value,
-                        },
+                        invoiceContact: { ...profile.invoiceContact, name },
                       })
                     }
                   />
-                ))}
-                <div className="space-y-2">
-                  <Label htmlFor="billing-country">Billing country</Label>
-                  <Select
-                    value={profile.address.country || "unknown"}
-                    onValueChange={(value) =>
+                  <Field
+                    label="Invoice email"
+                    id="invoice-email"
+                    type="email"
+                    autoComplete="section-invoice email"
+                    maxLength={254}
+                    value={profile.invoiceContact.email}
+                    onChange={(email) =>
                       setProfile({
                         ...profile,
-                        address: {
-                          ...profile.address,
-                          country: value === "unknown" ? "" : value,
-                        },
+                        invoiceContact: { ...profile.invoiceContact, email },
                       })
                     }
-                  >
-                    <SelectTrigger id="billing-country" className="w-full">
-                      <SelectValue placeholder="Choose country" />
-                    </SelectTrigger>
-                    <SelectContent position="popper">
-                      <SelectItem value="unknown">Not provided</SelectItem>
-                      {countries.map((country) => (
-                        <SelectItem key={country.code} value={country.code}>
-                          {country.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  />
                 </div>
-                <Field
-                  label="Invoice contact name"
-                  id="invoice-name"
-                  autoComplete="section-invoice name"
-                  value={profile.invoiceContact.name}
-                  onChange={(name) =>
-                    setProfile({
-                      ...profile,
-                      invoiceContact: { ...profile.invoiceContact, name },
-                    })
-                  }
-                />
-                <Field
-                  label="Invoice email"
-                  id="invoice-email"
-                  type="email"
-                  autoComplete="section-invoice email"
-                  maxLength={254}
-                  value={profile.invoiceContact.email}
-                  onChange={(email) =>
-                    setProfile({
-                      ...profile,
-                      invoiceContact: { ...profile.invoiceContact, email },
-                    })
-                  }
-                />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Use IN for India or the billing country’s two-letter code, such
-                as US. Leave it blank if unknown.
-              </p>
-              <div className="grid gap-5 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="business-status">Purchasing status</Label>
-                  <NativeSelect
-                    id="business-status"
-                    value={profile.businessStatus}
-                    onChange={(event) => {
-                      const parsed =
-                        billingProfileSchema.shape.businessStatus.safeParse(
-                          event.target.value,
-                        );
-                      if (parsed.success)
-                        setProfile({ ...profile, businessStatus: parsed.data });
-                    }}
-                  >
-                    <option value="unknown">Unknown</option>
-                    <option value="business">Business use</option>
-                    <option value="individual">Individual use</option>
-                  </NativeSelect>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="identifier-status">
-                    Tax identifier applicability
-                  </Label>
-                  <NativeSelect
-                    id="identifier-status"
-                    value={profile.taxIdentifierStatus}
-                    onChange={(event) => {
-                      const parsed =
-                        billingProfileSchema.shape.taxIdentifierStatus.safeParse(
-                          event.target.value,
-                        );
-                      if (parsed.success)
-                        setProfile({
-                          ...profile,
-                          taxIdentifierStatus: parsed.data,
-                        });
-                    }}
-                  >
-                    <option value="unknown">Unknown; needs review</option>
-                    <option value="provided">Identifiers supplied below</option>
-                    <option value="not_applicable">
-                      Customer states not applicable
-                    </option>
-                  </NativeSelect>
-                </div>
-              </div>
-              <section className="space-y-4" aria-labelledby="tax-identifiers">
-                <h3 id="tax-identifiers" className="font-semibold">
-                  Tax identifiers
-                </h3>
-                {profile.taxIdentifiers.map((entry, index) => (
-                  <div
-                    key={index}
-                    className="space-y-4 rounded-xl border border-border p-4"
-                  >
-                    {(
-                      [
-                        ["kind", "Identifier type (for example GSTIN or VAT)"],
-                        ["country", "Issuing country (two-letter code)"],
-                        ["value", "Identifier value"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <Field
-                        key={key}
-                        label={label}
-                        id={`identifier-${index}-${key}`}
-                        value={entry[key]}
-                        maxLength={key === "country" ? 2 : 300}
-                        onChange={(value) =>
-                          setProfile({
-                            ...profile,
-                            taxIdentifiers: profile.taxIdentifiers.map(
-                              (item, i) =>
-                                i === index
-                                  ? {
-                                      ...item,
-                                      [key]:
-                                        key === "country"
-                                          ? value.toUpperCase()
-                                          : value,
-                                    }
-                                  : item,
-                            ),
-                          })
-                        }
-                      />
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        setProfile({
-                          ...profile,
-                          taxIdentifiers: profile.taxIdentifiers.filter(
-                            (_, i) => i !== index,
-                          ),
-                        })
-                      }
-                    >
-                      Remove identifier {index + 1}
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={profile.taxIdentifiers.length >= 20}
-                  onClick={() =>
-                    setProfile({
-                      ...profile,
-                      taxIdentifiers: [
-                        ...profile.taxIdentifiers,
-                        { kind: "", country: "", value: "" },
-                      ],
-                    })
-                  }
-                >
-                  Add tax identifier
-                </Button>
-              </section>
-              <section className="space-y-4" aria-labelledby="billing-evidence">
-                <h3 id="billing-evidence" className="font-semibold">
-                  Attach evidence to this revision
-                </h3>
-                {profile.evidence.map((entry, index) => (
-                  <div
-                    key={index}
-                    className="space-y-4 rounded-xl border border-border p-4"
-                  >
-                    <Label htmlFor={`evidence-${index}-kind`}>
-                      Claim supported
-                    </Label>
+                <p className="text-sm text-muted-foreground">
+                  Use IN for India or the billing country’s two-letter code,
+                  such as US. Leave it blank if unknown.
+                </p>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <UiField className="flex flex-col gap-2">
+                    <Label htmlFor="business-status">Purchasing status</Label>
                     <NativeSelect
-                      id={`evidence-${index}-kind`}
-                      value={entry.kind}
+                      id="business-status"
+                      value={profile.businessStatus}
                       onChange={(event) => {
                         const parsed =
-                          billingProfileSchema.shape.evidence.element.shape.kind.safeParse(
+                          billingProfileSchema.shape.businessStatus.safeParse(
                             event.target.value,
                           );
                         if (parsed.success)
                           setProfile({
                             ...profile,
-                            evidence: profile.evidence.map((item, i) =>
-                              i === index
-                                ? { ...item, kind: parsed.data }
-                                : item,
-                            ),
+                            businessStatus: parsed.data,
                           });
                       }}
                     >
-                      {Object.entries(evidenceKinds).map(([key, label]) => (
-                        <option key={key} value={key}>
-                          {label}
-                        </option>
-                      ))}
+                      <option value="unknown">Unknown</option>
+                      <option value="business">Business use</option>
+                      <option value="individual">Individual use</option>
                     </NativeSelect>
-                    <Label htmlFor={`evidence-${index}-file`}>
-                      Private billing document
+                  </UiField>
+                  <UiField className="flex flex-col gap-2">
+                    <Label htmlFor="identifier-status">
+                      Tax identifier applicability
                     </Label>
                     <NativeSelect
-                      id={`evidence-${index}-file`}
-                      value={entry.fileId}
-                      onChange={(event) =>
-                        setProfile({
-                          ...profile,
-                          evidence: profile.evidence.map((item, i) =>
-                            i === index
-                              ? { ...item, fileId: event.target.value }
-                              : item,
-                          ),
-                        })
-                      }
+                      id="identifier-status"
+                      value={profile.taxIdentifierStatus}
+                      onChange={(event) => {
+                        const parsed =
+                          billingProfileSchema.shape.taxIdentifierStatus.safeParse(
+                            event.target.value,
+                          );
+                        if (parsed.success)
+                          setProfile({
+                            ...profile,
+                            taxIdentifierStatus: parsed.data,
+                          });
+                      }}
                     >
-                      <option value="">Choose a completed document</option>
-                      {!available.some((file) => file.id === entry.fileId) &&
-                        entry.fileId && (
-                          <option value={entry.fileId}>
-                            Previously attached document; unavailable
-                          </option>
-                        )}
-                      {available.map((file) => (
-                        <option key={file.id} value={file.id}>
-                          {file.name}
-                        </option>
-                      ))}
+                      <option value="unknown">Unknown; needs review</option>
+                      <option value="provided">
+                        Identifiers supplied below
+                      </option>
+                      <option value="not_applicable">
+                        Customer states not applicable
+                      </option>
                     </NativeSelect>
-                    <Field
-                      label="What this document supports"
-                      id={`evidence-${index}-note`}
-                      value={entry.note}
-                      maxLength={1000}
-                      onChange={(note) =>
-                        setProfile({
-                          ...profile,
-                          evidence: profile.evidence.map((item, i) =>
-                            i === index ? { ...item, note } : item,
-                          ),
-                        })
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        setProfile({
-                          ...profile,
-                          evidence: profile.evidence.filter(
-                            (_, i) => i !== index,
-                          ),
-                        })
-                      }
+                  </UiField>
+                </div>
+                <section
+                  className="flex flex-col gap-4"
+                  aria-labelledby="tax-identifiers"
+                >
+                  <h3 id="tax-identifiers" className="font-semibold">
+                    Tax identifiers
+                  </h3>
+                  {profile.taxIdentifiers.map((entry, index) => (
+                    <div
+                      key={index}
+                      className="flex flex-col gap-4 rounded-xl border border-border p-4"
                     >
-                      Remove evidence {index + 1} from this revision
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={profile.evidence.length >= 40}
-                  onClick={() =>
-                    setProfile({
-                      ...profile,
-                      evidence: [
-                        ...profile.evidence,
-                        { kind: "legal_identity", fileId: "", note: "" },
-                      ],
-                    })
-                  }
+                      {(
+                        [
+                          [
+                            "kind",
+                            "Identifier type (for example GSTIN or VAT)",
+                          ],
+                          ["country", "Issuing country (two-letter code)"],
+                          ["value", "Identifier value"],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <Field
+                          key={key}
+                          label={label}
+                          id={`identifier-${index}-${key}`}
+                          value={entry[key]}
+                          maxLength={key === "country" ? 2 : 300}
+                          onChange={(value) =>
+                            setProfile({
+                              ...profile,
+                              taxIdentifiers: profile.taxIdentifiers.map(
+                                (item, i) =>
+                                  i === index
+                                    ? {
+                                        ...item,
+                                        [key]:
+                                          key === "country"
+                                            ? value.toUpperCase()
+                                            : value,
+                                      }
+                                    : item,
+                              ),
+                            })
+                          }
+                        />
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setProfile({
+                            ...profile,
+                            taxIdentifiers: profile.taxIdentifiers.filter(
+                              (_, i) => i !== index,
+                            ),
+                          })
+                        }
+                      >
+                        Remove identifier {index + 1}
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={profile.taxIdentifiers.length >= 20}
+                    onClick={() =>
+                      setProfile({
+                        ...profile,
+                        taxIdentifiers: [
+                          ...profile.taxIdentifiers,
+                          { kind: "", country: "", value: "" },
+                        ],
+                      })
+                    }
+                  >
+                    Add tax identifier
+                  </Button>
+                </section>
+                <section
+                  className="flex flex-col gap-4"
+                  aria-labelledby="billing-evidence"
                 >
-                  Attach supporting evidence
-                </Button>
-              </section>
-            </>
-          )}
-          {operator && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="review-outcome">Evidence review outcome</Label>
-                <NativeSelect
-                  id="review-outcome"
-                  value={outcome}
-                  onChange={(event) => {
-                    const parsed =
-                      billingReviewInputSchema.shape.outcome.safeParse(
-                        event.target.value,
-                      );
-                    if (parsed.success) setOutcome(parsed.data);
-                  }}
-                >
-                  <option value="missing">Missing evidence</option>
-                  <option value="conflicting">Conflicting evidence</option>
-                  <option value="reviewed">
-                    Evidence reviewed; no unresolved findings
-                  </option>
-                </NativeSelect>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="review-findings">
-                  Unresolved findings (one per line)
-                </Label>
-                <Textarea
-                  id="review-findings"
-                  value={findings}
-                  maxLength={40000}
-                  onChange={(event) => setFindings(event.target.value)}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Record what the Business must resolve. Leave empty only for a
-                  completed evidence review.
-                </p>
-              </div>
-            </>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="billing-note">
-              {operator
-                ? "Review reason and evidence basis"
-                : "Reason for this revision"}
-            </Label>
-            <Textarea
-              id="billing-note"
-              required
-              maxLength={1000}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </div>
-          <Button type="submit">
-            {busy
-              ? "Saving…"
-              : operator
-                ? "Record evidence review"
-                : "Save billing revision"}
-          </Button>
-        </fieldset>
+                  <h3 id="billing-evidence" className="font-semibold">
+                    Attach evidence to this revision
+                  </h3>
+                  {profile.evidence.map((entry, index) => (
+                    <UiField
+                      key={index}
+                      className="flex flex-col gap-4 rounded-xl border border-border p-4"
+                    >
+                      <Label htmlFor={`evidence-${index}-kind`}>
+                        Claim supported
+                      </Label>
+                      <NativeSelect
+                        id={`evidence-${index}-kind`}
+                        value={entry.kind}
+                        onChange={(event) => {
+                          const parsed =
+                            billingProfileSchema.shape.evidence.element.shape.kind.safeParse(
+                              event.target.value,
+                            );
+                          if (parsed.success)
+                            setProfile({
+                              ...profile,
+                              evidence: profile.evidence.map((item, i) =>
+                                i === index
+                                  ? { ...item, kind: parsed.data }
+                                  : item,
+                              ),
+                            });
+                        }}
+                      >
+                        {Object.entries(evidenceKinds).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                      <Label htmlFor={`evidence-${index}-file`}>
+                        Private billing document
+                      </Label>
+                      <NativeSelect
+                        id={`evidence-${index}-file`}
+                        value={entry.fileId}
+                        onChange={(event) =>
+                          setProfile({
+                            ...profile,
+                            evidence: profile.evidence.map((item, i) =>
+                              i === index
+                                ? { ...item, fileId: event.target.value }
+                                : item,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="">Choose a completed document</option>
+                        {!available.some((file) => file.id === entry.fileId) &&
+                          entry.fileId && (
+                            <option value={entry.fileId}>
+                              Previously attached document; unavailable
+                            </option>
+                          )}
+                        {available.map((file) => (
+                          <option key={file.id} value={file.id}>
+                            {file.name}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                      <Field
+                        label="What this document supports"
+                        id={`evidence-${index}-note`}
+                        value={entry.note}
+                        maxLength={1000}
+                        onChange={(note) =>
+                          setProfile({
+                            ...profile,
+                            evidence: profile.evidence.map((item, i) =>
+                              i === index ? { ...item, note } : item,
+                            ),
+                          })
+                        }
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setProfile({
+                            ...profile,
+                            evidence: profile.evidence.filter(
+                              (_, i) => i !== index,
+                            ),
+                          })
+                        }
+                      >
+                        Remove evidence {index + 1} from this revision
+                      </Button>
+                    </UiField>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={profile.evidence.length >= 40}
+                    onClick={() =>
+                      setProfile({
+                        ...profile,
+                        evidence: [
+                          ...profile.evidence,
+                          { kind: "legal_identity", fileId: "", note: "" },
+                        ],
+                      })
+                    }
+                  >
+                    Attach supporting evidence
+                  </Button>
+                </section>
+              </>
+            )}
+            {operator && (
+              <>
+                <UiField className="flex flex-col gap-2">
+                  <Label htmlFor="review-outcome">
+                    Evidence review outcome
+                  </Label>
+                  <NativeSelect
+                    id="review-outcome"
+                    value={outcome}
+                    onChange={(event) => {
+                      const parsed =
+                        billingReviewInputSchema.shape.outcome.safeParse(
+                          event.target.value,
+                        );
+                      if (parsed.success) setOutcome(parsed.data);
+                    }}
+                  >
+                    <option value="missing">Missing evidence</option>
+                    <option value="conflicting">Conflicting evidence</option>
+                    <option value="reviewed">
+                      Evidence reviewed; no unresolved findings
+                    </option>
+                  </NativeSelect>
+                </UiField>
+                <UiField className="flex flex-col gap-2">
+                  <Label htmlFor="review-findings">
+                    Unresolved findings (one per line)
+                  </Label>
+                  <Textarea
+                    id="review-findings"
+                    value={findings}
+                    maxLength={40000}
+                    onChange={(event) => setFindings(event.target.value)}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Record what the Business must resolve. Leave empty only for
+                    a completed evidence review.
+                  </p>
+                </UiField>
+              </>
+            )}
+            <UiField className="flex flex-col gap-2">
+              <Label htmlFor="billing-note">
+                {operator
+                  ? "Review reason and evidence basis"
+                  : "Reason for this revision"}
+              </Label>
+              <Textarea
+                id="billing-note"
+                required
+                maxLength={1000}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </UiField>
+            <Button type="submit">
+              {busy
+                ? "Saving…"
+                : operator
+                  ? "Record evidence review"
+                  : "Save billing revision"}
+            </Button>
+          </fieldset>
+        </FieldGroup>
       </form>
       <AlertDialog>
         <AlertDialogTrigger asChild>

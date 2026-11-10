@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -16,20 +17,16 @@ export default async function PlatformOperationsPage() {
     }
   })();
   return (
-    <div className="space-y-8">
-      <header>
-        <Link
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-          href="/businesses"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Platform operations</h1>
-        <p className="mt-3 text-muted-foreground">
-          Inspect runs, queues and channel health. Maintenance keeps each
-          Business’s authorization, ownership and limits.
-        </p>
-      </header>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        title={<>Platform operations</>}
+        description={
+          <>
+            Inspect runs, queues and channel health. Maintenance keeps each
+            Business’s authorization, ownership and limits.
+          </>
+        }
+      ></PageHeader>
       <OperationsPanel initialState={state} />
     </div>
   );

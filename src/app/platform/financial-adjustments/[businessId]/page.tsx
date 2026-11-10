@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -21,16 +22,8 @@ export default async function FinancialWorkspace({
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header className="space-y-4">
-        <Link
-          href="/platform/financial-adjustments"
-          className="inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back
-        </Link>
-        <h1 className="page-title">Refunds and disputes</h1>
-      </header>
+    <div className="app-page">
+      <PageHeader title={<>Refunds and disputes</>}></PageHeader>
       <FinancialAdjustmentManager
         businessId={businessId}
         initial={initial}

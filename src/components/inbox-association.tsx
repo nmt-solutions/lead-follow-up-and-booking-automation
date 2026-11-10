@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -149,7 +150,7 @@ export function InboxAssociation({
           remain in their original history.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="flex flex-col gap-5">
         {error && (
           <Alert variant="destructive">
             {error}
@@ -179,194 +180,203 @@ export function InboxAssociation({
           </p>
         )}
         <form onSubmit={save}>
-          <fieldset
-            disabled={
-              pending || savedVersion === conversation.association.version
-            }
-            className="space-y-5"
-          >
-            <legend className="mb-3 font-medium">Messages to associate</legend>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() =>
-                setSelected(conversation.messages.map((message) => message.id))
+          <FieldGroup className="gap-5">
+            <fieldset
+              disabled={
+                pending || savedVersion === conversation.association.version
               }
+              className="flex flex-col gap-5"
             >
-              Select all messages
-            </Button>
-            <div className="space-y-2">
-              {conversation.messages.map((message, index) => (
-                <label
-                  key={message.id}
-                  className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border p-3"
-                >
-                  <Input
-                    type="checkbox"
-                    className="mt-1 size-5 min-h-0 w-5 shrink-0 accent-primary"
-                    checked={selected.includes(message.id)}
-                    onChange={(event) =>
-                      setSelected((ids) =>
-                        event.target.checked
-                          ? [...ids, message.id]
-                          : ids.filter((id) => id !== message.id),
-                      )
-                    }
-                  />
-                  <span className="min-w-0">
-                    <span className="font-medium">
-                      Message {index + 1}: {message.subject}
-                    </span>
-                    <span className="mt-1 block text-sm text-muted-foreground">
-                      {message.text.slice(0, 180)}
-                      {message.text.length > 180 ? "…" : ""}
-                    </span>
-                    <span className="mt-1 block text-sm">
-                      {workspace.opportunities.find(
-                        (need) => need.id === message.opportunityId,
-                      )?.title ?? "Needs association review"}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="association-buyer">Verified buyer</Label>
-              <NativeSelect
-                id="association-buyer"
-                value={buyerId}
-                onChange={(event) => {
-                  setBuyerId(event.target.value);
-                  setTarget("review");
-                }}
+              <legend className="mb-3 font-medium">
+                Messages to associate
+              </legend>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setSelected(
+                    conversation.messages.map((message) => message.id),
+                  )
+                }
               >
-                {workspace.buyers.map((buyer) => (
-                  <option key={buyer.id} value={buyer.id}>
-                    {buyer.name} · {buyer.senderRef} · {buyer.id.slice(0, 8)}
-                  </option>
+                Select all messages
+              </Button>
+              <div className="flex flex-col gap-2">
+                {conversation.messages.map((message, index) => (
+                  <label
+                    key={message.id}
+                    className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border p-3"
+                  >
+                    <Input
+                      type="checkbox"
+                      className="mt-1 size-5 min-h-0 w-5 shrink-0 accent-primary"
+                      checked={selected.includes(message.id)}
+                      onChange={(event) =>
+                        setSelected((ids) =>
+                          event.target.checked
+                            ? [...ids, message.id]
+                            : ids.filter((id) => id !== message.id),
+                        )
+                      }
+                    />
+                    <span className="min-w-0">
+                      <span className="font-medium">
+                        Message {index + 1}: {message.subject}
+                      </span>
+                      <span className="mt-1 block text-sm text-muted-foreground">
+                        {message.text.slice(0, 180)}
+                        {message.text.length > 180 ? "…" : ""}
+                      </span>
+                      <span className="mt-1 block text-sm">
+                        {workspace.opportunities.find(
+                          (need) => need.id === message.opportunityId,
+                        )?.title ?? "Needs association review"}
+                      </span>
+                    </span>
+                  </label>
                 ))}
-              </NativeSelect>
-              <p className="text-sm text-muted-foreground">
-                Matching names, company domains or public signals do not verify
-                a person. Changing this buyer affects this conversation only.
-              </p>
-            </div>
-            {changedBuyer && (
-              <label className="flex min-h-11 items-start gap-3">
-                <Input
-                  type="checkbox"
-                  name="verified"
-                  required
-                  className="mt-1 size-5 min-h-0 w-5 shrink-0 accent-primary"
-                />
-                <span>
-                  I verified this person&apos;s identity across these channels.
-                  All messages in this conversation belong to the selected
-                  buyer.
-                </span>
-              </label>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="association-target">Purchasing need</Label>
-              <NativeSelect
-                id="association-target"
-                value={target}
-                onChange={(event) => setTarget(event.target.value)}
-              >
-                <option value="review">Keep selected messages in review</option>
-                <option value="new">Create a separate Opportunity</option>
-                {needs.map((need) => (
-                  <option key={need.id} value={need.id}>
-                    {need.title} · {need.id.slice(0, 8)}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-            {target === "new" && (
-              <div className="space-y-2">
-                <Label htmlFor="association-title">
-                  Distinct purchasing need
-                </Label>
-                <Input
-                  id="association-title"
-                  name="title"
-                  required
-                  maxLength={200}
-                  placeholder="e.g. Steel for the second site"
-                />
               </div>
-            )}
-            {workspace.discoverySources.length > 0 && target !== "review" && (
-              <div className="space-y-2">
-                <Label htmlFor="association-source">
-                  Discovery evidence to retain (optional)
-                </Label>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="association-buyer">Verified buyer</Label>
                 <NativeSelect
-                  id="association-source"
-                  name="discoverySource"
-                  defaultValue=""
+                  id="association-buyer"
+                  value={buyerId}
+                  onChange={(event) => {
+                    setBuyerId(event.target.value);
+                    setTarget("review");
+                  }}
                 >
-                  <option value="">No discovery evidence to attach</option>
-                  {workspace.discoverySources.map((source) => (
-                    <option
-                      key={source.observationId}
-                      value={source.observationId}
-                    >
-                      {source.name} · {source.evidence[0]?.checkedAt} ·{" "}
-                      {source.observationId.slice(0, 8)}
+                  {workspace.buyers.map((buyer) => (
+                    <option key={buyer.id} value={buyer.id}>
+                      {buyer.name} · {buyer.senderRef} · {buyer.id.slice(0, 8)}
                     </option>
                   ))}
                 </NativeSelect>
                 <p className="text-sm text-muted-foreground">
-                  Choose evidence only after verifying its relationship to this
-                  buyer and need. Public evidence alone does not establish
-                  engagement or permission to send.
+                  Matching names, company domains or public signals do not
+                  verify a person. Changing this buyer affects this conversation
+                  only.
                 </p>
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="association-future">
-                Future messages without a matching reply reference
-              </Label>
-              <NativeSelect
-                id="association-future"
-                name="future"
-                defaultValue="review"
-              >
-                <option value="review">Require association review</option>
-                {target !== "review" && (
-                  <option value="target">
-                    Use the selected purchasing need
+              </Field>
+              {changedBuyer && (
+                <label className="flex min-h-11 items-start gap-3">
+                  <Input
+                    type="checkbox"
+                    name="verified"
+                    required
+                    className="mt-1 size-5 min-h-0 w-5 shrink-0 accent-primary"
+                  />
+                  <span>
+                    I verified this person&apos;s identity across these
+                    channels. All messages in this conversation belong to the
+                    selected buyer.
+                  </span>
+                </label>
+              )}
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="association-target">Purchasing need</Label>
+                <NativeSelect
+                  id="association-target"
+                  value={target}
+                  onChange={(event) => setTarget(event.target.value)}
+                >
+                  <option value="review">
+                    Keep selected messages in review
                   </option>
-                )}
-                {!changedBuyer && (
-                  <option value="keep">
-                    Keep the current conversation default
-                  </option>
-                )}
-              </NativeSelect>
-              <p className="text-sm text-muted-foreground">
-                A matching received-message reply reference follows that
-                message&apos;s current association. Other messages follow this
-                explicit choice.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="association-reason">
-                Evidence and reason for this association
-              </Label>
-              <Textarea
-                id="association-reason"
-                name="reason"
-                required
-                maxLength={1000}
-                placeholder="Explain how the buyer and purchasing need were verified."
-              />
-            </div>
-            <Button disabled={!selected.length}>
-              {pending ? "Saving…" : "Save association"}
-            </Button>
-          </fieldset>
+                  <option value="new">Create a separate Opportunity</option>
+                  {needs.map((need) => (
+                    <option key={need.id} value={need.id}>
+                      {need.title} · {need.id.slice(0, 8)}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              {target === "new" && (
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="association-title">
+                    Distinct purchasing need
+                  </Label>
+                  <Input
+                    id="association-title"
+                    name="title"
+                    required
+                    maxLength={200}
+                    placeholder="e.g. Steel for the second site"
+                  />
+                </Field>
+              )}
+              {workspace.discoverySources.length > 0 && target !== "review" && (
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="association-source">
+                    Discovery evidence to retain (optional)
+                  </Label>
+                  <NativeSelect
+                    id="association-source"
+                    name="discoverySource"
+                    defaultValue=""
+                  >
+                    <option value="">No discovery evidence to attach</option>
+                    {workspace.discoverySources.map((source) => (
+                      <option
+                        key={source.observationId}
+                        value={source.observationId}
+                      >
+                        {source.name} · {source.evidence[0]?.checkedAt} ·{" "}
+                        {source.observationId.slice(0, 8)}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <p className="text-sm text-muted-foreground">
+                    Choose evidence only after verifying its relationship to
+                    this buyer and need. Public evidence alone does not
+                    establish engagement or permission to send.
+                  </p>
+                </Field>
+              )}
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="association-future">
+                  Future messages without a matching reply reference
+                </Label>
+                <NativeSelect
+                  id="association-future"
+                  name="future"
+                  defaultValue="review"
+                >
+                  <option value="review">Require association review</option>
+                  {target !== "review" && (
+                    <option value="target">
+                      Use the selected purchasing need
+                    </option>
+                  )}
+                  {!changedBuyer && (
+                    <option value="keep">
+                      Keep the current conversation default
+                    </option>
+                  )}
+                </NativeSelect>
+                <p className="text-sm text-muted-foreground">
+                  A matching received-message reply reference follows that
+                  message&apos;s current association. Other messages follow this
+                  explicit choice.
+                </p>
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="association-reason">
+                  Evidence and reason for this association
+                </Label>
+                <Textarea
+                  id="association-reason"
+                  name="reason"
+                  required
+                  maxLength={1000}
+                  placeholder="Explain how the buyer and purchasing need were verified."
+                />
+              </Field>
+              <Button disabled={!selected.length}>
+                {pending ? "Saving…" : "Save association"}
+              </Button>
+            </fieldset>
+          </FieldGroup>
         </form>
       </CardContent>
     </Card>

@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -51,16 +52,8 @@ export default async function MailboxesPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to overview
-        </Link>
-        <h1 className="page-title">Email inboxes</h1>
-      </header>
+    <div className="app-page">
+      <PageHeader title={<>Email inboxes</>}></PageHeader>
       <MailboxManager
         businessId={businessId}
         initialState={state.workspace}

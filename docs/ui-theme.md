@@ -1,6 +1,6 @@
 # LeadRelay UI
 
-The interface helps people identify their Business, understand their access and complete the next setup action. Its character comes from a pale indigo background, an indigo primary action inspired by NMT Solutions, explicit status, and one translucent header. Product copy describes capabilities that exist.
+The interface helps people identify their Business, understand their access and complete the next setup action. Its character comes from a neutral page background, white content panels, NMT indigo actions, explicit status, and one translucent header. Product copy describes capabilities that exist.
 
 ## Theme
 
@@ -10,7 +10,7 @@ The interface helps people identify their Business, understand their access and 
 - Content: `foreground` and `muted-foreground`; `primary` for the main action and links; `success`, `warning` and `destructive` paired with text that names the state.
 - Boundaries: `border` groups content; `input` identifies controls; `ring` supplies visible keyboard focus.
 - Shape: control, group and panel radius tokens map to `rounded-lg`, `rounded-xl` and `rounded-2xl`. Elevation separates panels and modal overlays.
-- Type: system sans, normal/medium/semibold; monospace only for keys and codes. Body 1rem, secondary 0.875rem, metadata 0.75rem. `page-title` supplies the responsive title scale and tracking.
+- Type: the same self-hosted fonts as NMT Solutions: Manrope for body and controls, Space Grotesk for headings, Geist for the wordmark, and Geist Mono only for keys and codes. Headings use medium weight and tracking of -0.045em; body text uses weight 450. Body 1rem, secondary 0.875rem, metadata 0.75rem. `page-title` supplies the responsive title scale and tracking.
 - Rhythm: 0.25rem spacing grid, 1.5–2rem panel padding, 2rem section gaps, `page-container` for width and responsive gutters. Layouts wrap by available space and grow with text.
 
 ## Material
@@ -21,7 +21,7 @@ Opaque fallback is automatic without backdrop-filter support, with reduced trans
 
 ## Components and flows
 
-Reuse `src/components/ui`: shadcn Button, Input, Textarea, Label, NativeSelect, Select, DropdownMenu, Sidebar, Sheet, Skeleton, Card, Alert and Badge; Radix-backed Checkbox, Tabs, Collapsible and AlertDialog preserve their keyboard and focus behavior. Use semantic links for navigation and buttons for commands. Native selects remain appropriate for short role lists.
+Reuse `src/components/ui`: shadcn Button, Field, FieldGroup, Input, Textarea, Label, NativeSelect, Select, DropdownMenu, Sidebar, Sheet, Skeleton, Card, Table, Empty, Alert and Badge; Radix-backed Checkbox, Tabs, Collapsible and AlertDialog preserve their keyboard and focus behavior. Use semantic links for navigation and buttons for commands. Native selects remain appropriate for short role lists.
 
 Controls have 44px minimum height, visible focus, persistent labels and appropriate autocomplete/input mode. Validate external responses before using them. Keep one prominent task per section. Destructive security changes use AlertDialog with a named consequence and cancel action.
 
@@ -29,11 +29,13 @@ Status appears next to the affected action. Reserve alert semantics for errors a
 
 ## Navigation and setup
 
-Use the shared shadcn sidebar and business dropdown. Keep sales actions separate from business settings. The business landing page is an overview; profile editing lives at `/businesses/[businessId]/profile`.
+Use the shared shadcn sidebar and business dropdown. Keep sales actions separate from business settings. The sidebar groups sales actions, resources, and expandable business settings. The command menu searches available pages and businesses with Ctrl/Cmd K. The business landing page is an overview with recorded activity, recent conversations, and setup state; profile editing lives at `/businesses/[businessId]/profile`.
 
 New business setup has four steps: business, customers, location, and review. Save the profile and confirmed configuration in one transaction. Customer types require explicit selection. Use the entered address as the default search area and offer a separate area only when the user needs it. Billing can prefill the same address, with an explicit review before saving legal details.
 
-Use Framer Motion for brief step changes, with reduced-motion support. The welcome illustration uses a lazy-loaded React Three Fiber scene with demand rendering and a fallback. Keep it out of forms and sales records. Route loading uses shared skeletons.
+Use Framer Motion for brief step changes, with reduced-motion support. The welcome illustration uses a lazy-loaded React Three Fiber scene with demand rendering and a fallback. Keep it out of forms and sales records. Route loading uses shared skeletons. Prospect searches, AI previews, and outreach use task tabs. Preserve form contents when changing tabs.
+
+Public routes `/getting-started`, `/privacy-policy`, and `/terms` use the same fonts, logo, and controls. The vendor guide explains the implemented flow. Policies describe current capabilities without inventing retention periods, guaranteed results, free trials, or blanket permission to contact prospects.
 
 ## Review
 

@@ -147,7 +147,7 @@ export function MicrosoftMailConnection({
   return (
     <section
       aria-label="Microsoft mail connection"
-      className="space-y-4 rounded-xl border border-border p-4"
+      className="flex flex-col gap-4 rounded-xl border border-border p-4"
     >
       <h3 className="font-semibold">Microsoft mail connection</h3>
       <Badge
@@ -280,7 +280,7 @@ export function MicrosoftMailConnection({
         )}
       </div>
       {folders.length > 0 && (
-        <details className="space-y-3">
+        <details className="flex flex-col gap-3">
           <summary className="cursor-pointer font-medium">
             Available folders and exact selection IDs
           </summary>
@@ -288,7 +288,7 @@ export function MicrosoftMailConnection({
             Select folders explicitly; subfolders are separate. Newly selected
             mail starts at a new boundary. History remains a separate opt-in.
           </p>
-          <ul className="space-y-3">
+          <ul className="flex flex-col gap-3">
             {folders.map((folder) => (
               <li key={folder.id}>
                 <span className="font-medium">{folder.label}</span>

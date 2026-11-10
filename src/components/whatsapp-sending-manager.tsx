@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
@@ -39,7 +40,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       {children}
     </div>
@@ -268,7 +269,7 @@ export function WhatsAppSendingManager({
   }
   function planSummary(plan: MetaPlan) {
     return (
-      <div className="space-y-3 text-sm">
+      <div className="flex flex-col gap-3 text-sm">
         <p>
           {plan.recipients.length} fixed recipients · at most {plan.maxAttempts}{" "}
           attempts per recipient
@@ -284,7 +285,10 @@ export function WhatsAppSendingManager({
           Approval grants no recipient permission or financial authority.
         </p>
         {plan.recipients.map((r) => (
-          <div key={r.peer} className="space-y-2 rounded-xl bg-muted p-4">
+          <div
+            key={r.peer}
+            className="flex flex-col gap-2 rounded-xl bg-muted p-4"
+          >
             <p className="font-medium">+{r.peer}</p>
             <p>
               This recipient and its source/contact evidence are fixed for this
@@ -305,7 +309,7 @@ export function WhatsAppSendingManager({
     );
   }
   return (
-    <div className="space-y-8 wrap-anywhere" aria-busy={pending}>
+    <div className="flex flex-col gap-8 wrap-anywhere" aria-busy={pending}>
       {error && (
         <Alert role="alert">
           {error}
@@ -328,7 +332,7 @@ export function WhatsAppSendingManager({
         <CardHeader>
           <CardTitle>Current sending checks</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <Badge>
             {state.sendingReady
               ? "Account checks ready; each message is checked again"
@@ -340,7 +344,7 @@ export function WhatsAppSendingManager({
             saved inquiry recipient, parent and grounded answer.
           </p>
           {state.issues.length > 0 && (
-            <ul className="list-disc space-y-1 pl-5">
+            <ul className="flex flex-col list-disc gap-1 pl-5">
               {state.issues.map((v) => (
                 <li key={v}>{v.replaceAll("_", " ")}</li>
               ))}
@@ -372,102 +376,107 @@ export function WhatsAppSendingManager({
         <CardHeader>
           <CardTitle>WhatsApp permission evidence</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <p className="text-sm text-muted-foreground">
             Record attributable evidence held in the approved case archive.
             Public phone numbers, paid reach and Meta template approval do not
             establish opt-in. Do not enter credentials or private documents.
           </p>
-          <form onSubmit={permission} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field id="wa-peer" label="Recipient international number">
-                <Input id="wa-peer" name="peer" type="tel" required />
-              </Field>
-              <Field id="wa-purpose" label="Permission purpose">
-                <NativeSelect id="wa-purpose" name="purpose">
-                  <option value="conversation">Conversation replies</option>
-                  <option value="outreach">
-                    Approved outreach and follow-up
-                  </option>
-                </NativeSelect>
-              </Field>
-              <Field
-                id="wa-opportunity"
-                label="Opportunity (optional; blank covers this recipient and purpose)"
-              >
-                <NativeSelect id="wa-opportunity" name="opportunity">
-                  <option value="">Recipient and purpose</option>
-                  {[...new Set(state.actions.map((a) => a.opportunityId))].map(
-                    (id) => (
+          <form onSubmit={permission} className="flex flex-col gap-4">
+            <FieldGroup className="gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field id="wa-peer" label="Recipient international number">
+                  <Input id="wa-peer" name="peer" type="tel" required />
+                </Field>
+                <Field id="wa-purpose" label="Permission purpose">
+                  <NativeSelect id="wa-purpose" name="purpose">
+                    <option value="conversation">Conversation replies</option>
+                    <option value="outreach">
+                      Approved outreach and follow-up
+                    </option>
+                  </NativeSelect>
+                </Field>
+                <Field
+                  id="wa-opportunity"
+                  label="Opportunity (optional; blank covers this recipient and purpose)"
+                >
+                  <NativeSelect id="wa-opportunity" name="opportunity">
+                    <option value="">Recipient and purpose</option>
+                    {[
+                      ...new Set(state.actions.map((a) => a.opportunityId)),
+                    ].map((id) => (
                       <option key={id} value={id}>
                         {state.actions.find((a) => a.opportunityId === id)
                           ?.title ?? id}
                       </option>
-                    ),
-                  )}
-                </NativeSelect>
-              </Field>
-              <Field id="wa-reference" label="Evidence case reference">
-                <Input
-                  id="wa-reference"
-                  name="reference"
-                  required
-                  pattern="[A-Z][A-Z0-9-]{5,100}"
-                />
-              </Field>
-              <Field id="wa-digest" label="Redacted evidence SHA-256">
-                <Input
-                  id="wa-digest"
-                  name="digest"
-                  required
-                  pattern="[a-f0-9]{64}"
-                />
-              </Field>
-              <Field id="wa-observed" label="Evidence observed (UTC)">
-                <Input
-                  id="wa-observed"
-                  name="observed"
-                  type="datetime-local"
-                  required
-                />
-              </Field>
-              <Field id="wa-expiry" label="Evidence valid until (UTC)">
-                <Input
-                  id="wa-expiry"
-                  name="expiry"
-                  type="datetime-local"
-                  required
-                />
-              </Field>
-            </div>
-            {[
-              [
-                "numberProvided",
-                "The recipient provided this number to this Business.",
-              ],
-              [
-                "optedIn",
-                "The recipient opted in to messages for this purpose.",
-              ],
-              [
-                "notices",
-                "Required notices and applicable permission rules were reviewed.",
-              ],
-            ].map(([name, label]) => (
-              <label key={name} className="flex min-h-11 items-center gap-3">
-                <Checkbox name={name} required />
-                {label}
-              </label>
-            ))}
-            <Button disabled={pending}>Record permission evidence</Button>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <Field id="wa-reference" label="Evidence case reference">
+                  <Input
+                    id="wa-reference"
+                    name="reference"
+                    required
+                    pattern="[A-Z][A-Z0-9-]{5,100}"
+                  />
+                </Field>
+                <Field id="wa-digest" label="Redacted evidence SHA-256">
+                  <Input
+                    id="wa-digest"
+                    name="digest"
+                    required
+                    pattern="[a-f0-9]{64}"
+                  />
+                </Field>
+                <Field id="wa-observed" label="Evidence observed (UTC)">
+                  <Input
+                    id="wa-observed"
+                    name="observed"
+                    type="datetime-local"
+                    required
+                  />
+                </Field>
+                <Field id="wa-expiry" label="Evidence valid until (UTC)">
+                  <Input
+                    id="wa-expiry"
+                    name="expiry"
+                    type="datetime-local"
+                    required
+                  />
+                </Field>
+              </div>
+              {[
+                [
+                  "numberProvided",
+                  "The recipient provided this number to this Business.",
+                ],
+                [
+                  "optedIn",
+                  "The recipient opted in to messages for this purpose.",
+                ],
+                [
+                  "notices",
+                  "Required notices and applicable permission rules were reviewed.",
+                ],
+              ].map(([name, label]) => (
+                <label key={name} className="flex min-h-11 items-center gap-3">
+                  <Checkbox name={name} required />
+                  {label}
+                </label>
+              ))}
+              <Button disabled={pending}>Record permission evidence</Button>
+            </FieldGroup>
           </form>
           <details>
             <summary className="min-h-11 cursor-pointer py-3 font-medium">
               Saved permission history
             </summary>
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {state.permissions.map((p) => (
-                <div key={p.id} className="space-y-2 rounded-xl border p-4">
+                <div
+                  key={p.id}
+                  className="flex flex-col gap-2 rounded-xl border p-4"
+                >
                   <p>
                     +{p.permission.peer} · {p.permission.purpose} ·{" "}
                     {p.revoked
@@ -502,36 +511,38 @@ export function WhatsAppSendingManager({
         <CardHeader>
           <CardTitle>Current approved templates</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <p className="text-sm text-muted-foreground">
             Retrieve the exact language and positional text parameters from your
             selected Meta account. Body-only informational templates are
             supported. Unsupported components and financial promises need
             separate review.
           </p>
-          <form onSubmit={template} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field id="wa-template" label="Template name">
-                <Input id="wa-template" name="name" required />
+          <form onSubmit={template} className="flex flex-col gap-4">
+            <FieldGroup className="gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field id="wa-template" label="Template name">
+                  <Input id="wa-template" name="name" required />
+                </Field>
+                <Field id="wa-language" label="Exact language code">
+                  <Input
+                    id="wa-language"
+                    name="language"
+                    required
+                    placeholder="en_US"
+                  />
+                </Field>
+              </div>
+              <Field
+                id="wa-parameters"
+                label="Positional text parameters, one per line (blank when none)"
+              >
+                <Textarea id="wa-parameters" name="parameters" />
               </Field>
-              <Field id="wa-language" label="Exact language code">
-                <Input
-                  id="wa-language"
-                  name="language"
-                  required
-                  placeholder="en_US"
-                />
-              </Field>
-            </div>
-            <Field
-              id="wa-parameters"
-              label="Positional text parameters, one per line (blank when none)"
-            >
-              <Textarea id="wa-parameters" name="parameters" />
-            </Field>
-            <Button variant="outline" disabled={pending}>
-              Retrieve current template
-            </Button>
+              <Button variant="outline" disabled={pending}>
+                Retrieve current template
+              </Button>
+            </FieldGroup>
           </form>
           {activeTemplates.map((t) => (
             <div key={t.id} className="rounded-xl bg-muted p-4">
@@ -552,164 +563,177 @@ export function WhatsAppSendingManager({
         <CardHeader>
           <CardTitle>Bounded outreach plan</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <p className="text-sm text-muted-foreground">
             Choose current sourced contacts. Saving a version sends nothing; the
             Owner reviews its fixed recipient set, evidence, sender, exact
             messages, timing, attempt cap and stop rules before approval.
             Execution is a separate action.
           </p>
-          <form onSubmit={savePlan} className="space-y-4">
-            <Field
-              id="wa-plan-name"
-              label={
-                revision
-                  ? `New version after ${revision.plan.expectedVersion + 1}`
-                  : "New campaign name"
-              }
-            >
-              <Input
-                key={revision?.id ?? "new"}
+          <form onSubmit={savePlan} className="flex flex-col gap-4">
+            <FieldGroup className="gap-4">
+              <Field
                 id="wa-plan-name"
-                name="name"
-                defaultValue={revision?.plan.name}
-                required
-              />
-            </Field>
-            <fieldset className="space-y-2">
-              <legend className="mb-2 font-medium">Fixed recipient set</legend>
-              {!state.candidates.length && (
-                <p className="text-sm text-muted-foreground">
-                  No current sourced phone contacts. Review Prospect discovery
-                  first.
-                </p>
-              )}
-              {state.candidates.map((c) => (
-                <label
-                  key={c.contactId}
-                  className="flex min-h-11 items-start gap-3 rounded-xl border p-3"
-                >
-                  <Checkbox
-                    checked={selected.includes(c.contactId)}
-                    onCheckedChange={(checked) =>
-                      setSelected((v) =>
-                        checked
-                          ? [...v, c.contactId]
-                          : v.filter((id) => id !== c.contactId),
-                      )
-                    }
-                  />
-                  <span>
-                    {c.name} · +{c.peer}
-                    <span className="block text-sm text-muted-foreground">
-                      {c.market} · {c.sources.length} retained source references
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-            {steps.map((s, i) => (
-              <div key={i} className="space-y-3 rounded-xl border p-4">
-                <Field id={`wa-step-${i}`} label={`Message ${i + 1}`}>
-                  {templateChoices(
-                    s.templateId,
-                    (id) =>
-                      setSteps((v) =>
-                        v.map((r, n) =>
-                          n === i ? { ...r, templateId: id } : r,
-                        ),
-                      ),
-                    `wa-step-${i}`,
-                  )}
-                </Field>
-                {i > 0 && (
-                  <Field
-                    id={`wa-delay-${i}`}
-                    label="Minimum minutes after the previous message"
+                label={
+                  revision
+                    ? `New version after ${revision.plan.expectedVersion + 1}`
+                    : "New campaign name"
+                }
+              >
+                <Input
+                  key={revision?.id ?? "new"}
+                  id="wa-plan-name"
+                  name="name"
+                  defaultValue={revision?.plan.name}
+                  required
+                />
+              </Field>
+              <fieldset className="flex flex-col gap-2">
+                <legend className="mb-2 font-medium">
+                  Fixed recipient set
+                </legend>
+                {!state.candidates.length && (
+                  <p className="text-sm text-muted-foreground">
+                    No current sourced phone contacts. Review Prospect discovery
+                    first.
+                  </p>
+                )}
+                {state.candidates.map((c) => (
+                  <label
+                    key={c.contactId}
+                    className="flex min-h-11 items-start gap-3 rounded-xl border p-3"
                   >
-                    <Input
-                      id={`wa-delay-${i}`}
-                      type="number"
-                      min="1"
-                      required
-                      value={s.delayMinutes}
-                      onChange={(e) =>
-                        setSteps((v) =>
-                          v.map((r, n) =>
-                            n === i
-                              ? { ...r, delayMinutes: e.target.value }
-                              : r,
-                          ),
+                    <Checkbox
+                      checked={selected.includes(c.contactId)}
+                      onCheckedChange={(checked) =>
+                        setSelected((v) =>
+                          checked
+                            ? [...v, c.contactId]
+                            : v.filter((id) => id !== c.contactId),
                         )
                       }
                     />
+                    <span>
+                      {c.name} · +{c.peer}
+                      <span className="block text-sm text-muted-foreground">
+                        {c.market} · {c.sources.length} retained source
+                        references
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+              {steps.map((s, i) => (
+                <div
+                  key={i}
+                  className="flex flex-col gap-3 rounded-xl border p-4"
+                >
+                  <Field id={`wa-step-${i}`} label={`Message ${i + 1}`}>
+                    {templateChoices(
+                      s.templateId,
+                      (id) =>
+                        setSteps((v) =>
+                          v.map((r, n) =>
+                            n === i ? { ...r, templateId: id } : r,
+                          ),
+                        ),
+                      `wa-step-${i}`,
+                    )}
                   </Field>
-                )}
-              </div>
-            ))}
-            <div className="flex flex-wrap gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={steps.length >= 10}
-                onClick={() =>
-                  setSteps((v) => [...v, { templateId: "", delayMinutes: "" }])
-                }
-              >
-                Add bounded follow-up
-              </Button>
-              {steps.length > 1 && (
+                  {i > 0 && (
+                    <Field
+                      id={`wa-delay-${i}`}
+                      label="Minimum minutes after the previous message"
+                    >
+                      <Input
+                        id={`wa-delay-${i}`}
+                        type="number"
+                        min="1"
+                        required
+                        value={s.delayMinutes}
+                        onChange={(e) =>
+                          setSteps((v) =>
+                            v.map((r, n) =>
+                              n === i
+                                ? { ...r, delayMinutes: e.target.value }
+                                : r,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                  )}
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-3">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setSteps((v) => v.slice(0, -1))}
+                  disabled={steps.length >= 10}
+                  onClick={() =>
+                    setSteps((v) => [
+                      ...v,
+                      { templateId: "", delayMinutes: "" },
+                    ])
+                  }
                 >
-                  Remove last follow-up
+                  Add bounded follow-up
+                </Button>
+                {steps.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setSteps((v) => v.slice(0, -1))}
+                  >
+                    Remove last follow-up
+                  </Button>
+                )}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {[
+                  ["notBefore", "Earliest start (UTC)", "datetime-local"],
+                  ["expiresAt", "Plan expiry (UTC)", "datetime-local"],
+                  ["zone", "Sending time zone, such as Asia/Kolkata", "text"],
+                  [
+                    "weekdays",
+                    "Allowed weekdays, comma-separated (Monday 1, Sunday 7)",
+                    "text",
+                  ],
+                  ["start", "Local sending window starts", "time"],
+                  ["end", "Local sending window ends", "time"],
+                ].map(([name, label, type]) => (
+                  <Field key={name} id={`wa-plan-${name}`} label={label}>
+                    <Input
+                      id={`wa-plan-${name}`}
+                      name={name}
+                      type={type}
+                      required
+                    />
+                  </Field>
+                ))}
+              </div>
+              <p className="text-sm">
+                Attempt cap: {steps.length} messages per recipient. Repeated
+                work never increases it. Missed sends wait for the next approved
+                local window; ambiguous acceptance blocks subsequent attempts.
+              </p>
+              <Button
+                disabled={
+                  pending || !selected.length || !state.connectionVersion
+                }
+              >
+                Save version for Owner review
+              </Button>
+              {revision && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setRevision(null)}
+                >
+                  Start a separate campaign
                 </Button>
               )}
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {[
-                ["notBefore", "Earliest start (UTC)", "datetime-local"],
-                ["expiresAt", "Plan expiry (UTC)", "datetime-local"],
-                ["zone", "Sending time zone, such as Asia/Kolkata", "text"],
-                [
-                  "weekdays",
-                  "Allowed weekdays, comma-separated (Monday 1, Sunday 7)",
-                  "text",
-                ],
-                ["start", "Local sending window starts", "time"],
-                ["end", "Local sending window ends", "time"],
-              ].map(([name, label, type]) => (
-                <Field key={name} id={`wa-plan-${name}`} label={label}>
-                  <Input
-                    id={`wa-plan-${name}`}
-                    name={name}
-                    type={type}
-                    required
-                  />
-                </Field>
-              ))}
-            </div>
-            <p className="text-sm">
-              Attempt cap: {steps.length} messages per recipient. Repeated work
-              never increases it. Missed sends wait for the next approved local
-              window; ambiguous acceptance blocks subsequent attempts.
-            </p>
-            <Button
-              disabled={pending || !selected.length || !state.connectionVersion}
-            >
-              Save version for Owner review
-            </Button>
-            {revision && (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setRevision(null)}
-              >
-                Start a separate campaign
-              </Button>
-            )}
+            </FieldGroup>
           </form>
         </CardContent>
       </Card>
@@ -720,7 +744,7 @@ export function WhatsAppSendingManager({
               {p.plan.name} · version {p.plan.expectedVersion + 1}
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="flex flex-col gap-5">
             <Badge>
               {p.cancelled
                 ? "Stopped"
@@ -744,11 +768,11 @@ export function WhatsAppSendingManager({
               <summary className="min-h-11 cursor-pointer py-3 font-medium">
                 Saved source and contact evidence
               </summary>
-              <div className="space-y-4">
+              <div className="flex flex-col gap-4">
                 {p.sources.map((s) => (
                   <div
                     key={s.contactId}
-                    className="space-y-2 rounded-xl bg-muted p-4"
+                    className="flex flex-col gap-2 rounded-xl bg-muted p-4"
                   >
                     <p className="font-medium">
                       {s.name} · +{s.peer}
@@ -776,18 +800,23 @@ export function WhatsAppSendingManager({
               </div>
             </details>
             {p.current && !p.cancelled && (
-              <div className="space-y-3">
+              <div className="flex flex-col gap-3">
                 {!p.approved && state.canApprove && (
-                  <form onSubmit={(e) => approval(e, p)} className="space-y-3">
-                    <label className="flex min-h-11 items-start gap-3">
-                      <Checkbox required className="mt-1" />I reviewed this
-                      sender version, recipient set, retained source/contact
-                      evidence, exact messages, timing, attempt cap and stop
-                      conditions.
-                    </label>
-                    <Button disabled={pending}>
-                      Approve this exact version
-                    </Button>
+                  <form
+                    onSubmit={(e) => approval(e, p)}
+                    className="flex flex-col gap-3"
+                  >
+                    <FieldGroup className="gap-3">
+                      <label className="flex min-h-11 items-start gap-3">
+                        <Checkbox required className="mt-1" />I reviewed this
+                        sender version, recipient set, retained source/contact
+                        evidence, exact messages, timing, attempt cap and stop
+                        conditions.
+                      </label>
+                      <Button disabled={pending}>
+                        Approve this exact version
+                      </Button>
+                    </FieldGroup>
                   </form>
                 )}
                 {p.approved && (
@@ -843,7 +872,7 @@ export function WhatsAppSendingManager({
         <CardHeader>
           <CardTitle>Message evidence and customer Meta usage</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <p className="text-sm text-muted-foreground">
             Accepted is distinct from Sent, delivered and read. Missing or
             unsupported evidence remains unresolved; reconciliation never
@@ -858,7 +887,10 @@ export function WhatsAppSendingManager({
             </p>
           )}
           {state.actions.map((a) => (
-            <div key={a.id} className="space-y-3 rounded-xl border p-4">
+            <div
+              key={a.id}
+              className="flex flex-col gap-3 rounded-xl border p-4"
+            >
               <Link
                 href={`/businesses/${businessId}/opportunities/${a.opportunityId}`}
                 className="inline-flex min-h-11 items-center text-primary underline"
@@ -891,7 +923,7 @@ export function WhatsAppSendingManager({
               </Button>
               {a.state === "pending" && (
                 <form
-                  className="space-y-3"
+                  className="flex flex-col gap-3"
                   onSubmit={(e) => {
                     e.preventDefault();
                     void command("bindReplyTemplate", {
@@ -902,29 +934,31 @@ export function WhatsAppSendingManager({
                     });
                   }}
                 >
-                  <Field
-                    id={`wa-bind-${a.id}`}
-                    label="For an expired reply window: select a template whose exact rendering equals the saved grounded answer"
-                  >
-                    <NativeSelect
+                  <FieldGroup className="gap-3">
+                    <Field
                       id={`wa-bind-${a.id}`}
-                      name="templateId"
-                      required
+                      label="For an expired reply window: select a template whose exact rendering equals the saved grounded answer"
                     >
-                      <option value="">
-                        Select matching approved template
-                      </option>
-                      {activeTemplates.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.template.name} · {t.template.language} ·{" "}
-                          {t.template.rendered}
+                      <NativeSelect
+                        id={`wa-bind-${a.id}`}
+                        name="templateId"
+                        required
+                      >
+                        <option value="">
+                          Select matching approved template
                         </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <Button variant="outline" disabled={pending}>
-                    Bind exact reply template
-                  </Button>
+                        {activeTemplates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.template.name} · {t.template.language} ·{" "}
+                            {t.template.rendered}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                    <Button variant="outline" disabled={pending}>
+                      Bind exact reply template
+                    </Button>
+                  </FieldGroup>
                 </form>
               )}
               {state.usage
@@ -932,7 +966,7 @@ export function WhatsAppSendingManager({
                 .map((u, i) => (
                   <div
                     key={i}
-                    className="space-y-1 text-sm text-muted-foreground"
+                    className="flex flex-col gap-1 text-sm text-muted-foreground"
                   >
                     <p>
                       Customer Meta usage: {u.state.replaceAll("_", " ")} ·{" "}
@@ -968,7 +1002,7 @@ export function WhatsAppSendingManager({
                     an observed final bill. Do not enter payment credentials.
                   </p>
                   <form
-                    className="space-y-4"
+                    className="flex flex-col gap-4"
                     onSubmit={(e) => {
                       e.preventDefault();
                       const f = new FormData(e.currentTarget);
@@ -982,67 +1016,69 @@ export function WhatsAppSendingManager({
                       });
                     }}
                   >
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field
-                        id={`wa-cost-currency-${a.id}`}
-                        label="Meta billing currency"
-                      >
-                        <Input
+                    <FieldGroup className="gap-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field
                           id={`wa-cost-currency-${a.id}`}
-                          name="currency"
-                          required
-                          pattern="[A-Z]{3}"
-                        />
-                      </Field>
-                      <Field
-                        id={`wa-cost-minor-${a.id}`}
-                        label="Estimated minor units for this message"
-                      >
-                        <Input
+                          label="Meta billing currency"
+                        >
+                          <Input
+                            id={`wa-cost-currency-${a.id}`}
+                            name="currency"
+                            required
+                            pattern="[A-Z]{3}"
+                          />
+                        </Field>
+                        <Field
                           id={`wa-cost-minor-${a.id}`}
-                          name="minor"
-                          inputMode="numeric"
-                          required
-                          pattern="[0-9]+"
-                        />
-                      </Field>
-                      <Field
-                        id={`wa-cost-ref-${a.id}`}
-                        label="Rate evidence case reference"
-                      >
-                        <Input
+                          label="Estimated minor units for this message"
+                        >
+                          <Input
+                            id={`wa-cost-minor-${a.id}`}
+                            name="minor"
+                            inputMode="numeric"
+                            required
+                            pattern="[0-9]+"
+                          />
+                        </Field>
+                        <Field
                           id={`wa-cost-ref-${a.id}`}
-                          name="reference"
-                          required
-                          pattern="[A-Z][A-Z0-9-]{5,100}"
-                        />
-                      </Field>
-                      <Field
-                        id={`wa-cost-observed-${a.id}`}
-                        label="Rate observed (UTC)"
-                      >
-                        <Input
+                          label="Rate evidence case reference"
+                        >
+                          <Input
+                            id={`wa-cost-ref-${a.id}`}
+                            name="reference"
+                            required
+                            pattern="[A-Z][A-Z0-9-]{5,100}"
+                          />
+                        </Field>
+                        <Field
                           id={`wa-cost-observed-${a.id}`}
-                          name="observed"
-                          type="datetime-local"
-                          required
-                        />
-                      </Field>
-                      <Field
-                        id={`wa-cost-valid-${a.id}`}
-                        label="Estimate valid until (UTC)"
-                      >
-                        <Input
+                          label="Rate observed (UTC)"
+                        >
+                          <Input
+                            id={`wa-cost-observed-${a.id}`}
+                            name="observed"
+                            type="datetime-local"
+                            required
+                          />
+                        </Field>
+                        <Field
                           id={`wa-cost-valid-${a.id}`}
-                          name="valid"
-                          type="datetime-local"
-                          required
-                        />
-                      </Field>
-                    </div>
-                    <Button variant="outline" disabled={pending}>
-                      Record separate Meta estimate
-                    </Button>
+                          label="Estimate valid until (UTC)"
+                        >
+                          <Input
+                            id={`wa-cost-valid-${a.id}`}
+                            name="valid"
+                            type="datetime-local"
+                            required
+                          />
+                        </Field>
+                      </div>
+                      <Button variant="outline" disabled={pending}>
+                        Record separate Meta estimate
+                      </Button>
+                    </FieldGroup>
                   </form>
                 </details>
               )}

@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
@@ -100,7 +101,7 @@ export function BusinessDataPanel({
   }
   const selected = cancellations.find((c) => c.id === cancelId);
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       {error && (
         <Alert role="alert">
           {error}{" "}
@@ -118,7 +119,7 @@ export function BusinessDataPanel({
         <CardHeader>
           <CardTitle>Retained records</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p>
             Export permitted prospects, evidence, conversations, calls and
             immutable financial history. Reach reductions and subscription
@@ -130,7 +131,7 @@ export function BusinessDataPanel({
             files use separate downloads; available invoice and credit-note
             attachments are included within the limit.
           </p>
-          <div className="max-w-xs space-y-2">
+          <Field className="flex flex-col max-w-xs gap-2">
             <Label htmlFor="export-part">Export part</Label>
             <Input
               id="export-part"
@@ -148,7 +149,7 @@ export function BusinessDataPanel({
               names remaining records. New arrivals can change later parts;
               these packages are not a database snapshot.
             </p>
-          </div>
+          </Field>
           <Button
             disabled={
               busy ||
@@ -177,11 +178,11 @@ export function BusinessDataPanel({
               require your current access.
             </p>
           )}
-          <ul className="space-y-4">
+          <ul className="flex flex-col gap-4">
             {state.exports.map((e) => (
               <li
                 key={e.id}
-                className="rounded-xl border border-border p-4 space-y-2"
+                className="flex flex-col rounded-xl border border-border p-4 gap-2"
               >
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge>{e.state}</Badge>
@@ -262,7 +263,7 @@ export function BusinessDataPanel({
         <CardHeader>
           <CardTitle>Agreed access and retention</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           {!p ? (
             <Alert>
               Production policy is missing, expired or withdrawn. Ask the
@@ -319,7 +320,7 @@ export function BusinessDataPanel({
         <CardHeader>
           <CardTitle>Stop and offboard connections</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <Badge>
             {state.stopped
               ? "Application work stopped"
@@ -355,7 +356,7 @@ export function BusinessDataPanel({
               evidence and legal holds are preserved.
             </span>
           </Label>
-          <div className="space-y-2">
+          <Field className="flex flex-col gap-2">
             <Label htmlFor="cancel-subscription">
               Subscription cancellation
             </Label>
@@ -390,7 +391,7 @@ export function BusinessDataPanel({
                 .
               </p>
             )}
-          </div>
+          </Field>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" disabled={busy || !p || state.stopped}>
@@ -474,11 +475,11 @@ export function BusinessDataPanel({
           >
             Refresh outcomes
           </Button>
-          <ul className="space-y-4">
+          <ul className="flex flex-col gap-4">
             {state.offboarding.map((r) => (
               <li
                 key={r.id}
-                className="rounded-xl border border-border p-4 space-y-3"
+                className="flex flex-col rounded-xl border border-border p-4 gap-3"
               >
                 <p className="font-medium">
                   {r.kind === "offboard"
@@ -495,9 +496,9 @@ export function BusinessDataPanel({
                     payments for requested, confirmed and effective status.
                   </p>
                 )}
-                <ul className="space-y-3">
+                <ul className="flex flex-col gap-3">
                   {r.steps.map((s) => (
-                    <li key={s.id} className="space-y-1">
+                    <li key={s.id} className="flex flex-col gap-1">
                       <p className="text-sm">
                         <span className="font-medium">
                           {s.kind.replaceAll("_", " ")}
@@ -517,7 +518,7 @@ export function BusinessDataPanel({
                           <summary className="cursor-pointer">
                             Step history and evidence
                           </summary>
-                          <ul className="mt-2 space-y-2">
+                          <ul className="flex flex-col mt-2 gap-2">
                             {s.history.map((e) => (
                               <li key={e.id} className="wrap-anywhere">
                                 {new Date(e.at).toLocaleString()} -{" "}
@@ -538,7 +539,7 @@ export function BusinessDataPanel({
                       )}
                       {s.kind !== "file" && s.kind !== "local" && (
                         <form
-                          className="space-y-3 rounded-lg bg-muted p-4"
+                          className="flex flex-col gap-3 rounded-lg bg-muted p-4"
                           onSubmit={(e) => {
                             e.preventDefault();
                             const form = new FormData(e.currentTarget);
@@ -554,51 +555,53 @@ export function BusinessDataPanel({
                             });
                           }}
                         >
-                          <p className="text-sm">
-                            Record an externally completed review or provider
-                            action. This report preserves accountability and
-                            does not establish native provider confirmation.
-                          </p>
-                          <Label htmlFor={`fact-${s.id}`}>
-                            Completed external action
-                          </Label>
-                          <NativeSelect
-                            id={`fact-${s.id}`}
-                            name="fact"
-                            disabled={busy}
-                          >
-                            <option value="external_consent_removal_reported">
-                              Provider consent removal reported
-                            </option>
-                            {s.kind === "meta" && (
-                              <>
-                                <option value="number_control_reviewed">
-                                  Number/account control reviewed
-                                </option>
-                                <option value="number_transfer_reported">
-                                  External number transfer reported
-                                </option>
-                              </>
-                            )}
-                          </NativeSelect>
-                          <Label htmlFor={`reference-${s.id}`}>
-                            Supporting record reference
-                          </Label>
-                          <Input
-                            id={`reference-${s.id}`}
-                            name="reference"
-                            required
-                            maxLength={500}
-                            disabled={busy}
-                            placeholder="Reviewed support record or document ID"
-                          />
-                          <p className="text-sm text-muted-foreground">
-                            Use a record ID. Keep passwords, bearer values and
-                            private links out of this reference.
-                          </p>
-                          <Button variant="outline" disabled={busy}>
-                            Record external evidence
-                          </Button>
+                          <FieldGroup className="gap-3">
+                            <p className="text-sm">
+                              Record an externally completed review or provider
+                              action. This report preserves accountability and
+                              does not establish native provider confirmation.
+                            </p>
+                            <Label htmlFor={`fact-${s.id}`}>
+                              Completed external action
+                            </Label>
+                            <NativeSelect
+                              id={`fact-${s.id}`}
+                              name="fact"
+                              disabled={busy}
+                            >
+                              <option value="external_consent_removal_reported">
+                                Provider consent removal reported
+                              </option>
+                              {s.kind === "meta" && (
+                                <>
+                                  <option value="number_control_reviewed">
+                                    Number/account control reviewed
+                                  </option>
+                                  <option value="number_transfer_reported">
+                                    External number transfer reported
+                                  </option>
+                                </>
+                              )}
+                            </NativeSelect>
+                            <Label htmlFor={`reference-${s.id}`}>
+                              Supporting record reference
+                            </Label>
+                            <Input
+                              id={`reference-${s.id}`}
+                              name="reference"
+                              required
+                              maxLength={500}
+                              disabled={busy}
+                              placeholder="Reviewed support record or document ID"
+                            />
+                            <p className="text-sm text-muted-foreground">
+                              Use a record ID. Keep passwords, bearer values and
+                              private links out of this reference.
+                            </p>
+                            <Button variant="outline" disabled={busy}>
+                              Record external evidence
+                            </Button>
+                          </FieldGroup>
                         </form>
                       )}
                     </li>

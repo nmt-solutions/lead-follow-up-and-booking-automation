@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -25,18 +26,16 @@ export default async function SubscriptionPaymentsPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to overview
-        </Link>
-        <p className="mb-3 font-medium text-primary wrap-anywhere">
-          {data.profile.name}
-        </p>
-        <h1 className="page-title">Subscription payments</h1>
+    <div className="app-page">
+      <PageHeader
+        title={<>Subscription payments</>}
+        description={
+          <>
+            Review the exact tax, total and intended period before hosted
+            checkout. Paid access starts after provider confirmation.
+          </>
+        }
+      >
         <Link
           href={`/businesses/${businessId}/reach-changes`}
           className="mt-3 mr-5 inline-flex min-h-11 items-center text-primary underline"
@@ -49,11 +48,7 @@ export default async function SubscriptionPaymentsPage({
         >
           View invoices and credit notes
         </Link>
-        <p className="mt-3 text-muted-foreground">
-          Review the exact tax, total and intended period before hosted
-          checkout. Paid access starts after provider confirmation.
-        </p>
-      </header>
+      </PageHeader>
       <SubscriptionPaymentManager
         businessId={businessId}
         initial={data.state}

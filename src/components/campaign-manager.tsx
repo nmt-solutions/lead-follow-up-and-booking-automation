@@ -1,4 +1,13 @@
 "use client";
+import { PageSkeleton } from "./page-skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "./ui/collapsible";
+
+import { Field, FieldGroup } from "./ui/field";
 
 import {
   useEffect,
@@ -96,13 +105,13 @@ export function CampaignManager(props: {
       key={`${props.businessId}:${props.initialState.actorId}`}
     />
   ) : (
-    <p role="status">Loading campaign review and saved drafts…</p>
+    <PageSkeleton />
   );
 }
 
 function RecipientEvidence({ recipient: r }: { recipient: Recipient }) {
   return (
-    <div className="space-y-2 wrap-anywhere text-sm">
+    <div className="flex flex-col gap-2 wrap-anywhere text-sm">
       <p className="font-medium">
         {r.prospect.name} · {r.address}
       </p>
@@ -125,7 +134,7 @@ function RecipientEvidence({ recipient: r }: { recipient: Recipient }) {
         <summary className="min-h-11 cursor-pointer py-3 font-medium text-primary">
           Inspect selected evidence and identity
         </summary>
-        <div className="space-y-3 border-l border-border pl-4">
+        <div className="flex flex-col gap-3 border-l border-border pl-4">
           <p>
             Prospect ID: {r.prospectId}
             <br />
@@ -278,6 +287,9 @@ function CampaignEditor({
       </Alert>
     ) : null;
   }
+  const [view, setView] = useState(
+    initialState.campaigns.length ? "campaigns" : "create",
+  );
   const base = `/api/businesses/${businessId}/campaigns`;
   async function request<T>(
     schema: z.ZodType<T>,
@@ -315,7 +327,7 @@ function CampaignEditor({
             code === "MFA_REQUIRED"
               ? "Keep this tab open. Verify your authenticator using the Security link, then retry."
               : code === "CONFLICT"
-                ? "This version or its evidence changed. Refresh current state, review and save a new version. Your draft is preserved."
+                ? "This version or its evidence changed. Refresh campaigns, review and save a new version. Your draft is preserved."
                 : code === "UNAUTHENTICATED"
                   ? "Keep this tab open. Sign in using the recovery link, then retry."
                   : code === "FORBIDDEN"
@@ -331,7 +343,7 @@ function CampaignEditor({
         notify({
           error: true,
           message:
-            "The response could not be verified. Refresh current state before retrying.",
+            "The response could not be verified. Refresh campaigns before retrying.",
         });
         return null;
       }
@@ -369,6 +381,7 @@ function CampaignEditor({
     setRequestKey(crypto.randomUUID());
   }
   function revise(r: CampaignRevision) {
+    setView("create");
     setTiming(
       r.snapshot.timing ? { enabled: true, ...r.snapshot.timing } : emptyTiming,
     );
@@ -467,6 +480,15 @@ function CampaignEditor({
       setState(next);
       setReviews({});
       resetDraft();
+      setView("campaigns");
+      setFeedback(
+        {
+          error: false,
+          message:
+            "Campaign saved. Review the exact version before approving it.",
+        },
+        "workspace",
+      );
     }
   }
   async function decide(
@@ -536,706 +558,799 @@ function CampaignEditor({
     }
   }
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <Alert>
-        Campaign approval records a bounded plan. It does not send, launch,
-        grant legal permission, authorize commercial commitments or return an
-        Opportunity to automation.
+        Review the recipients, messages, and timing before approval. Starting an
+        approved campaign is a separate action.
       </Alert>
-      <p className="text-sm text-muted-foreground">
-        Keep this tab open while verifying access in another tab. Drafts are
-        also saved in this tab when browser storage is available.
-      </p>
-      <div className="flex flex-wrap gap-4">
-        <Button
-          variant="outline"
-          disabled={pending}
-          onClick={async () => {
-            const next = await request(campaignWorkspaceSchema);
-            if (next) {
-              setState(next);
-              setReviews({});
-            }
-          }}
-        >
-          Refresh current state
-        </Button>
-        <Link
-          href="/security"
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex min-h-11 items-center text-primary underline"
-        >
-          Security and authenticator (new tab)
-        </Link>
-      </div>
-      <Link
-        href="/sign-in"
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex min-h-11 items-center text-primary underline"
-      >
-        Sign in again (new tab)
-      </Link>
       {feedbackFor("workspace")}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {editing
-              ? `Revise campaign · after version ${editing.expectedVersion}`
-              : "Prepare a campaign"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={save}
-            onChange={() => setRequestKey(crypto.randomUUID())}
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button type="button" variant="ghost">
+            Sign-in and draft recovery
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-3 pt-3">
+          <p className="text-sm text-muted-foreground">
+            Keep this tab open while verifying access in another tab. Drafts are
+            also saved in this tab when browser storage is available.
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={async () => {
+                const next = await request(campaignWorkspaceSchema);
+                if (next) {
+                  setState(next);
+                  setReviews({});
+                }
+              }}
+            >
+              Refresh campaigns
+            </Button>
+            <Link
+              href="/security"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center text-primary underline"
+            >
+              Security and authenticator (new tab)
+            </Link>
+          </div>
+          <Link
+            href="/sign-in"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center text-primary underline"
           >
-            <fieldset disabled={pending} className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="campaign-name">Campaign name</Label>
-                <Input
-                  id="campaign-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  maxLength={2000}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="campaign-channel">Channel</Label>
-                <NativeSelect
-                  id="campaign-channel"
-                  value="email"
-                  onChange={() => {}}
-                >
-                  <option value="email">Email</option>
-                </NativeSelect>
-                <p className="text-sm text-muted-foreground">
-                  Review uses configured email identities. Execution and sending
-                  adapters are not activated here.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="campaign-sender">Sending identity</Label>
-                <NativeSelect
-                  id="campaign-sender"
-                  value={senderId}
-                  onChange={(e) => setSenderId(e.target.value)}
-                  required
-                >
-                  <option value="">Choose an identity</option>
-                  {state.senders.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.configuration.fromAddress} ·{" "}
-                      {s.configuration.purpose.replaceAll("_", " ")} · version{" "}
-                      {s.version}
-                    </option>
-                  ))}
-                </NativeSelect>
-                {!state.senders.length && (
-                  <p>
-                    Create an identity in{" "}
-                    <Link
-                      href={`/businesses/${businessId}/senders`}
-                      className="text-primary underline"
-                    >
-                      Sending identities
-                    </Link>{" "}
-                    before saving.
-                  </p>
-                )}
-              </div>
-              <fieldset className="space-y-4">
-                <legend className="mb-3 font-semibold">
-                  Fixed recipient and evidence selection
-                </legend>
-                <p className="text-sm text-muted-foreground">
-                  Select exact published contacts. Later discoveries stay
-                  outside saved versions. Duplicate addresses cannot appear
-                  twice in one plan.
-                </p>
-                {!state.candidates.length && (
-                  <p>
-                    Run{" "}
-                    <Link
-                      href={`/businesses/${businessId}/discovery`}
-                      className="text-primary underline"
-                    >
-                      prospect discovery
-                    </Link>{" "}
-                    to collect sourced email contacts.
-                  </p>
-                )}
-                {state.candidates.map((r) => (
-                  <div
-                    key={selectionKey(r)}
-                    className="rounded-xl border border-border p-4"
-                  >
-                    <label className="mb-3 flex min-h-11 cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        className="size-5 accent-primary"
-                        checked={selected.includes(selectionKey(r))}
-                        onChange={(e) =>
-                          setSelected((v) =>
-                            e.target.checked
-                              ? [...v, selectionKey(r)]
-                              : v.filter((k) => k !== selectionKey(r)),
-                          )
-                        }
-                      />
-                      <span>
-                        Select {r.prospect.name} · {r.address}
-                      </span>
-                    </label>
-                    <RecipientEvidence recipient={r} />
-                  </div>
-                ))}
-                {selected.some(
-                  (key) =>
-                    !state.candidates.some((c) => selectionKey(c) === key),
-                ) && (
-                  <Alert variant="warning">
-                    Selected evidence changed.{" "}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setSelected((v) =>
-                          v.filter((k) =>
-                            state.candidates.some((c) => selectionKey(c) === k),
-                          ),
-                        );
-                        setRequestKey(crypto.randomUUID());
-                      }}
-                    >
-                      Remove outdated selections
-                    </Button>{" "}
-                    Then explicitly select the current contacts.
-                  </Alert>
-                )}
-              </fieldset>
-              <fieldset className="space-y-4">
-                <legend className="mb-3 font-semibold">
-                  Initial message and follow-ups
-                </legend>
-                <p className="text-sm text-muted-foreground">
-                  Every selected recipient receives the exact text below. No
-                  inferred personalization or commercial authority is added.
-                  Each message can be attempted once; delays start after the
-                  previous successful attempt.
-                </p>
-                {steps.map((s, i) => (
-                  <div
-                    key={i}
-                    className="space-y-3 rounded-xl border border-border p-4"
-                  >
-                    <h3 className="font-medium">
-                      {i === 0 ? "Initial message" : `Follow-up ${i}`}
-                    </h3>
-                    <Label htmlFor={`campaign-subject-${i}`}>Subject</Label>
-                    <Input
-                      id={`campaign-subject-${i}`}
-                      value={s.subject}
-                      required
-                      maxLength={2000}
-                      onChange={(e) =>
-                        setSteps((v) =>
-                          v.map((s, n) =>
-                            n === i ? { ...s, subject: e.target.value } : s,
-                          ),
-                        )
-                      }
-                    />
-                    <Label htmlFor={`campaign-body-${i}`}>Message</Label>
-                    <Textarea
-                      id={`campaign-body-${i}`}
-                      value={s.body}
-                      required
-                      maxLength={2000}
-                      onChange={(e) =>
-                        setSteps((v) =>
-                          v.map((s, n) =>
-                            n === i ? { ...s, body: e.target.value } : s,
-                          ),
-                        )
-                      }
-                    />
-                    {i === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        Initial delay: 0 minutes. Approval does not schedule
-                        this message.
+            Sign in again (new tab)
+          </Link>
+        </CollapsibleContent>
+      </Collapsible>
+      <Tabs
+        value={view}
+        onValueChange={setView}
+        className="flex flex-col gap-6"
+      >
+        <TabsList>
+          <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
+          <TabsTrigger value="create">
+            {editing ? "Edit campaign" : "Create campaign"}
+          </TabsTrigger>
+          <TabsTrigger value="handoff">Prepared emails</TabsTrigger>
+          <TabsTrigger value="sequences">Follow-ups</TabsTrigger>
+        </TabsList>
+        <TabsContent
+          forceMount
+          value="campaigns"
+          className="data-[state=inactive]:hidden"
+        >
+          <section
+            className="flex flex-col gap-5"
+            aria-labelledby="campaign-history"
+          >
+            <h2 id="campaign-history" className="text-xl font-semibold">
+              Campaign versions and approval history
+            </h2>
+            {!state.campaigns.length && (
+              <p className="text-muted-foreground">
+                No campaign has been prepared. Save a version to review its
+                exact scope.
+              </p>
+            )}
+            {state.campaigns.map((c) => (
+              <div key={c.id} className="flex flex-col gap-5">
+                {[...c.revisions].reverse().map((r) => (
+                  <Card key={r.id}>
+                    <CardHeader>
+                      <CardTitle>
+                        {r.snapshot.name} · version {r.version}
+                      </CardTitle>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge>
+                          {r.decision?.decision ?? "Awaiting Owner approval"}
+                        </Badge>
+                        <Badge>Approval record · execution shown below</Badge>
+                        {r.version !== c.revisions.at(-1)?.version && (
+                          <Badge>Superseded</Badge>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-5">
+                      <p className="text-sm">
+                        Prepared by {r.actorName} · {r.at}
+                        <br />
+                        {r.note}
                       </p>
-                    ) : (
-                      <>
-                        <Label htmlFor={`campaign-delay-${i}`}>
-                          Delay after previous successful attempt (minutes)
-                        </Label>
-                        <Input
-                          id={`campaign-delay-${i}`}
-                          type="number"
-                          min={1}
-                          step={1}
-                          required
-                          value={s.delayMinutes}
-                          onChange={(e) =>
-                            setSteps((v) =>
-                              v.map((s, n) =>
-                                n === i
-                                  ? { ...s, delayMinutes: e.target.value }
-                                  : s,
-                              ),
-                            )
-                          }
-                        />
+                      <p>
+                        Email · {r.snapshot.sender.displayName} &lt;
+                        {r.snapshot.sender.fromAddress}&gt; · identity version{" "}
+                        {r.snapshot.senderVersion}
+                        <br />
+                        Reply-to:{" "}
+                        {r.snapshot.senderContext.replyRoute?.configuration
+                          .address ?? "Not configured"}{" "}
+                        · transport:{" "}
+                        {r.snapshot.senderContext.connection?.configuration
+                          .provider ?? "Not configured"}
+                        <br />
+                        Maximum {r.snapshot.maxAttempts} attempts per recipient.
+                        {r.snapshot.timing && (
+                          <>
+                            <br />
+                            Local window: {r.snapshot.timing.timeZone} ·{" "}
+                            {r.snapshot.timing.startTime}–
+                            {r.snapshot.timing.endTime} · days{" "}
+                            {r.snapshot.timing.weekdays.join(", ")}. Missed work
+                            uses the next allowed window.
+                          </>
+                        )}
+                      </p>
+                      <div className="flex flex-col gap-3">
+                        {r.snapshot.steps.map((s, i) => (
+                          <div key={i} className="rounded-xl bg-muted p-4">
+                            <h3 className="font-semibold">
+                              {i === 0 ? "Initial message" : `Follow-up ${i}`} ·{" "}
+                              {s.delayMinutes} minutes{" "}
+                              {i
+                                ? "after previous provider acceptance"
+                                : "initial delay"}
+                            </h3>
+                            <p className="mt-2 font-medium wrap-anywhere">
+                              {s.subject}
+                            </p>
+                            <p className="mt-2 whitespace-pre-wrap wrap-anywhere">
+                              {s.body}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      <p>{stopText}</p>
+                      {r.snapshot.stopConditions.additional.map((s, i) => (
+                        <p key={i}>Additional stop: {s}</p>
+                      ))}
+                      <section className="flex flex-col gap-3">
+                        <h3 className="font-semibold">
+                          Current checks, separate from approval
+                        </h3>
+                        {(
+                          [
+                            "version",
+                            "authority",
+                            "evidence",
+                            "sender",
+                            "reach",
+                            "conversation",
+                          ] as const
+                        ).map((key) => (
+                          <p key={key}>
+                            <span className="font-medium capitalize">
+                              {key}: {r.current[key].status}
+                            </span>{" "}
+                            · {r.current[key].reason}
+                          </p>
+                        ))}
+                        <p className="text-sm text-muted-foreground">
+                          Commercial policy version {r.current.policyVersion};
+                          reviewed version {r.current.approvalPolicyVersion}.{" "}
+                          <Link
+                            href={`/businesses/${businessId}/commercial-authority`}
+                            className="text-primary underline"
+                          >
+                            Inspect current commercial authority
+                          </Link>
+                          .
+                        </p>
+                      </section>
+                      <div className="flex flex-col gap-4">
+                        {r.snapshot.recipients.map((recipient) => (
+                          <div
+                            key={recipient.contactId}
+                            className="flex flex-col gap-3 rounded-xl border border-border p-4"
+                          >
+                            <RecipientEvidence recipient={recipient} />
+                            {r.snapshot.steps.map((_, i) => {
+                              const result =
+                                reviews[`${r.id}:${recipient.contactId}:${i}`];
+                              return (
+                                <div key={i} className="flex flex-col gap-2">
+                                  <Button
+                                    variant="outline"
+                                    disabled={pending}
+                                    onClick={() => review(r, recipient, i)}
+                                  >
+                                    Check current eligibility ·{" "}
+                                    {i === 0
+                                      ? "initial message"
+                                      : `follow-up ${i}`}
+                                  </Button>
+                                  {feedbackFor(
+                                    `review:${r.id}:${recipient.contactId}:${i}`,
+                                  )}
+                                  {result && (
+                                    <div className="flex flex-col gap-2 text-sm">
+                                      <p className="font-medium">
+                                        Email eligibility:{" "}
+                                        {result.eligibility.status} ·{" "}
+                                        {result.eligibility.at}
+                                      </p>
+                                      {result.eligibility.checks.map(
+                                        (check) => (
+                                          <p key={check.code}>
+                                            <strong>
+                                              {check.code.replaceAll("_", " ")}:{" "}
+                                              {check.status}
+                                            </strong>{" "}
+                                            · {check.detail}{" "}
+                                            {check.status !== "allowed" &&
+                                              check.nextAction}
+                                          </p>
+                                        ),
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                      <Link
+                        href={`/businesses/${businessId}/email-eligibility`}
+                        className="inline-flex min-h-11 items-center text-primary underline"
+                      >
+                        Review permission evidence, policy requirements and
+                        suppression history
+                      </Link>
+                      {feedbackFor(`decision:${r.id}`)}
+                      {r.decision ? (
+                        <p className="rounded-xl bg-muted p-4">
+                          {r.decision.decision === "approved"
+                            ? "Approved"
+                            : "Rejected"}{" "}
+                          by {r.decision.actorName} (Owner) · {r.decision.at}
+                          <br />
+                          {r.decision.note}
+                        </p>
+                      ) : (
+                        r.version === c.revisions.at(-1)?.version && (
+                          <div className="flex flex-col gap-3">
+                            {state.canApprove ? (
+                              <>
+                                <Label htmlFor={`decision-${r.id}`}>
+                                  Owner review note
+                                </Label>
+                                <Textarea
+                                  id={`decision-${r.id}`}
+                                  maxLength={2000}
+                                  value={decisionNotes[r.id] ?? ""}
+                                  onChange={(e) =>
+                                    setDecisionNotes((v) => ({
+                                      ...v,
+                                      [r.id]: e.target.value,
+                                    }))
+                                  }
+                                />
+                                <div className="flex flex-wrap gap-3">
+                                  <Button
+                                    disabled={pending}
+                                    onClick={() => decide(r, "approved")}
+                                  >
+                                    Approve version {r.version}
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    disabled={pending}
+                                    onClick={() => decide(r, "rejected")}
+                                  >
+                                    Reject version {r.version}
+                                  </Button>
+                                </div>
+                              </>
+                            ) : (
+                              <p>
+                                Ask a Business Owner with current authenticator
+                                verification to approve or reject this version.
+                              </p>
+                            )}
+                          </div>
+                        )
+                      )}
+                      {r.version === c.revisions.at(-1)?.version && (
                         <Button
-                          type="button"
                           variant="outline"
-                          onClick={() => {
-                            setSteps((v) => v.filter((_, n) => n !== i));
-                            setRequestKey(crypto.randomUUID());
-                          }}
+                          disabled={pending}
+                          onClick={() => revise(r)}
                         >
-                          Remove follow-up {i}
+                          Prepare a new revision
                         </Button>
-                      </>
-                    )}
-                  </div>
+                      )}
+                      <details>
+                        <summary className="min-h-11 cursor-pointer py-3 text-sm text-primary">
+                          Immutable version reference
+                        </summary>
+                        <p className="text-sm wrap-anywhere">
+                          Revision: {r.id}
+                          <br />
+                          Snapshot hash: {r.payloadHash}
+                        </p>
+                      </details>
+                    </CardContent>
+                  </Card>
                 ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setSteps((v) => [
-                      ...v,
-                      { subject: "", body: "", delayMinutes: "" },
-                    ]);
-                    setRequestKey(crypto.randomUUID());
-                  }}
-                >
-                  Add follow-up
-                </Button>
-              </fieldset>
-              <div className="space-y-2">
-                <Label htmlFor="campaign-attempts">
-                  Maximum attempts per recipient, including initial contact
-                </Label>
-                <Input
-                  id="campaign-attempts"
-                  type="number"
-                  min={1}
-                  step={1}
-                  required
-                  value={attempts}
-                  onChange={(e) => setAttempts(e.target.value)}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Enter {steps.length} for this {steps.length}-message plan.
-                  Reservations include failed and uncertain transport calls. A
-                  retry consumes the same cap and may leave no attempt for a
-                  later reminder.
-                </p>
               </div>
-              <div className="space-y-2">
-                <h3 className="font-semibold">Mandatory stop conditions</h3>
-                <p>{stopText}</p>
-                <Label htmlFor="campaign-stops">
-                  Additional stop conditions (one per line, optional)
-                </Label>
-                <Textarea
-                  id="campaign-stops"
-                  value={additional}
-                  onChange={(e) => setAdditional(e.target.value)}
-                />
-              </div>
-              <fieldset className="space-y-4 rounded-xl border border-border p-4">
-                <legend className="px-2 font-semibold">
-                  Local timing for automated sequences
-                </legend>
-                <div className="flex min-h-11 items-center gap-3">
-                  <Checkbox
-                    id="campaign-timing-enabled"
-                    checked={timing.enabled}
-                    onCheckedChange={(v) =>
-                      setTiming({ ...timing, enabled: v === true })
-                    }
-                  />
-                  <Label htmlFor="campaign-timing-enabled">
-                    Include a local send window in this approval
-                  </Label>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Choose the intended time zone and send days for this campaign.
-                  Delays are minimum elapsed minutes after actual provider
-                  acceptance. Missed work moves to an allowed window; it does
-                  not send overdue reminders in a burst. Without a window, this
-                  version supports manual email handoff only.
-                </p>
-                {timing.enabled && (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="campaign-timezone">IANA time zone</Label>
+            ))}
+          </section>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="create"
+          className="data-[state=inactive]:hidden"
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {editing
+                  ? `Revise campaign · after version ${editing.expectedVersion}`
+                  : "Prepare a campaign"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form
+                onSubmit={save}
+                onChange={() => setRequestKey(crypto.randomUUID())}
+              >
+                <FieldGroup className="gap-5">
+                  <fieldset disabled={pending} className="flex flex-col gap-6">
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="campaign-name">Campaign name</Label>
                       <Input
-                        id="campaign-timezone"
-                        value={timing.timeZone}
-                        onChange={(e) =>
-                          setTiming({ ...timing, timeZone: e.target.value })
-                        }
+                        id="campaign-name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
                         required
-                        placeholder="For example, America/New_York"
+                        maxLength={2000}
                       />
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="campaign-window-start">
-                          Local window starts
-                        </Label>
-                        <Input
-                          id="campaign-window-start"
-                          type="time"
-                          value={timing.startTime}
-                          required
-                          onChange={(e) =>
-                            setTiming({ ...timing, startTime: e.target.value })
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="campaign-window-end">
-                          Local window ends
-                        </Label>
-                        <Input
-                          id="campaign-window-end"
-                          type="time"
-                          value={timing.endTime}
-                          required
-                          onChange={(e) =>
-                            setTiming({ ...timing, endTime: e.target.value })
-                          }
-                        />
-                      </div>
-                    </div>
-                    <fieldset>
-                      <legend className="mb-2 text-sm font-medium">
-                        Send days
+                    </Field>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="campaign-channel">Channel</Label>
+                      <NativeSelect
+                        id="campaign-channel"
+                        value="email"
+                        onChange={() => {}}
+                      >
+                        <option value="email">Email</option>
+                      </NativeSelect>
+                      <p className="text-sm text-muted-foreground">
+                        Review uses configured email identities. Execution and
+                        sending adapters are not activated here.
+                      </p>
+                    </Field>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="campaign-sender">Sending identity</Label>
+                      <NativeSelect
+                        id="campaign-sender"
+                        value={senderId}
+                        onChange={(e) => setSenderId(e.target.value)}
+                        required
+                      >
+                        <option value="">Choose an identity</option>
+                        {state.senders.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.configuration.fromAddress} ·{" "}
+                            {s.configuration.purpose.replaceAll("_", " ")} ·
+                            version {s.version}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                      {!state.senders.length && (
+                        <p>
+                          Create an identity in{" "}
+                          <Link
+                            href={`/businesses/${businessId}/senders`}
+                            className="text-primary underline"
+                          >
+                            Sending identities
+                          </Link>{" "}
+                          before saving.
+                        </p>
+                      )}
+                    </Field>
+                    <fieldset className="flex flex-col gap-4">
+                      <legend className="mb-3 font-semibold">
+                        Fixed recipient and evidence selection
                       </legend>
-                      <div className="flex flex-wrap gap-4">
-                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                          (day, i) => (
-                            <div
-                              key={day}
-                              className="flex min-h-11 items-center gap-2"
-                            >
-                              <Checkbox
-                                id={`campaign-day-${i}`}
-                                checked={timing.weekdays.includes(i + 1)}
-                                onCheckedChange={(v) =>
+                      <p className="text-sm text-muted-foreground">
+                        Select exact published contacts. Later discoveries stay
+                        outside saved versions. Duplicate addresses cannot
+                        appear twice in one plan.
+                      </p>
+                      {!state.candidates.length && (
+                        <p>
+                          Run{" "}
+                          <Link
+                            href={`/businesses/${businessId}/discovery`}
+                            className="text-primary underline"
+                          >
+                            prospect discovery
+                          </Link>{" "}
+                          to collect sourced email contacts.
+                        </p>
+                      )}
+                      {state.candidates.map((r) => (
+                        <div
+                          key={selectionKey(r)}
+                          className="rounded-xl border border-border p-4"
+                        >
+                          <label className="mb-3 flex min-h-11 cursor-pointer items-center gap-3">
+                            <input
+                              type="checkbox"
+                              className="size-5 accent-primary"
+                              checked={selected.includes(selectionKey(r))}
+                              onChange={(e) =>
+                                setSelected((v) =>
+                                  e.target.checked
+                                    ? [...v, selectionKey(r)]
+                                    : v.filter((k) => k !== selectionKey(r)),
+                                )
+                              }
+                            />
+                            <span>
+                              Select {r.prospect.name} · {r.address}
+                            </span>
+                          </label>
+                          <RecipientEvidence recipient={r} />
+                        </div>
+                      ))}
+                      {selected.some(
+                        (key) =>
+                          !state.candidates.some(
+                            (c) => selectionKey(c) === key,
+                          ),
+                      ) && (
+                        <Alert variant="warning">
+                          Selected evidence changed.{" "}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setSelected((v) =>
+                                v.filter((k) =>
+                                  state.candidates.some(
+                                    (c) => selectionKey(c) === k,
+                                  ),
+                                ),
+                              );
+                              setRequestKey(crypto.randomUUID());
+                            }}
+                          >
+                            Remove outdated selections
+                          </Button>{" "}
+                          Then explicitly select the current contacts.
+                        </Alert>
+                      )}
+                    </fieldset>
+                    <fieldset className="flex flex-col gap-4">
+                      <legend className="mb-3 font-semibold">
+                        Initial message and follow-ups
+                      </legend>
+                      <p className="text-sm text-muted-foreground">
+                        Every selected recipient receives the exact text below.
+                        No inferred personalization or commercial authority is
+                        added. Each message can be attempted once; delays start
+                        after the previous successful attempt.
+                      </p>
+                      {steps.map((s, i) => (
+                        <Field
+                          key={i}
+                          className="flex flex-col gap-3 rounded-xl border border-border p-4"
+                        >
+                          <h3 className="font-medium">
+                            {i === 0 ? "Initial message" : `Follow-up ${i}`}
+                          </h3>
+                          <Label htmlFor={`campaign-subject-${i}`}>
+                            Subject
+                          </Label>
+                          <Input
+                            id={`campaign-subject-${i}`}
+                            value={s.subject}
+                            required
+                            maxLength={2000}
+                            onChange={(e) =>
+                              setSteps((v) =>
+                                v.map((s, n) =>
+                                  n === i
+                                    ? { ...s, subject: e.target.value }
+                                    : s,
+                                ),
+                              )
+                            }
+                          />
+                          <Label htmlFor={`campaign-body-${i}`}>Message</Label>
+                          <Textarea
+                            id={`campaign-body-${i}`}
+                            value={s.body}
+                            required
+                            maxLength={2000}
+                            onChange={(e) =>
+                              setSteps((v) =>
+                                v.map((s, n) =>
+                                  n === i ? { ...s, body: e.target.value } : s,
+                                ),
+                              )
+                            }
+                          />
+                          {i === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              Initial delay: 0 minutes. Approval does not
+                              schedule this message.
+                            </p>
+                          ) : (
+                            <>
+                              <Label htmlFor={`campaign-delay-${i}`}>
+                                Delay after previous successful attempt
+                                (minutes)
+                              </Label>
+                              <Input
+                                id={`campaign-delay-${i}`}
+                                type="number"
+                                min={1}
+                                step={1}
+                                required
+                                value={s.delayMinutes}
+                                onChange={(e) =>
+                                  setSteps((v) =>
+                                    v.map((s, n) =>
+                                      n === i
+                                        ? { ...s, delayMinutes: e.target.value }
+                                        : s,
+                                    ),
+                                  )
+                                }
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  setSteps((v) => v.filter((_, n) => n !== i));
+                                  setRequestKey(crypto.randomUUID());
+                                }}
+                              >
+                                Remove follow-up {i}
+                              </Button>
+                            </>
+                          )}
+                        </Field>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setSteps((v) => [
+                            ...v,
+                            { subject: "", body: "", delayMinutes: "" },
+                          ]);
+                          setRequestKey(crypto.randomUUID());
+                        }}
+                      >
+                        Add follow-up
+                      </Button>
+                    </fieldset>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="campaign-attempts">
+                        Maximum attempts per recipient, including initial
+                        contact
+                      </Label>
+                      <Input
+                        id="campaign-attempts"
+                        type="number"
+                        min={1}
+                        step={1}
+                        required
+                        value={attempts}
+                        onChange={(e) => setAttempts(e.target.value)}
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        Enter {steps.length} for this {steps.length}-message
+                        plan. Reservations include failed and uncertain
+                        transport calls. A retry consumes the same cap and may
+                        leave no attempt for a later reminder.
+                      </p>
+                    </Field>
+                    <Field className="flex flex-col gap-2">
+                      <h3 className="font-semibold">
+                        Mandatory stop conditions
+                      </h3>
+                      <p>{stopText}</p>
+                      <Label htmlFor="campaign-stops">
+                        Additional stop conditions (one per line, optional)
+                      </Label>
+                      <Textarea
+                        id="campaign-stops"
+                        value={additional}
+                        onChange={(e) => setAdditional(e.target.value)}
+                      />
+                    </Field>
+                    <fieldset className="flex flex-col gap-4 rounded-xl border border-border p-4">
+                      <legend className="px-2 font-semibold">
+                        Local timing for automated sequences
+                      </legend>
+                      <div className="flex min-h-11 items-center gap-3">
+                        <Checkbox
+                          id="campaign-timing-enabled"
+                          checked={timing.enabled}
+                          onCheckedChange={(v) =>
+                            setTiming({ ...timing, enabled: v === true })
+                          }
+                        />
+                        <Label htmlFor="campaign-timing-enabled">
+                          Include a local send window in this approval
+                        </Label>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Choose the intended time zone and send days for this
+                        campaign. Delays are minimum elapsed minutes after
+                        actual provider acceptance. Missed work moves to an
+                        allowed window; it does not send overdue reminders in a
+                        burst. Without a window, this version supports manual
+                        email handoff only.
+                      </p>
+                      {timing.enabled && (
+                        <>
+                          <Field className="flex flex-col gap-2">
+                            <Label htmlFor="campaign-timezone">
+                              IANA time zone
+                            </Label>
+                            <Input
+                              id="campaign-timezone"
+                              value={timing.timeZone}
+                              onChange={(e) =>
+                                setTiming({
+                                  ...timing,
+                                  timeZone: e.target.value,
+                                })
+                              }
+                              required
+                              placeholder="For example, America/New_York"
+                            />
+                          </Field>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <Field className="flex flex-col gap-2">
+                              <Label htmlFor="campaign-window-start">
+                                Local window starts
+                              </Label>
+                              <Input
+                                id="campaign-window-start"
+                                type="time"
+                                value={timing.startTime}
+                                required
+                                onChange={(e) =>
                                   setTiming({
                                     ...timing,
-                                    weekdays:
-                                      v === true
-                                        ? [...timing.weekdays, i + 1]
-                                        : timing.weekdays.filter(
-                                            (d) => d !== i + 1,
-                                          ),
+                                    startTime: e.target.value,
                                   })
                                 }
                               />
-                              <Label htmlFor={`campaign-day-${i}`}>{day}</Label>
-                            </div>
-                          ),
-                        )}
-                      </div>
-                    </fieldset>
-                    <p className="text-sm text-muted-foreground">
-                      At daylight-saving changes, a repeated start uses its
-                      first occurrence; a missing local start moves forward by
-                      the gap.
-                    </p>
-                  </>
-                )}
-              </fieldset>
-              <div className="space-y-2">
-                <Label htmlFor="campaign-note">Reason for this version</Label>
-                <Textarea
-                  id="campaign-note"
-                  value={note}
-                  required
-                  maxLength={2000}
-                  onChange={(e) => setNote(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-wrap gap-3">
-                {feedbackFor("draft")}
-                <Button type="submit">
-                  {pending ? "Saving…" : "Save version for review"}
-                </Button>
-                {editing && (
-                  <Button type="button" variant="outline" onClick={resetDraft}>
-                    Cancel revision
-                  </Button>
-                )}
-              </div>
-            </fieldset>
-          </form>
-        </CardContent>
-      </Card>
-      <section className="space-y-5" aria-labelledby="campaign-history">
-        <h2 id="campaign-history" className="text-xl font-semibold">
-          Campaign versions and approval history
-        </h2>
-        {!state.campaigns.length && (
-          <p className="text-muted-foreground">
-            No campaign has been prepared. Save a version to review its exact
-            scope.
-          </p>
-        )}
-        {state.campaigns.map((c) => (
-          <div key={c.id} className="space-y-5">
-            {[...c.revisions].reverse().map((r) => (
-              <Card key={r.id}>
-                <CardHeader>
-                  <CardTitle>
-                    {r.snapshot.name} · version {r.version}
-                  </CardTitle>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge>
-                      {r.decision?.decision ?? "Awaiting Owner approval"}
-                    </Badge>
-                    <Badge>Approval record · execution shown below</Badge>
-                    {r.version !== c.revisions.at(-1)?.version && (
-                      <Badge>Superseded</Badge>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <p className="text-sm">
-                    Prepared by {r.actorName} · {r.at}
-                    <br />
-                    {r.note}
-                  </p>
-                  <p>
-                    Email · {r.snapshot.sender.displayName} &lt;
-                    {r.snapshot.sender.fromAddress}&gt; · identity version{" "}
-                    {r.snapshot.senderVersion}
-                    <br />
-                    Reply-to:{" "}
-                    {r.snapshot.senderContext.replyRoute?.configuration
-                      .address ?? "Not configured"}{" "}
-                    · transport:{" "}
-                    {r.snapshot.senderContext.connection?.configuration
-                      .provider ?? "Not configured"}
-                    <br />
-                    Maximum {r.snapshot.maxAttempts} attempts per recipient.
-                    {r.snapshot.timing && (
-                      <>
-                        <br />
-                        Local window: {r.snapshot.timing.timeZone} ·{" "}
-                        {r.snapshot.timing.startTime}–
-                        {r.snapshot.timing.endTime} · days{" "}
-                        {r.snapshot.timing.weekdays.join(", ")}. Missed work
-                        uses the next allowed window.
-                      </>
-                    )}
-                  </p>
-                  <div className="space-y-3">
-                    {r.snapshot.steps.map((s, i) => (
-                      <div key={i} className="rounded-xl bg-muted p-4">
-                        <h3 className="font-semibold">
-                          {i === 0 ? "Initial message" : `Follow-up ${i}`} ·{" "}
-                          {s.delayMinutes} minutes{" "}
-                          {i
-                            ? "after previous provider acceptance"
-                            : "initial delay"}
-                        </h3>
-                        <p className="mt-2 font-medium wrap-anywhere">
-                          {s.subject}
-                        </p>
-                        <p className="mt-2 whitespace-pre-wrap wrap-anywhere">
-                          {s.body}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                  <p>{stopText}</p>
-                  {r.snapshot.stopConditions.additional.map((s, i) => (
-                    <p key={i}>Additional stop: {s}</p>
-                  ))}
-                  <section className="space-y-3">
-                    <h3 className="font-semibold">
-                      Current checks, separate from approval
-                    </h3>
-                    {(
-                      [
-                        "version",
-                        "authority",
-                        "evidence",
-                        "sender",
-                        "reach",
-                        "conversation",
-                      ] as const
-                    ).map((key) => (
-                      <p key={key}>
-                        <span className="font-medium capitalize">
-                          {key}: {r.current[key].status}
-                        </span>{" "}
-                        · {r.current[key].reason}
-                      </p>
-                    ))}
-                    <p className="text-sm text-muted-foreground">
-                      Commercial policy version {r.current.policyVersion};
-                      reviewed version {r.current.approvalPolicyVersion}.{" "}
-                      <Link
-                        href={`/businesses/${businessId}/commercial-authority`}
-                        className="text-primary underline"
-                      >
-                        Inspect current commercial authority
-                      </Link>
-                      .
-                    </p>
-                  </section>
-                  <div className="space-y-4">
-                    {r.snapshot.recipients.map((recipient) => (
-                      <div
-                        key={recipient.contactId}
-                        className="space-y-3 rounded-xl border border-border p-4"
-                      >
-                        <RecipientEvidence recipient={recipient} />
-                        {r.snapshot.steps.map((_, i) => {
-                          const result =
-                            reviews[`${r.id}:${recipient.contactId}:${i}`];
-                          return (
-                            <div key={i} className="space-y-2">
-                              <Button
-                                variant="outline"
-                                disabled={pending}
-                                onClick={() => review(r, recipient, i)}
-                              >
-                                Check current eligibility ·{" "}
-                                {i === 0 ? "initial message" : `follow-up ${i}`}
-                              </Button>
-                              {feedbackFor(
-                                `review:${r.id}:${recipient.contactId}:${i}`,
-                              )}
-                              {result && (
-                                <div className="space-y-2 text-sm">
-                                  <p className="font-medium">
-                                    Email eligibility:{" "}
-                                    {result.eligibility.status} ·{" "}
-                                    {result.eligibility.at}
-                                  </p>
-                                  {result.eligibility.checks.map((check) => (
-                                    <p key={check.code}>
-                                      <strong>
-                                        {check.code.replaceAll("_", " ")}:{" "}
-                                        {check.status}
-                                      </strong>{" "}
-                                      · {check.detail}{" "}
-                                      {check.status !== "allowed" &&
-                                        check.nextAction}
-                                    </p>
-                                  ))}
+                            </Field>
+                            <Field className="flex flex-col gap-2">
+                              <Label htmlFor="campaign-window-end">
+                                Local window ends
+                              </Label>
+                              <Input
+                                id="campaign-window-end"
+                                type="time"
+                                value={timing.endTime}
+                                required
+                                onChange={(e) =>
+                                  setTiming({
+                                    ...timing,
+                                    endTime: e.target.value,
+                                  })
+                                }
+                              />
+                            </Field>
+                          </div>
+                          <fieldset>
+                            <legend className="mb-2 text-sm font-medium">
+                              Send days
+                            </legend>
+                            <div className="flex flex-wrap gap-4">
+                              {[
+                                "Mon",
+                                "Tue",
+                                "Wed",
+                                "Thu",
+                                "Fri",
+                                "Sat",
+                                "Sun",
+                              ].map((day, i) => (
+                                <div
+                                  key={day}
+                                  className="flex min-h-11 items-center gap-2"
+                                >
+                                  <Checkbox
+                                    id={`campaign-day-${i}`}
+                                    checked={timing.weekdays.includes(i + 1)}
+                                    onCheckedChange={(v) =>
+                                      setTiming({
+                                        ...timing,
+                                        weekdays:
+                                          v === true
+                                            ? [...timing.weekdays, i + 1]
+                                            : timing.weekdays.filter(
+                                                (d) => d !== i + 1,
+                                              ),
+                                      })
+                                    }
+                                  />
+                                  <Label htmlFor={`campaign-day-${i}`}>
+                                    {day}
+                                  </Label>
                                 </div>
-                              )}
+                              ))}
                             </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                  <Link
-                    href={`/businesses/${businessId}/email-eligibility`}
-                    className="inline-flex min-h-11 items-center text-primary underline"
-                  >
-                    Review permission evidence, policy requirements and
-                    suppression history
-                  </Link>
-                  {feedbackFor(`decision:${r.id}`)}
-                  {r.decision ? (
-                    <p className="rounded-xl bg-muted p-4">
-                      {r.decision.decision === "approved"
-                        ? "Approved"
-                        : "Rejected"}{" "}
-                      by {r.decision.actorName} (Owner) · {r.decision.at}
-                      <br />
-                      {r.decision.note}
-                    </p>
-                  ) : (
-                    r.version === c.revisions.at(-1)?.version && (
-                      <div className="space-y-3">
-                        {state.canApprove ? (
-                          <>
-                            <Label htmlFor={`decision-${r.id}`}>
-                              Owner review note
-                            </Label>
-                            <Textarea
-                              id={`decision-${r.id}`}
-                              maxLength={2000}
-                              value={decisionNotes[r.id] ?? ""}
-                              onChange={(e) =>
-                                setDecisionNotes((v) => ({
-                                  ...v,
-                                  [r.id]: e.target.value,
-                                }))
-                              }
-                            />
-                            <div className="flex flex-wrap gap-3">
-                              <Button
-                                disabled={pending}
-                                onClick={() => decide(r, "approved")}
-                              >
-                                Approve version {r.version}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                disabled={pending}
-                                onClick={() => decide(r, "rejected")}
-                              >
-                                Reject version {r.version}
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <p>
-                            Ask a Business Owner with current authenticator
-                            verification to approve or reject this version.
+                          </fieldset>
+                          <p className="text-sm text-muted-foreground">
+                            At daylight-saving changes, a repeated start uses
+                            its first occurrence; a missing local start moves
+                            forward by the gap.
                           </p>
-                        )}
-                      </div>
-                    )
-                  )}
-                  {r.version === c.revisions.at(-1)?.version && (
-                    <Button
-                      variant="outline"
-                      disabled={pending}
-                      onClick={() => revise(r)}
-                    >
-                      Prepare a new revision
-                    </Button>
-                  )}
-                  <details>
-                    <summary className="min-h-11 cursor-pointer py-3 text-sm text-primary">
-                      Immutable version reference
-                    </summary>
-                    <p className="text-sm wrap-anywhere">
-                      Revision: {r.id}
-                      <br />
-                      Snapshot hash: {r.payloadHash}
-                    </p>
-                  </details>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ))}
-      </section>
-      <EmailHandoffManager businessId={businessId} campaigns={state} />
-      <EmailSequenceManager
-        businessId={businessId}
-        initialState={initialSequences}
-        campaigns={state}
-      />
+                        </>
+                      )}
+                    </fieldset>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="campaign-note">
+                        Reason for this version
+                      </Label>
+                      <Textarea
+                        id="campaign-note"
+                        value={note}
+                        required
+                        maxLength={2000}
+                        onChange={(e) => setNote(e.target.value)}
+                      />
+                    </Field>
+                    <div className="flex flex-wrap gap-3">
+                      {feedbackFor("draft")}
+                      <Button type="submit">
+                        {pending ? "Saving…" : "Save version for review"}
+                      </Button>
+                      {editing && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={resetDraft}
+                        >
+                          Cancel revision
+                        </Button>
+                      )}
+                    </div>
+                  </fieldset>
+                </FieldGroup>
+              </form>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="handoff"
+          className="data-[state=inactive]:hidden"
+        >
+          <EmailHandoffManager businessId={businessId} campaigns={state} />
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="sequences"
+          className="data-[state=inactive]:hidden"
+        >
+          <EmailSequenceManager
+            businessId={businessId}
+            initialState={initialSequences}
+            campaigns={state}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
 import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -34,7 +35,7 @@ function Field({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
@@ -43,7 +44,7 @@ function Field({
         defaultValue={value}
         required={required}
       />
-    </div>
+    </UiField>
   );
 }
 function Choice({
@@ -59,13 +60,13 @@ function Choice({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <NativeSelect id={id} name={name} defaultValue={value} required>
         <option value="">Choose explicitly</option>
         {children}
       </NativeSelect>
-    </div>
+    </UiField>
   );
 }
 function Note({
@@ -77,10 +78,10 @@ function Note({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Textarea id={id} name={name} required maxLength={1000} />
-    </div>
+    </UiField>
   );
 }
 type Command = (
@@ -244,7 +245,7 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
     (i) => i.target.periodId === periodId,
   );
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       {error && (
         <Alert>
           <p>{error}</p>
@@ -261,7 +262,7 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
           {status}
         </p>
       )}
-      <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
+      <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h2 className="text-xl font-semibold">Period confirmations</h2>
           <Button
@@ -300,7 +301,7 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
           </p>
         )}
         {period && (
-          <div className="space-y-3 wrap-anywhere">
+          <div className="flex flex-col gap-3 wrap-anywhere">
             <p>
               {report?.snapshot.obligation.definition.jurisdiction} ·
               Registration{" "}
@@ -390,7 +391,7 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
       </section>
       {period && (
         <>
-          <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
+          <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
             <h2 className="text-xl font-semibold">
               Supported manual procedure
             </h2>
@@ -401,7 +402,7 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
               No automatic authority or bank connector is enabled.
             </p>
             {policy && (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 <p>
                   Procedure revision {policy.version} ·{" "}
                   {decision?.outcome ?? "Awaiting review"} ·{" "}
@@ -420,17 +421,21 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
                     });
                   }}
                 >
-                  <fieldset
-                    disabled={busy}
-                    className="grid gap-4 md:grid-cols-2"
-                  >
-                    <Choice name="outcome" label="Procedure review decision">
-                      <option value="approved">Approve exact procedure</option>
-                      <option value="withdrawn">Withdraw procedure</option>
-                    </Choice>
-                    <Field name="note" label="Procedure review reason" />
-                    <Button type="submit">Record procedure decision</Button>
-                  </fieldset>
+                  <FieldGroup className="gap-5">
+                    <fieldset
+                      disabled={busy}
+                      className="grid gap-4 md:grid-cols-2"
+                    >
+                      <Choice name="outcome" label="Procedure review decision">
+                        <option value="approved">
+                          Approve exact procedure
+                        </option>
+                        <option value="withdrawn">Withdraw procedure</option>
+                      </Choice>
+                      <Field name="note" label="Procedure review reason" />
+                      <Button type="submit">Record procedure decision</Button>
+                    </fieldset>
+                  </FieldGroup>
                 </form>
               </div>
             )}
@@ -445,89 +450,96 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
                 onSubmit={savePolicy}
                 className="mt-4"
               >
-                <fieldset disabled={busy} className="grid gap-4 md:grid-cols-2">
-                  <Field
-                    name="authorityAccount"
-                    label="Exact authority account reference"
-                    value={policy?.definition.authorityAccount}
-                  />
-                  <Field
-                    name="fundingAccount"
-                    label="Exact remitting account reference (no credentials)"
-                    value={policy?.definition.fundingAccount}
-                  />
-                  <Field
-                    name="returnType"
-                    label="Supported return or obligation type"
-                    value={policy?.definition.returnType}
-                  />
-                  <Field
-                    name="effectiveFrom"
-                    label="Procedure effective from (UTC, ending in Z)"
-                    value={policy?.definition.effectiveFrom}
-                  />
-                  <Field
-                    name="effectiveUntil"
-                    label="Effective until (UTC, optional)"
-                    value={policy?.definition.effectiveUntil ?? ""}
-                    required={false}
-                  />
-                  <Choice
-                    name="filingRequired"
-                    label="Does this obligation require a filed return?"
-                    value={
-                      policy
-                        ? policy.definition.filingRequired
-                          ? "yes"
-                          : "no"
-                        : ""
-                    }
+                <FieldGroup className="gap-5">
+                  <fieldset
+                    disabled={busy}
+                    className="grid gap-4 md:grid-cols-2"
                   >
-                    <option value="yes">Yes, confirmed return required</option>
-                    <option value="no">
-                      No, explicitly reviewed non-requirement
-                    </option>
-                  </Choice>
-                  <Choice
-                    name="paymentRequired"
-                    label="Does this obligation require confirmed remittance?"
-                    value={
-                      policy
-                        ? policy.definition.paymentRequired
-                          ? "yes"
-                          : "no"
-                        : ""
-                    }
-                  >
-                    <option value="yes">
-                      Yes, full liability must be reconciled
-                    </option>
-                    <option value="no">
-                      No, explicitly reviewed non-requirement
-                    </option>
-                  </Choice>
-                  <Field
-                    name="retention"
-                    label="Approved preservation and hold policy reference"
-                    value={policy?.definition.retention.policyReference}
-                  />
-                  <Note
-                    name="evidence"
-                    label="Legal and procedure review evidence (one reference per line)"
-                  />
-                  <Note label="Configuration reason" />
-                  <p className="text-sm text-muted-foreground md:col-span-2">
-                    Original filing evidence is protected history. Completion
-                    does not delete it or establish a universal legal retention
-                    period. Assigned current tax reviewers approve this
-                    procedure.
-                  </p>
-                  <Button type="submit">Save procedure revision</Button>
-                </fieldset>
+                    <Field
+                      name="authorityAccount"
+                      label="Exact authority account reference"
+                      value={policy?.definition.authorityAccount}
+                    />
+                    <Field
+                      name="fundingAccount"
+                      label="Exact remitting account reference (no credentials)"
+                      value={policy?.definition.fundingAccount}
+                    />
+                    <Field
+                      name="returnType"
+                      label="Supported return or obligation type"
+                      value={policy?.definition.returnType}
+                    />
+                    <Field
+                      name="effectiveFrom"
+                      label="Procedure effective from (UTC, ending in Z)"
+                      value={policy?.definition.effectiveFrom}
+                    />
+                    <Field
+                      name="effectiveUntil"
+                      label="Effective until (UTC, optional)"
+                      value={policy?.definition.effectiveUntil ?? ""}
+                      required={false}
+                    />
+                    <Choice
+                      name="filingRequired"
+                      label="Does this obligation require a filed return?"
+                      value={
+                        policy
+                          ? policy.definition.filingRequired
+                            ? "yes"
+                            : "no"
+                          : ""
+                      }
+                    >
+                      <option value="yes">
+                        Yes, confirmed return required
+                      </option>
+                      <option value="no">
+                        No, explicitly reviewed non-requirement
+                      </option>
+                    </Choice>
+                    <Choice
+                      name="paymentRequired"
+                      label="Does this obligation require confirmed remittance?"
+                      value={
+                        policy
+                          ? policy.definition.paymentRequired
+                            ? "yes"
+                            : "no"
+                          : ""
+                      }
+                    >
+                      <option value="yes">
+                        Yes, full liability must be reconciled
+                      </option>
+                      <option value="no">
+                        No, explicitly reviewed non-requirement
+                      </option>
+                    </Choice>
+                    <Field
+                      name="retention"
+                      label="Approved preservation and hold policy reference"
+                      value={policy?.definition.retention.policyReference}
+                    />
+                    <Note
+                      name="evidence"
+                      label="Legal and procedure review evidence (one reference per line)"
+                    />
+                    <Note label="Configuration reason" />
+                    <p className="text-sm text-muted-foreground md:col-span-2">
+                      Original filing evidence is protected history. Completion
+                      does not delete it or establish a universal legal
+                      retention period. Assigned current tax reviewers approve
+                      this procedure.
+                    </p>
+                    <Button type="submit">Save procedure revision</Button>
+                  </fieldset>
+                </FieldGroup>
               </form>
             </details>
           </section>
-          <section className="space-y-4 rounded-2xl border border-border bg-card p-6">
+          <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
             <h2 className="text-xl font-semibold">
               Approve a manual work order
             </h2>
@@ -558,66 +570,68 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
                 });
               }}
             >
-              <fieldset
-                disabled={
-                  busy ||
-                  period.readiness !== "configured" ||
-                  report?.status !== "approved" ||
-                  !report.current
-                }
-                className="grid gap-4 md:grid-cols-2"
-              >
-                <Choice name="kind" label="Manual action">
-                  <option value="submission">
-                    Submit exact return revision
-                  </option>
-                  <option value="remittance">
-                    Remit an explicit tax amount
-                  </option>
-                </Choice>
-                <Field
-                  name="amountMinor"
-                  label={`Amount in ${report?.snapshot.currency ?? "original currency"} minor units`}
-                  value={report?.snapshot.totals.taxMinor}
-                />
-                <Choice
-                  name="amendmentOf"
-                  label="Amendment lineage"
-                  value="none"
+              <FieldGroup className="gap-5">
+                <fieldset
+                  disabled={
+                    busy ||
+                    period.readiness !== "configured" ||
+                    report?.status !== "approved" ||
+                    !report.current
+                  }
+                  className="grid gap-4 md:grid-cols-2"
                 >
-                  <option value="none">
-                    Original submission or remittance
-                  </option>
-                  {workspace.intents
-                    .filter((i) => i.kind === "submission" && i.filed)
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        Amend filed report {i.report.id} revision{" "}
-                        {i.report.revision}
-                      </option>
-                    ))}
-                </Choice>
-                <Choice
-                  name="supersedesId"
-                  label="Conclusive no-effect replacement lineage"
-                  value="none"
-                >
-                  <option value="none">No superseded work order</option>
-                  {workspace.intents
-                    .filter(
-                      (i) =>
-                        i.status === "superseded" &&
-                        i.target.periodId === periodId,
-                    )
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        Replace reviewed no-effect work order {i.id}
-                      </option>
-                    ))}
-                </Choice>
-                <Field name="note" label="Work order reason" />
-                <Button type="submit">Save work order for approval</Button>
-              </fieldset>
+                  <Choice name="kind" label="Manual action">
+                    <option value="submission">
+                      Submit exact return revision
+                    </option>
+                    <option value="remittance">
+                      Remit an explicit tax amount
+                    </option>
+                  </Choice>
+                  <Field
+                    name="amountMinor"
+                    label={`Amount in ${report?.snapshot.currency ?? "original currency"} minor units`}
+                    value={report?.snapshot.totals.taxMinor}
+                  />
+                  <Choice
+                    name="amendmentOf"
+                    label="Amendment lineage"
+                    value="none"
+                  >
+                    <option value="none">
+                      Original submission or remittance
+                    </option>
+                    {workspace.intents
+                      .filter((i) => i.kind === "submission" && i.filed)
+                      .map((i) => (
+                        <option key={i.id} value={i.id}>
+                          Amend filed report {i.report.id} revision{" "}
+                          {i.report.revision}
+                        </option>
+                      ))}
+                  </Choice>
+                  <Choice
+                    name="supersedesId"
+                    label="Conclusive no-effect replacement lineage"
+                    value="none"
+                  >
+                    <option value="none">No superseded work order</option>
+                    {workspace.intents
+                      .filter(
+                        (i) =>
+                          i.status === "superseded" &&
+                          i.target.periodId === periodId,
+                      )
+                      .map((i) => (
+                        <option key={i.id} value={i.id}>
+                          Replace reviewed no-effect work order {i.id}
+                        </option>
+                      ))}
+                  </Choice>
+                  <Field name="note" label="Work order reason" />
+                  <Button type="submit">Save work order for approval</Button>
+                </fieldset>
+              </FieldGroup>
             </form>
           </section>
           {records.map((intent) => (
@@ -644,7 +658,7 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
             .map((a) => (
               <section
                 key={a.id}
-                className="space-y-4 rounded-2xl border border-border bg-card p-6"
+                className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
               >
                 <h2 className="text-xl font-semibold">
                   Review prior remittance allocation
@@ -671,18 +685,20 @@ export function TaxFilingManager({ initial }: { initial: TaxFilingWorkspace }) {
                     });
                   }}
                 >
-                  <fieldset
-                    disabled={busy || report?.status !== "approved"}
-                    className="space-y-4"
-                  >
-                    <Field
-                      name="note"
-                      label="Evidence-backed reallocation reason"
-                    />
-                    <Button type="submit">
-                      Reconcile existing payment to this revision
-                    </Button>
-                  </fieldset>
+                  <FieldGroup className="gap-5">
+                    <fieldset
+                      disabled={busy || report?.status !== "approved"}
+                      className="flex flex-col gap-4"
+                    >
+                      <Field
+                        name="note"
+                        label="Evidence-backed reallocation reason"
+                      />
+                      <Button type="submit">
+                        Reconcile existing payment to this revision
+                      </Button>
+                    </fieldset>
+                  </FieldGroup>
                 </form>
               </section>
             ))}
@@ -803,7 +819,7 @@ function IntentPanel({
   }
   return (
     <section
-      className="space-y-4 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+      className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
       aria-busy={busy || reading || downloadingId !== null}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -875,120 +891,127 @@ function IntentPanel({
           void command("act", input);
         }}
       >
-        <fieldset disabled={busy} className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor={id}>Next attributable action</Label>
-            <NativeSelect
-              id={id}
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
-            >
-              <option value="approve">Approve exact work order</option>
-              <option value="attempt">
-                Record manual attempt or initiation
-              </option>
-              <option value="acknowledge">
-                Record evidence acknowledgement
-              </option>
-              <option value="confirm">
-                Independently confirm original evidence
-              </option>
-              <option value="raise_issue">Raise a required review issue</option>
-              <option value="resolve_issue">Resolve a required issue</option>
-              <option value="supersede">
-                Supersede using conclusive no-effect evidence
-              </option>
-            </NativeSelect>
-          </div>
-          <Field name="note" label="Action reason" />
-          {kind === "attempt" && (
-            <>
-              <Choice name="outcome" label="Observed attempt outcome">
-                <option value="pending">Pending; no completion proof</option>
-                <option value="unknown">
-                  Unknown; reconcile this work order
-                </option>
-                <option value="failed">
-                  Failed attempt; no completion proof
-                </option>
-              </Choice>
-              <Field
-                name="reference"
-                label="Original submission or initiation reference"
-              />
-              <Field
-                name="occurredAt"
-                label="Actual attempt time (UTC, ending in Z)"
-              />
-            </>
-          )}
-          {(kind === "acknowledge" ||
-            kind === "raise_issue" ||
-            kind === "resolve_issue" ||
-            kind === "supersede") && (
-            <Choice name="evidenceId" label="Retained original supporting file">
-              {artifacts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} · {a.reference} · {a.result} · {a.amountMinor}{" "}
-                  {a.target?.currency ?? "Unknown currency"}
-                </option>
-              ))}
-            </Choice>
-          )}
-          {kind === "supersede" && (
-            <p className="text-sm">
-              Only an independent reviewer can supersede this authorization
-              using an original source that conclusively establishes no
-              submission or transfer. Generic failure or uncertainty is
-              insufficient. A previously confirmed filing or payment remains
-              recorded. The original must cover the attempt and acknowledgements
-              in time. A late final filing or settlement acknowledgement blocks
-              its replacement and must be reviewed under the original work
-              order.
-            </p>
-          )}
-          {kind === "confirm" && (
-            <>
-              <Choice
-                name="acknowledgementId"
-                label="Exact acknowledgement to independently review"
+        <FieldGroup className="gap-5">
+          <fieldset disabled={busy} className="grid gap-4 md:grid-cols-2">
+            <UiField className="flex flex-col gap-2">
+              <Label htmlFor={id}>Next attributable action</Label>
+              <NativeSelect
+                id={id}
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
               >
-                {intent.events
-                  .filter((e) => e.kind === "acknowledge")
-                  .map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {String(e.detail.reference)} · {String(e.detail.result)} ·{" "}
-                      {e.actorName}
-                    </option>
-                  ))}
-              </Choice>
-              <p className="text-sm">
-                A different assigned reviewer must inspect the original file and
-                its exact account, period, revision, currency and amount.
-                Accepted for processing cannot establish filing; initiation
-                cannot establish settled remittance.
-              </p>
-            </>
-          )}
-          {kind === "resolve_issue" && (
-            <Choice name="issueId" label="Required issue being resolved">
-              {intent.unresolvedIssueIds.map((i) => (
-                <option key={i} value={i}>
-                  {i}
+                <option value="approve">Approve exact work order</option>
+                <option value="attempt">
+                  Record manual attempt or initiation
                 </option>
-              ))}
-            </Choice>
-          )}
-          <Button
-            type="submit"
-            disabled={
-              (kind === "approve" && !canApprove) ||
-              (kind === "attempt" && !canAttempt)
-            }
-          >
-            Record {readable(kind)}
-          </Button>
-        </fieldset>
+                <option value="acknowledge">
+                  Record evidence acknowledgement
+                </option>
+                <option value="confirm">
+                  Independently confirm original evidence
+                </option>
+                <option value="raise_issue">
+                  Raise a required review issue
+                </option>
+                <option value="resolve_issue">Resolve a required issue</option>
+                <option value="supersede">
+                  Supersede using conclusive no-effect evidence
+                </option>
+              </NativeSelect>
+            </UiField>
+            <Field name="note" label="Action reason" />
+            {kind === "attempt" && (
+              <>
+                <Choice name="outcome" label="Observed attempt outcome">
+                  <option value="pending">Pending; no completion proof</option>
+                  <option value="unknown">
+                    Unknown; reconcile this work order
+                  </option>
+                  <option value="failed">
+                    Failed attempt; no completion proof
+                  </option>
+                </Choice>
+                <Field
+                  name="reference"
+                  label="Original submission or initiation reference"
+                />
+                <Field
+                  name="occurredAt"
+                  label="Actual attempt time (UTC, ending in Z)"
+                />
+              </>
+            )}
+            {(kind === "acknowledge" ||
+              kind === "raise_issue" ||
+              kind === "resolve_issue" ||
+              kind === "supersede") && (
+              <Choice
+                name="evidenceId"
+                label="Retained original supporting file"
+              >
+                {artifacts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} · {a.reference} · {a.result} · {a.amountMinor}{" "}
+                    {a.target?.currency ?? "Unknown currency"}
+                  </option>
+                ))}
+              </Choice>
+            )}
+            {kind === "supersede" && (
+              <p className="text-sm">
+                Only an independent reviewer can supersede this authorization
+                using an original source that conclusively establishes no
+                submission or transfer. Generic failure or uncertainty is
+                insufficient. A previously confirmed filing or payment remains
+                recorded. The original must cover the attempt and
+                acknowledgements in time. A late final filing or settlement
+                acknowledgement blocks its replacement and must be reviewed
+                under the original work order.
+              </p>
+            )}
+            {kind === "confirm" && (
+              <>
+                <Choice
+                  name="acknowledgementId"
+                  label="Exact acknowledgement to independently review"
+                >
+                  {intent.events
+                    .filter((e) => e.kind === "acknowledge")
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {String(e.detail.reference)} · {String(e.detail.result)}{" "}
+                        · {e.actorName}
+                      </option>
+                    ))}
+                </Choice>
+                <p className="text-sm">
+                  A different assigned reviewer must inspect the original file
+                  and its exact account, period, revision, currency and amount.
+                  Accepted for processing cannot establish filing; initiation
+                  cannot establish settled remittance.
+                </p>
+              </>
+            )}
+            {kind === "resolve_issue" && (
+              <Choice name="issueId" label="Required issue being resolved">
+                {intent.unresolvedIssueIds.map((i) => (
+                  <option key={i} value={i}>
+                    {i}
+                  </option>
+                ))}
+              </Choice>
+            )}
+            <Button
+              type="submit"
+              disabled={
+                (kind === "approve" && !canApprove) ||
+                (kind === "attempt" && !canAttempt)
+              }
+            >
+              Record {readable(kind)}
+            </Button>
+          </fieldset>
+        </FieldGroup>
       </form>
       <details>
         <summary className="cursor-pointer py-2 font-medium">
@@ -996,89 +1019,95 @@ function IntentPanel({
         </summary>
         {reading && <p role="status">Reading and hashing the original file…</p>}
         <form onSubmit={(e) => void upload(e)} className="mt-4">
-          <fieldset
-            disabled={busy || reading}
-            className="grid gap-4 md:grid-cols-2"
-          >
-            <Field
-              name="file"
-              label="Original file (up to 2 MiB)"
-              type="file"
-            />
-            <Choice
-              name="scope"
-              label="Does the original evidence identify the displayed scope?"
+          <FieldGroup className="gap-5">
+            <fieldset
+              disabled={busy || reading}
+              className="grid gap-4 md:grid-cols-2"
             >
-              <option value="known">
-                Known account, period and revision; review each displayed
-                identity
-              </option>
-              <option value="unknown">
-                Unknown scope; retain unmatched for review
-              </option>
-            </Choice>
-            <Field
-              name="originalCurrency"
-              label="Original evidence currency (three-letter code; no conversion)"
-              value={intent.target.currency}
-            />
-            <Choice name="contentType" label="Original content type">
-              <option value="text/plain">UTF-8 text</option>
-              <option value="application/pdf">PDF</option>
-              <option value="image/png">PNG</option>
-              <option value="image/jpeg">JPEG</option>
-            </Choice>
-            <Choice name="evidenceKind" label="Original evidence source">
-              <option value="authority_acknowledgement">
-                Authority acknowledgement
-              </option>
-              <option value="bank_confirmation">
-                Bank remittance confirmation
-              </option>
-              <option value="supporting">
-                Other supporting evidence or actual administration expense
-              </option>
-            </Choice>
-            <Choice
-              name="result"
-              label="What does the original evidence establish?"
-            >
-              <option value="accepted_for_processing">
-                Accepted for processing only
-              </option>
-              <option value="filed">Final filing acknowledgement</option>
-              <option value="settled">Settled bank remittance</option>
-              <option value="failed">Failure without conclusive absence</option>
-              <option value="unknown">Unresolved or supporting evidence</option>
-              <option value="no_effect">
-                Conclusive no-submission / no-transfer source
-              </option>
-            </Choice>
-            <Field name="reference" label="Original evidence reference" />
-            <Field
-              name="occurredAt"
-              label="Original fact time (UTC, ending in Z)"
-            />
-            <Field
-              name="amountMinor"
-              label="Original amount (minor units)"
-              value={intent.amountMinor}
-            />
-            <Note label="Provenance: actual source and how this original was obtained" />
-            <p className="text-sm text-muted-foreground md:col-span-2">
-              The file is bound to the displayed work order scope and retained
-              with its original bytes and SHA-256. Upload only evidence for this
-              registration, authority account, remitting account, period and
-              report revision. Incorrect or unknown evidence must be recorded as
-              a review issue.
-            </p>
-            <Button type="submit">Retain original evidence</Button>
-          </fieldset>
+              <Field
+                name="file"
+                label="Original file (up to 2 MiB)"
+                type="file"
+              />
+              <Choice
+                name="scope"
+                label="Does the original evidence identify the displayed scope?"
+              >
+                <option value="known">
+                  Known account, period and revision; review each displayed
+                  identity
+                </option>
+                <option value="unknown">
+                  Unknown scope; retain unmatched for review
+                </option>
+              </Choice>
+              <Field
+                name="originalCurrency"
+                label="Original evidence currency (three-letter code; no conversion)"
+                value={intent.target.currency}
+              />
+              <Choice name="contentType" label="Original content type">
+                <option value="text/plain">UTF-8 text</option>
+                <option value="application/pdf">PDF</option>
+                <option value="image/png">PNG</option>
+                <option value="image/jpeg">JPEG</option>
+              </Choice>
+              <Choice name="evidenceKind" label="Original evidence source">
+                <option value="authority_acknowledgement">
+                  Authority acknowledgement
+                </option>
+                <option value="bank_confirmation">
+                  Bank remittance confirmation
+                </option>
+                <option value="supporting">
+                  Other supporting evidence or actual administration expense
+                </option>
+              </Choice>
+              <Choice
+                name="result"
+                label="What does the original evidence establish?"
+              >
+                <option value="accepted_for_processing">
+                  Accepted for processing only
+                </option>
+                <option value="filed">Final filing acknowledgement</option>
+                <option value="settled">Settled bank remittance</option>
+                <option value="failed">
+                  Failure without conclusive absence
+                </option>
+                <option value="unknown">
+                  Unresolved or supporting evidence
+                </option>
+                <option value="no_effect">
+                  Conclusive no-submission / no-transfer source
+                </option>
+              </Choice>
+              <Field name="reference" label="Original evidence reference" />
+              <Field
+                name="occurredAt"
+                label="Original fact time (UTC, ending in Z)"
+              />
+              <Field
+                name="amountMinor"
+                label="Original amount (minor units)"
+                value={intent.amountMinor}
+              />
+              <Note label="Provenance: actual source and how this original was obtained" />
+              <p className="text-sm text-muted-foreground md:col-span-2">
+                The file is bound to the displayed work order scope and retained
+                with its original bytes and SHA-256. Upload only evidence for
+                this registration, authority account, remitting account, period
+                and report revision. Incorrect or unknown evidence must be
+                recorded as a review issue.
+              </p>
+              <Button type="submit">Retain original evidence</Button>
+            </fieldset>
+          </FieldGroup>
         </form>
       </details>
-      <ul className="space-y-3">
+      <ul className="flex flex-col gap-3">
         {artifacts.map((a) => (
-          <li key={a.id} className="space-y-1 text-sm">
+          <li key={a.id} className="flex flex-col gap-1 text-sm">
             <Button
               variant="outline"
               disabled={busy || downloadingId !== null}
@@ -1111,7 +1140,7 @@ function IntentPanel({
                 Review original evidence scope
               </summary>
               {a.target ? (
-                <div className="space-y-2">
+                <div className="flex flex-col gap-2">
                   <p>
                     {a.target.jurisdiction} · {a.target.registration} ·{" "}
                     {a.target.mode} · {a.target.returnType}
@@ -1158,39 +1187,44 @@ function IntentPanel({
                     });
                   }}
                 >
-                  <fieldset
-                    disabled={busy}
-                    className="grid gap-4 md:grid-cols-2"
-                  >
-                    <Field
-                      name="quantity"
-                      label="Actual evidenced quantity (no assumed duration)"
-                      type="number"
-                    />
-                    <Choice name="unit" label="Evidenced unit">
-                      <option value="filing">Filing</option>
-                      <option value="document">Document</option>
-                      <option value="service">Service</option>
-                      <option value="minute">Measured minute</option>
-                      <option value="hour">Measured hour</option>
-                    </Choice>
-                    <Choice name="funding" label="Actual expense funding">
-                      <option value="cash">Operator cash</option>
-                      <option value="existing_subscription">
-                        Existing subscription allocation
-                      </option>
-                      <option value="unknown">Unresolved funding</option>
-                    </Choice>
-                    <Field
-                      name="retentionSeconds"
-                      label="Approved cost-detail retention (seconds)"
-                      type="number"
-                    />
-                    <Field name="note" label="Actual cost attribution reason" />
-                    <Button type="submit">
-                      Record evidenced administration expense
-                    </Button>
-                  </fieldset>
+                  <FieldGroup className="gap-5">
+                    <fieldset
+                      disabled={busy}
+                      className="grid gap-4 md:grid-cols-2"
+                    >
+                      <Field
+                        name="quantity"
+                        label="Actual evidenced quantity (no assumed duration)"
+                        type="number"
+                      />
+                      <Choice name="unit" label="Evidenced unit">
+                        <option value="filing">Filing</option>
+                        <option value="document">Document</option>
+                        <option value="service">Service</option>
+                        <option value="minute">Measured minute</option>
+                        <option value="hour">Measured hour</option>
+                      </Choice>
+                      <Choice name="funding" label="Actual expense funding">
+                        <option value="cash">Operator cash</option>
+                        <option value="existing_subscription">
+                          Existing subscription allocation
+                        </option>
+                        <option value="unknown">Unresolved funding</option>
+                      </Choice>
+                      <Field
+                        name="retentionSeconds"
+                        label="Approved cost-detail retention (seconds)"
+                        type="number"
+                      />
+                      <Field
+                        name="note"
+                        label="Actual cost attribution reason"
+                      />
+                      <Button type="submit">
+                        Record evidenced administration expense
+                      </Button>
+                    </fieldset>
+                  </FieldGroup>
                 </form>
                 <Link
                   href="/platform/costs"
@@ -1207,7 +1241,7 @@ function IntentPanel({
         <summary className="cursor-pointer py-2 font-medium">
           Attributable history and frozen report
         </summary>
-        <ol className="space-y-4">
+        <ol className="flex flex-col gap-4">
           {intent.events.map((e) => (
             <li key={e.id} className="rounded-xl border border-border p-4">
               <p>

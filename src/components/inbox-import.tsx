@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -183,7 +184,7 @@ export function InboxImport({
   }
   return (
     <section
-      className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+      className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
       aria-labelledby="imports-title"
     >
       <h2 id="imports-title" className="text-xl font-semibold">
@@ -217,11 +218,11 @@ export function InboxImport({
         </Alert>
       )}
       {notice && <p role="status">{notice}</p>}
-      <details className="space-y-4">
+      <details className="flex flex-col gap-4">
         <summary className="min-h-11 cursor-pointer py-3 font-medium">
           Manage import connections
         </summary>
-        <ul className="space-y-3">
+        <ul className="flex flex-col gap-3">
           {connections.map((connection) => (
             <li
               key={connection.id}
@@ -272,146 +273,153 @@ export function InboxImport({
             </li>
           ))}
         </ul>
-        <form onSubmit={add} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="import-label">Connection name</Label>
-            <Input id="import-label" name="label" required maxLength={120} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="import-channel">Channel</Label>
-            <NativeSelect id="import-channel" name="channel">
-              <option value="email">Email</option>
-              <option value="whatsapp">WhatsApp</option>
-            </NativeSelect>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="import-scope">
-              Selected conversation references (optional)
-            </Label>
-            <Textarea
-              id="import-scope"
-              name="conversationRefs"
-              aria-describedby="import-scope-help"
-              maxLength={25700}
-            />
-            <p id="import-scope-help" className="text-sm text-muted-foreground">
-              One source reference per line. Leave blank to process all new
-              messages you import into this connection. Historical
-              correspondence is not imported.
-            </p>
-          </div>
-          <label className="flex min-h-11 items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              name="manualRepliesObservable"
-              className="mt-1 size-5 accent-primary"
-            />
-            Allow authenticated manual-reply records for this import. This does
-            not enable live mailbox or WhatsApp monitoring.
-          </label>
-          <Button disabled={pending}>
-            {pending ? "Saving…" : "Add import connection"}
-          </Button>
+        <form onSubmit={add} className="flex flex-col gap-4">
+          <FieldGroup className="gap-4">
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="import-label">Connection name</Label>
+              <Input id="import-label" name="label" required maxLength={120} />
+            </Field>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="import-channel">Channel</Label>
+              <NativeSelect id="import-channel" name="channel">
+                <option value="email">Email</option>
+                <option value="whatsapp">WhatsApp</option>
+              </NativeSelect>
+            </Field>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="import-scope">
+                Selected conversation references (optional)
+              </Label>
+              <Textarea
+                id="import-scope"
+                name="conversationRefs"
+                aria-describedby="import-scope-help"
+                maxLength={25700}
+              />
+              <p
+                id="import-scope-help"
+                className="text-sm text-muted-foreground"
+              >
+                One source reference per line. Leave blank to process all new
+                messages you import into this connection. Historical
+                correspondence is not imported.
+              </p>
+            </Field>
+            <label className="flex min-h-11 items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                name="manualRepliesObservable"
+                className="mt-1 size-5 accent-primary"
+              />
+              Allow authenticated manual-reply records for this import. This
+              does not enable live mailbox or WhatsApp monitoring.
+            </label>
+            <Button disabled={pending}>
+              {pending ? "Saving…" : "Add import connection"}
+            </Button>
+          </FieldGroup>
         </form>
       </details>
       {connections.some((connection) => connection.active) && (
-        <details className="space-y-4">
+        <details className="flex flex-col gap-4">
           <summary className="min-h-11 cursor-pointer py-3 font-medium">
             Import a received inquiry
           </summary>
-          <form onSubmit={capture} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="import-connection">Source connection</Label>
-              <NativeSelect id="import-connection" name="connectionId">
-                {connections
-                  .filter((connection) => connection.active)
-                  .map((connection) => (
-                    <option key={connection.id} value={connection.id}>
-                      {connection.label} ({connection.channel})
-                    </option>
-                  ))}
-              </NativeSelect>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="import-kind">Engagement</Label>
-              <NativeSelect id="import-kind" name="kind">
-                <option value="direct_inquiry">Direct inquiry</option>
-                <option value="buying_interest_reply">
-                  Buying-interest reply
-                </option>
-              </NativeSelect>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {[
-                ["senderName", "Buyer name", 200],
-                ["senderRef", "Source buyer reference", 256],
-                ["geography", "Buyer geography (optional)", 200],
-                ["eventId", "Source event reference", 256],
-                ["messageRef", "Source message reference", 256],
-                ["conversationRef", "Source conversation reference", 256],
-                [
-                  "replyToMessageRef",
-                  "Original message reference (for replies)",
-                  256,
-                ],
-              ].map(([name, label, max]) => (
-                <div key={name} className="space-y-2">
-                  <Label htmlFor={`import-${name}`}>{label}</Label>
-                  <Input
-                    id={`import-${name}`}
-                    name={String(name)}
-                    maxLength={Number(max)}
-                    required={
-                      name !== "geography" && name !== "replyToMessageRef"
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="import-occurred">Source event time</Label>
-              <Input
-                id="import-occurred"
-                name="occurredAt"
-                required
-                placeholder="2026-11-06T09:00:00Z"
-                aria-describedby="import-time-help"
-              />
-              <p
-                id="import-time-help"
-                className="text-sm text-muted-foreground"
-              >
-                Use the original ISO 8601 timestamp, including timezone. Only
-                events since this connection was added are accepted.
+          <form onSubmit={capture} className="flex flex-col gap-4">
+            <FieldGroup className="gap-4">
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="import-connection">Source connection</Label>
+                <NativeSelect id="import-connection" name="connectionId">
+                  {connections
+                    .filter((connection) => connection.active)
+                    .map((connection) => (
+                      <option key={connection.id} value={connection.id}>
+                        {connection.label} ({connection.channel})
+                      </option>
+                    ))}
+                </NativeSelect>
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="import-kind">Engagement</Label>
+                <NativeSelect id="import-kind" name="kind">
+                  <option value="direct_inquiry">Direct inquiry</option>
+                  <option value="buying_interest_reply">
+                    Buying-interest reply
+                  </option>
+                </NativeSelect>
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {[
+                  ["senderName", "Buyer name", 200],
+                  ["senderRef", "Source buyer reference", 256],
+                  ["geography", "Buyer geography (optional)", 200],
+                  ["eventId", "Source event reference", 256],
+                  ["messageRef", "Source message reference", 256],
+                  ["conversationRef", "Source conversation reference", 256],
+                  [
+                    "replyToMessageRef",
+                    "Original message reference (for replies)",
+                    256,
+                  ],
+                ].map(([name, label, max]) => (
+                  <Field key={name} className="flex flex-col gap-2">
+                    <Label htmlFor={`import-${name}`}>{label}</Label>
+                    <Input
+                      id={`import-${name}`}
+                      name={String(name)}
+                      maxLength={Number(max)}
+                      required={
+                        name !== "geography" && name !== "replyToMessageRef"
+                      }
+                    />
+                  </Field>
+                ))}
+              </div>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="import-occurred">Source event time</Label>
+                <Input
+                  id="import-occurred"
+                  name="occurredAt"
+                  required
+                  placeholder="2026-11-06T09:00:00Z"
+                  aria-describedby="import-time-help"
+                />
+                <p
+                  id="import-time-help"
+                  className="text-sm text-muted-foreground"
+                >
+                  Use the original ISO 8601 timestamp, including timezone. Only
+                  events since this connection was added are accepted.
+                </p>
+              </Field>
+              <p className="text-sm text-muted-foreground">
+                Keep source references and event time unchanged when retrying an
+                import. Use the original channel conversation reference. Review
+                the conversation to associate messages with the right purchasing
+                need or separate independent needs.
               </p>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Keep source references and event time unchanged when retrying an
-              import. Use the original channel conversation reference. Review
-              the conversation to associate messages with the right purchasing
-              need or separate independent needs.
-            </p>
-            <div className="space-y-2">
-              <Label htmlFor="import-subject">Subject</Label>
-              <Input
-                id="import-subject"
-                name="subject"
-                required
-                maxLength={500}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="import-text">Received message</Label>
-              <Textarea
-                id="import-text"
-                name="text"
-                required
-                maxLength={20000}
-              />
-            </div>
-            <Button disabled={pending}>
-              {pending ? "Saving…" : "Import inquiry"}
-            </Button>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="import-subject">Subject</Label>
+                <Input
+                  id="import-subject"
+                  name="subject"
+                  required
+                  maxLength={500}
+                />
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="import-text">Received message</Label>
+                <Textarea
+                  id="import-text"
+                  name="text"
+                  required
+                  maxLength={20000}
+                />
+              </Field>
+              <Button disabled={pending}>
+                {pending ? "Saving…" : "Import inquiry"}
+              </Button>
+            </FieldGroup>
           </form>
         </details>
       )}

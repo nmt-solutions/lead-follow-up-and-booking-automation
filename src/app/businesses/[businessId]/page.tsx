@@ -2,21 +2,39 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import {
   ArrowRight,
-  ArrowUpRight,
+  BookOpen,
+  CalendarDays,
   CheckCircle2,
   Circle,
   Inbox,
-  MapPin,
   Search,
-  Send,
-  Settings2,
+  Sparkles,
+  Users,
 } from "lucide-react";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
-import { IsometricView } from "@/components/isometric-view";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyContent,
+} from "@/components/ui/empty";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Overview" };
@@ -28,10 +46,10 @@ export default async function BusinessPage({
   searchParams: Promise<{ created?: string; joined?: string }>;
 }) {
   const { businessId } = await params;
-  const services = await getServices();
-  const credentials = await headers();
-  const state = await (async () => {
+  const data = await (async () => {
     try {
+      const services = await getServices();
+      const credentials = await headers();
       const [profile, access] = await Promise.all([
         services.application.getProfile(credentials, businessId),
         services.team.requireBusinessCapability(
@@ -40,231 +58,368 @@ export default async function BusinessPage({
           "profile.read",
         ),
       ]);
-      return { profile, access };
+      const [report, inbox, mailboxes, ai, knowledge] = await Promise.all([
+        services.reporting.read(credentials, businessId, {}).catch(() => null),
+        services.inbox.workspace(credentials, businessId).catch(() => null),
+        services.mailboxes.workspace(credentials, businessId).catch(() => null),
+        services.ai.workspace(credentials, businessId).catch(() => null),
+        services.knowledge.workspace(credentials, businessId).catch(() => null),
+      ]);
+      return { profile, access, report, inbox, mailboxes, ai, knowledge };
     } catch (error: unknown) {
       return pageFailure(error);
     }
   })();
-  const { profile, access } = state;
-  const canManage = access.role !== "salesperson";
+  const { profile, access, report, inbox, mailboxes, ai, knowledge } = data;
+  const base = `/businesses/${businessId}`;
   const configured = Boolean(
     profile.configuration?.homeMarketConfirmedAt &&
     profile.configuration?.buyersReviewedAt,
   );
-  const base = `/businesses/${businessId}`;
+  const connected =
+    mailboxes?.mailboxes.some(
+      (item) => item.configuration.enabled && item.visibility === "current",
+    ) ?? false;
+  const knowledgeReady = Boolean(knowledge?.current);
+  const aiReady = Boolean(ai?.activation.profileId && !ai.setup.length);
+  const tasks = [
+    {
+      label: "Add your business",
+      description: "Name and products saved",
+      complete: true,
+      path: "/profile",
+    },
+    {
+      label: "Choose customers and location",
+      description: configured
+        ? "Search preferences confirmed"
+        : "Complete your business setup",
+      complete: configured,
+      path: "/configuration",
+    },
+    {
+      label: "Connect a sales inbox",
+      description: connected
+        ? "An inbox is ready to process sales mail"
+        : "Choose the sales mail to process",
+      complete: connected,
+      path: "/mailboxes",
+    },
+    {
+      label: "Approve business knowledge",
+      description: knowledgeReady
+        ? "Approved information is available"
+        : "Give AI the answers your team uses",
+      complete: knowledgeReady,
+      path: "/knowledge",
+    },
+  ];
+  const completed = tasks.filter((item) => item.complete).length;
+  const recent = [...(inbox?.conversations ?? [])]
+    .sort((a, b) => Date.parse(b.lastReceivedAt) - Date.parse(a.lastReceivedAt))
+    .slice(0, 5);
   const query = await searchParams;
+  const metrics = [
+    { id: "observed_prospects", label: "Prospects", icon: Search },
+    { id: "incoming_messages", label: "Incoming messages", icon: Inbox },
+    { id: "qualified", label: "Qualified opportunities", icon: Users },
+    {
+      id: "appointment_requests",
+      label: "Appointment requests",
+      icon: CalendarDays,
+    },
+  ];
   return (
-    <div className="space-y-8">
-      {query.created === "1" && (
-        <p
-          role="status"
-          className="flex items-start gap-3 rounded-xl border border-success/30 bg-card p-4 text-sm"
-        >
-          <CheckCircle2
-            className="size-5 shrink-0 text-success"
-            aria-hidden="true"
-          />
-          Your business is ready. Start with a prospect search or connect your
-          sales inbox.
-        </p>
-      )}
-      {query.joined === "1" && (
-        <p
-          role="status"
-          className="rounded-xl border border-border bg-card p-4 text-sm"
-        >
-          Invitation accepted. You now have access to {profile.name}.
-        </p>
-      )}
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="eyebrow">Your business at a glance</p>
-          <h1 className="page-title mt-2">{profile.name}</h1>
-          <p className="mt-3 max-w-xl text-muted-foreground">
-            Find potential customers and keep sales conversations moving.
-          </p>
-        </div>
-        {canManage && (
-          <Button asChild variant="outline">
-            <Link href={`${base}/configuration`}>
-              <Settings2 aria-hidden="true" />
-              Business setup
-            </Link>
-          </Button>
-        )}
-      </header>
-      <section
-        className="grid items-center gap-6 rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8 lg:grid-cols-[1.1fr_1fr]"
-        aria-labelledby="next-step-heading"
-      >
-        <div className="space-y-5">
-          <Badge>{configured ? "Next step" : "Finish setup"}</Badge>
-          <h2
-            id="next-step-heading"
-            className="max-w-md text-3xl leading-tight font-semibold tracking-tight"
-          >
-            {configured
-              ? "Find your next customer."
-              : "Tell us who you want to reach."}
-          </h2>
-          <p className="max-w-md leading-relaxed text-muted-foreground">
-            {configured
-              ? "Search for buyers who match your business. Review each prospect before choosing who to contact."
-              : "Your business profile is saved. Add your customers and confirm your search area to get ready for prospect searches."}
-          </p>
-          <Button asChild>
-            <Link
-              href={`${base}/${configured ? "discovery" : "configuration"}`}
-            >
-              {configured
-                ? "Find prospects"
-                : canManage
-                  ? "Continue setup"
-                  : "View business setup"}
-              <ArrowRight aria-hidden="true" />
-            </Link>
-          </Button>
-          {profile.homeMarket && (
-            <p className="flex items-start gap-2 text-sm text-muted-foreground">
-              <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              {profile.homeMarket}
-            </p>
-          )}
-        </div>
-        <IsometricView />
-      </section>
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[
-          {
-            icon: Search,
-            title: "Find prospects",
-            description: "Search for customers who may need what you sell.",
-            path: "/discovery",
-          },
-          {
-            icon: Inbox,
-            title: "Sales inbox",
-            description: "Read inquiries and replies from potential customers.",
-            path: "/inbox",
-          },
-          {
-            icon: Send,
-            title: "Outreach",
-            description: "Prepare messages and review them before sending.",
-            path: "/campaigns",
-          },
-        ].map((item) => (
-          <Link
-            key={item.path}
-            href={base + item.path}
-            className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 transition-colors hover:border-primary"
-          >
-            <div className="flex items-center justify-between">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-muted text-primary">
-                <item.icon aria-hidden="true" className="size-5" />
-              </span>
-              <ArrowUpRight
-                className="size-4 text-muted-foreground group-hover:text-primary"
-                aria-hidden="true"
-              />
-            </div>
-            <div>
-              <h2 className="font-semibold">{item.title}</h2>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                {item.description}
-              </p>
-            </div>
-          </Link>
-        ))}
-      </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Getting started</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {[
-              {
-                complete: true,
-                label: "Add your business",
-                text: "Your profile is saved.",
-                path: "/profile",
-              },
-              {
-                complete: configured,
-                label: "Choose customers and location",
-                text: configured
-                  ? "Your search preferences are saved."
-                  : "Complete your business setup.",
-                path: "/configuration",
-              },
-            ].map((item) => (
-              <Link
-                key={item.path}
-                href={base + item.path}
-                className="flex items-start gap-3 rounded-xl p-3 hover:bg-muted"
-              >
-                {item.complete ? (
-                  <CheckCircle2
-                    aria-hidden="true"
-                    className="mt-0.5 size-5 shrink-0 text-success"
-                  />
-                ) : (
-                  <Circle
-                    aria-hidden="true"
-                    className="mt-0.5 size-5 shrink-0 text-muted-foreground"
-                  />
-                )}
-                <span className="flex-1">
-                  <span className="block text-sm font-medium">
-                    {item.label}
-                  </span>
-                  <span className="mt-1 block text-sm text-muted-foreground">
-                    {item.text}
-                  </span>
-                </span>
-                <ArrowRight
-                  aria-hidden="true"
-                  className="mt-1 size-4 shrink-0"
-                />
-              </Link>
-            ))}
-            <Link
-              href={`${base}/mailboxes`}
-              className="flex items-start gap-3 rounded-xl p-3 hover:bg-muted"
-            >
-              <Inbox
-                className="mt-0.5 size-5 shrink-0 text-primary"
-                aria-hidden="true"
-              />
-              <span className="flex-1">
-                <span className="block text-sm font-medium">
-                  Connect a sales inbox
-                </span>
-                <span className="mt-1 block text-sm text-muted-foreground">
-                  Choose which emails LeadRelay can process.
-                </span>
-              </span>
-              <ArrowRight className="mt-1 size-4 shrink-0" aria-hidden="true" />
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>What you sell</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="line-clamp-5 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-              {profile.offering}
-            </p>
-            <Button asChild variant="ghost" className="mt-4">
-              <Link href={`${base}/profile`}>
-                {canManage ? "Edit business profile" : "View business profile"}
-                <ArrowRight aria-hidden="true" />
+    <div className="app-page">
+      <PageHeader
+        title="Overview"
+        description={`Your sales activity for ${profile.name}.`}
+        actions={
+          <>
+            <Button asChild variant="outline">
+              <Link href={base + "/inbox"}>
+                <Inbox data-icon="inline-start" aria-hidden="true" />
+                Conversations
               </Link>
             </Button>
-          </CardContent>
-        </Card>
+            <Button asChild>
+              <Link
+                href={base + (configured ? "/discovery" : "/configuration")}
+              >
+                <Search data-icon="inline-start" aria-hidden="true" />
+                {configured ? "Find prospects" : "Finish setup"}
+              </Link>
+            </Button>
+          </>
+        }
+      />
+      {(query.created === "1" || query.joined === "1") && (
+        <Alert variant="success">
+          <CheckCircle2 aria-hidden="true" />
+          <AlertTitle>
+            {query.created === "1"
+              ? "Your business is saved"
+              : "You joined the business"}
+          </AlertTitle>
+          <AlertDescription>
+            {query.created === "1"
+              ? "Your customers and location are ready. Continue with the setup checklist below."
+              : `You now have access to ${profile.name}.`}
+          </AlertDescription>
+        </Alert>
+      )}
+      <section
+        aria-label="Recorded activity for the last 30 days"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+      >
+        {metrics.map((item) => {
+          const metric = report?.metrics.find(
+            (metric) => metric.id === item.id,
+          );
+          return (
+            <Card key={item.id}>
+              <CardHeader className="flex-row items-center justify-between gap-3">
+                <CardDescription>{item.label}</CardDescription>
+                <item.icon
+                  className="size-4 text-muted-foreground"
+                  aria-hidden="true"
+                />
+              </CardHeader>
+              <CardContent>
+                <p className="text-3xl font-bold tracking-tight tabular-nums">
+                  {metric?.value != null
+                    ? new Intl.NumberFormat("en").format(metric.value)
+                    : "Unavailable"}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {metric?.status === "recorded"
+                    ? "Recorded in the last 30 days"
+                    : "Open Reports to review availability"}
+                </p>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </section>
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex min-w-0 flex-col gap-6">
+          <Card>
+            <CardHeader className="flex-row flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <CardTitle>Recent conversations</CardTitle>
+                <CardDescription>
+                  Customer inquiries and replies received by your business.
+                </CardDescription>
+              </div>
+              <Button asChild variant="ghost">
+                <Link href={base + "/inbox"}>
+                  View all
+                  <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                </Link>
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {recent.length ? (
+                <ul className="divide-y divide-border">
+                  {recent.map((conversation) => (
+                    <li key={conversation.id}>
+                      <Link
+                        href={`${base}/inbox/${conversation.id}`}
+                        className="flex items-start gap-3 rounded-lg py-4 hover:bg-muted/50"
+                      >
+                        <Avatar className="size-10">
+                          <AvatarFallback>
+                            {conversation.buyerName.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex min-w-0 flex-1 flex-col gap-1">
+                          <span className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-sm font-semibold">
+                              {conversation.buyerName}
+                            </span>
+                            <time
+                              className="text-xs text-muted-foreground"
+                              dateTime={conversation.lastReceivedAt}
+                            >
+                              {new Date(
+                                conversation.lastReceivedAt,
+                              ).toLocaleDateString("en-GB", {
+                                day: "numeric",
+                                month: "short",
+                                timeZone: "UTC",
+                              })}
+                            </time>
+                          </span>
+                          <span className="truncate text-sm text-muted-foreground">
+                            {conversation.subject}
+                          </span>
+                        </div>
+                        {conversation.needsReview && (
+                          <Badge variant="warning">Review</Badge>
+                        )}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Inbox aria-hidden="true" />
+                    </EmptyMedia>
+                    <EmptyTitle>
+                      {inbox
+                        ? "Your conversations will appear here"
+                        : "Conversations are unavailable"}
+                    </EmptyTitle>
+                    <EmptyDescription>
+                      {inbox
+                        ? "Connect a sales inbox or import a received inquiry. Prospect search results stay in Find prospects."
+                        : "Open Conversations to review access or retry loading your messages."}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent>
+                    <Button asChild variant="outline">
+                      <Link href={base + (inbox ? "/mailboxes" : "/inbox")}>
+                        {inbox ? "Connect an inbox" : "Open conversations"}
+                      </Link>
+                    </Button>
+                  </EmptyContent>
+                </Empty>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex-row flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <CardTitle>Business setup</CardTitle>
+                <CardDescription>
+                  {completed} of {tasks.length} steps complete. Your progress is
+                  based on saved settings.
+                </CardDescription>
+              </div>
+              <Badge
+                variant={completed === tasks.length ? "success" : "primary"}
+              >
+                {completed === tasks.length ? "Ready" : "In progress"}
+              </Badge>
+            </CardHeader>
+            <CardContent>
+              <Progress
+                value={(completed / tasks.length) * 100}
+                aria-label={`${completed} of ${tasks.length} setup steps complete`}
+                className="mb-5"
+              />
+              <div className="grid gap-2 sm:grid-cols-2">
+                {tasks.map((item) => (
+                  <Link
+                    key={item.path}
+                    href={base + item.path}
+                    className="flex items-start gap-3 rounded-lg p-3 hover:bg-muted"
+                  >
+                    <span className="mt-0.5">
+                      {item.complete ? (
+                        <CheckCircle2
+                          className="size-5 text-success"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Circle
+                          className="size-5 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </span>
+                    <span className="flex flex-1 flex-col gap-1">
+                      <span className="text-sm font-semibold">
+                        {item.label}
+                      </span>
+                      <span className="text-xs leading-5 text-muted-foreground">
+                        {item.description}
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+        <aside className="flex flex-col gap-6">
+          {ai && (
+            <Card>
+              <CardHeader>
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-primary">
+                    <Sparkles className="size-5" aria-hidden="true" />
+                  </span>
+                  <Badge variant={aiReady ? "success" : "default"}>
+                    {aiReady ? "Profile active" : "Setup needed"}
+                  </Badge>
+                </div>
+                <CardTitle>Your AI assistant</CardTitle>
+                <CardDescription>
+                  {aiReady
+                    ? "Uses your approved business information for supported research review and sales drafts."
+                    : "Approve business knowledge and activate a reviewed profile to use supported AI workflows."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <p className="text-xs leading-6 text-muted-foreground">
+                  Review generated facts and messages. Sending and other sales
+                  actions need their own approval.
+                </p>
+                <Button asChild variant="outline" className="w-full">
+                  <Link href={base + "/ai"}>
+                    Open AI assistant
+                    <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+          <Card>
+            <CardHeader>
+              <CardTitle>What you sell</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <p className="line-clamp-4 text-sm leading-6 text-muted-foreground">
+                {profile.offering}
+              </p>
+              <Separator />
+              <div className="flex flex-col gap-1">
+                <p className="text-xs text-muted-foreground">
+                  Default search area
+                </p>
+                <p className="text-sm font-medium">
+                  {profile.homeMarket || "Not set"}
+                </p>
+              </div>
+              <Button asChild variant="ghost" className="w-fit">
+                <Link href={base + "/profile"}>
+                  {access.role === "salesperson"
+                    ? "View profile"
+                    : "Edit profile"}
+                  <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+          <Link
+            href="/getting-started"
+            className="flex items-start gap-3 rounded-xl border border-border p-4 hover:bg-card"
+          >
+            <BookOpen
+              className="mt-0.5 size-5 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <span className="flex flex-col gap-1">
+              <span className="text-sm font-semibold">The vendor guide</span>
+              <span className="text-xs leading-5 text-muted-foreground">
+                Setup, your first search, and handling replies.
+              </span>
+            </span>
+          </Link>
+        </aside>
       </div>
     </div>
   );

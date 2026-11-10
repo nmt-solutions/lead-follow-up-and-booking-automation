@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -16,18 +17,21 @@ export default async function SecurityPage() {
   })();
   return (
     <AppShell>
-      <div className="mb-8 max-w-2xl space-y-3">
-        <p className="eyebrow">Account security</p>
-        <h1 className="page-title">A second layer of protection.</h1>
-        <p className="text-muted-foreground leading-relaxed">
-          Manage secure access for{" "}
-          <span className="font-medium text-foreground wrap-anywhere">
-            {status.email}
-          </span>
-          .
-        </p>
+      <div className="app-page">
+        <PageHeader
+          title="Account security"
+          description={
+            <>
+              Manage secure access for{" "}
+              <span className="font-medium text-foreground wrap-anywhere">
+                {status.email}
+              </span>
+              .
+            </>
+          }
+        />
+        <SecurityManager initialStatus={status} />
       </div>
-      <SecurityManager initialStatus={status} />
     </AppShell>
   );
 }

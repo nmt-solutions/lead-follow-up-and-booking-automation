@@ -9,7 +9,7 @@ function Timestamp({ value }: { value: string }) {
 }
 function Entry({ call }: { call: CallRevision }) {
   return (
-    <div className="space-y-2 wrap-anywhere">
+    <div className="flex flex-col gap-2 wrap-anywhere">
       <p className="font-medium">Outcome: {call.outcome}</p>
       <p className="text-sm">
         Occurred: <Timestamp value={call.occurredAt} />
@@ -37,7 +37,7 @@ function Entry({ call }: { call: CallRevision }) {
 export function CallTimeline({ state }: { state: CallWorkspace }) {
   return (
     <section
-      className="space-y-4"
+      className="flex flex-col gap-4"
       aria-label={`Human call timeline for ${state.opportunityTitle}`}
     >
       <p className="text-sm text-muted-foreground">
@@ -45,9 +45,12 @@ export function CallTimeline({ state }: { state: CallWorkspace }) {
         logged
       </p>
       {state.calls.length ? (
-        <ol className="space-y-5">
+        <ol className="flex flex-col gap-5">
           {state.calls.map((call) => (
-            <li key={call.id} className="space-y-3 rounded-xl border p-4">
+            <li
+              key={call.id}
+              className="flex flex-col gap-3 rounded-xl border p-4"
+            >
               <Entry call={call} />
               <p className="text-sm text-muted-foreground">
                 First recorded by {call.recordedByName} ({call.recordedBy}) ·{" "}
@@ -57,7 +60,7 @@ export function CallTimeline({ state }: { state: CallWorkspace }) {
                 <summary className="min-h-11 cursor-pointer py-3 font-medium">
                   Call revision history
                 </summary>
-                <ol className="space-y-4">
+                <ol className="flex flex-col gap-4">
                   {state.history
                     .filter((r) => r.id === call.id)
                     .map((r) => (

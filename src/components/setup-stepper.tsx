@@ -8,15 +8,22 @@ export function SetupStepper({
   current,
   onChange,
   disabled = false,
+  orientation = "horizontal",
 }: {
   steps: readonly string[];
   current: number;
   onChange(step: number): void;
   disabled?: boolean;
+  orientation?: "horizontal" | "vertical";
 }) {
   return (
     <nav aria-label="Setup progress">
-      <ol className="flex gap-2 sm:gap-3">
+      <ol
+        className={cn(
+          "flex gap-2 sm:gap-3",
+          orientation === "vertical" && "lg:flex-col lg:gap-3",
+        )}
+      >
         {steps.map((step, index) => (
           <li key={step} className="min-w-0 flex-1">
             <Button
@@ -27,6 +34,7 @@ export function SetupStepper({
               aria-current={index === current ? "step" : undefined}
               className={cn(
                 "flex h-auto min-h-14 w-full justify-start flex-col gap-2 rounded-lg p-1 text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring sm:flex-row sm:items-center sm:gap-3",
+                orientation === "vertical" && "lg:flex-row lg:p-2",
                 index > current ? "text-muted-foreground" : "text-foreground",
               )}
             >
@@ -49,6 +57,7 @@ export function SetupStepper({
             <div
               className={cn(
                 "mt-2 h-1 rounded-full",
+                orientation === "vertical" && "lg:hidden",
                 index <= current ? "bg-primary" : "bg-border",
               )}
             />

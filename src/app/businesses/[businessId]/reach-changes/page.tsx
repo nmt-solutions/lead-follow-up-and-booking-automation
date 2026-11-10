@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -25,21 +26,17 @@ export default async function ReachChangesPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}/subscription-payments`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Subscription payments
-        </Link>
-        <h1 className="page-title">Change geographic reach</h1>
-        <p className="mt-3 text-muted-foreground">
-          Review the exact prorated payment and monthly renewal before
-          approving. Reductions begin with a paid eligible renewal. Stored
-          prospects and incoming or engaged conversations remain available.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Change geographic reach</>}
+        description={
+          <>
+            Review the exact prorated payment and monthly renewal before
+            approving. Reductions begin with a paid eligible renewal. Stored
+            prospects and incoming or engaged conversations remain available.
+          </>
+        }
+      ></PageHeader>
       <ReachChangeManager
         businessId={businessId}
         initial={data.state}

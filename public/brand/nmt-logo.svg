@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg
+  data-v-423bf9ae=""
+  viewBox="0 0 90 90"
+  class="iconLeft"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <defs data-v-423bf9ae="">
+    <linearGradient
+      data-v-423bf9ae=""
+      gradientTransform="rotate(25)"
+      id="bd9c1d3b-cd47-4262-9b45-f01bb9303fa9"
+      x1="0%"
+      y1="0%"
+      x2="100%"
+      y2="0%"
+    >
+      <stop
+        data-v-423bf9ae=""
+        offset="0"
+        style="stop-color: rgb(78, 26, 112); stop-opacity: 1"
+      />
+      <stop
+        data-v-423bf9ae=""
+        offset="1"
+        style="stop-color: rgb(43, 76, 242); stop-opacity: 1"
+      />
+    </linearGradient>
+  </defs>
+  <g
+    data-v-423bf9ae=""
+    id="3148767c-c355-47e4-a2fb-ba26438cc518"
+    transform="matrix(2.8125,0,0,2.8125,0,0)"
+    stroke="none"
+    fill="url(#bd9c1d3b-cd47-4262-9b45-f01bb9303fa9)"
+  >
+    <path
+      d="M4.029 14.362L14.362 4.028l.707.707L4.736 15.07zM17.135 27.47L27.47 17.135l.707.707-10.333 10.333zM4.029 17.841l.707-.707 10.333 10.334-.707.707zM17.135 4.735l.708-.707L28.176 14.36l-.707.707z"
+    />
+    <g>
+      <path
+        d="M16 1.414l1.683 1.683L16 4.779l-1.683-1.683L16 1.414M16 0l-3.097 3.097L16 6.194l3.097-3.097L16 0zM16 27.221l1.683 1.683L16 30.586l-1.683-1.683L16 27.221m0-1.415l-3.097 3.097L16 32l3.097-3.097L16 25.806zM3.097 14.317L4.779 16l-1.683 1.683L1.414 16l1.683-1.683m0-1.414L0 16l3.097 3.097L6.194 16l-3.097-3.097zM28.903 14.317L30.586 16l-1.683 1.683L27.221 16l1.682-1.683m0-1.414L25.806 16l3.097 3.097L32 16l-3.097-3.097z"
+      />
+    </g>
+  </g>
+</svg>

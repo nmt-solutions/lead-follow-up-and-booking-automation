@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { FileManager } from "@/components/file-manager";
 import { getServices } from "@/server/services";
@@ -25,22 +26,15 @@ export default async function FilesPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <div>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to overview
-        </Link>
-        <p className="mb-3 text-sm font-medium text-primary wrap-anywhere">
-          {state.profile.name}
-        </p>
-        <h1 className="page-title">Private Business files</h1>
-        <p className="mt-3 text-muted-foreground">
-          Upload approved documents and track ownership, access and deletion.
-        </p>
-      </div>
+    <div className="app-page">
+      <PageHeader
+        title={<>Private Business files</>}
+        description={
+          <>
+            Upload approved documents and track ownership, access and deletion.
+          </>
+        }
+      ></PageHeader>
       <FileManager businessId={businessId} initial={state.listing} />
     </div>
   );

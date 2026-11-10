@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
 import {
@@ -195,7 +196,7 @@ function Field({
   multiline?: boolean;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       {multiline ? (
         <Textarea
@@ -228,7 +229,7 @@ function AllowanceFields({
   onChange(value: AllowanceDraft): void;
 }) {
   return (
-    <fieldset className="space-y-3 rounded-xl border border-border p-4">
+    <fieldset className="flex flex-col gap-3 rounded-xl border border-border p-4">
       <legend className="px-2 font-medium">{title}</legend>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
@@ -266,7 +267,7 @@ function PriceFields({
   pilot: boolean;
 }) {
   return (
-    <fieldset className="space-y-3 rounded-xl border border-border p-4">
+    <fieldset className="flex flex-col gap-3 rounded-xl border border-border p-4">
       <legend className="px-2 font-medium">{currency} platform prices</legend>
       <Field
         id={`${prefix}-monthly`}
@@ -307,7 +308,7 @@ function OfferEditor({
     onChange({ ...value, [key]: next });
   }
   return (
-    <fieldset className="space-y-5 rounded-2xl border border-border p-5">
+    <fieldset className="flex flex-col gap-5 rounded-2xl border border-border p-5">
       <legend className="px-2 text-xl font-semibold">
         {value.label || `Reach offer ${index + 1}`}
       </legend>
@@ -344,7 +345,7 @@ function OfferEditor({
         value={value.automation}
         onChange={(next) => update("automation", next)}
       />
-      <div className="space-y-2">
+      <UiField className="flex flex-col gap-2">
         <Label htmlFor={`${prefix}-pilot`}>Paid pilot</Label>
         <NativeSelect
           id={`${prefix}-pilot`}
@@ -356,9 +357,9 @@ function OfferEditor({
           <option value="unavailable">Not offered</option>
           <option value="offered">Offer a bounded paid pilot</option>
         </NativeSelect>
-      </div>
+      </UiField>
       {value.pilotEnabled && (
-        <div className="space-y-5">
+        <div className="flex flex-col gap-5">
           <Field
             id={`${prefix}-days`}
             label="Paid pilot duration in days"
@@ -399,7 +400,7 @@ function OfferEditor({
         multiline
         onChange={(next) => update("renewalTerms", next)}
       />
-      <fieldset className="space-y-5 rounded-xl border border-border p-4">
+      <fieldset className="flex flex-col gap-5 rounded-xl border border-border p-4">
         <legend className="px-2 font-semibold">
           Optional reserved discovery capacity
         </legend>
@@ -418,7 +419,7 @@ function OfferEditor({
           return (
             <fieldset
               key={i}
-              className="space-y-4 rounded-xl border border-border p-4"
+              className="flex flex-col gap-4 rounded-xl border border-border p-4"
             >
               <legend className="px-2 font-medium">
                 Reserved option {i + 1}
@@ -549,8 +550,8 @@ export function SubscriptionPricingManager({
     }
   }
   return (
-    <div className="space-y-8">
-      <section className="space-y-3 rounded-2xl border border-border bg-card p-6">
+    <div className="flex flex-col gap-8">
+      <section className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6">
         <h2 className="text-xl font-semibold">
           Effective commercial configuration
         </h2>
@@ -573,7 +574,7 @@ export function SubscriptionPricingManager({
       </section>
       <SubscriptionDisclosures />
       <form
-        className="space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
+        className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
         onSubmit={(event) => {
           event.preventDefault();
           if (!parsed.success) return;
@@ -594,151 +595,154 @@ export function SubscriptionPricingManager({
           });
         }}
       >
-        <h2 className="text-2xl font-semibold">Next price version</h2>
-        <p className="text-sm text-muted-foreground">
-          Enter approved commercial inputs only. There are no production prices,
-          FX rates, allowance quantities or tax defaults. Unconfigured currency
-          prices and allowances keep affected quotes unavailable.
-        </p>
-        <fieldset disabled={busy} className="space-y-6">
-          {offers.map((offer, index) => (
-            <OfferEditor
-              key={index}
-              value={offer}
-              index={index}
-              onChange={(next) =>
-                setOffers((current) =>
-                  current.map((item, n) => (n === index ? next : item)),
-                )
-              }
-              remove={() =>
-                setOffers((current) => current.filter((_, n) => n !== index))
-              }
-            />
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={offers.length >= 50}
-            onClick={() => setOffers((current) => [...current, draft()])}
-          >
-            Add reach offer
-          </Button>
-          <div className="space-y-2">
-            <Label htmlFor="pricing-timing">Effective time</Label>
-            <NativeSelect
-              id="pricing-timing"
-              value={timing}
-              onChange={(event) => setTiming(event.target.value)}
-            >
-              <option value="immediate">Immediately when saved</option>
-              <option value="scheduled">Scheduled in UTC</option>
-            </NativeSelect>
-            {state.history.at(-1) && (
-              <p className="text-sm text-muted-foreground">
-                The next effective time must be at or after{" "}
-                {new Date(state.history.at(-1)!.effectiveFrom).toLocaleString(
-                  "en",
-                  { timeZone: "UTC" },
-                )}{" "}
-                UTC. Use scheduled timing while that date is in the future.
-              </p>
-            )}
-          </div>
-          {timing === "scheduled" && (
-            <div className="space-y-2">
-              <Label htmlFor="pricing-schedule">
-                Effective date and time (UTC)
-              </Label>
-              <Input
-                id="pricing-schedule"
-                type="datetime-local"
-                value={schedule}
-                onChange={(event) => setSchedule(event.target.value)}
+        <FieldGroup className="gap-6">
+          <h2 className="text-2xl font-semibold">Next price version</h2>
+          <p className="text-sm text-muted-foreground">
+            Enter approved commercial inputs only. There are no production
+            prices, FX rates, allowance quantities or tax defaults. Unconfigured
+            currency prices and allowances keep affected quotes unavailable.
+          </p>
+          <fieldset disabled={busy} className="flex flex-col gap-6">
+            {offers.map((offer, index) => (
+              <OfferEditor
+                key={index}
+                value={offer}
+                index={index}
+                onChange={(next) =>
+                  setOffers((current) =>
+                    current.map((item, n) => (n === index ? next : item)),
+                  )
+                }
+                remove={() =>
+                  setOffers((current) => current.filter((_, n) => n !== index))
+                }
               />
-              <p className="text-sm text-muted-foreground">
-                Use a future UTC time at or after the latest saved effective
-                date. This is not your local time zone.
-              </p>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={offers.length >= 50}
+              onClick={() => setOffers((current) => [...current, draft()])}
+            >
+              Add reach offer
+            </Button>
+            <UiField className="flex flex-col gap-2">
+              <Label htmlFor="pricing-timing">Effective time</Label>
+              <NativeSelect
+                id="pricing-timing"
+                value={timing}
+                onChange={(event) => setTiming(event.target.value)}
+              >
+                <option value="immediate">Immediately when saved</option>
+                <option value="scheduled">Scheduled in UTC</option>
+              </NativeSelect>
+              {state.history.at(-1) && (
+                <p className="text-sm text-muted-foreground">
+                  The next effective time must be at or after{" "}
+                  {new Date(state.history.at(-1)!.effectiveFrom).toLocaleString(
+                    "en",
+                    { timeZone: "UTC" },
+                  )}{" "}
+                  UTC. Use scheduled timing while that date is in the future.
+                </p>
+              )}
+            </UiField>
+            {timing === "scheduled" && (
+              <UiField className="flex flex-col gap-2">
+                <Label htmlFor="pricing-schedule">
+                  Effective date and time (UTC)
+                </Label>
+                <Input
+                  id="pricing-schedule"
+                  type="datetime-local"
+                  value={schedule}
+                  onChange={(event) => setSchedule(event.target.value)}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Use a future UTC time at or after the latest saved effective
+                  date. This is not your local time zone.
+                </p>
+              </UiField>
+            )}
+            <Field
+              id="pricing-note"
+              label="Reason and approval reference for this price version"
+              value={note}
+              multiline
+              onChange={setNote}
+            />
+          </fieldset>
+          {!parsed.success && (
+            <div className="flex flex-col gap-2 text-sm" aria-live="polite">
+              <p>Complete or correct these fields before publishing:</p>
+              <ul className="list-disc pl-5">
+                {parsed.error.issues.slice(0, 12).map((issue, i) => (
+                  <li key={i}>
+                    {fieldLocation(issue.path)}:{" "}
+                    {issue.code === "invalid_type"
+                      ? "Enter the requested quantity or amount in the indicated format."
+                      : issue.message}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
-          <Field
-            id="pricing-note"
-            label="Reason and approval reference for this price version"
-            value={note}
-            multiline
-            onChange={setNote}
-          />
-        </fieldset>
-        {!parsed.success && (
-          <div className="space-y-2 text-sm" aria-live="polite">
-            <p>Complete or correct these fields before publishing:</p>
-            <ul className="list-disc pl-5">
-              {parsed.error.issues.slice(0, 12).map((issue, i) => (
-                <li key={i}>
-                  {fieldLocation(issue.path)}:{" "}
-                  {issue.code === "invalid_type"
-                    ? "Enter the requested quantity or amount in the indicated format."
-                    : issue.message}
-                </li>
-              ))}
-            </ul>
+          <div className="flex flex-wrap gap-3">
+            <Button type="submit" disabled={busy || !parsed.success}>
+              {busy ? "Saving…" : "Publish price version"}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="outline" disabled={busy}>
+                  Load latest saved catalog
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogTitle>
+                  Replace unsaved pricing edits?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This loads the latest saved catalog, including any future
+                  version. Unsaved offer edits, timing and note will be
+                  discarded.
+                </AlertDialogDescription>
+                <div className="mt-5 flex flex-wrap justify-end gap-3">
+                  <AlertDialogCancel>Keep editing</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() =>
+                      void act(async () => {
+                        const saved = await readCommercialResponse(
+                          await fetch("/api/platform/pricing", {
+                            cache: "no-store",
+                          }),
+                          pricingCatalogSchema,
+                        );
+                        setState(saved);
+                        setOffers(
+                          (saved.history.at(-1)?.offers ?? []).map((item) =>
+                            draft(item),
+                          ),
+                        );
+                        setTiming("immediate");
+                        setSchedule("");
+                        setNote("");
+                        setMessage(
+                          "Latest saved catalog loaded. Review the effective time before publishing.",
+                        );
+                      })
+                    }
+                  >
+                    Load saved catalog
+                  </AlertDialogAction>
+                </div>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
-        )}
-        <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={busy || !parsed.success}>
-            {busy ? "Saving…" : "Publish price version"}
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button type="button" variant="outline" disabled={busy}>
-                Load latest saved catalog
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogTitle>
-                Replace unsaved pricing edits?
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                This loads the latest saved catalog, including any future
-                version. Unsaved offer edits, timing and note will be discarded.
-              </AlertDialogDescription>
-              <div className="mt-5 flex flex-wrap justify-end gap-3">
-                <AlertDialogCancel>Keep editing</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() =>
-                    void act(async () => {
-                      const saved = await readCommercialResponse(
-                        await fetch("/api/platform/pricing", {
-                          cache: "no-store",
-                        }),
-                        pricingCatalogSchema,
-                      );
-                      setState(saved);
-                      setOffers(
-                        (saved.history.at(-1)?.offers ?? []).map((item) =>
-                          draft(item),
-                        ),
-                      );
-                      setTiming("immediate");
-                      setSchedule("");
-                      setNote("");
-                      setMessage(
-                        "Latest saved catalog loaded. Review the effective time before publishing.",
-                      );
-                    })
-                  }
-                >
-                  Load saved catalog
-                </AlertDialogAction>
-              </div>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-        {error && <Alert variant="destructive">{error}</Alert>}
-        {message && <Alert variant="success">{message}</Alert>}
+          {error && <Alert variant="destructive">{error}</Alert>}
+          {message && <Alert variant="success">{message}</Alert>}
+        </FieldGroup>
       </form>
-      <section className="space-y-4" aria-labelledby="price-history">
+      <section className="flex flex-col gap-4" aria-labelledby="price-history">
         <h2 id="price-history" className="text-2xl font-semibold">
           Price history
         </h2>
@@ -757,7 +761,7 @@ export function SubscriptionPricingManager({
               })}{" "}
               UTC
             </summary>
-            <div className="mt-4 space-y-5">
+            <div className="flex flex-col mt-4 gap-5">
               <p className="text-sm text-muted-foreground">
                 {revision.actorName} · {revision.note}
               </p>
@@ -765,7 +769,7 @@ export function SubscriptionPricingManager({
                 <p>No offers from this version’s effective time.</p>
               )}
               {revision.offers.map((offer) => (
-                <section key={offer.id} className="space-y-3">
+                <section key={offer.id} className="flex flex-col gap-3">
                   <h3 className="font-semibold">{offer.label}</h3>
                   <OfferScope offer={offer} />
                   {(["INR", "USD"] as const).map((currency) => (
@@ -784,7 +788,7 @@ export function SubscriptionPricingManager({
                   {offer.reservedCapacity.map((capacity) => (
                     <div
                       key={capacity.id}
-                      className="space-y-2 rounded-xl border border-border p-4"
+                      className="flex flex-col gap-2 rounded-xl border border-border p-4"
                     >
                       <p>
                         {capacity.label}: {capacity.capacity.quantity}{" "}

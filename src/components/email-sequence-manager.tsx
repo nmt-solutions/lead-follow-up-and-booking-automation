@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { z } from "zod";
@@ -148,7 +149,7 @@ export function EmailSequenceManager({
     await request("configure", input.data);
   }
   return (
-    <section className="space-y-5" aria-labelledby="sequence-heading">
+    <section className="flex flex-col gap-5" aria-labelledby="sequence-heading">
       <h2 id="sequence-heading" className="text-xl font-semibold">
         Email sequence execution
       </h2>
@@ -156,7 +157,7 @@ export function EmailSequenceManager({
         <CardHeader>
           <CardTitle>Sending and recovery setup</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p>
             Mail integration:{" "}
             <strong>
@@ -232,117 +233,119 @@ export function EmailSequenceManager({
               <summary className="min-h-11 cursor-pointer py-3 font-medium text-primary">
                 Operator allowance and pacing
               </summary>
-              <form onSubmit={configure} className="space-y-4">
-                {state.adapters && (
-                  <div className="space-y-2">
-                    <Label htmlFor="sequence-adapter">
-                      Authorized mail provider
-                    </Label>
-                    <NativeSelect
-                      id="sequence-adapter"
-                      name="adapterKey"
-                      defaultValue={
-                        state.policy?.configuration.adapterKeys
-                          ? "native-mail-v1"
-                          : state.provider.key
-                      }
-                      disabled={pending || !mailConfigured}
-                      required
-                    >
-                      {state.adapters.length > 1 && (
-                        <option value="native-mail-v1">
-                          Gmail and Microsoft (shared allowance)
-                        </option>
-                      )}
-                      {state.adapters.map((a) => (
-                        <option key={a.key} value={a.key}>
-                          {a.key === "microsoft-mail-send-v1"
-                            ? "Microsoft"
-                            : a.key === "gmail-sequence-v1"
-                              ? "Gmail"
-                              : a.key}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                    <p className="text-sm text-muted-foreground">
-                      Choose the reviewed providers of the approved sending
-                      identities. The reservation cap is shared across the
-                      selected providers. Changing this allowance never retries
-                      a committed attempt through another provider.
-                    </p>
-                  </div>
-                )}
-
-                <fieldset
-                  disabled={pending || !mailConfigured}
-                  className="space-y-4"
-                >
-                  <p className="text-sm text-muted-foreground">
-                    A current email policy operator can record an explicitly
-                    authorized limit. This does not purchase capacity or enable
-                    a mail adapter.
-                  </p>
-                  {(
-                    [
-                      ["periodStart", "Allowance starts (UTC timestamp)"],
-                      ["periodEnd", "Allowance ends (UTC timestamp)"],
-                      [
-                        "maxProviderCalls",
-                        "Maximum reserved transport attempts",
-                      ],
-                      [
-                        "minIntervalSeconds",
-                        "Minimum seconds between attempts",
-                      ],
-                    ] as const
-                  ).map(([name, title]) => (
-                    <div className="space-y-2" key={name}>
-                      <Label htmlFor={`sequence-${name}`}>{title}</Label>
-                      <Input
-                        id={`sequence-${name}`}
-                        name={name}
-                        required
-                        type={
-                          name === "periodStart" || name === "periodEnd"
-                            ? "text"
-                            : "number"
+              <form onSubmit={configure} className="flex flex-col gap-4">
+                <FieldGroup className="gap-4">
+                  {state.adapters && (
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="sequence-adapter">
+                        Authorized mail provider
+                      </Label>
+                      <NativeSelect
+                        id="sequence-adapter"
+                        name="adapterKey"
+                        defaultValue={
+                          state.policy?.configuration.adapterKeys
+                            ? "native-mail-v1"
+                            : state.provider.key
                         }
-                        min={1}
-                        step={1}
-                        defaultValue={state.policy?.configuration[name] ?? ""}
-                        placeholder={
-                          name.startsWith("period")
-                            ? "YYYY-MM-DDTHH:mm:ssZ"
-                            : undefined
+                        disabled={pending || !mailConfigured}
+                        required
+                      >
+                        {state.adapters.length > 1 && (
+                          <option value="native-mail-v1">
+                            Gmail and Microsoft (shared allowance)
+                          </option>
+                        )}
+                        {state.adapters.map((a) => (
+                          <option key={a.key} value={a.key}>
+                            {a.key === "microsoft-mail-send-v1"
+                              ? "Microsoft"
+                              : a.key === "gmail-sequence-v1"
+                                ? "Gmail"
+                                : a.key}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                      <p className="text-sm text-muted-foreground">
+                        Choose the reviewed providers of the approved sending
+                        identities. The reservation cap is shared across the
+                        selected providers. Changing this allowance never
+                        retries a committed attempt through another provider.
+                      </p>
+                    </Field>
+                  )}
+
+                  <fieldset
+                    disabled={pending || !mailConfigured}
+                    className="flex flex-col gap-4"
+                  >
+                    <p className="text-sm text-muted-foreground">
+                      A current email policy operator can record an explicitly
+                      authorized limit. This does not purchase capacity or
+                      enable a mail adapter.
+                    </p>
+                    {(
+                      [
+                        ["periodStart", "Allowance starts (UTC timestamp)"],
+                        ["periodEnd", "Allowance ends (UTC timestamp)"],
+                        [
+                          "maxProviderCalls",
+                          "Maximum reserved transport attempts",
+                        ],
+                        [
+                          "minIntervalSeconds",
+                          "Minimum seconds between attempts",
+                        ],
+                      ] as const
+                    ).map(([name, title]) => (
+                      <Field className="flex flex-col gap-2" key={name}>
+                        <Label htmlFor={`sequence-${name}`}>{title}</Label>
+                        <Input
+                          id={`sequence-${name}`}
+                          name={name}
+                          required
+                          type={
+                            name === "periodStart" || name === "periodEnd"
+                              ? "text"
+                              : "number"
+                          }
+                          min={1}
+                          step={1}
+                          defaultValue={state.policy?.configuration[name] ?? ""}
+                          placeholder={
+                            name.startsWith("period")
+                              ? "YYYY-MM-DDTHH:mm:ssZ"
+                              : undefined
+                          }
+                        />
+                      </Field>
+                    ))}
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="sequence-policy-note">
+                        Authorization reference and reason
+                      </Label>
+                      <Textarea
+                        id="sequence-policy-note"
+                        name="note"
+                        required
+                        maxLength={2000}
+                      />
+                    </Field>
+                    <div className="flex min-h-11 items-center gap-3">
+                      <Checkbox
+                        id="sequence-policy-enabled"
+                        name="enabled"
+                        defaultChecked={
+                          state.policy?.configuration.enabled ?? false
                         }
                       />
+                      <Label htmlFor="sequence-policy-enabled">
+                        Enable this allowance
+                      </Label>
                     </div>
-                  ))}
-                  <div className="space-y-2">
-                    <Label htmlFor="sequence-policy-note">
-                      Authorization reference and reason
-                    </Label>
-                    <Textarea
-                      id="sequence-policy-note"
-                      name="note"
-                      required
-                      maxLength={2000}
-                    />
-                  </div>
-                  <div className="flex min-h-11 items-center gap-3">
-                    <Checkbox
-                      id="sequence-policy-enabled"
-                      name="enabled"
-                      defaultChecked={
-                        state.policy?.configuration.enabled ?? false
-                      }
-                    />
-                    <Label htmlFor="sequence-policy-enabled">
-                      Enable this allowance
-                    </Label>
-                  </div>
-                  <Button>Save authorized allowance</Button>
-                </fieldset>
+                    <Button>Save authorized allowance</Button>
+                  </fieldset>
+                </FieldGroup>
               </form>
             </details>
           )}
@@ -362,7 +365,7 @@ export function EmailSequenceManager({
                 {r.snapshot.name} · version {r.version}
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="flex flex-col gap-3">
               <p>
                 {r.snapshot.recipients.length} approved recipients ·{" "}
                 {r.snapshot.maxAttempts} maximum transport attempts per
@@ -414,7 +417,7 @@ export function EmailSequenceManager({
             <p>Progress: {label(run.progress)}</p>
             {run.reason && <p>{label(run.reason)}</p>}
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="flex flex-col gap-5">
             <p className="text-sm text-muted-foreground">
               Attempt reservations include uncertain calls. Provider acceptance
               does not prove delivery, engagement or a sale. An unknown attempt
@@ -423,7 +426,7 @@ export function EmailSequenceManager({
             {run.recipients.map((r) => (
               <section
                 key={r.contactId}
-                className="space-y-3 rounded-xl border border-border p-4 wrap-anywhere"
+                className="flex flex-col gap-3 rounded-xl border border-border p-4 wrap-anywhere"
               >
                 <h3 className="font-semibold">{r.recipient}</h3>
                 <Link
@@ -433,7 +436,10 @@ export function EmailSequenceManager({
                   Take over or hand back this Opportunity
                 </Link>
                 {r.actions.map((a) => (
-                  <div key={a.id} className="space-y-2 rounded-lg bg-muted p-4">
+                  <div
+                    key={a.id}
+                    className="flex flex-col gap-2 rounded-lg bg-muted p-4"
+                  >
                     <p className="font-medium">
                       {a.stepIndex === 0
                         ? "Initial message"
@@ -486,7 +492,7 @@ export function EmailSequenceManager({
                 ))}
               </section>
             ))}
-            <div className="space-y-2">
+            <Field className="flex flex-col gap-2">
               <Label htmlFor={`sequence-note-${run.id}`}>
                 Reason for the next action
               </Label>
@@ -498,7 +504,7 @@ export function EmailSequenceManager({
                 }
                 maxLength={2000}
               />
-            </div>
+            </Field>
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="outline"
@@ -541,7 +547,7 @@ export function EmailSequenceManager({
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
-                  <div className="space-y-3">
+                  <div className="flex flex-col gap-3">
                     <AlertDialogTitle>Cancel this sequence?</AlertDialogTitle>
                     <AlertDialogDescription>
                       Unsent steps stop permanently. Accepted or uncertain
@@ -566,7 +572,7 @@ export function EmailSequenceManager({
               <summary className="min-h-11 cursor-pointer py-3 font-medium text-primary">
                 Action and delivery history
               </summary>
-              <ol className="space-y-3">
+              <ol className="flex flex-col gap-3">
                 {run.history.map((e) => (
                   <li
                     key={e.id}
@@ -604,7 +610,7 @@ export function EmailSequenceManager({
                       </details>
                     )}
                     {e.reviewNeeded && (
-                      <div className="mt-3 space-y-3">
+                      <div className="flex flex-col mt-3 gap-3">
                         <p>
                           Review the exact reply before classifying it. Any
                           reply stops reminders. Only a qualifying inquiry or

@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
@@ -166,7 +167,7 @@ export function TaxManager({
     state.calculations.map((record) => record.resolvesId),
   );
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <BillingStatus state={state.billing} />
       <div className="flex flex-wrap gap-4">
         <Link
@@ -217,7 +218,7 @@ export function TaxManager({
         </p>
       )}
       {operator ? (
-        <section className="space-y-4 rounded-2xl border border-border bg-card p-6 sm:p-8">
+        <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:p-8">
           <h2 className="text-xl font-semibold">Resolve tax review</h2>
           <p>
             Correct and review current billing evidence or approve unambiguous
@@ -238,125 +239,127 @@ export function TaxManager({
             event.preventDefault();
             void act(calculate);
           }}
-          className="space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
+          className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
           aria-busy={busy}
         >
-          <h2 className="text-xl font-semibold">Calculate a tax preview</h2>
-          <p className="text-muted-foreground">
-            Enter amounts before tax in the billing currency. These are
-            calculation inputs; subscription pricing and payment require a
-            separate agreed quote.
-          </p>
-          <div className="space-y-2">
-            <Label htmlFor="tax-currency">Billing currency</Label>
-            <NativeSelect
-              id="tax-currency"
-              value={currency}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === "INR" || value === "USD") setCurrency(value);
-              }}
+          <FieldGroup className="gap-6">
+            <h2 className="text-xl font-semibold">Calculate a tax preview</h2>
+            <p className="text-muted-foreground">
+              Enter amounts before tax in the billing currency. These are
+              calculation inputs; subscription pricing and payment require a
+              separate agreed quote.
+            </p>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="tax-currency">Billing currency</Label>
+              <NativeSelect
+                id="tax-currency"
+                value={currency}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "INR" || value === "USD") setCurrency(value);
+                }}
+              >
+                <option value="" disabled>
+                  Choose billing currency
+                </option>
+                <option value="INR">INR</option>
+                <option value="USD">USD</option>
+              </NativeSelect>
+            </Field>
+            {lines.map((line, index) => (
+              <fieldset
+                key={line.id}
+                className="flex flex-col gap-4 rounded-xl border border-border p-4"
+              >
+                <legend className="px-2 font-medium">Line {index + 1}</legend>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {(
+                    [
+                      ["description", "Description"],
+                      ["productCode", "Configured product code"],
+                      ["amount", `Unit amount before tax (${currency})`],
+                      ["quantity", "Whole quantity"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Field key={key} className="flex flex-col gap-2">
+                      <Label htmlFor={`tax-${line.id}-${key}`}>{label}</Label>
+                      <Input
+                        id={`tax-${line.id}-${key}`}
+                        value={line[key]}
+                        inputMode={
+                          key === "amount"
+                            ? "decimal"
+                            : key === "quantity"
+                              ? "numeric"
+                              : "text"
+                        }
+                        maxLength={key === "amount" ? 25 : 200}
+                        required
+                        onChange={(event) =>
+                          setLines((current) =>
+                            current.map((row) =>
+                              row.id === line.id
+                                ? { ...row, [key]: event.target.value }
+                                : row,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                  ))}
+                </div>
+                {lines.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      setLines((current) =>
+                        current.filter((row) => row.id !== line.id),
+                      )
+                    }
+                  >
+                    Remove line {index + 1}
+                  </Button>
+                )}
+              </fieldset>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || lines.length >= 40}
+              onClick={() =>
+                setLines((current) => [
+                  ...current,
+                  {
+                    id: String(nextLine.current++),
+                    description: "",
+                    productCode: "",
+                    amount: "",
+                    quantity: "1",
+                  },
+                ])
+              }
             >
-              <option value="" disabled>
-                Choose billing currency
-              </option>
-              <option value="INR">INR</option>
-              <option value="USD">USD</option>
-            </NativeSelect>
-          </div>
-          {lines.map((line, index) => (
-            <fieldset
-              key={line.id}
-              className="space-y-4 rounded-xl border border-border p-4"
-            >
-              <legend className="px-2 font-medium">Line {index + 1}</legend>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {(
-                  [
-                    ["description", "Description"],
-                    ["productCode", "Configured product code"],
-                    ["amount", `Unit amount before tax (${currency})`],
-                    ["quantity", "Whole quantity"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <div key={key} className="space-y-2">
-                    <Label htmlFor={`tax-${line.id}-${key}`}>{label}</Label>
-                    <Input
-                      id={`tax-${line.id}-${key}`}
-                      value={line[key]}
-                      inputMode={
-                        key === "amount"
-                          ? "decimal"
-                          : key === "quantity"
-                            ? "numeric"
-                            : "text"
-                      }
-                      maxLength={key === "amount" ? 25 : 200}
-                      required
-                      onChange={(event) =>
-                        setLines((current) =>
-                          current.map((row) =>
-                            row.id === line.id
-                              ? { ...row, [key]: event.target.value }
-                              : row,
-                          ),
-                        )
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-              {lines.length > 1 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    setLines((current) =>
-                      current.filter((row) => row.id !== line.id),
-                    )
-                  }
-                >
-                  Remove line {index + 1}
-                </Button>
-              )}
-            </fieldset>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy || lines.length >= 40}
-            onClick={() =>
-              setLines((current) => [
-                ...current,
-                {
-                  id: String(nextLine.current++),
-                  description: "",
-                  productCode: "",
-                  amount: "",
-                  quantity: "1",
-                },
-              ])
-            }
-          >
-            Add line
-          </Button>
-          <div className="space-y-2">
-            <Label htmlFor="tax-note">Calculation reason or reference</Label>
-            <Textarea
-              id="tax-note"
-              required
-              value={note}
-              maxLength={1000}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </div>
-          <Button disabled={busy} type="submit">
-            {busy ? "Calculating…" : "Record tax preview"}
-          </Button>
+              Add line
+            </Button>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="tax-note">Calculation reason or reference</Label>
+              <Textarea
+                id="tax-note"
+                required
+                value={note}
+                maxLength={1000}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </Field>
+            <Button disabled={busy} type="submit">
+              {busy ? "Calculating…" : "Record tax preview"}
+            </Button>
+          </FieldGroup>
         </form>
       )}
-      <section className="space-y-5" aria-labelledby="tax-history">
+      <section className="flex flex-col gap-5" aria-labelledby="tax-history">
         <h2 id="tax-history" className="text-xl font-semibold">
           Calculation and review history
         </h2>
@@ -367,7 +370,7 @@ export function TaxManager({
           </p>
         )}
         {[...state.calculations].reverse().map((record) => (
-          <div key={record.id} className="space-y-3">
+          <div key={record.id} className="flex flex-col gap-3">
             <TaxRecord record={record} />
             {operator &&
               record.status === "review_required" &&

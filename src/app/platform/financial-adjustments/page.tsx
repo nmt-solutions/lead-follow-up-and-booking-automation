@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -18,28 +19,24 @@ export default async function FinancialReview() {
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header className="space-y-4">
-        <Link
-          href="/businesses"
-          className="inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Refund and dispute review</h1>
-        <p className="text-muted-foreground">
-          Review the original paid charge, retained evidence and explicit access
-          terms before a native financial action.
-        </p>
-      </header>
-      <section className="space-y-4">
+    <div className="app-page">
+      <PageHeader
+        title={<>Refund and dispute review</>}
+        description={
+          <>
+            Review the original paid charge, retained evidence and explicit
+            access terms before a native financial action.
+          </>
+        }
+      ></PageHeader>
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">
           Businesses with paid financial history
         </h2>
         {!queue.length && (
           <p>No confirmed paid charge is available for review.</p>
         )}
-        <ul className="space-y-3">
+        <ul className="flex flex-col gap-3">
           {queue.map((b) => (
             <li key={b.businessId}>
               <Link
@@ -52,7 +49,7 @@ export default async function FinancialReview() {
           ))}
         </ul>
       </section>
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">Authenticated native receipts</h2>
         <p className="text-sm text-muted-foreground">
           Receipts queue independent native reconciliation. Receipt arrival
@@ -60,7 +57,7 @@ export default async function FinancialReview() {
           needs review against its original paid payment and seller invoice.
         </p>
         {!receipts.length && <p>No authenticated receipt retained.</p>}
-        <ul className="space-y-3">
+        <ul className="flex flex-col gap-3">
           {receipts.map((r) => (
             <li
               key={r.id}

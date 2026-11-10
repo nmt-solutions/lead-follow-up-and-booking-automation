@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 import { useId, useState } from "react";
 import {
   issuerCatalogSchema,
@@ -93,7 +94,7 @@ export function SellerIssuerManager({ initial }: { initial: IssuerCatalog }) {
     }
   }
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <Button
         variant="outline"
         disabled={busy}
@@ -137,7 +138,7 @@ export function SellerIssuerManager({ initial }: { initial: IssuerCatalog }) {
       )}
       {status && <p role="status">{status}</p>}
       <IssuerForm key={formVersion} seed={seed} busy={busy} onSave={save} />
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">Versioned issuer review</h2>
         {!state.revisions.length && (
           <p>
@@ -152,7 +153,7 @@ export function SellerIssuerManager({ initial }: { initial: IssuerCatalog }) {
           return (
             <article
               key={r.id}
-              className="space-y-4 rounded-xl border border-border bg-card p-6 wrap-anywhere"
+              className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6 wrap-anywhere"
             >
               <h3 className="text-lg font-semibold">
                 Version {r.version} · {c.seller.legalName} ·{" "}
@@ -218,7 +219,7 @@ export function SellerIssuerManager({ initial }: { initial: IssuerCatalog }) {
                 Copy as new draft
               </Button>
               <form
-                className="space-y-3"
+                className="flex flex-col gap-3"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const data = new FormData(e.currentTarget),
@@ -227,29 +228,31 @@ export function SellerIssuerManager({ initial }: { initial: IssuerCatalog }) {
                     void decide(r.id, String(data.get("note")), outcome);
                 }}
               >
-                <Label htmlFor={`decision-${r.id}`}>
-                  Review reason and evidence for this exact version
-                </Label>
-                <Textarea
-                  id={`decision-${r.id}`}
-                  required
-                  name="note"
-                  maxLength={1000}
-                />
-                <Label htmlFor={`outcome-${r.id}`}>Decision</Label>
-                <NativeSelect
-                  required
-                  name="outcome"
-                  id={`outcome-${r.id}`}
-                  defaultValue=""
-                >
-                  <option value="" disabled>
-                    Choose a decision
-                  </option>
-                  <option value="approved">Approve this version</option>
-                  <option value="withdrawn">Withdraw this version</option>
-                </NativeSelect>
-                <Button disabled={busy}>Record issuer decision</Button>
+                <FieldGroup className="gap-3">
+                  <Label htmlFor={`decision-${r.id}`}>
+                    Review reason and evidence for this exact version
+                  </Label>
+                  <Textarea
+                    id={`decision-${r.id}`}
+                    required
+                    name="note"
+                    maxLength={1000}
+                  />
+                  <Label htmlFor={`outcome-${r.id}`}>Decision</Label>
+                  <NativeSelect
+                    required
+                    name="outcome"
+                    id={`outcome-${r.id}`}
+                    defaultValue=""
+                  >
+                    <option value="" disabled>
+                      Choose a decision
+                    </option>
+                    <option value="approved">Approve this version</option>
+                    <option value="withdrawn">Withdraw this version</option>
+                  </NativeSelect>
+                  <Button disabled={busy}>Record issuer decision</Button>
+                </FieldGroup>
               </form>
               <details>
                 <summary className="min-h-11 cursor-pointer py-3">
@@ -274,7 +277,7 @@ export function SellerIssuerManager({ initial }: { initial: IssuerCatalog }) {
         }}
       >
         <AlertDialogContent>
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             <AlertDialogTitle>Replace the unsaved draft?</AlertDialogTitle>
             <AlertDialogDescription>
               The selected version will populate the form. Unsaved entries in
@@ -319,7 +322,7 @@ function IssuerForm({
     value: string | number | undefined,
     type = "text",
   ) => (
-    <div className="space-y-2">
+    <Field className="flex flex-col gap-2">
       <Label htmlFor={`${prefix}-${name}`}>{label}</Label>
       <Input
         required
@@ -329,7 +332,7 @@ function IssuerForm({
         defaultValue={value ?? ""}
         maxLength={1000}
       />
-    </div>
+    </Field>
   );
   const select = (
     name: string,
@@ -337,7 +340,7 @@ function IssuerForm({
     options: readonly string[],
     value: string | undefined,
   ) => (
-    <div className="space-y-2">
+    <Field className="flex flex-col gap-2">
       <Label htmlFor={`${prefix}-${name}`}>{label}</Label>
       <NativeSelect
         required
@@ -354,11 +357,11 @@ function IssuerForm({
           </option>
         ))}
       </NativeSelect>
-    </div>
+    </Field>
   );
   return (
     <form
-      className="space-y-6 rounded-xl border border-border bg-card p-6"
+      className="flex flex-col gap-6 rounded-xl border border-border bg-card p-6"
       onSubmit={(e) => {
         e.preventDefault();
         setError("");
@@ -447,256 +450,270 @@ function IssuerForm({
         void onSave(parsed.data, v("note"));
       }}
     >
-      <h2 className="text-xl font-semibold">New issuer version</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {select("mode", "Execution mode", ["live", "fixture"], seed?.mode)}
-        {field(
-          "from",
-          "Effective from · ISO UTC timestamp",
-          seed?.effectiveFrom,
-        )}
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-until`}>
-            Effective until · optional ISO UTC timestamp
-          </Label>
-          <Input
-            id={`${prefix}-until`}
-            name="until"
-            defaultValue={seed?.effectiveUntil ?? ""}
-          />
-        </div>
-      </div>
-      <fieldset className="space-y-4">
-        <legend className="mb-3 font-semibold">Seller legal identity</legend>
-        {field("name", "Legal name", seed?.seller.legalName)}
-        {field("address", "Legal address", seed?.seller.address)}
+      <FieldGroup className="gap-6">
+        <h2 className="text-xl font-semibold">New issuer version</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          {field("country", "Two-letter country code", seed?.seller.country)}
-          {field("contact", "Seller contact", seed?.seller.contact)}
+          {select("mode", "Execution mode", ["live", "fixture"], seed?.mode)}
+          {field(
+            "from",
+            "Effective from · ISO UTC timestamp",
+            seed?.effectiveFrom,
+          )}
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-until`}>
+              Effective until · optional ISO UTC timestamp
+            </Label>
+            <Input
+              id={`${prefix}-until`}
+              name="until"
+              defaultValue={seed?.effectiveUntil ?? ""}
+            />
+          </Field>
         </div>
-        <Label htmlFor={`${prefix}-legal`}>
-          Applicable legal fields · one label | value per line
+        <fieldset className="flex flex-col gap-4">
+          <legend className="mb-3 font-semibold">Seller legal identity</legend>
+          {field("name", "Legal name", seed?.seller.legalName)}
+          {field("address", "Legal address", seed?.seller.address)}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {field("country", "Two-letter country code", seed?.seller.country)}
+            {field("contact", "Seller contact", seed?.seller.contact)}
+          </div>
+          <Label htmlFor={`${prefix}-legal`}>
+            Applicable legal fields · one label | value per line
+          </Label>
+          <Textarea
+            required
+            id={`${prefix}-legal`}
+            name="legal"
+            defaultValue={
+              seed?.legalFields
+                .map((f) => `${f.label} | ${f.value}`)
+                .join("\n") ?? ""
+            }
+          />
+        </fieldset>
+        <fieldset className="flex flex-col gap-3">
+          <legend className="mb-3 font-semibold">
+            Required customer fields
+          </legend>
+          {(
+            [
+              "legalName",
+              "address",
+              "invoiceContact",
+              "registrationNumber",
+              "taxIdentifiers",
+            ] as const
+          ).map((name) => (
+            <label key={name} className="flex min-h-11 items-center gap-3">
+              <Checkbox
+                name="required"
+                value={name}
+                defaultChecked={
+                  seed?.requiredCustomerFields.some((f) => f === name) ?? false
+                }
+              />
+              {
+                {
+                  legalName: "Legal name",
+                  address: "Billing address",
+                  invoiceContact: "Invoice contact",
+                  registrationNumber: "Registration number",
+                  taxIdentifiers: "Tax identifiers",
+                }[name]
+              }
+            </label>
+          ))}
+        </fieldset>
+        {(["invoice", "credit_note"] as const).map((kind) => (
+          <fieldset key={kind} className="grid gap-4 sm:grid-cols-2">
+            <legend className="mb-3 font-semibold">
+              {kind === "invoice" ? "Invoice" : "Credit note"} numbering
+            </legend>
+            {field(
+              `${kind === "invoice" ? "invoice" : "credit"}-key`,
+              "Stable series key",
+              seed?.series[kind].key,
+            )}
+            {field(
+              `${kind === "invoice" ? "invoice" : "credit"}-prefix`,
+              "Number prefix · letters, digits, dash or underscore",
+              seed?.series[kind].prefix,
+            )}
+            {field(
+              `${kind === "invoice" ? "invoice" : "credit"}-first`,
+              "First number",
+              seed?.series[kind].first,
+            )}
+            {field(
+              `${kind === "invoice" ? "invoice" : "credit"}-width`,
+              "Minimum digit width",
+              seed?.series[kind].width,
+              "number",
+            )}
+          </fieldset>
+        ))}
+        <fieldset className="flex flex-col gap-4">
+          <legend className="mb-3 font-semibold">
+            Supported currency precision and rounding
+          </legend>
+          <p className="text-sm text-muted-foreground">
+            The current financial calculator supports two decimal places. Select
+            and review each supported currency explicitly.
+          </p>
+          {(["INR", "USD"] as const).map((currency) => {
+            const c = seed?.currencies.find((c) => c.currency === currency),
+              enabled = currencies.includes(currency);
+            return (
+              <div
+                key={currency}
+                className="flex flex-col gap-3 rounded-lg bg-muted p-4"
+              >
+                <label className="flex min-h-11 items-center gap-3">
+                  <Checkbox
+                    checked={enabled}
+                    onCheckedChange={(checked) =>
+                      setCurrencies((values) =>
+                        checked === true
+                          ? [...values, currency]
+                          : values.filter((v) => v !== currency),
+                      )
+                    }
+                  />
+                  {currency}
+                </label>
+                <fieldset
+                  disabled={!enabled}
+                  className="grid gap-4 sm:grid-cols-2"
+                >
+                  {field(
+                    `${currency}-precision`,
+                    "Decimal places",
+                    c?.precision,
+                    "number",
+                  )}
+                  {select(
+                    `${currency}-rounding`,
+                    "Rounding mode",
+                    ["half_up", "half_even", "down"],
+                    c?.rounding.mode,
+                  )}
+                  {select(
+                    `${currency}-scope`,
+                    "Rounding scope",
+                    ["per_line", "subtotal"],
+                    c?.rounding.scope,
+                  )}
+                  {select(
+                    `${currency}-increment`,
+                    "Rounding increment in minor units",
+                    ["1", "5", "10", "100"],
+                    c?.rounding.incrementMinor,
+                  )}
+                  <Field className="flex flex-col gap-2 sm:col-span-2">
+                    <Label htmlFor={`${prefix}-${currency}-additional`}>
+                      Additional approved rounding policies · optional · mode |
+                      scope | increment per line
+                    </Label>
+                    <Textarea
+                      id={`${prefix}-${currency}-additional`}
+                      name={`${currency}-additional`}
+                      defaultValue={
+                        c?.additionalRoundings
+                          .map(
+                            (r) =>
+                              `${r.mode} | ${r.scope} | ${r.incrementMinor}`,
+                          )
+                          .join("\n") ?? ""
+                      }
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Modes: half_up, half_even, down. Scopes: per_line,
+                      subtotal. Increments: 1, 5, 10, 100. Each captured line
+                      must match an explicitly approved policy; its original
+                      amount stays unchanged.
+                    </p>
+                  </Field>
+                </fieldset>
+              </div>
+            );
+          })}
+        </fieldset>
+        <fieldset className="flex flex-col gap-4">
+          <legend className="mb-3 font-semibold">
+            Artifact template and protected retention
+          </legend>
+          {select(
+            "format",
+            "Artifact format",
+            ["text_v1"],
+            seed?.template.format,
+          )}
+          {field("invoice-title", "Invoice title", seed?.template.invoiceTitle)}
+          {field(
+            "credit-title",
+            "Credit note title",
+            seed?.template.creditTitle,
+          )}
+          {field(
+            "footer",
+            "Required footer / legal wording",
+            seed?.template.footer,
+          )}
+          {field(
+            "retention",
+            "Minimum retention in seconds",
+            seed?.retention.minimumSeconds,
+            "number",
+          )}
+          {field(
+            "retention-reference",
+            "Reviewed retention policy reference",
+            seed?.retention.policyReference,
+          )}
+          {select(
+            "disposition",
+            "History disposition",
+            ["protected_history"],
+            seed?.retention.disposition,
+          )}
+          {select(
+            "allocation",
+            "Partial credit allocation policy",
+            ["cumulative_original_components_v1"],
+            seed?.creditAllocation,
+          )}
+          <p className="text-sm text-muted-foreground">
+            Protected history is excluded from ordinary file expiry and
+            deletion. Partial credits round cumulative original tax components
+            and preserve the exact final remainder.
+          </p>
+        </fieldset>
+        <Label htmlFor={`${prefix}-evidence`}>
+          Reviewed legal/configuration evidence · title | reference | checked-at
+          ISO UTC · one per line
         </Label>
         <Textarea
           required
-          id={`${prefix}-legal`}
-          name="legal"
+          id={`${prefix}-evidence`}
+          name="evidence"
           defaultValue={
-            seed?.legalFields
-              .map((f) => `${f.label} | ${f.value}`)
+            seed?.evidence
+              .map((e) => `${e.title} | ${e.reference} | ${e.checkedAt}`)
               .join("\n") ?? ""
           }
         />
-      </fieldset>
-      <fieldset className="space-y-3">
-        <legend className="mb-3 font-semibold">Required customer fields</legend>
-        {(
-          [
-            "legalName",
-            "address",
-            "invoiceContact",
-            "registrationNumber",
-            "taxIdentifiers",
-          ] as const
-        ).map((name) => (
-          <label key={name} className="flex min-h-11 items-center gap-3">
-            <Checkbox
-              name="required"
-              value={name}
-              defaultChecked={
-                seed?.requiredCustomerFields.some((f) => f === name) ?? false
-              }
-            />
-            {
-              {
-                legalName: "Legal name",
-                address: "Billing address",
-                invoiceContact: "Invoice contact",
-                registrationNumber: "Registration number",
-                taxIdentifiers: "Tax identifiers",
-              }[name]
-            }
-          </label>
-        ))}
-      </fieldset>
-      {(["invoice", "credit_note"] as const).map((kind) => (
-        <fieldset key={kind} className="grid gap-4 sm:grid-cols-2">
-          <legend className="mb-3 font-semibold">
-            {kind === "invoice" ? "Invoice" : "Credit note"} numbering
-          </legend>
-          {field(
-            `${kind === "invoice" ? "invoice" : "credit"}-key`,
-            "Stable series key",
-            seed?.series[kind].key,
-          )}
-          {field(
-            `${kind === "invoice" ? "invoice" : "credit"}-prefix`,
-            "Number prefix · letters, digits, dash or underscore",
-            seed?.series[kind].prefix,
-          )}
-          {field(
-            `${kind === "invoice" ? "invoice" : "credit"}-first`,
-            "First number",
-            seed?.series[kind].first,
-          )}
-          {field(
-            `${kind === "invoice" ? "invoice" : "credit"}-width`,
-            "Minimum digit width",
-            seed?.series[kind].width,
-            "number",
-          )}
-        </fieldset>
-      ))}
-      <fieldset className="space-y-4">
-        <legend className="mb-3 font-semibold">
-          Supported currency precision and rounding
-        </legend>
-        <p className="text-sm text-muted-foreground">
-          The current financial calculator supports two decimal places. Select
-          and review each supported currency explicitly.
-        </p>
-        {(["INR", "USD"] as const).map((currency) => {
-          const c = seed?.currencies.find((c) => c.currency === currency),
-            enabled = currencies.includes(currency);
-          return (
-            <div key={currency} className="space-y-3 rounded-lg bg-muted p-4">
-              <label className="flex min-h-11 items-center gap-3">
-                <Checkbox
-                  checked={enabled}
-                  onCheckedChange={(checked) =>
-                    setCurrencies((values) =>
-                      checked === true
-                        ? [...values, currency]
-                        : values.filter((v) => v !== currency),
-                    )
-                  }
-                />
-                {currency}
-              </label>
-              <fieldset
-                disabled={!enabled}
-                className="grid gap-4 sm:grid-cols-2"
-              >
-                {field(
-                  `${currency}-precision`,
-                  "Decimal places",
-                  c?.precision,
-                  "number",
-                )}
-                {select(
-                  `${currency}-rounding`,
-                  "Rounding mode",
-                  ["half_up", "half_even", "down"],
-                  c?.rounding.mode,
-                )}
-                {select(
-                  `${currency}-scope`,
-                  "Rounding scope",
-                  ["per_line", "subtotal"],
-                  c?.rounding.scope,
-                )}
-                {select(
-                  `${currency}-increment`,
-                  "Rounding increment in minor units",
-                  ["1", "5", "10", "100"],
-                  c?.rounding.incrementMinor,
-                )}
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor={`${prefix}-${currency}-additional`}>
-                    Additional approved rounding policies · optional · mode |
-                    scope | increment per line
-                  </Label>
-                  <Textarea
-                    id={`${prefix}-${currency}-additional`}
-                    name={`${currency}-additional`}
-                    defaultValue={
-                      c?.additionalRoundings
-                        .map(
-                          (r) => `${r.mode} | ${r.scope} | ${r.incrementMinor}`,
-                        )
-                        .join("\n") ?? ""
-                    }
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Modes: half_up, half_even, down. Scopes: per_line, subtotal.
-                    Increments: 1, 5, 10, 100. Each captured line must match an
-                    explicitly approved policy; its original amount stays
-                    unchanged.
-                  </p>
-                </div>
-              </fieldset>
-            </div>
-          );
-        })}
-      </fieldset>
-      <fieldset className="space-y-4">
-        <legend className="mb-3 font-semibold">
-          Artifact template and protected retention
-        </legend>
-        {select(
-          "format",
-          "Artifact format",
-          ["text_v1"],
-          seed?.template.format,
+        <Label htmlFor={`${prefix}-note`}>Reason for this version</Label>
+        <Textarea required id={`${prefix}-note`} name="note" maxLength={1000} />
+        {error && (
+          <Alert role="alert" variant="destructive">
+            {error}
+          </Alert>
         )}
-        {field("invoice-title", "Invoice title", seed?.template.invoiceTitle)}
-        {field("credit-title", "Credit note title", seed?.template.creditTitle)}
-        {field(
-          "footer",
-          "Required footer / legal wording",
-          seed?.template.footer,
-        )}
-        {field(
-          "retention",
-          "Minimum retention in seconds",
-          seed?.retention.minimumSeconds,
-          "number",
-        )}
-        {field(
-          "retention-reference",
-          "Reviewed retention policy reference",
-          seed?.retention.policyReference,
-        )}
-        {select(
-          "disposition",
-          "History disposition",
-          ["protected_history"],
-          seed?.retention.disposition,
-        )}
-        {select(
-          "allocation",
-          "Partial credit allocation policy",
-          ["cumulative_original_components_v1"],
-          seed?.creditAllocation,
-        )}
-        <p className="text-sm text-muted-foreground">
-          Protected history is excluded from ordinary file expiry and deletion.
-          Partial credits round cumulative original tax components and preserve
-          the exact final remainder.
-        </p>
-      </fieldset>
-      <Label htmlFor={`${prefix}-evidence`}>
-        Reviewed legal/configuration evidence · title | reference | checked-at
-        ISO UTC · one per line
-      </Label>
-      <Textarea
-        required
-        id={`${prefix}-evidence`}
-        name="evidence"
-        defaultValue={
-          seed?.evidence
-            .map((e) => `${e.title} | ${e.reference} | ${e.checkedAt}`)
-            .join("\n") ?? ""
-        }
-      />
-      <Label htmlFor={`${prefix}-note`}>Reason for this version</Label>
-      <Textarea required id={`${prefix}-note`} name="note" maxLength={1000} />
-      {error && (
-        <Alert role="alert" variant="destructive">
-          {error}
-        </Alert>
-      )}
-      <Button disabled={busy}>{busy ? "Saving…" : "Save issuer draft"}</Button>
+        <Button disabled={busy}>
+          {busy ? "Saving…" : "Save issuer draft"}
+        </Button>
+      </FieldGroup>
     </form>
   );
 }

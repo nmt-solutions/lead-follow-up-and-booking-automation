@@ -33,7 +33,7 @@ export function DiscoveryProspectCard({
   prospect: ProspectView;
 }) {
   return (
-    <li className="space-y-4 rounded-xl border border-border bg-card p-5">
+    <li className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h5 className="font-semibold wrap-anywhere">{prospect.name}</h5>
@@ -55,9 +55,9 @@ export function DiscoveryProspectCard({
         {prospect.history.length} retained observations
       </p>
       {prospect.reviewReasons.length > 0 && (
-        <div className="space-y-2 rounded-lg border border-warning bg-warning/10 p-4 text-sm">
+        <div className="flex flex-col gap-2 rounded-lg border border-warning bg-warning/10 p-4 text-sm">
           <p className="font-medium">Evidence needs review</p>
-          <ul className="list-disc space-y-2 pl-5">
+          <ul className="flex flex-col list-disc gap-2 pl-5">
             {prospect.reviewReasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
@@ -70,7 +70,7 @@ export function DiscoveryProspectCard({
         </p>
       )}
       {prospect.request && prospect.requestState && (
-        <div className="space-y-2 rounded-lg bg-muted p-4 text-sm">
+        <div className="flex flex-col gap-2 rounded-lg bg-muted p-4 text-sm">
           <p className="font-medium">{requestLabels[prospect.requestState]}</p>
           <blockquote className="wrap-anywhere">
             “{prospect.request.quote}”
@@ -120,9 +120,9 @@ export function DiscoveryProspectCard({
         <summary className="min-h-11 cursor-pointer font-medium">
           Fit evidence and public contacts
         </summary>
-        <div className="mt-4 space-y-4 text-sm">
+        <div className="flex flex-col mt-4 gap-4 text-sm">
           {prospect.evidence.map((evidence) => (
-            <div key={JSON.stringify(evidence)} className="space-y-2">
+            <div key={JSON.stringify(evidence)} className="flex flex-col gap-2">
               <blockquote className="border-l-2 border-border pl-3 wrap-anywhere">
                 “{evidence.quote}”
               </blockquote>
@@ -161,7 +161,10 @@ export function DiscoveryProspectCard({
           {prospect.contacts.map((contact, index) => {
             const classification = contactClassification(contact);
             return (
-              <div key={index} className="space-y-2 rounded-lg bg-muted p-4">
+              <div
+                key={index}
+                className="flex flex-col gap-2 rounded-lg bg-muted p-4"
+              >
                 <p className="font-medium">{contactLabels[classification]}</p>
                 {contact.name && (
                   <p className="wrap-anywhere">
@@ -215,7 +218,7 @@ export function DiscoveryProspectCard({
         <summary className="min-h-11 cursor-pointer font-medium">
           Source history and refresh outcomes ({prospect.history.length})
         </summary>
-        <div className="mt-4 space-y-4 text-sm">
+        <div className="flex flex-col mt-4 gap-4 text-sm">
           <p className="text-muted-foreground">
             Historical roles and request statuses are observations from their
             check dates. They do not establish current purchasing responsibility
@@ -224,7 +227,7 @@ export function DiscoveryProspectCard({
           {prospect.history.map((observation) => (
             <div
               key={observation.id}
-              className="space-y-2 rounded-lg bg-muted p-4"
+              className="flex flex-col gap-2 rounded-lg bg-muted p-4"
             >
               <p className="font-medium">
                 {observation.current
@@ -254,7 +257,7 @@ export function DiscoveryProspectCard({
                 </p>
               )}
               {observation.data.evidence.map((evidence, index) => (
-                <div key={index} className="space-y-2">
+                <div key={index} className="flex flex-col gap-2">
                   <blockquote className="border-l-2 border-border pl-3 wrap-anywhere">
                     “{evidence.quote}”
                   </blockquote>
@@ -262,7 +265,7 @@ export function DiscoveryProspectCard({
                 </div>
               ))}
               {observation.data.request ? (
-                <div className="space-y-2">
+                <div className="flex flex-col gap-2">
                   <p className="wrap-anywhere">
                     Request: “{observation.data.request.quote}”
                   </p>
@@ -301,7 +304,7 @@ export function DiscoveryProspectCard({
               {observation.data.contacts.map((contact, index) => (
                 <div
                   key={index}
-                  className="space-y-2 border-t border-border pt-3"
+                  className="flex flex-col gap-2 border-t border-border pt-3"
                 >
                   <p className="wrap-anywhere">
                     Published contact: {contact.name ?? "Name unverified"}
@@ -327,13 +330,13 @@ export function DiscoveryProspectCard({
               ))}
             </div>
           ))}
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <p className="font-medium">Successful source checks</p>
             <p className="text-muted-foreground">
               A check can retain no matching need. Earlier evidence stays in
               history and cannot establish that need as current.
             </p>
-            <ul className="space-y-3">
+            <ul className="flex flex-col gap-3">
               {prospect.sourceChecks.map((check, index) => (
                 <li key={index}>
                   <SourceLink url={check.url} />

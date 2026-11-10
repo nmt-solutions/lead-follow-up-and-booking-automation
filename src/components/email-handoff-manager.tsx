@@ -156,7 +156,7 @@ export function EmailHandoffManager({
     .flatMap((c) => c.revisions.slice(-1))
     .filter((r) => r.decision?.decision === "approved");
   return (
-    <section aria-labelledby="email-handoffs" className="space-y-5">
+    <section aria-labelledby="email-handoffs" className="flex flex-col gap-5">
       <h2 id="email-handoffs" className="text-xl font-semibold">
         Use your own email client
       </h2>
@@ -168,7 +168,7 @@ export function EmailHandoffManager({
         <CardHeader>
           <CardTitle>Before opening your client</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm">
+        <CardContent className="flex flex-col gap-3 text-sm">
           <p>
             The standard mailto link uses your device’s configured email
             handler. Select the approved From account yourself and review the
@@ -223,7 +223,7 @@ export function EmailHandoffManager({
       )}
       {workspace &&
         available.map((r) => (
-          <div key={r.id} className="space-y-3">
+          <div key={r.id} className="flex flex-col gap-3">
             <h3 className="font-medium">
               {r.snapshot.name} · version {r.version}
             </h3>
@@ -274,14 +274,14 @@ export function EmailHandoffManager({
               Email to {row.recipient}
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="flex flex-col gap-5">
             <p className="text-sm">
               Approved From:{" "}
               <strong className="wrap-anywhere">{row.fromAddress}</strong>.
               Select this account in your client yourself.
             </p>
             {(["recipient", "subject", "body"] as const).map((field) => (
-              <div key={field} className="space-y-2">
+              <div key={field} className="flex flex-col gap-2">
                 <Label htmlFor={`${row.id}-${field}`}>
                   {field === "recipient"
                     ? "Recipient"
@@ -360,11 +360,11 @@ export function EmailHandoffManager({
                 I sent this email · record my assertion
               </Button>
             </div>
-            <div className="space-y-2 text-sm">
+            <div className="flex flex-col gap-2 text-sm">
               <h4 className="font-medium">Evidence history</h4>
-              <ol className="space-y-3">
+              <ol className="flex flex-col gap-3">
                 {row.evidence.map((e) => (
-                  <li key={e.id} className="space-y-1">
+                  <li key={e.id} className="flex flex-col gap-1">
                     <Badge>{evidenceLabels[e.kind]}</Badge>
                     <p>
                       Recorded {e.at} ·{" "}
@@ -412,7 +412,7 @@ export function EmailHandoffManager({
               </p>
             </div>
             {!row.evidence.some((e) => e.kind === "sent_folder_observed") && (
-              <div className="space-y-3 border-t border-border pt-4 text-sm">
+              <div className="flex flex-col gap-3 border-t border-border pt-4 text-sm">
                 <h4 className="font-medium">
                   Link a reviewed Sent-folder observation
                 </h4>
@@ -439,7 +439,7 @@ export function EmailHandoffManager({
                   row.candidates.map((c) => (
                     <div
                       key={c.id}
-                      className="space-y-3 rounded-xl border border-border p-4"
+                      className="flex flex-col gap-3 rounded-xl border border-border p-4"
                     >
                       <p className="wrap-anywhere">
                         {c.source.provider} · message {c.source.messageRef} ·

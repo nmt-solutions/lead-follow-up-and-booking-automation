@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { ArrowUpRight, Plus } from "lucide-react";
@@ -5,6 +6,24 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { OnboardingForm } from "@/components/onboarding-form";
 import { Button } from "@/components/ui/button";
+
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Your businesses" };
@@ -254,7 +273,7 @@ export default async function BusinessesPage() {
   );
   if (!businesses.length)
     return (
-      <div className="space-y-8">
+      <div className="app-page">
         <OnboardingForm />
         {hasPlatformAccess && (
           <details className="rounded-xl border border-border bg-card p-5">
@@ -280,51 +299,95 @@ export default async function BusinessesPage() {
       </div>
     );
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Your businesses
-          </h1>
-          <p className="mt-3 text-muted-foreground">
-            Choose a business to find prospects and manage your sales.
-          </p>
-        </div>
-        <Button asChild variant="outline">
-          <Link href="/businesses/new">
-            <Plus aria-hidden="true" />
-            Add business
-          </Link>
-        </Button>
-      </div>
-      <ul className="grid gap-4 sm:grid-cols-2">
-        {businesses.map((business) => (
-          <li key={business.id}>
-            <Link
-              href={`/businesses/${business.id}`}
-              className="group flex h-full flex-col gap-4 rounded-xl border border-border bg-card p-6 transition-colors hover:border-input motion-reduce:transition-none"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <h2 className="min-w-0 text-xl font-semibold wrap-anywhere">
-                  {business.name}
-                </h2>
-                <ArrowUpRight
-                  aria-hidden="true"
-                  className="size-5 shrink-0 text-primary"
-                />
-              </div>
-              <p className="line-clamp-3 leading-relaxed wrap-anywhere text-muted-foreground">
-                {business.offering}
-              </p>
-              {business.homeMarket && (
-                <p className="mt-auto text-sm wrap-anywhere text-muted-foreground">
-                  {business.homeMarket}
-                </p>
-              )}
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        title="Your businesses"
+        description="Choose the business you want to work with. Each business has separate records and team access."
+        actions={
+          <Button asChild>
+            <Link href="/businesses/new">
+              <Plus data-icon="inline-start" aria-hidden="true" />
+              Add business
             </Link>
-          </li>
-        ))}
-      </ul>
+          </Button>
+        }
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Business directory</CardTitle>
+          <CardDescription>
+            {businesses.length}{" "}
+            {businesses.length === 1 ? "business" : "businesses"} available to
+            your account.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Business</TableHead>
+                <TableHead className="hidden md:table-cell">
+                  Search area
+                </TableHead>
+                <TableHead>Setup</TableHead>
+                <TableHead className="text-right">Open</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {businesses.map((business) => (
+                <TableRow key={business.id}>
+                  <TableCell>
+                    <Link
+                      href={`/businesses/${business.id}`}
+                      className="flex min-h-18 items-center gap-3"
+                    >
+                      <Avatar className="size-10 rounded-xl">
+                        <AvatarFallback className="rounded-xl">
+                          {business.name.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="flex max-w-sm flex-col gap-1">
+                        <span className="font-semibold">{business.name}</span>
+                        <span className="line-clamp-1 text-xs text-muted-foreground">
+                          {business.offering}
+                        </span>
+                      </span>
+                    </Link>
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground md:table-cell">
+                    {business.homeMarket || "Not set"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        business.configuration?.homeMarketConfirmedAt &&
+                        business.configuration?.buyersReviewedAt
+                          ? "success"
+                          : "default"
+                      }
+                    >
+                      {business.configuration?.homeMarketConfirmedAt &&
+                      business.configuration?.buyersReviewedAt
+                        ? "Configured"
+                        : "In progress"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button asChild variant="ghost" size="icon">
+                      <Link
+                        href={`/businesses/${business.id}`}
+                        aria-label={`Open ${business.name}`}
+                      >
+                        <ArrowUpRight aria-hidden="true" />
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
       {hasPlatformAccess && (
         <details className="rounded-xl border border-border bg-card p-5">
           <summary className="cursor-pointer text-sm font-medium">

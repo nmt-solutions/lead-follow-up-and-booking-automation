@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -49,7 +50,7 @@ export function CallManager({
     setGeneration((g) => g + 1);
   }
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       {notice && <p role="status">{notice}</p>}
       <Card>
         <CardHeader>
@@ -92,18 +93,21 @@ export function CallManager({
           )}
         </CardContent>
       </Card>
-      <section className="space-y-4" aria-labelledby="call-timeline-title">
+      <section
+        className="flex flex-col gap-4"
+        aria-labelledby="call-timeline-title"
+      >
         <h2 id="call-timeline-title" className="text-xl font-semibold">
           Human call timeline
         </h2>
         <CallTimeline state={state} />
         {!!state.calls.length && (
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             <h3 className="font-medium">Correct an existing call</h3>
             <p className="text-sm text-muted-foreground">
               Updates retain the original entry and every revision.
             </p>
-            <ul className="space-y-2">
+            <ul className="flex flex-col gap-2">
               {state.calls.map((call) => (
                 <li key={call.id}>
                   <Button
@@ -270,105 +274,111 @@ function CallForm({
     }
   }
   return (
-    <form onSubmit={save} className="space-y-5">
-      <p className="text-sm text-muted-foreground">
-        Saving puts this Opportunity under your human control and pauses its
-        automated messages. The call retains its own responsible person. Return
-        control explicitly through Opportunity controls when ready.
-      </p>
-      {error && <Alert variant="destructive">{error}</Alert>}
-      {recovery && (
-        <Link
-          href={recovery}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex min-h-11 items-center text-primary underline"
-        >
-          {recovery === "/security" ? "Open Security" : "Open sign-in"} in a new
-          tab; keep this draft
-        </Link>
-      )}
-      <fieldset disabled={pending} className="space-y-5">
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-time`}>Call occurred at (UTC)</Label>
-          <Input
-            id={`${prefix}-time`}
-            type="datetime-local"
-            step="0.001"
-            required
-            value={occurredAt}
-            onChange={(e) => setOccurredAt(e.target.value)}
-          />
-          <p className="text-sm text-muted-foreground">
-            Use the actual occurrence time, including for a retrospective entry.
-            Entry and update times are recorded separately.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-notes`}>Written notes</Label>
-          <Textarea
-            id={`${prefix}-notes`}
-            required
-            maxLength={8000}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-outcome`}>Call outcome</Label>
-          <Textarea
-            id={`${prefix}-outcome`}
-            required
-            maxLength={1000}
-            value={outcome}
-            onChange={(e) => setOutcome(e.target.value)}
-            placeholder="Describe what happened, including an unanswered attempt if relevant"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-responsible`}>
-            Responsible person for this call
-          </Label>
-          <NativeSelect
-            id={`${prefix}-responsible`}
-            required
-            value={responsibleId}
-            onChange={(e) => setResponsibleId(e.target.value)}
+    <form onSubmit={save} className="flex flex-col gap-5">
+      <FieldGroup className="gap-5">
+        <p className="text-sm text-muted-foreground">
+          Saving puts this Opportunity under your human control and pauses its
+          automated messages. The call retains its own responsible person.
+          Return control explicitly through Opportunity controls when ready.
+        </p>
+        {error && <Alert variant="destructive">{error}</Alert>}
+        {recovery && (
+          <Link
+            href={recovery}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-11 items-center text-primary underline"
           >
-            {!state.members.some((m) => m.userId === responsibleId) && (
-              <option value={responsibleId}>
-                Choose a current Business member
-              </option>
-            )}
-            {state.members.map((m) => (
-              <option key={m.userId} value={m.userId}>
-                {m.name}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-next`}>Next action</Label>
-          <Textarea
-            id={`${prefix}-next`}
-            required
-            maxLength={1000}
-            value={nextAction}
-            onChange={(e) => setNextAction(e.target.value)}
-          />
-        </div>
-        <Button type="submit">
-          {pending ? "Saving…" : editing ? "Save call update" : "Save call log"}
+            {recovery === "/security" ? "Open Security" : "Open sign-in"} in a
+            new tab; keep this draft
+          </Link>
+        )}
+        <fieldset disabled={pending} className="flex flex-col gap-5">
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-time`}>Call occurred at (UTC)</Label>
+            <Input
+              id={`${prefix}-time`}
+              type="datetime-local"
+              step="0.001"
+              required
+              value={occurredAt}
+              onChange={(e) => setOccurredAt(e.target.value)}
+            />
+            <p className="text-sm text-muted-foreground">
+              Use the actual occurrence time, including for a retrospective
+              entry. Entry and update times are recorded separately.
+            </p>
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-notes`}>Written notes</Label>
+            <Textarea
+              id={`${prefix}-notes`}
+              required
+              maxLength={8000}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-outcome`}>Call outcome</Label>
+            <Textarea
+              id={`${prefix}-outcome`}
+              required
+              maxLength={1000}
+              value={outcome}
+              onChange={(e) => setOutcome(e.target.value)}
+              placeholder="Describe what happened, including an unanswered attempt if relevant"
+            />
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-responsible`}>
+              Responsible person for this call
+            </Label>
+            <NativeSelect
+              id={`${prefix}-responsible`}
+              required
+              value={responsibleId}
+              onChange={(e) => setResponsibleId(e.target.value)}
+            >
+              {!state.members.some((m) => m.userId === responsibleId) && (
+                <option value={responsibleId}>
+                  Choose a current Business member
+                </option>
+              )}
+              {state.members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-next`}>Next action</Label>
+            <Textarea
+              id={`${prefix}-next`}
+              required
+              maxLength={1000}
+              value={nextAction}
+              onChange={(e) => setNextAction(e.target.value)}
+            />
+          </Field>
+          <Button type="submit">
+            {pending
+              ? "Saving…"
+              : editing
+                ? "Save call update"
+                : "Save call log"}
+          </Button>
+        </fieldset>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={reload}
+        >
+          Reload saved calls (discards this draft)
         </Button>
-      </fieldset>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={pending}
-        onClick={reload}
-      >
-        Reload saved calls (discards this draft)
-      </Button>
+      </FieldGroup>
     </form>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -53,7 +54,7 @@ function MetricRow({ metric }: { metric: ReportMetric }) {
           </span>
         )}
       </summary>
-      <div className="mt-3 space-y-2 text-sm leading-relaxed">
+      <div className="flex flex-col mt-3 gap-2 text-sm leading-relaxed">
         <p>{metric.definition}</p>
         <p className="text-muted-foreground">Cohort: {metric.cohort}</p>
       </div>
@@ -149,90 +150,92 @@ export function BusinessReportPanel({
     void load(0);
   }
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       <Card>
         <CardHeader>
           <CardTitle>Reporting interval</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="report-from">From (UTC)</Label>
-                <Input
-                  id="report-from"
-                  type="datetime-local"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                  required
-                />
+          <form onSubmit={submit} className="flex flex-col gap-4">
+            <FieldGroup className="gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="report-from">From (UTC)</Label>
+                  <Input
+                    id="report-from"
+                    type="datetime-local"
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="report-to">
+                    Through (UTC; blank uses current time)
+                  </Label>
+                  <Input
+                    id="report-to"
+                    type="datetime-local"
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                  />
+                </Field>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="report-to">
-                  Through (UTC; blank uses current time)
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="report-detail-category">
+                  Source detail section
                 </Label>
-                <Input
-                  id="report-to"
-                  type="datetime-local"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="report-detail-category">
-                Source detail section
-              </Label>
-              <NativeSelect
-                id="report-detail-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              >
-                <option value="all">All source details</option>
-                <option value="discovery">Discovery</option>
-                <option value="sales">Sales</option>
-                <option value="communication">Communication</option>
-                <option value="activity">Human activity</option>
-              </NativeSelect>
-            </div>
-            <Button disabled={busy}>
-              {busy ? "Loading report…" : "Update report"}
-            </Button>
-            <p className="text-sm text-muted-foreground">
-              Filters apply source event or cohort times named on each measure.
-              Current states and freshness use the report generation time.
-              Counts include all retained records, across every source detail
-              page.
-            </p>
-            {error && (
-              <Alert role="alert">
-                {error}
-                {security && (
-                  <span className="ml-2">
-                    <RecoveryLink
-                      className="text-primary underline"
-                      href="/security"
-                    >
-                      Security
-                    </RecoveryLink>{" "}
-                    ·{" "}
-                    <RecoveryLink
-                      className="text-primary underline"
-                      href="/sign-in"
-                    >
-                      Sign in
-                    </RecoveryLink>
-                  </span>
-                )}
-              </Alert>
-            )}
-            <p role="status" className="text-sm text-muted-foreground">
-              {busy
-                ? "Reading retained Business records…"
-                : loaded
-                  ? "Report updated."
-                  : "Report loaded."}
-            </p>
+                <NativeSelect
+                  id="report-detail-category"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                >
+                  <option value="all">All source details</option>
+                  <option value="discovery">Discovery</option>
+                  <option value="sales">Sales</option>
+                  <option value="communication">Communication</option>
+                  <option value="activity">Human activity</option>
+                </NativeSelect>
+              </Field>
+              <Button disabled={busy}>
+                {busy ? "Loading report…" : "Update report"}
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                Filters apply source event or cohort times named on each
+                measure. Current states and freshness use the report generation
+                time. Counts include all retained records, across every source
+                detail page.
+              </p>
+              {error && (
+                <Alert role="alert">
+                  {error}
+                  {security && (
+                    <span className="ml-2">
+                      <RecoveryLink
+                        className="text-primary underline"
+                        href="/security"
+                      >
+                        Security
+                      </RecoveryLink>{" "}
+                      ·{" "}
+                      <RecoveryLink
+                        className="text-primary underline"
+                        href="/sign-in"
+                      >
+                        Sign in
+                      </RecoveryLink>
+                    </span>
+                  )}
+                </Alert>
+              )}
+              <p role="status" className="text-sm text-muted-foreground">
+                {busy
+                  ? "Reading retained Business records…"
+                  : loaded
+                    ? "Report updated."
+                    : "Report loaded."}
+              </p>
+            </FieldGroup>
           </form>
         </CardContent>
       </Card>
@@ -247,7 +250,7 @@ export function BusinessReportPanel({
               </p>
             </CardHeader>
             <CardContent>
-              <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed">
+              <ul className="flex flex-col list-disc gap-2 pl-5 text-sm leading-relaxed">
                 {report.coverage.map((text) => (
                   <li key={text}>{text}</li>
                 ))}
@@ -259,7 +262,7 @@ export function BusinessReportPanel({
               </p>
             </CardContent>
           </Card>
-          <Tabs defaultValue="discovery" className="space-y-5">
+          <Tabs defaultValue="discovery" className="flex flex-col gap-5">
             <TabsList className="h-auto flex-wrap justify-start">
               {groups.map(([id, label]) => (
                 <TabsTrigger key={id} value={id}>
@@ -278,7 +281,7 @@ export function BusinessReportPanel({
                       conversion funnel.
                     </p>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent className="flex flex-col gap-3">
                     {report.metrics
                       .filter((m) => m.group === id)
                       .map((m) => (
@@ -298,12 +301,12 @@ export function BusinessReportPanel({
                   : `Showing ${report.details.offset + 1}–${report.details.offset + report.details.items.length} of ${report.details.total} retained source details. Aggregates cover the complete populations described above.`}
               </p>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <ol className="space-y-3">
+            <CardContent className="flex flex-col gap-4">
+              <ol className="flex flex-col gap-3">
                 {report.details.items.map((item) => (
                   <li
                     key={item.id}
-                    className="space-y-2 rounded-xl border border-border p-4 text-sm wrap-anywhere"
+                    className="flex flex-col gap-2 rounded-xl border border-border p-4 text-sm wrap-anywhere"
                   >
                     <div className="flex flex-wrap items-center gap-3">
                       <Link

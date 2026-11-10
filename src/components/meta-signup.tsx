@@ -218,7 +218,7 @@ export function MetaSignup({
     }
   }
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <Script
         src="https://connect.facebook.net/en_US/sdk.js"
         strategy="afterInteractive"

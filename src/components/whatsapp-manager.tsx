@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useCallback, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -248,7 +249,7 @@ export function WhatsAppManager({
   function feedbackFor(section: Section) {
     if (feedback?.section !== section) return null;
     return (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {feedback.error ? (
           <Alert>{feedback.text}</Alert>
         ) : (
@@ -304,7 +305,7 @@ export function WhatsAppManager({
   const c = state.connection;
   const lastObservation = c?.observation;
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <WhatsAppIntakeManager
         key={`${c?.version}-${state.intake.inboxConnectionId}`}
         businessId={businessId}
@@ -316,7 +317,7 @@ export function WhatsAppManager({
         <CardHeader>
           <CardTitle>Customer-owned channel, separate Meta bill</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p>{state.billing.disclosure}</p>
           <a
             href="https://business.whatsapp.com/products/platform-pricing"
@@ -339,7 +340,7 @@ export function WhatsAppManager({
         <CardHeader>
           <CardTitle>Connection readiness</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <div className="flex flex-wrap gap-3">
             <Badge>{c ? statusLabels[c.status] : "Not connected"}</Badge>
             <Badge>
@@ -364,7 +365,7 @@ export function WhatsAppManager({
             </p>
           )}
           {state.readiness.issues.length > 0 && (
-            <ul className="list-disc space-y-2 ps-5 text-sm">
+            <ul className="flex flex-col list-disc gap-2 ps-5 text-sm">
               {state.readiness.issues.map((issue, i) => (
                 <li key={`${issue}-${i}`}>
                   {issueLabels[issue] ??
@@ -374,7 +375,7 @@ export function WhatsAppManager({
             </ul>
           )}
           {lastObservation && (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <p className="text-sm text-muted-foreground">
                 Last provider observation. Current readiness above also requires
                 unexpired evidence.
@@ -444,7 +445,7 @@ export function WhatsAppManager({
         <CardHeader>
           <CardTitle>Customer control and direct Meta payment</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <WhatsAppEvidenceStatus evidence={state.paymentEvidence} />
           <p className="text-sm text-muted-foreground">
             For assisted review, share this Business ID with your onboarding
@@ -477,125 +478,129 @@ export function WhatsAppManager({
           <CardTitle>Number arrangement and control</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={save} className="space-y-5">
-            <fieldset disabled={pending} className="space-y-5">
-              <p className="text-sm text-muted-foreground">
-                Record the actual arrangement before authorizing Meta access.
-                For assisted setup, state who buys the number, controls OTP
-                access, pays the carrier and can authorize a transfer. Saving
-                changes requires fresh Meta sign-in.
-              </p>
-              <div className="space-y-2">
-                <Label htmlFor="wa-portfolio">
-                  Your Meta Business portfolio ID
-                </Label>
-                <Input
-                  id="wa-portfolio"
-                  name="portfolioId"
-                  inputMode="numeric"
-                  pattern="[0-9]{1,40}"
-                  required
-                  defaultValue={c?.configuration.portfolioId ?? ""}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="wa-number">
-                  Business phone number, including country code
-                </Label>
-                <Input
-                  id="wa-number"
-                  name="requestedNumber"
-                  type="tel"
-                  autoComplete="tel"
-                  pattern="\+[1-9][0-9]{6,14}"
-                  placeholder="+14155550123"
-                  required
-                  defaultValue={c?.configuration.requestedNumber ?? ""}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="wa-source">Number setup path</Label>
-                <NativeSelect
-                  id="wa-source"
-                  name="numberSource"
-                  defaultValue={
-                    c?.configuration.numberSource ?? "existing_cloud"
-                  }
+          <form onSubmit={save} className="flex flex-col gap-5">
+            <FieldGroup className="gap-5">
+              <fieldset disabled={pending} className="flex flex-col gap-5">
+                <p className="text-sm text-muted-foreground">
+                  Record the actual arrangement before authorizing Meta access.
+                  For assisted setup, state who buys the number, controls OTP
+                  access, pays the carrier and can authorize a transfer. Saving
+                  changes requires fresh Meta sign-in.
+                </p>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="wa-portfolio">
+                    Your Meta Business portfolio ID
+                  </Label>
+                  <Input
+                    id="wa-portfolio"
+                    name="portfolioId"
+                    inputMode="numeric"
+                    pattern="[0-9]{1,40}"
+                    required
+                    defaultValue={c?.configuration.portfolioId ?? ""}
+                  />
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="wa-number">
+                    Business phone number, including country code
+                  </Label>
+                  <Input
+                    id="wa-number"
+                    name="requestedNumber"
+                    type="tel"
+                    autoComplete="tel"
+                    pattern="\+[1-9][0-9]{6,14}"
+                    placeholder="+14155550123"
+                    required
+                    defaultValue={c?.configuration.requestedNumber ?? ""}
+                  />
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="wa-source">Number setup path</Label>
+                  <NativeSelect
+                    id="wa-source"
+                    name="numberSource"
+                    defaultValue={
+                      c?.configuration.numberSource ?? "existing_cloud"
+                    }
+                  >
+                    <option value="existing_cloud">
+                      Existing Cloud API number
+                    </option>
+                    <option value="business_app">
+                      Keep using the WhatsApp Business App (eligibility
+                      required)
+                    </option>
+                    <option value="assisted_new">
+                      Assisted setup of a new customer-controlled number
+                    </option>
+                  </NativeSelect>
+                  <p className="text-sm text-muted-foreground">
+                    {state.setup.coexistence
+                      ? "Business App use still needs Meta's supported coexistence completion and a number check."
+                      : "Business App coexistence is currently unavailable. Selecting this path records your request and cannot make it ready."}
+                  </p>
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="wa-terms">
+                    Provisioning, control and transfer terms
+                  </Label>
+                  <Textarea
+                    id="wa-terms"
+                    name="provisioningTerms"
+                    required
+                    minLength={30}
+                    maxLength={2000}
+                    rows={5}
+                    defaultValue={c?.configuration.provisioningTerms ?? ""}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Include any carrier/provider restrictions and the steps
+                    needed to release or transfer the number. No automatic
+                    transfer or guaranteed retention of app features is
+                    promised.
+                  </p>
+                </Field>
+                <label
+                  htmlFor="wa-control"
+                  className="flex min-h-11 items-start gap-3 py-2"
                 >
-                  <option value="existing_cloud">
-                    Existing Cloud API number
-                  </option>
-                  <option value="business_app">
-                    Keep using the WhatsApp Business App (eligibility required)
-                  </option>
-                  <option value="assisted_new">
-                    Assisted setup of a new customer-controlled number
-                  </option>
-                </NativeSelect>
-                <p className="text-sm text-muted-foreground">
-                  {state.setup.coexistence
-                    ? "Business App use still needs Meta's supported coexistence completion and a number check."
-                    : "Business App coexistence is currently unavailable. Selecting this path records your request and cannot make it ready."}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="wa-terms">
-                  Provisioning, control and transfer terms
-                </Label>
-                <Textarea
-                  id="wa-terms"
-                  name="provisioningTerms"
-                  required
-                  minLength={30}
-                  maxLength={2000}
-                  rows={5}
-                  defaultValue={c?.configuration.provisioningTerms ?? ""}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Include any carrier/provider restrictions and the steps needed
-                  to release or transfer the number. No automatic transfer or
-                  guaranteed retention of app features is promised.
-                </p>
-              </div>
-              <label
-                htmlFor="wa-control"
-                className="flex min-h-11 items-start gap-3 py-2"
-              >
-                <Checkbox
-                  id="wa-control"
-                  name="customerControlsAssets"
-                  value="on"
-                  required
-                  defaultChecked={Boolean(c)}
-                />
-                <span className="text-sm">
-                  Our Business controls the Meta portfolio, account and number,
-                  or will retain those controls under the recorded assisted
-                  setup terms.
-                </span>
-              </label>
-              <label
-                htmlFor="wa-billing"
-                className="flex min-h-11 items-start gap-3 py-2"
-              >
-                <Checkbox
-                  id="wa-billing"
-                  name="customerPaysMeta"
-                  value="on"
-                  required
-                  defaultChecked={Boolean(c)}
-                />
-                <span className="text-sm">
-                  Our Business supplies its own Meta payment method and pays
-                  Meta usage separately from the automation subscription. This
-                  declaration does not verify billing setup.
-                </span>
-              </label>
-              <Button type="submit">
-                {pending ? "Working…" : "Save number arrangement"}
-              </Button>
-            </fieldset>
-            {feedbackFor("save")}
+                  <Checkbox
+                    id="wa-control"
+                    name="customerControlsAssets"
+                    value="on"
+                    required
+                    defaultChecked={Boolean(c)}
+                  />
+                  <span className="text-sm">
+                    Our Business controls the Meta portfolio, account and
+                    number, or will retain those controls under the recorded
+                    assisted setup terms.
+                  </span>
+                </label>
+                <label
+                  htmlFor="wa-billing"
+                  className="flex min-h-11 items-start gap-3 py-2"
+                >
+                  <Checkbox
+                    id="wa-billing"
+                    name="customerPaysMeta"
+                    value="on"
+                    required
+                    defaultChecked={Boolean(c)}
+                  />
+                  <span className="text-sm">
+                    Our Business supplies its own Meta payment method and pays
+                    Meta usage separately from the automation subscription. This
+                    declaration does not verify billing setup.
+                  </span>
+                </label>
+                <Button type="submit">
+                  {pending ? "Working…" : "Save number arrangement"}
+                </Button>
+              </fieldset>
+              {feedbackFor("save")}
+            </FieldGroup>
           </form>
         </CardContent>
       </Card>
@@ -604,7 +609,7 @@ export function WhatsAppManager({
           <CardHeader>
             <CardTitle>Authorize with Meta</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">
               Use your own Meta administrator login. Complete account selection,
               number verification and payment setup at Meta. A partial or
@@ -649,7 +654,7 @@ export function WhatsAppManager({
               {c.observation?.checks.number_registered === "missing" &&
               c.reason === null ? (
                 <form
-                  className="space-y-4"
+                  className="flex flex-col gap-4"
                   onSubmit={(event) => {
                     event.preventDefault();
                     const form = event.currentTarget;
@@ -661,29 +666,31 @@ export function WhatsAppManager({
                     ).finally(() => form.reset());
                   }}
                 >
-                  <p className="text-sm text-muted-foreground">
-                    Registration uses your six-digit Meta two-step verification
-                    PIN. Keep the PIN with your Business; it is sent once to
-                    Meta and never saved here. Business App coexistence does not
-                    use this registration action.
-                  </p>
-                  <Label htmlFor="wa-pin">Meta registration PIN</Label>
-                  <Input
-                    id="wa-pin"
-                    name="pin"
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    required
-                  />
-                  <Button disabled={pending} type="submit">
-                    Register number with Meta
-                  </Button>
+                  <FieldGroup className="gap-4">
+                    <p className="text-sm text-muted-foreground">
+                      Registration uses your six-digit Meta two-step
+                      verification PIN. Keep the PIN with your Business; it is
+                      sent once to Meta and never saved here. Business App
+                      coexistence does not use this registration action.
+                    </p>
+                    <Label htmlFor="wa-pin">Meta registration PIN</Label>
+                    <Input
+                      id="wa-pin"
+                      name="pin"
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      pattern="[0-9]{6}"
+                      maxLength={6}
+                      required
+                    />
+                    <Button disabled={pending} type="submit">
+                      Register number with Meta
+                    </Button>
+                  </FieldGroup>
                 </form>
               ) : (
-                <div className="space-y-3">
+                <div className="flex flex-col gap-3">
                   <p className="text-sm text-muted-foreground">
                     Review the latest registration status before another
                     attempt.
@@ -713,7 +720,7 @@ export function WhatsAppManager({
           <CardHeader>
             <CardTitle>Remove local access</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex flex-col gap-4">
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button type="button" variant="outline" disabled={pending}>

@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -27,30 +28,24 @@ export default async function BillingPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to overview
-        </Link>
-        <p className="mb-3 font-medium text-primary wrap-anywhere">
-          {data.profile.name}
-        </p>
-        <h1 className="page-title">Billing details</h1>
+    <div className="app-page">
+      <PageHeader
+        title={<>Billing details</>}
+        description={
+          <>
+            Maintain the legal details for your platform subscription. Owners
+            and Admins can submit changes; authorized tax operators review
+            supporting evidence.
+          </>
+        }
+      >
         <Link
           href={`/businesses/${businessId}/tax`}
           className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Subscription tax preview and review history
         </Link>
-        <p className="mt-3 text-muted-foreground">
-          Maintain the legal details for your platform subscription. Owners and
-          Admins can submit changes; authorized tax operators review supporting
-          evidence.
-        </p>
-      </header>
+      </PageHeader>
       <BillingManager
         businessId={businessId}
         initial={data.state}

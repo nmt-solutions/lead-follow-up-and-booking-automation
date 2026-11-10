@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -20,21 +21,17 @@ export default async function SendersPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <header>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to overview
-        </Link>
-        <h1 className="page-title">Sending identities</h1>
-        <p className="mt-3 text-muted-foreground">
-          Configure the Business identity people see, its intended uses and
-          where replies go. Domain authentication, sending access and two-way
-          reply handling are separate requirements.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Sending identities</>}
+        description={
+          <>
+            Configure the Business identity people see, its intended uses and
+            where replies go. Domain authentication, sending access and two-way
+            reply handling are separate requirements.
+          </>
+        }
+      ></PageHeader>
       <Link
         href={`/businesses/${businessId}/mailboxes`}
         className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"

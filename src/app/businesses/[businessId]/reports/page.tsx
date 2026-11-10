@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -20,20 +21,16 @@ export default async function ReportsPage({
     }
   })();
   return (
-    <div className="space-y-8">
-      <header>
-        <Link
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-          href={`/businesses/${businessId}`}
-        >
-          Back to overview
-        </Link>
-        <h1 className="page-title">Reports</h1>
-        <p className="mt-3 max-w-3xl text-muted-foreground">
-          Review sourced prospects, recorded conversations and confirmed
-          outcomes. Every measure names its evidence and population.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Reports</>}
+        description={
+          <>
+            Review sourced prospects, recorded conversations and confirmed
+            outcomes. Every measure names its evidence and population.
+          </>
+        }
+      ></PageHeader>
       <BusinessReportPanel businessId={businessId} initialReport={report} />
     </div>
   );

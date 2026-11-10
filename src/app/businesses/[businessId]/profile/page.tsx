@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -34,16 +35,13 @@ export default async function BusinessPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <header>
-        <p className="eyebrow">Business details</p>
-        <h1 className="page-title mt-2">Business profile</h1>
-        <p className="mt-3 text-muted-foreground">
-          Update your name, website, and products or services.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Business profile</>}
+        description={<>Update your name, website, and products or services.</>}
+      ></PageHeader>
       {access.role === "salesperson" ? (
-        <dl className="space-y-6 rounded-2xl border border-border bg-card p-6">
+        <dl className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6">
           {[
             { label: "Business name", value: profile.name },
             { label: "Products or services", value: profile.offering },

@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -22,20 +23,16 @@ export default async function Notifications() {
     }
   })();
   return (
-    <div className="mx-auto max-w-5xl space-y-8">
-      <header className="space-y-4">
-        <Link
-          href="/businesses"
-          className="inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Transactional notification delivery</h1>
-        <p>
-          Verify the platform sender, select sending terms and review
-          authentication, invitations and authorized platform notices.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Transactional notification delivery</>}
+        description={
+          <>
+            Verify the platform sender, select sending terms and review
+            authentication, invitations and authorized platform notices.
+          </>
+        }
+      ></PageHeader>
       <NotificationManager
         initial={data.workspace}
         initialPreferences={data.preferences}

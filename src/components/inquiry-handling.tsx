@@ -160,7 +160,7 @@ export function InquiryHandling({
   }
   return (
     <section
-      className="space-y-4 border-t pt-5"
+      className="flex flex-col gap-4 border-t pt-5"
       aria-labelledby={`inquiry-${opportunityId}`}
     >
       <h3 id={`inquiry-${opportunityId}`} className="font-semibold">
@@ -253,9 +253,12 @@ export function InquiryHandling({
           explicitly hand back when it is ready for automation.
         </p>
       ) : (
-        <ol className="space-y-5">
+        <ol className="flex flex-col gap-5">
           {[...state.runs].reverse().map((run) => (
-            <li key={run.id} className="space-y-3 rounded-xl border p-4">
+            <li
+              key={run.id}
+              className="flex flex-col gap-3 rounded-xl border p-4"
+            >
               <div className="flex flex-wrap gap-2">
                 <Badge
                   className={
@@ -279,7 +282,7 @@ export function InquiryHandling({
               </p>
               {run.body && <p className="whitespace-pre-wrap">{run.body}</p>}
               {run.body && (
-                <dl className="space-y-1 text-sm wrap-anywhere">
+                <dl className="flex flex-col gap-1 text-sm wrap-anywhere">
                   <div>
                     <dt className="inline font-medium">To: </dt>
                     <dd className="inline">{run.reply.recipient}</dd>
@@ -321,7 +324,7 @@ export function InquiryHandling({
                   "Acceptance is unknown. This action will not resend. Synchronize the selected mailbox and check Sent evidence before any manual action."}
               </p>
               {run.action?.email && (
-                <div className="space-y-2 text-sm wrap-anywhere">
+                <div className="flex flex-col gap-2 text-sm wrap-anywhere">
                   {run.action.email.processingAcceptance && (
                     <p>
                       Microsoft accepted processing at{" "}
@@ -369,7 +372,7 @@ export function InquiryHandling({
                 </div>
               )}
               {run.action?.state === "pending" && run.status === "ready" && (
-                <div className="space-y-2">
+                <div className="flex flex-col gap-2">
                   <Button
                     type="button"
                     disabled={
@@ -408,7 +411,7 @@ export function InquiryHandling({
                   </Button>
                 )}
               {run.facts.length > 0 && (
-                <dl className="space-y-2">
+                <dl className="flex flex-col gap-2">
                   {run.facts.map((fact) => (
                     <div key={fact.key}>
                       <dt className="text-sm font-medium">{fact.key}</dt>
@@ -447,7 +450,7 @@ export function InquiryHandling({
                   })}{" "}
                   UTC
                 </time>
-                <ul className="mt-3 space-y-2">
+                <ul className="flex flex-col mt-3 gap-2">
                   {run.citations.map((citation) => (
                     <li key={`${citation.kind}-${citation.index}`}>
                       {citation.kind} {citation.index + 1}: {citation.text}

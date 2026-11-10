@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 import { RecoveryLink } from "./recovery-link";
 import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import { z } from "zod";
@@ -21,10 +22,10 @@ function Field({
 }: ComponentProps<typeof Input> & { label: string }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input id={id} {...props} />
-    </div>
+    </UiField>
   );
 }
 function Choice({
@@ -37,12 +38,12 @@ function Choice({
 }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <NativeSelect id={id} {...props}>
         {children}
       </NativeSelect>
-    </div>
+    </UiField>
   );
 }
 function text(form: FormData, key: string) {
@@ -160,7 +161,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
         : r.source.category === category),
   );
   return (
-    <div key={state.month} className="space-y-8">
+    <div key={state.month} className="flex flex-col gap-8">
       <p className="text-sm text-muted-foreground">
         Forms belong to the loaded month. Loading another month starts fresh
         forms.
@@ -190,7 +191,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
       {status && <p role="status">{status}</p>}
       {busy && <p role="status">Updating saved cost records…</p>}
       <section
-        className="space-y-4 rounded-2xl border border-border bg-card p-6"
+        className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
         aria-labelledby="cost-summary"
       >
         <h2 id="cost-summary" className="text-xl font-semibold">
@@ -261,7 +262,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
           <summary className="min-h-11 cursor-pointer py-3 text-primary">
             Review separate funding and customer costs
           </summary>
-          <dl className="space-y-3">
+          <dl className="flex flex-col gap-3">
             <div>
               <dt className="font-medium">
                 Cash top-ups · funding, excluded from consumption total
@@ -298,7 +299,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
           </p>
         </details>
       </section>
-      <section className="space-y-4" aria-labelledby="cost-alerts">
+      <section className="flex flex-col gap-4" aria-labelledby="cost-alerts">
         <h2 id="cost-alerts" className="text-xl font-semibold">
           Budgets and notifications
         </h2>
@@ -351,7 +352,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
         {state.alerts.map((a) => (
           <article
             key={a.id}
-            className="space-y-3 rounded-xl border border-border bg-card p-5"
+            className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5"
           >
             <div className="flex flex-wrap gap-3">
               <h3 className="font-semibold">
@@ -386,15 +387,17 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
                   );
                 }}
               >
-                <Field
-                  label="Review note"
-                  name="note"
-                  required
-                  maxLength={300}
-                />
-                <Button disabled={busy} variant="outline">
-                  Acknowledge notification
-                </Button>
+                <FieldGroup className="gap-3">
+                  <Field
+                    label="Review note"
+                    name="note"
+                    required
+                    maxLength={300}
+                  />
+                  <Button disabled={busy} variant="outline">
+                    Acknowledge notification
+                  </Button>
+                </FieldGroup>
               </form>
             )}
             {a.emailState === "held" && (
@@ -423,7 +426,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
             Configure a monthly budget
           </summary>
           <form
-            className="mt-4 space-y-4"
+            className="flex flex-col mt-4 gap-4"
             onSubmit={(e) => {
               e.preventDefault();
               const f = new FormData(e.currentTarget);
@@ -445,66 +448,70 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
               }, "Budget version saved.");
             }}
           >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Choice label="Budget category" name="category" required>
-                <option value="global">All operator categories</option>
-                {costCategorySchema.options.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </Choice>
-              <Field
-                label="Monthly INR planning budget"
-                name="limit"
-                required
-                inputMode="decimal"
-              />
-              <Field
-                label="Responsible operator user ID"
-                name="owner"
-                required
-                defaultValue={state.operatorId}
-              />
-              <Field
-                label="Threshold percentages, separated by commas"
-                name="thresholds"
-                defaultValue="80,90,100"
-                required
-              />
-              <Choice label="Notification delivery" name="email">
-                <option value="no">In-app</option>
-                <option value="yes">In-app and configured email sender</option>
-              </Choice>
-              <Choice label="Forecast notifications" name="forecast">
-                <option value="no">Actual cost only</option>
-                <option value="yes">
-                  Actual cost and known-source forecast
-                </option>
-              </Choice>
-              <Field
-                label="Delegation and evidence retention, seconds"
-                name="retention"
-                required
-                type="number"
-                min="60"
-                max="2147483647"
-              />
-              <Field
-                label="Reason and responsibility"
-                name="note"
-                required
-                maxLength={300}
-              />
-            </div>
-            <p className="text-sm">
-              Saving revises the selected category for this month. Automation
-              remains authorized only while this version is current, unexpired
-              and its owner retains cost capability and MFA enrollment.
-            </p>
-            <Button disabled={busy}>Save budget version</Button>
+            <FieldGroup className="gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Choice label="Budget category" name="category" required>
+                  <option value="global">All operator categories</option>
+                  {costCategorySchema.options.map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </Choice>
+                <Field
+                  label="Monthly INR planning budget"
+                  name="limit"
+                  required
+                  inputMode="decimal"
+                />
+                <Field
+                  label="Responsible operator user ID"
+                  name="owner"
+                  required
+                  defaultValue={state.operatorId}
+                />
+                <Field
+                  label="Threshold percentages, separated by commas"
+                  name="thresholds"
+                  defaultValue="80,90,100"
+                  required
+                />
+                <Choice label="Notification delivery" name="email">
+                  <option value="no">In-app</option>
+                  <option value="yes">
+                    In-app and configured email sender
+                  </option>
+                </Choice>
+                <Choice label="Forecast notifications" name="forecast">
+                  <option value="no">Actual cost only</option>
+                  <option value="yes">
+                    Actual cost and known-source forecast
+                  </option>
+                </Choice>
+                <Field
+                  label="Delegation and evidence retention, seconds"
+                  name="retention"
+                  required
+                  type="number"
+                  min="60"
+                  max="2147483647"
+                />
+                <Field
+                  label="Reason and responsibility"
+                  name="note"
+                  required
+                  maxLength={300}
+                />
+              </div>
+              <p className="text-sm">
+                Saving revises the selected category for this month. Automation
+                remains authorized only while this version is current, unexpired
+                and its owner retains cost capability and MFA enrollment.
+              </p>
+              <Button disabled={busy}>Save budget version</Button>
+            </FieldGroup>
           </form>
         </details>
       </section>
-      <section className="space-y-4" aria-labelledby="cost-sources">
+      <section className="flex flex-col gap-4" aria-labelledby="cost-sources">
         <h2 id="cost-sources" className="text-xl font-semibold">
           Source usage and evidence
         </h2>
@@ -523,15 +530,17 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
             );
           }}
         >
-          <Field
-            label="Native evidence retention, seconds"
-            name="retention"
-            type="number"
-            min="60"
-            max="2147483647"
-            required
-          />
-          <Button disabled={busy}>Ingest current application usage</Button>
+          <FieldGroup className="gap-4">
+            <Field
+              label="Native evidence retention, seconds"
+              name="retention"
+              type="number"
+              min="60"
+              max="2147483647"
+              required
+            />
+            <Button disabled={busy}>Ingest current application usage</Button>
+          </FieldGroup>
         </form>
         <p className="text-sm">
           Application usage includes AI, discovery, storage operations, native
@@ -653,7 +662,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
           amount or rate; blank amounts stay unpriced.
         </p>
         <form
-          className="space-y-4"
+          className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
@@ -697,135 +706,137 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
             }, "Evidence version saved. Prior versions remain in history.");
           }}
         >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Stable source ID, beginning evidence:"
-              name="sourceId"
-              placeholder="evidence:provider-statement-line"
-              required
-            />
-            <Field
-              label="Provider or effort owner key"
-              name="provider"
-              required
-            />
-            <Choice label="Category" name="category" required>
-              <option value="">Choose category</option>
-              {costCategorySchema.options.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </Choice>
-            <Choice label="Record type" name="kind" required>
-              <option value="">Choose accounting treatment</option>
-              {[
-                "consumption",
-                "commitment",
-                "cash_topup",
-                "subscription_allocation",
-                "customer_paid_meta",
-                "plan_change",
-              ].map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </Choice>
-            <Choice label="Funding source" name="funding" required>
-              <option value="">Choose funding evidence</option>
-              {[
-                "cash",
-                "openai_linked_credits",
-                "openai_purchased_credits",
-                "gateway_prepaid",
-                "existing_subscription",
-                "byok",
-                "fallback",
-                "customer_meta",
-                "unknown",
-              ].map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </Choice>
-            <Choice label="Source currency" name="currency">
-              <option>INR</option>
-              <option>USD</option>
-            </Choice>
-            <Field
-              label="Attributed amount; plan changes may use a signed delta; blank means unpriced"
-              name="amount"
-              inputMode="decimal"
-            />
-            <Field
-              label="Usage quantity or effort duration"
-              name="quantity"
-              type="number"
-              min="0"
-              step="1"
-            />
-            <Field
-              label="Unit, such as minutes or compute_hours"
-              name="unit"
-              required
-            />
-            <Field
-              label="Allocation method and platform share"
-              name="allocation"
-              required
-              maxLength={300}
-            />
-            <Field
-              label="Business ID; blank for shared platform"
-              name="business"
-            />
-            <Field label="Run ID, if attributable" name="run" />
-            <Field
-              label="Exact nonsecret statement or evidence reference"
-              name="evidence"
-              required
-              maxLength={300}
-            />
-            <Field
-              label="Selected plan or change description, if applicable"
-              name="plan"
-              maxLength={300}
-            />
-            <Field
-              label="Observed or effective time"
-              name="observed"
-              type="datetime-local"
-              required
-            />
-            <Field
-              label="Evidence fresh through"
-              name="fresh"
-              type="datetime-local"
-              required
-            />
-            <Field
-              label="Reason or correction evidence"
-              name="reason"
-              required
-              maxLength={300}
-            />
-            <Field
-              label="Minimum evidence retention, seconds"
-              name="retention"
-              type="number"
-              min="60"
-              max="2147483647"
-              required
-            />
-            <Field
-              label="Covered native or planned-change source IDs, separated by commas"
-              name="covers"
-            />
-          </div>
-          <p className="text-sm">
-            A statement covering imported usage replaces its listed native costs
-            in the total. Payment fees retain their authoritative gateway
-            observation; bank settlement and fee reconciliation remain separate.
-            Plan-change amounts are future incremental commitments, included
-            only in the forecast; record actual charges separately.
-          </p>
-          <Button disabled={busy}>Save evidence version</Button>
+          <FieldGroup className="gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Stable source ID, beginning evidence:"
+                name="sourceId"
+                placeholder="evidence:provider-statement-line"
+                required
+              />
+              <Field
+                label="Provider or effort owner key"
+                name="provider"
+                required
+              />
+              <Choice label="Category" name="category" required>
+                <option value="">Choose category</option>
+                {costCategorySchema.options.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </Choice>
+              <Choice label="Record type" name="kind" required>
+                <option value="">Choose accounting treatment</option>
+                {[
+                  "consumption",
+                  "commitment",
+                  "cash_topup",
+                  "subscription_allocation",
+                  "customer_paid_meta",
+                  "plan_change",
+                ].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </Choice>
+              <Choice label="Funding source" name="funding" required>
+                <option value="">Choose funding evidence</option>
+                {[
+                  "cash",
+                  "openai_linked_credits",
+                  "openai_purchased_credits",
+                  "gateway_prepaid",
+                  "existing_subscription",
+                  "byok",
+                  "fallback",
+                  "customer_meta",
+                  "unknown",
+                ].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </Choice>
+              <Choice label="Source currency" name="currency">
+                <option>INR</option>
+                <option>USD</option>
+              </Choice>
+              <Field
+                label="Attributed amount; plan changes may use a signed delta; blank means unpriced"
+                name="amount"
+                inputMode="decimal"
+              />
+              <Field
+                label="Usage quantity or effort duration"
+                name="quantity"
+                type="number"
+                min="0"
+                step="1"
+              />
+              <Field
+                label="Unit, such as minutes or compute_hours"
+                name="unit"
+                required
+              />
+              <Field
+                label="Allocation method and platform share"
+                name="allocation"
+                required
+                maxLength={300}
+              />
+              <Field
+                label="Business ID; blank for shared platform"
+                name="business"
+              />
+              <Field label="Run ID, if attributable" name="run" />
+              <Field
+                label="Exact nonsecret statement or evidence reference"
+                name="evidence"
+                required
+                maxLength={300}
+              />
+              <Field
+                label="Selected plan or change description, if applicable"
+                name="plan"
+                maxLength={300}
+              />
+              <Field
+                label="Observed or effective time"
+                name="observed"
+                type="datetime-local"
+                required
+              />
+              <Field
+                label="Evidence fresh through"
+                name="fresh"
+                type="datetime-local"
+                required
+              />
+              <Field
+                label="Reason or correction evidence"
+                name="reason"
+                required
+                maxLength={300}
+              />
+              <Field
+                label="Minimum evidence retention, seconds"
+                name="retention"
+                type="number"
+                min="60"
+                max="2147483647"
+                required
+              />
+              <Field
+                label="Covered native or planned-change source IDs, separated by commas"
+                name="covers"
+              />
+            </div>
+            <p className="text-sm">
+              A statement covering imported usage replaces its listed native
+              costs in the total. Payment fees retain their authoritative
+              gateway observation; bank settlement and fee reconciliation remain
+              separate. Plan-change amounts are future incremental commitments,
+              included only in the forecast; record actual charges separately.
+            </p>
+            <Button disabled={busy}>Save evidence version</Button>
+          </FieldGroup>
         </form>
       </details>
       <details className="rounded-xl border border-border bg-card p-6">
@@ -833,7 +844,7 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
           Configure planning assumptions and evidenced rates
         </summary>
         <form
-          className="mt-4 space-y-4"
+          className="flex flex-col mt-4 gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
@@ -899,97 +910,99 @@ export function CostManager({ initial }: { initial: CostWorkspace }) {
             }, "Planning version saved. Earlier assumptions remain in history.");
           }}
         >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Assumed USD to INR rate; blank leaves USD separate"
-              name="fx"
-              inputMode="decimal"
-              defaultValue={state.planning?.usdToInr ?? ""}
-            />
-            <Field
-              label="Planning conversion evidence"
-              name="fxEvidence"
-              defaultValue={state.planning?.conversionEvidence ?? ""}
-            />
-            <Field
-              label="Planning conversion checked at"
-              name="fxDate"
-              type="datetime-local"
-            />
-            <Choice
-              label="Variable forecast model"
-              name="forecast"
-              defaultValue={state.planning?.forecast ?? "none"}
-            >
-              <option value="none">No forecast</option>
-              <option value="linear_elapsed_utc">
-                Linear usage over elapsed UTC month, plus fixed commitments
-              </option>
-            </Choice>
-            <Field
-              label="Assumptions, time basis and coverage limits"
-              name="assumptions"
-              required
-              maxLength={300}
-              defaultValue={state.planning?.assumptions ?? ""}
-            />
-            <Field
-              label="Minimum planning evidence retention, seconds"
-              name="retention"
-              required
-              type="number"
-              min="60"
-              max="2147483647"
-            />
-          </div>
-          <fieldset className="space-y-4 rounded-xl border border-border p-4">
-            <legend className="px-2 font-medium">
-              Optional rate addition or correction
-            </legend>
-            <p className="text-sm">
-              An effective rate estimates missing provider amounts. It never
-              replaces observed money. Enter a unit rate, or both token rates
-              per million; no rate or free band is supplied. A new effective
-              date preserves earlier rates. The same date corrects that rate in
-              the new planning version.
-            </p>
+          <FieldGroup className="gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Provider key" name="rateProvider" />
-              <Field label="Exact usage unit" name="rateUnit" />
-              <Field label="Model ID, if specific" name="model" />
-              <Choice label="Rate currency" name="rateCurrency">
-                <option>INR</option>
-                <option>USD</option>
+              <Field
+                label="Assumed USD to INR rate; blank leaves USD separate"
+                name="fx"
+                inputMode="decimal"
+                defaultValue={state.planning?.usdToInr ?? ""}
+              />
+              <Field
+                label="Planning conversion evidence"
+                name="fxEvidence"
+                defaultValue={state.planning?.conversionEvidence ?? ""}
+              />
+              <Field
+                label="Planning conversion checked at"
+                name="fxDate"
+                type="datetime-local"
+              />
+              <Choice
+                label="Variable forecast model"
+                name="forecast"
+                defaultValue={state.planning?.forecast ?? "none"}
+              >
+                <option value="none">No forecast</option>
+                <option value="linear_elapsed_utc">
+                  Linear usage over elapsed UTC month, plus fixed commitments
+                </option>
               </Choice>
               <Field
-                label="Cost per unit"
-                name="unitRate"
-                inputMode="decimal"
+                label="Assumptions, time basis and coverage limits"
+                name="assumptions"
+                required
+                maxLength={300}
+                defaultValue={state.planning?.assumptions ?? ""}
               />
               <Field
-                label="Input token cost per million"
-                name="inputRate"
-                inputMode="decimal"
-              />
-              <Field
-                label="Output token cost per million"
-                name="outputRate"
-                inputMode="decimal"
-              />
-              <Field label="Exact rate evidence" name="rateEvidence" />
-              <Field
-                label="Rate effective at"
-                name="rateStart"
-                type="datetime-local"
-              />
-              <Field
-                label="Rate valid through"
-                name="rateEnd"
-                type="datetime-local"
+                label="Minimum planning evidence retention, seconds"
+                name="retention"
+                required
+                type="number"
+                min="60"
+                max="2147483647"
               />
             </div>
-          </fieldset>
-          <Button disabled={busy}>Save planning version</Button>
+            <fieldset className="flex flex-col gap-4 rounded-xl border border-border p-4">
+              <legend className="px-2 font-medium">
+                Optional rate addition or correction
+              </legend>
+              <p className="text-sm">
+                An effective rate estimates missing provider amounts. It never
+                replaces observed money. Enter a unit rate, or both token rates
+                per million; no rate or free band is supplied. A new effective
+                date preserves earlier rates. The same date corrects that rate
+                in the new planning version.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Provider key" name="rateProvider" />
+                <Field label="Exact usage unit" name="rateUnit" />
+                <Field label="Model ID, if specific" name="model" />
+                <Choice label="Rate currency" name="rateCurrency">
+                  <option>INR</option>
+                  <option>USD</option>
+                </Choice>
+                <Field
+                  label="Cost per unit"
+                  name="unitRate"
+                  inputMode="decimal"
+                />
+                <Field
+                  label="Input token cost per million"
+                  name="inputRate"
+                  inputMode="decimal"
+                />
+                <Field
+                  label="Output token cost per million"
+                  name="outputRate"
+                  inputMode="decimal"
+                />
+                <Field label="Exact rate evidence" name="rateEvidence" />
+                <Field
+                  label="Rate effective at"
+                  name="rateStart"
+                  type="datetime-local"
+                />
+                <Field
+                  label="Rate valid through"
+                  name="rateEnd"
+                  type="datetime-local"
+                />
+              </div>
+            </fieldset>
+            <Button disabled={busy}>Save planning version</Button>
+          </FieldGroup>
         </form>
         <details className="mt-4">
           <summary className="min-h-11 cursor-pointer py-3 text-primary">

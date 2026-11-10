@@ -1,4 +1,5 @@
 "use client";
+import { Field as UiField, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
 import { useState, useId, useRef, useEffect, type ComponentProps } from "react";
@@ -56,10 +57,10 @@ function Field({
 }: ComponentProps<typeof Input> & { label: string }) {
   const id = useId();
   return (
-    <div className="space-y-2">
+    <UiField className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input id={id} {...props} />
-    </div>
+    </UiField>
   );
 }
 function at(value: string | null) {
@@ -112,7 +113,10 @@ function History({
   retry?: (id: string) => void;
 }) {
   return (
-    <section className="space-y-4" aria-labelledby="notification-history">
+    <section
+      className="flex flex-col gap-4"
+      aria-labelledby="notification-history"
+    >
       <h2
         id="notification-history"
         tabIndex={-1}
@@ -131,11 +135,11 @@ function History({
           enable a current platform notice below.
         </p>
       ) : (
-        <ul className="space-y-4">
+        <ul className="flex flex-col gap-4">
           {notices.map((n) => (
             <li
               key={n.id}
-              className="space-y-3 rounded-xl border border-border bg-card p-5"
+              className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5"
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h3 className="font-semibold capitalize">
@@ -203,7 +207,7 @@ function History({
                 <summary className="cursor-pointer py-3 text-sm font-medium">
                   Attempt history
                 </summary>
-                <ol className="space-y-2 text-sm">
+                <ol className="flex flex-col gap-2 text-sm">
                   {n.history.map((e, i) => (
                     <li key={`${e.at}:${i}`}>
                       {at(e.at)} · {e.kind.replaceAll("_", " ")}
@@ -257,7 +261,7 @@ function Preferences({
   }) => void;
 }) {
   return (
-    <section className="space-y-4 rounded-2xl border border-border bg-card p-5 sm:p-8">
+    <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 sm:p-8">
       <h2 className="text-xl font-semibold tracking-tight">
         My platform email notices
       </h2>
@@ -363,7 +367,7 @@ export function NotificationManager({
     await load();
   }
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       {error && (
         <Alert variant="destructive">
           <AlertTitle>Action needs review</AlertTitle>
@@ -376,7 +380,7 @@ export function NotificationManager({
         </Alert>
       )}
       {status && <Alert variant="success">{status}</Alert>}
-      <section className="space-y-5 rounded-2xl border border-border bg-card p-5 sm:p-8">
+      <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-5 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-semibold">Platform sender</h2>
@@ -434,7 +438,7 @@ export function NotificationManager({
             </dd>
           </div>
         </dl>
-        <ul className="space-y-3 text-sm">
+        <ul className="flex flex-col gap-3 text-sm">
           {state.setup?.senders.map((sender) => (
             <li
               key={sender.from}
@@ -478,7 +482,7 @@ export function NotificationManager({
           </Button>
         </div>
       </section>
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">
           Account-wide transactional usage
         </h2>
@@ -539,7 +543,7 @@ export function NotificationManager({
           expenses.
         </p>
         <form
-          className="mt-6 space-y-5"
+          className="flex flex-col mt-6 gap-5"
           key={JSON.stringify(state.terms)}
           onSubmit={(e) => {
             e.preventDefault();
@@ -579,84 +583,86 @@ export function NotificationManager({
             }, "Selected terms saved. Verify native account limits after any provider plan change.");
           }}
         >
-          <fieldset disabled={busy} className="grid gap-5 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="notice-plan-kind">Plan selection</Label>
-              <NativeSelect
-                id="notice-plan-kind"
-                value={kind}
-                onChange={(e) =>
-                  setKind(
-                    z.enum(["free", "selected_paid"]).parse(e.target.value),
-                  )
-                }
-              >
-                <option value="free">Free band</option>
-                <option value="selected_paid">Explicit paid terms</option>
-              </NativeSelect>
-            </div>
-            <Field
-              label="Reviewed terms reference"
-              name="reference"
-              required
-              maxLength={240}
-              defaultValue={state.terms?.reference ?? ""}
-            />
-            <Field
-              label="Selected monthly email limit"
-              name="monthly"
-              type="number"
-              min={1}
-              required
-              defaultValue={
-                state.terms?.monthlyLimit ??
-                state.setup?.usage?.emails.monthly.limit ??
-                ""
-              }
-            />
-            <Field
-              label="Selected daily limit (blank only for paid uncapped)"
-              name="daily"
-              type="number"
-              min={1}
-              defaultValue={
-                state.terms?.dailyLimit ??
-                state.setup?.usage?.emails.daily.limit ??
-                ""
-              }
-            />
-            {kind === "selected_paid" && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="notice-plan-currency">
-                    Commitment currency
-                  </Label>
-                  <NativeSelect
-                    id="notice-plan-currency"
-                    name="currency"
-                    defaultValue={state.terms?.amount?.currency ?? "USD"}
-                  >
-                    <option value="USD">USD</option>
-                    <option value="INR">INR</option>
-                  </NativeSelect>
-                </div>
-                <Field
-                  label="Selected monthly commitment"
-                  name="amount"
-                  inputMode="decimal"
-                  required
-                  defaultValue={
-                    state.terms?.amount
-                      ? `${BigInt(state.terms.amount.micros) / 1000000n}.${(BigInt(state.terms.amount.micros) % 1000000n).toString().padStart(6, "0")}`
-                      : ""
+          <FieldGroup className="gap-5">
+            <fieldset disabled={busy} className="grid gap-5 sm:grid-cols-2">
+              <UiField className="flex flex-col gap-2">
+                <Label htmlFor="notice-plan-kind">Plan selection</Label>
+                <NativeSelect
+                  id="notice-plan-kind"
+                  value={kind}
+                  onChange={(e) =>
+                    setKind(
+                      z.enum(["free", "selected_paid"]).parse(e.target.value),
+                    )
                   }
-                />
-              </>
-            )}
-          </fieldset>
-          <Button disabled={busy} type="submit">
-            Save selected terms
-          </Button>
+                >
+                  <option value="free">Free band</option>
+                  <option value="selected_paid">Explicit paid terms</option>
+                </NativeSelect>
+              </UiField>
+              <Field
+                label="Reviewed terms reference"
+                name="reference"
+                required
+                maxLength={240}
+                defaultValue={state.terms?.reference ?? ""}
+              />
+              <Field
+                label="Selected monthly email limit"
+                name="monthly"
+                type="number"
+                min={1}
+                required
+                defaultValue={
+                  state.terms?.monthlyLimit ??
+                  state.setup?.usage?.emails.monthly.limit ??
+                  ""
+                }
+              />
+              <Field
+                label="Selected daily limit (blank only for paid uncapped)"
+                name="daily"
+                type="number"
+                min={1}
+                defaultValue={
+                  state.terms?.dailyLimit ??
+                  state.setup?.usage?.emails.daily.limit ??
+                  ""
+                }
+              />
+              {kind === "selected_paid" && (
+                <>
+                  <UiField className="flex flex-col gap-2">
+                    <Label htmlFor="notice-plan-currency">
+                      Commitment currency
+                    </Label>
+                    <NativeSelect
+                      id="notice-plan-currency"
+                      name="currency"
+                      defaultValue={state.terms?.amount?.currency ?? "USD"}
+                    >
+                      <option value="USD">USD</option>
+                      <option value="INR">INR</option>
+                    </NativeSelect>
+                  </UiField>
+                  <Field
+                    label="Selected monthly commitment"
+                    name="amount"
+                    inputMode="decimal"
+                    required
+                    defaultValue={
+                      state.terms?.amount
+                        ? `${BigInt(state.terms.amount.micros) / 1000000n}.${(BigInt(state.terms.amount.micros) % 1000000n).toString().padStart(6, "0")}`
+                        : ""
+                    }
+                  />
+                </>
+              )}
+            </fieldset>
+            <Button disabled={busy} type="submit">
+              Save selected terms
+            </Button>
+          </FieldGroup>
         </form>
       </section>
       <Preferences
@@ -730,7 +736,7 @@ export function BusinessNotifications({
     }
   }
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       {error && (
         <Alert variant="destructive">
           {error}{" "}

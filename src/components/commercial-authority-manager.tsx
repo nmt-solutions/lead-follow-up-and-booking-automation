@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState } from "react";
 import Link from "next/link";
@@ -147,10 +148,10 @@ function PolicySummary({
         return (
           <div
             key={action}
-            className="space-y-2 rounded-xl border border-border p-4 wrap-anywhere"
+            className="flex flex-col gap-2 rounded-xl border border-border p-4 wrap-anywhere"
           >
             <dt className="font-semibold">{commercialActionLabels[action]}</dt>
-            <dd className="space-y-2 text-sm">
+            <dd className="flex flex-col gap-2 text-sm">
               <Badge>
                 {automatic ? "Automatic within limits" : "Approval required"}
               </Badge>
@@ -302,9 +303,9 @@ export function CommercialAuthorityManager({
     }
   }
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
       <section
-        className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+        className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
         aria-labelledby="effective-commercial-policy"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -361,189 +362,191 @@ export function CommercialAuthorityManager({
       )}
       {state.canManage ? (
         <form
-          className="space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
+          className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <div>
-            <h2 className="text-xl font-semibold">Configure authority</h2>
-            <p className="mt-2 text-muted-foreground">
-              Choose each action deliberately. Changes apply when you save.
-              Disable automation to revoke it, or keep approval required for
-              every action.
-            </p>
-          </div>
-          <fieldset disabled={busy} className="space-y-6">
-            <legend className="sr-only">Commercial action settings</legend>
-            {commercialActions.map((action) => {
-              const rule = draft[action];
-              return (
-                <fieldset
-                  key={action}
-                  className="space-y-4 rounded-xl border border-border p-4"
-                >
-                  <legend className="px-2 font-semibold">
-                    {commercialActionLabels[action]}
-                  </legend>
-                  <div className="space-y-2">
-                    <Label htmlFor={`${action}-mode`}>
-                      Automation and approval
-                    </Label>
-                    <NativeSelect
-                      id={`${action}-mode`}
-                      value={rule.mode}
-                      onChange={(event) => {
-                        const mode = z
-                          .enum(["disabled", "approval", "automatic"])
-                          .parse(event.target.value);
-                        change(action, { mode });
-                      }}
-                    >
-                      <option value="disabled">
-                        Disabled — approval required
-                      </option>
-                      <option value="approval">
-                        Enabled — always require approval
-                      </option>
-                      <option value="automatic">
-                        Automatic within configured limits
-                      </option>
-                    </NativeSelect>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor={`${action}-currency`}>Currency</Label>
-                      <NativeSelect
-                        id={`${action}-currency`}
-                        value={rule.currency}
-                        onChange={(event) =>
-                          change(action, { currency: event.target.value })
-                        }
-                      >
-                        <option value="">Not configured</option>
-                        {commercialCurrencies.map((code) => (
-                          <option key={code} value={code}>
-                            {code}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`${action}-amount`}>
-                        Maximum total before discount
-                      </Label>
-                      <Input
-                        id={`${action}-amount`}
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={rule.amount}
-                        onChange={(event) =>
-                          change(action, { amount: event.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`${action}-discount`}>
-                        Maximum discount (%)
-                      </Label>
-                      <Input
-                        id={`${action}-discount`}
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={rule.discount}
-                        onChange={(event) =>
-                          change(action, { discount: event.target.value })
-                        }
-                      />
-                      <p className="text-sm text-muted-foreground">
-                        0–100%, up to two decimal places. Blank permits no
-                        automatic discount.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`${action}-owner`}>
-                        Escalation owner
-                      </Label>
-                      <NativeSelect
-                        id={`${action}-owner`}
-                        value={rule.ownerId}
-                        onChange={(event) =>
-                          change(action, { ownerId: event.target.value })
-                        }
-                      >
-                        <option value="">Not configured</option>
-                        {rule.ownerId &&
-                          !state.approvers.some(
-                            (member) => member.userId === rule.ownerId,
-                          ) && (
-                            <option value={rule.ownerId}>
-                              Unavailable owner — choose another
-                            </option>
-                          )}
-                        {state.approvers.map((member) => (
-                          <option key={member.userId} value={member.userId}>
-                            {member.name} ({member.role})
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </div>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Enabling this action requires an amount limit and a current
-                    Owner or Admin for escalation.
-                    {action === "discounts"
-                      ? " Discount automation also requires an explicit percentage limit."
-                      : " Discounted actions must satisfy both this policy and the Discounts policy."}
-                  </p>
-                </fieldset>
-              );
-            })}
-            <div className="space-y-2">
-              <Label htmlFor="commercial-change-note">
-                Reason for this change
-              </Label>
-              <Textarea
-                id="commercial-change-note"
-                maxLength={1000}
-                value={note}
-                onChange={(event) => {
-                  setNote(event.target.value);
-                  setReviewed(false);
-                }}
-                required
-              />
+          <FieldGroup className="gap-6">
+            <div>
+              <h2 className="text-xl font-semibold">Configure authority</h2>
+              <p className="mt-2 text-muted-foreground">
+                Choose each action deliberately. Changes apply when you save.
+                Disable automation to revoke it, or keep approval required for
+                every action.
+              </p>
             </div>
-            {!parsedChange.success && (
-              <ul className="space-y-1 text-sm text-muted-foreground">
-                {parsedChange.error.issues.map((issue, index) => (
-                  <li key={index}>
-                    {issue.path.length ? `${issue.path.join(" · ")}: ` : ""}
-                    {issue.message}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <label className="flex min-h-11 items-start gap-3">
-              <input
-                type="checkbox"
-                checked={reviewed}
-                onChange={(event) => setReviewed(event.target.checked)}
-                className="mt-1.5 size-5 shrink-0 accent-primary"
-              />
-              <span>
-                I have reviewed these settings and authorize the selected
-                automation and limits for this Business.
-              </span>
-            </label>
-            <Button
-              type="submit"
-              disabled={!parsedChange.success || !reviewed || conflict}
-            >
-              {busy ? "Saving…" : "Save commercial policy"}
-            </Button>
-          </fieldset>
+            <fieldset disabled={busy} className="flex flex-col gap-6">
+              <legend className="sr-only">Commercial action settings</legend>
+              {commercialActions.map((action) => {
+                const rule = draft[action];
+                return (
+                  <fieldset
+                    key={action}
+                    className="flex flex-col gap-4 rounded-xl border border-border p-4"
+                  >
+                    <legend className="px-2 font-semibold">
+                      {commercialActionLabels[action]}
+                    </legend>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor={`${action}-mode`}>
+                        Automation and approval
+                      </Label>
+                      <NativeSelect
+                        id={`${action}-mode`}
+                        value={rule.mode}
+                        onChange={(event) => {
+                          const mode = z
+                            .enum(["disabled", "approval", "automatic"])
+                            .parse(event.target.value);
+                          change(action, { mode });
+                        }}
+                      >
+                        <option value="disabled">
+                          Disabled — approval required
+                        </option>
+                        <option value="approval">
+                          Enabled — always require approval
+                        </option>
+                        <option value="automatic">
+                          Automatic within configured limits
+                        </option>
+                      </NativeSelect>
+                    </Field>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor={`${action}-currency`}>Currency</Label>
+                        <NativeSelect
+                          id={`${action}-currency`}
+                          value={rule.currency}
+                          onChange={(event) =>
+                            change(action, { currency: event.target.value })
+                          }
+                        >
+                          <option value="">Not configured</option>
+                          {commercialCurrencies.map((code) => (
+                            <option key={code} value={code}>
+                              {code}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      </Field>
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor={`${action}-amount`}>
+                          Maximum total before discount
+                        </Label>
+                        <Input
+                          id={`${action}-amount`}
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={rule.amount}
+                          onChange={(event) =>
+                            change(action, { amount: event.target.value })
+                          }
+                        />
+                      </Field>
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor={`${action}-discount`}>
+                          Maximum discount (%)
+                        </Label>
+                        <Input
+                          id={`${action}-discount`}
+                          inputMode="decimal"
+                          autoComplete="off"
+                          value={rule.discount}
+                          onChange={(event) =>
+                            change(action, { discount: event.target.value })
+                          }
+                        />
+                        <p className="text-sm text-muted-foreground">
+                          0–100%, up to two decimal places. Blank permits no
+                          automatic discount.
+                        </p>
+                      </Field>
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor={`${action}-owner`}>
+                          Escalation owner
+                        </Label>
+                        <NativeSelect
+                          id={`${action}-owner`}
+                          value={rule.ownerId}
+                          onChange={(event) =>
+                            change(action, { ownerId: event.target.value })
+                          }
+                        >
+                          <option value="">Not configured</option>
+                          {rule.ownerId &&
+                            !state.approvers.some(
+                              (member) => member.userId === rule.ownerId,
+                            ) && (
+                              <option value={rule.ownerId}>
+                                Unavailable owner — choose another
+                              </option>
+                            )}
+                          {state.approvers.map((member) => (
+                            <option key={member.userId} value={member.userId}>
+                              {member.name} ({member.role})
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      </Field>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Enabling this action requires an amount limit and a
+                      current Owner or Admin for escalation.
+                      {action === "discounts"
+                        ? " Discount automation also requires an explicit percentage limit."
+                        : " Discounted actions must satisfy both this policy and the Discounts policy."}
+                    </p>
+                  </fieldset>
+                );
+              })}
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="commercial-change-note">
+                  Reason for this change
+                </Label>
+                <Textarea
+                  id="commercial-change-note"
+                  maxLength={1000}
+                  value={note}
+                  onChange={(event) => {
+                    setNote(event.target.value);
+                    setReviewed(false);
+                  }}
+                  required
+                />
+              </Field>
+              {!parsedChange.success && (
+                <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  {parsedChange.error.issues.map((issue, index) => (
+                    <li key={index}>
+                      {issue.path.length ? `${issue.path.join(" · ")}: ` : ""}
+                      {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <label className="flex min-h-11 items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={reviewed}
+                  onChange={(event) => setReviewed(event.target.checked)}
+                  className="mt-1.5 size-5 shrink-0 accent-primary"
+                />
+                <span>
+                  I have reviewed these settings and authorize the selected
+                  automation and limits for this Business.
+                </span>
+              </label>
+              <Button
+                type="submit"
+                disabled={!parsedChange.success || !reviewed || conflict}
+              >
+                {busy ? "Saving…" : "Save commercial policy"}
+              </Button>
+            </fieldset>
+          </FieldGroup>
         </form>
       ) : (
         <p className="rounded-xl border border-border bg-card p-6 text-muted-foreground">
@@ -553,7 +556,7 @@ export function CommercialAuthorityManager({
       )}
       <CommercialPolicyCheck endpoint={endpoint} />
       <section
-        className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+        className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
         aria-labelledby="commercial-history"
       >
         <h2 id="commercial-history" className="text-xl font-semibold">
@@ -649,7 +652,7 @@ function CommercialPolicyCheck({ endpoint }: { endpoint: string }) {
   }
   return (
     <section
-      className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+      className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
       aria-labelledby="commercial-check"
     >
       <div>
@@ -668,76 +671,80 @@ function CommercialPolicyCheck({ endpoint }: { endpoint: string }) {
           void check();
         }}
       >
-        <fieldset disabled={busy} className="space-y-4">
-          <legend className="sr-only">Proposed commercial action</legend>
-          <div className="space-y-2">
-            <Label htmlFor="check-action">Action</Label>
-            <NativeSelect
-              id="check-action"
-              value={action}
-              onChange={(event) => {
-                setAction(z.enum(commercialActions).parse(event.target.value));
-                setResult(null);
-              }}
-            >
-              {commercialActions.map((entry) => (
-                <option key={entry} value={entry}>
-                  {commercialActionLabels[entry]}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="check-currency">Currency</Label>
+        <FieldGroup className="gap-5">
+          <fieldset disabled={busy} className="flex flex-col gap-4">
+            <legend className="sr-only">Proposed commercial action</legend>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="check-action">Action</Label>
               <NativeSelect
-                id="check-currency"
-                value={currency}
+                id="check-action"
+                value={action}
                 onChange={(event) => {
-                  setCurrency(event.target.value);
+                  setAction(
+                    z.enum(commercialActions).parse(event.target.value),
+                  );
                   setResult(null);
                 }}
               >
-                <option value="">Unknown</option>
-                {commercialCurrencies.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
+                {commercialActions.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {commercialActionLabels[entry]}
                   </option>
                 ))}
               </NativeSelect>
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="check-currency">Currency</Label>
+                <NativeSelect
+                  id="check-currency"
+                  value={currency}
+                  onChange={(event) => {
+                    setCurrency(event.target.value);
+                    setResult(null);
+                  }}
+                >
+                  <option value="">Unknown</option>
+                  {commercialCurrencies.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="check-amount">Total before discount</Label>
+                <Input
+                  id="check-amount"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(event) => {
+                    setAmount(event.target.value);
+                    setResult(null);
+                  }}
+                />
+              </Field>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="check-amount">Total before discount</Label>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor="check-discount">Discount (%)</Label>
               <Input
-                id="check-amount"
+                id="check-discount"
                 inputMode="decimal"
-                value={amount}
+                value={discount}
                 onChange={(event) => {
-                  setAmount(event.target.value);
+                  setDiscount(event.target.value);
                   setResult(null);
                 }}
               />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="check-discount">Discount (%)</Label>
-            <Input
-              id="check-discount"
-              inputMode="decimal"
-              value={discount}
-              onChange={(event) => {
-                setDiscount(event.target.value);
-                setResult(null);
-              }}
-            />
-            <p className="text-sm text-muted-foreground">
-              Enter 0 for no discount; leave blank when unknown.
-            </p>
-          </div>
-          <Button type="submit" variant="outline">
-            {busy ? "Checking…" : "Check current policy"}
-          </Button>
-        </fieldset>
+              <p className="text-sm text-muted-foreground">
+                Enter 0 for no discount; leave blank when unknown.
+              </p>
+            </Field>
+            <Button type="submit" variant="outline">
+              {busy ? "Checking…" : "Check current policy"}
+            </Button>
+          </fieldset>
+        </FieldGroup>
       </form>
       {error && (
         <Alert variant="destructive">
@@ -757,7 +764,7 @@ function CommercialPolicyCheck({ endpoint }: { endpoint: string }) {
       {result && (
         <div
           role="status"
-          className="space-y-2 rounded-xl bg-muted p-4 wrap-anywhere"
+          className="flex flex-col gap-2 rounded-xl bg-muted p-4 wrap-anywhere"
         >
           <p className="font-semibold">
             {result.status === "permitted"

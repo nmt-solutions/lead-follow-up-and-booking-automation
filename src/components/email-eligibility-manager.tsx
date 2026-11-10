@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
@@ -65,7 +66,7 @@ function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Label htmlFor={name}>{title}</Label>
       {children}
     </div>
@@ -263,7 +264,7 @@ export function EmailEligibilityManager({
     ) : null;
   }
   return (
-    <div className="space-y-6 wrap-anywhere">
+    <div className="flex flex-col gap-6 wrap-anywhere">
       <div className="flex flex-wrap items-center gap-4">
         <Button
           variant="outline"
@@ -284,7 +285,7 @@ export function EmailEligibilityManager({
         <CardHeader>
           <CardTitle>Prepared email eligibility</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <p className="text-muted-foreground">
             Review the exact recipient, purpose and evidence. Allowed is a dated
             eligibility result; authority, ownership, sender readiness and
@@ -308,7 +309,7 @@ export function EmailEligibilityManager({
             return (
               <section
                 key={actionKey}
-                className="space-y-3 rounded-xl border p-4"
+                className="flex flex-col gap-3 rounded-xl border p-4"
               >
                 <div className="flex flex-wrap items-center gap-3">
                   <h2 className="font-semibold">{a.recipient}</h2>
@@ -332,7 +333,7 @@ export function EmailEligibilityManager({
                   <p className="my-3 whitespace-pre-wrap">{a.description}</p>
                   {state.canManage && (
                     <form
-                      className="space-y-3"
+                      className="flex flex-col gap-3"
                       onSubmit={(e) =>
                         submit(
                           e,
@@ -347,28 +348,35 @@ export function EmailEligibilityManager({
                         )
                       }
                     >
-                      <fieldset disabled={pending} className="space-y-3">
-                        <legend className="mb-2 font-medium">
-                          Record the requirements you verified for this exact
-                          content
-                        </legend>
-                        <Checks
-                          name="requirements"
-                          values={contentRequirements}
-                        />
-                        <Field
-                          name={`review-${actionKey}`}
-                          title="Review evidence or reference"
+                      <FieldGroup className="gap-3">
+                        <fieldset
+                          disabled={pending}
+                          className="flex flex-col gap-3"
                         >
-                          <Textarea
-                            id={`review-${actionKey}`}
-                            name="reference"
-                            required
-                            maxLength={2000}
+                          <legend className="mb-2 font-medium">
+                            Record the requirements you verified for this exact
+                            content
+                          </legend>
+                          <Checks
+                            name="requirements"
+                            values={contentRequirements}
                           />
-                        </Field>
-                        <Button variant="outline">Record content review</Button>
-                      </fieldset>
+                          <Field
+                            name={`review-${actionKey}`}
+                            title="Review evidence or reference"
+                          >
+                            <Textarea
+                              id={`review-${actionKey}`}
+                              name="reference"
+                              required
+                              maxLength={2000}
+                            />
+                          </Field>
+                          <Button variant="outline">
+                            Record content review
+                          </Button>
+                        </fieldset>
+                      </FieldGroup>
                     </form>
                   )}
                 </details>
@@ -380,7 +388,7 @@ export function EmailEligibilityManager({
                 </Button>
                 {feedbackFor(actionKey)}
                 {result && (
-                  <div className="space-y-3">
+                  <div className="flex flex-col gap-3">
                     <p className="text-sm text-muted-foreground">
                       Evaluated {new Date(result.at).toLocaleString()}. A later
                       restriction can stop this action.
@@ -429,7 +437,7 @@ export function EmailEligibilityManager({
         <CardHeader>
           <CardTitle>Recipient facts and permission evidence</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p className="text-muted-foreground">
             Destination and legal recipient class need evidence independent of
             buyer category. An inquiry supports its own response only when the
@@ -460,7 +468,7 @@ export function EmailEligibilityManager({
               </Field>
               <form
                 key={current?.id ?? recipient}
-                className="space-y-4"
+                className="flex flex-col gap-4"
                 onSubmit={(e) =>
                   submit(
                     e,
@@ -503,197 +511,208 @@ export function EmailEligibilityManager({
                   )
                 }
               >
-                <fieldset disabled={pending} className="space-y-4">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field name="recipient-email" title="Exact recipient email">
-                      <Input
-                        id="recipient-email"
-                        name="recipient"
-                        type="email"
-                        required
-                        defaultValue={recipient}
-                      />
-                    </Field>
-                    <Field
-                      name="recipient-market"
-                      title="Evidenced destination country code (or blank if unknown)"
-                    >
-                      <Input
-                        id="recipient-market"
-                        name="market"
-                        pattern="[A-Z]{2}"
-                        maxLength={2}
-                        placeholder="US"
-                        defaultValue={current?.facts.market ?? ""}
-                      />
-                    </Field>
-                  </div>
-                  <Field name="recipient-class" title="Legal recipient class">
-                    <NativeSelect
-                      id="recipient-class"
-                      name="recipientClass"
-                      defaultValue={current?.facts.recipientClass ?? "unknown"}
-                    >
-                      {recipientClasses.map((v) => (
-                        <option key={v} value={v}>
-                          {label(v)}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <Field
-                    name="recipient-reference"
-                    title="Destination and legal class evidence"
-                  >
-                    <Textarea
-                      id="recipient-reference"
-                      name="reference"
-                      required
-                      maxLength={2000}
-                      defaultValue={current?.facts.reference}
-                    />
-                  </Field>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field
-                      name="recipient-effective"
-                      title="Effective time (local)"
-                    >
-                      <Input
-                        id="recipient-effective"
-                        type="datetime-local"
-                        name="effectiveAt"
-                        required
-                        defaultValue={localDate(current?.facts.effectiveAt)}
-                      />
-                    </Field>
-                    <Field
-                      name="recipient-until"
-                      title="Evidence valid until (local)"
-                    >
-                      <Input
-                        id="recipient-until"
-                        type="datetime-local"
-                        name="validUntil"
-                        required
-                        defaultValue={localDate(current?.facts.validUntil)}
-                      />
-                    </Field>
-                  </div>
-                  <label className="flex min-h-11 items-center gap-3">
-                    <input
-                      type="checkbox"
-                      name="retain"
-                      defaultChecked
-                      className="size-5 accent-primary"
-                    />
-                    Retain existing permission evidence in the new revision
-                  </label>
-                  <p className="text-sm text-muted-foreground">
-                    Clear this to withdraw prior permission from the new
-                    effective time. Historical records remain available.
-                  </p>
-                  <details>
-                    <summary className="min-h-11 cursor-pointer py-2 font-medium">
-                      Add purpose-specific permission evidence
-                    </summary>
-                    <div className="space-y-4">
-                      <label className="flex min-h-11 items-center gap-3">
-                        <input
-                          name="addPermission"
-                          type="checkbox"
-                          className="size-5 accent-primary"
-                        />
-                        Include this evidence in the new revision
-                      </label>
-                      <Field name="permission-kind" title="Evidence kind">
-                        <NativeSelect id="permission-kind" name="kind">
-                          <option value="consent">Consent</option>
-                          <option value="documented_relationship">
-                            Documented relationship
-                          </option>
-                        </NativeSelect>
-                      </Field>
-                      <Field name="permission-purpose" title="Covered purpose">
-                        <NativeSelect id="permission-purpose" name="purpose">
-                          {emailPurposes.map((p) => (
-                            <option key={p} value={p}>
-                              {label(p)}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </Field>
+                <FieldGroup className="gap-4">
+                  <fieldset disabled={pending} className="flex flex-col gap-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <Field
-                        name="permission-policy"
-                        title="Policy revision this evidence was reviewed against"
-                      >
-                        <NativeSelect id="permission-policy" name="policyId">
-                          <option value="">Choose applicable policy</option>
-                          {state.policies.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.policy.market} ·{" "}
-                              {label(p.policy.recipientClass)} ·{" "}
-                              {label(p.policy.purpose)} · Revision {p.version}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </Field>
-                      <Field
-                        name="permission-opportunity"
-                        title="Covered Opportunity"
+                        name="recipient-email"
+                        title="Exact recipient email"
                       >
                         <Input
-                          id="permission-opportunity"
-                          name="opportunityId"
-                          list="eligibility-opportunities"
+                          id="recipient-email"
+                          name="recipient"
+                          type="email"
+                          required
+                          defaultValue={recipient}
                         />
                       </Field>
                       <Field
-                        name="permission-prospect"
-                        title="Covered prospect (for first outreach without an Opportunity)"
+                        name="recipient-market"
+                        title="Evidenced destination country code (or blank if unknown)"
                       >
-                        <Input id="permission-prospect" name="prospectId" />
-                        <p className="text-sm text-muted-foreground">
-                          Use the prospect ID shown in campaign review. Leave
-                          Opportunity blank when recording prospect permission.
-                        </p>
-                      </Field>
-                      <Field
-                        name="permission-reference"
-                        title="Permission provenance and covered use"
-                      >
-                        <Textarea
-                          id="permission-reference"
-                          name="permissionReference"
-                          maxLength={2000}
+                        <Input
+                          id="recipient-market"
+                          name="market"
+                          pattern="[A-Z]{2}"
+                          maxLength={2}
+                          placeholder="US"
+                          defaultValue={current?.facts.market ?? ""}
                         />
                       </Field>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <Field
-                          name="permission-observed"
-                          title="Observed time (local)"
-                        >
-                          <Input
-                            id="permission-observed"
-                            name="observedAt"
-                            type="datetime-local"
-                          />
-                        </Field>
-                        <Field
-                          name="permission-until"
-                          title="Permission valid until (local)"
-                        >
-                          <Input
-                            id="permission-until"
-                            name="permissionUntil"
-                            type="datetime-local"
-                          />
-                        </Field>
-                      </div>
                     </div>
-                  </details>
-                  <Button>Save recipient evidence revision</Button>
-                </fieldset>
-                {feedbackFor("recipient")}
+                    <Field name="recipient-class" title="Legal recipient class">
+                      <NativeSelect
+                        id="recipient-class"
+                        name="recipientClass"
+                        defaultValue={
+                          current?.facts.recipientClass ?? "unknown"
+                        }
+                      >
+                        {recipientClasses.map((v) => (
+                          <option key={v} value={v}>
+                            {label(v)}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                    <Field
+                      name="recipient-reference"
+                      title="Destination and legal class evidence"
+                    >
+                      <Textarea
+                        id="recipient-reference"
+                        name="reference"
+                        required
+                        maxLength={2000}
+                        defaultValue={current?.facts.reference}
+                      />
+                    </Field>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field
+                        name="recipient-effective"
+                        title="Effective time (local)"
+                      >
+                        <Input
+                          id="recipient-effective"
+                          type="datetime-local"
+                          name="effectiveAt"
+                          required
+                          defaultValue={localDate(current?.facts.effectiveAt)}
+                        />
+                      </Field>
+                      <Field
+                        name="recipient-until"
+                        title="Evidence valid until (local)"
+                      >
+                        <Input
+                          id="recipient-until"
+                          type="datetime-local"
+                          name="validUntil"
+                          required
+                          defaultValue={localDate(current?.facts.validUntil)}
+                        />
+                      </Field>
+                    </div>
+                    <label className="flex min-h-11 items-center gap-3">
+                      <input
+                        type="checkbox"
+                        name="retain"
+                        defaultChecked
+                        className="size-5 accent-primary"
+                      />
+                      Retain existing permission evidence in the new revision
+                    </label>
+                    <p className="text-sm text-muted-foreground">
+                      Clear this to withdraw prior permission from the new
+                      effective time. Historical records remain available.
+                    </p>
+                    <details>
+                      <summary className="min-h-11 cursor-pointer py-2 font-medium">
+                        Add purpose-specific permission evidence
+                      </summary>
+                      <div className="flex flex-col gap-4">
+                        <label className="flex min-h-11 items-center gap-3">
+                          <input
+                            name="addPermission"
+                            type="checkbox"
+                            className="size-5 accent-primary"
+                          />
+                          Include this evidence in the new revision
+                        </label>
+                        <Field name="permission-kind" title="Evidence kind">
+                          <NativeSelect id="permission-kind" name="kind">
+                            <option value="consent">Consent</option>
+                            <option value="documented_relationship">
+                              Documented relationship
+                            </option>
+                          </NativeSelect>
+                        </Field>
+                        <Field
+                          name="permission-purpose"
+                          title="Covered purpose"
+                        >
+                          <NativeSelect id="permission-purpose" name="purpose">
+                            {emailPurposes.map((p) => (
+                              <option key={p} value={p}>
+                                {label(p)}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                        </Field>
+                        <Field
+                          name="permission-policy"
+                          title="Policy revision this evidence was reviewed against"
+                        >
+                          <NativeSelect id="permission-policy" name="policyId">
+                            <option value="">Choose applicable policy</option>
+                            {state.policies.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.policy.market} ·{" "}
+                                {label(p.policy.recipientClass)} ·{" "}
+                                {label(p.policy.purpose)} · Revision {p.version}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                        </Field>
+                        <Field
+                          name="permission-opportunity"
+                          title="Covered Opportunity"
+                        >
+                          <Input
+                            id="permission-opportunity"
+                            name="opportunityId"
+                            list="eligibility-opportunities"
+                          />
+                        </Field>
+                        <Field
+                          name="permission-prospect"
+                          title="Covered prospect (for first outreach without an Opportunity)"
+                        >
+                          <Input id="permission-prospect" name="prospectId" />
+                          <p className="text-sm text-muted-foreground">
+                            Use the prospect ID shown in campaign review. Leave
+                            Opportunity blank when recording prospect
+                            permission.
+                          </p>
+                        </Field>
+                        <Field
+                          name="permission-reference"
+                          title="Permission provenance and covered use"
+                        >
+                          <Textarea
+                            id="permission-reference"
+                            name="permissionReference"
+                            maxLength={2000}
+                          />
+                        </Field>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field
+                            name="permission-observed"
+                            title="Observed time (local)"
+                          >
+                            <Input
+                              id="permission-observed"
+                              name="observedAt"
+                              type="datetime-local"
+                            />
+                          </Field>
+                          <Field
+                            name="permission-until"
+                            title="Permission valid until (local)"
+                          >
+                            <Input
+                              id="permission-until"
+                              name="permissionUntil"
+                              type="datetime-local"
+                            />
+                          </Field>
+                        </div>
+                      </div>
+                    </details>
+                    <Button>Save recipient evidence revision</Button>
+                  </fieldset>
+                  {feedbackFor("recipient")}
+                </FieldGroup>
               </form>
             </>
           )}
@@ -701,7 +720,7 @@ export function EmailEligibilityManager({
             <summary className="min-h-11 cursor-pointer py-2 font-medium">
               Recipient evidence history ({state.recipients.length})
             </summary>
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {state.recipients.map((r) => (
                 <div key={r.id} className="rounded-lg border p-3">
                   <p>
@@ -732,7 +751,7 @@ export function EmailEligibilityManager({
         <CardHeader>
           <CardTitle>Opt-outs and suppression</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p className="text-muted-foreground">
             Record the covered scope and effective time. Effective restrictions
             apply at dispatch, including to queued work. Ownership and
@@ -756,65 +775,67 @@ export function EmailEligibilityManager({
                 }),
               )
             }
-            className="space-y-4"
+            className="flex flex-col gap-4"
           >
-            <fieldset disabled={pending} className="space-y-4">
-              <Field name="suppression-recipient" title="Recipient email">
-                <Input
-                  id="suppression-recipient"
-                  name="recipient"
-                  type="email"
-                  required
-                />
-              </Field>
-              <Field name="suppression-scope" title="Covered scope">
-                <NativeSelect id="suppression-scope" name="scope">
-                  <option value="recipient_outreach">
-                    This recipient&apos;s outreach across this Business
-                  </option>
-                  <option value="opportunity_outreach">
-                    This recipient&apos;s outreach for one Opportunity
-                  </option>
-                  <option value="recipient_email">
-                    All sales email to this recipient in this Business
-                  </option>
-                </NativeSelect>
-              </Field>
-              <Field
-                name="suppression-opportunity"
-                title="Opportunity (only for one-Opportunity scope)"
-              >
-                <Input
-                  id="suppression-opportunity"
-                  name="opportunityId"
-                  list="eligibility-opportunities"
-                />
-              </Field>
-              <Field
-                name="suppression-effective"
-                title="Effective time (local)"
-              >
-                <Input
-                  id="suppression-effective"
-                  name="effectiveAt"
-                  type="datetime-local"
-                  required
-                />
-              </Field>
-              <Field
-                name="suppression-reference"
-                title="Opt-out source and responsible next action"
-              >
-                <Textarea
-                  id="suppression-reference"
-                  name="reference"
-                  required
-                  maxLength={2000}
-                />
-              </Field>
-              <Button>Record suppression</Button>
-            </fieldset>
-            {feedbackFor("suppression")}
+            <FieldGroup className="gap-4">
+              <fieldset disabled={pending} className="flex flex-col gap-4">
+                <Field name="suppression-recipient" title="Recipient email">
+                  <Input
+                    id="suppression-recipient"
+                    name="recipient"
+                    type="email"
+                    required
+                  />
+                </Field>
+                <Field name="suppression-scope" title="Covered scope">
+                  <NativeSelect id="suppression-scope" name="scope">
+                    <option value="recipient_outreach">
+                      This recipient&apos;s outreach across this Business
+                    </option>
+                    <option value="opportunity_outreach">
+                      This recipient&apos;s outreach for one Opportunity
+                    </option>
+                    <option value="recipient_email">
+                      All sales email to this recipient in this Business
+                    </option>
+                  </NativeSelect>
+                </Field>
+                <Field
+                  name="suppression-opportunity"
+                  title="Opportunity (only for one-Opportunity scope)"
+                >
+                  <Input
+                    id="suppression-opportunity"
+                    name="opportunityId"
+                    list="eligibility-opportunities"
+                  />
+                </Field>
+                <Field
+                  name="suppression-effective"
+                  title="Effective time (local)"
+                >
+                  <Input
+                    id="suppression-effective"
+                    name="effectiveAt"
+                    type="datetime-local"
+                    required
+                  />
+                </Field>
+                <Field
+                  name="suppression-reference"
+                  title="Opt-out source and responsible next action"
+                >
+                  <Textarea
+                    id="suppression-reference"
+                    name="reference"
+                    required
+                    maxLength={2000}
+                  />
+                </Field>
+                <Button>Record suppression</Button>
+              </fieldset>
+              {feedbackFor("suppression")}
+            </FieldGroup>
           </form>
           {!state.suppressions.length ? (
             <p>
@@ -822,7 +843,7 @@ export function EmailEligibilityManager({
               dispatch.
             </p>
           ) : (
-            <ul className="space-y-3">
+            <ul className="flex flex-col gap-3">
               {state.suppressions.map((s) => (
                 <li key={s.id} className="rounded-xl border p-4">
                   <p className="font-medium">
@@ -846,7 +867,7 @@ export function EmailEligibilityManager({
         <CardHeader>
           <CardTitle>Market and purpose policy</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p className="text-muted-foreground">
             No market is preapproved. A separately authorized platform operator
             records applicable guidance, accepted evidence, content requirements
@@ -886,7 +907,7 @@ export function EmailEligibilityManager({
               </Field>
               <form
                 key={selectedPolicy?.id ?? "new"}
-                className="space-y-4"
+                className="flex flex-col gap-4"
                 onSubmit={(e) =>
                   submit(
                     e,
@@ -915,151 +936,156 @@ export function EmailEligibilityManager({
                   )
                 }
               >
-                <fieldset disabled={pending} className="space-y-4">
-                  <Field name="policy-market" title="Destination country code">
-                    <Input
-                      id="policy-market"
-                      name="market"
-                      required
-                      pattern="[A-Z]{2}"
-                      maxLength={2}
-                      defaultValue={selectedPolicy?.policy.market}
-                      readOnly={Boolean(selectedPolicy)}
-                    />
-                  </Field>
-                  <Field name="policy-class" title="Legal recipient class">
-                    <NativeSelect
-                      id="policy-class"
-                      name="recipientClass"
-                      defaultValue={selectedPolicy?.policy.recipientClass}
+                <FieldGroup className="gap-4">
+                  <fieldset disabled={pending} className="flex flex-col gap-4">
+                    <Field
+                      name="policy-market"
+                      title="Destination country code"
                     >
-                      {recipientClasses
-                        .filter((v) => v !== "unknown")
-                        .map((v) => (
+                      <Input
+                        id="policy-market"
+                        name="market"
+                        required
+                        pattern="[A-Z]{2}"
+                        maxLength={2}
+                        defaultValue={selectedPolicy?.policy.market}
+                        readOnly={Boolean(selectedPolicy)}
+                      />
+                    </Field>
+                    <Field name="policy-class" title="Legal recipient class">
+                      <NativeSelect
+                        id="policy-class"
+                        name="recipientClass"
+                        defaultValue={selectedPolicy?.policy.recipientClass}
+                      >
+                        {recipientClasses
+                          .filter((v) => v !== "unknown")
+                          .map((v) => (
+                            <option key={v} value={v}>
+                              {label(v)}
+                            </option>
+                          ))}
+                      </NativeSelect>
+                    </Field>
+                    <Field name="policy-purpose" title="Message purpose">
+                      <NativeSelect
+                        id="policy-purpose"
+                        name="purpose"
+                        defaultValue={selectedPolicy?.policy.purpose}
+                      >
+                        {emailPurposes.map((v) => (
                           <option key={v} value={v}>
                             {label(v)}
                           </option>
                         ))}
-                    </NativeSelect>
-                  </Field>
-                  <Field name="policy-purpose" title="Message purpose">
-                    <NativeSelect
-                      id="policy-purpose"
-                      name="purpose"
-                      defaultValue={selectedPolicy?.policy.purpose}
-                    >
-                      {emailPurposes.map((v) => (
-                        <option key={v} value={v}>
-                          {label(v)}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <label className="flex min-h-11 items-center gap-3">
-                    <input
-                      type="checkbox"
-                      name="enabled"
-                      defaultChecked={selectedPolicy?.policy.enabled ?? false}
-                      className="size-5 accent-primary"
-                    />
-                    Enable this exact policy coverage
-                  </label>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                      </NativeSelect>
+                    </Field>
+                    <label className="flex min-h-11 items-center gap-3">
+                      <input
+                        type="checkbox"
+                        name="enabled"
+                        defaultChecked={selectedPolicy?.policy.enabled ?? false}
+                        className="size-5 accent-primary"
+                      />
+                      Enable this exact policy coverage
+                    </label>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field
+                        name="policy-effective"
+                        title="Effective time (local)"
+                      >
+                        <Input
+                          id="policy-effective"
+                          name="effectiveAt"
+                          type="datetime-local"
+                          required
+                          defaultValue={localDate(
+                            selectedPolicy?.policy.effectiveAt,
+                          )}
+                        />
+                      </Field>
+                      <Field
+                        name="policy-until"
+                        title="Policy valid until (local)"
+                      >
+                        <Input
+                          id="policy-until"
+                          name="validUntil"
+                          type="datetime-local"
+                          required
+                          defaultValue={localDate(
+                            selectedPolicy?.policy.validUntil,
+                          )}
+                        />
+                      </Field>
+                    </div>
+                    <fieldset>
+                      <legend className="font-medium">
+                        Accepted permission evidence (direct inquiry applies
+                        only to its response)
+                      </legend>
+                      <Checks
+                        name="acceptedEvidence"
+                        values={evidenceKinds}
+                        selected={selectedPolicy?.policy.acceptedEvidence}
+                      />
+                    </fieldset>
+                    <fieldset>
+                      <legend className="font-medium">
+                        Required content review
+                      </legend>
+                      <Checks
+                        name="requiredContent"
+                        values={contentRequirements}
+                        selected={selectedPolicy?.policy.requiredContent}
+                      />
+                    </fieldset>
                     <Field
-                      name="policy-effective"
-                      title="Effective time (local)"
+                      name="policy-optout"
+                      title="Scope of incoming opt-out requests"
                     >
-                      <Input
-                        id="policy-effective"
-                        name="effectiveAt"
-                        type="datetime-local"
+                      <NativeSelect
+                        id="policy-optout"
+                        name="incomingOptOutScope"
+                        defaultValue={
+                          selectedPolicy?.policy.incomingOptOutScope ??
+                          "recipient_outreach"
+                        }
+                      >
+                        {suppressionScopes.map((v) => (
+                          <option key={v} value={v}>
+                            {label(v)}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                    <Field
+                      name="policy-sources"
+                      title="Applicable primary guidance URLs (one HTTPS URL per line)"
+                    >
+                      <Textarea
+                        id="policy-sources"
+                        name="sources"
                         required
-                        defaultValue={localDate(
-                          selectedPolicy?.policy.effectiveAt,
-                        )}
+                        defaultValue={selectedPolicy?.policy.sources.join("\n")}
                       />
                     </Field>
                     <Field
-                      name="policy-until"
-                      title="Policy valid until (local)"
+                      name="policy-rationale"
+                      title="Reviewed rules, evidence conditions and provider requirements"
                     >
-                      <Input
-                        id="policy-until"
-                        name="validUntil"
-                        type="datetime-local"
+                      <Textarea
+                        id="policy-rationale"
+                        name="rationale"
                         required
-                        defaultValue={localDate(
-                          selectedPolicy?.policy.validUntil,
-                        )}
+                        maxLength={2000}
+                        defaultValue={selectedPolicy?.policy.rationale}
                       />
                     </Field>
-                  </div>
-                  <fieldset>
-                    <legend className="font-medium">
-                      Accepted permission evidence (direct inquiry applies only
-                      to its response)
-                    </legend>
-                    <Checks
-                      name="acceptedEvidence"
-                      values={evidenceKinds}
-                      selected={selectedPolicy?.policy.acceptedEvidence}
-                    />
+                    <Button>Publish policy revision</Button>
                   </fieldset>
-                  <fieldset>
-                    <legend className="font-medium">
-                      Required content review
-                    </legend>
-                    <Checks
-                      name="requiredContent"
-                      values={contentRequirements}
-                      selected={selectedPolicy?.policy.requiredContent}
-                    />
-                  </fieldset>
-                  <Field
-                    name="policy-optout"
-                    title="Scope of incoming opt-out requests"
-                  >
-                    <NativeSelect
-                      id="policy-optout"
-                      name="incomingOptOutScope"
-                      defaultValue={
-                        selectedPolicy?.policy.incomingOptOutScope ??
-                        "recipient_outreach"
-                      }
-                    >
-                      {suppressionScopes.map((v) => (
-                        <option key={v} value={v}>
-                          {label(v)}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <Field
-                    name="policy-sources"
-                    title="Applicable primary guidance URLs (one HTTPS URL per line)"
-                  >
-                    <Textarea
-                      id="policy-sources"
-                      name="sources"
-                      required
-                      defaultValue={selectedPolicy?.policy.sources.join("\n")}
-                    />
-                  </Field>
-                  <Field
-                    name="policy-rationale"
-                    title="Reviewed rules, evidence conditions and provider requirements"
-                  >
-                    <Textarea
-                      id="policy-rationale"
-                      name="rationale"
-                      required
-                      maxLength={2000}
-                      defaultValue={selectedPolicy?.policy.rationale}
-                    />
-                  </Field>
-                  <Button>Publish policy revision</Button>
-                </fieldset>
-                {feedbackFor("policy")}
+                  {feedbackFor("policy")}
+                </FieldGroup>
               </form>
             </>
           )}

@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -26,27 +27,24 @@ export default async function TaxPeriodsPage() {
     }
   })();
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
-      <header>
-        <Link
-          href="/platform/tax"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to tax calculation review
-        </Link>
-        <h1 className="page-title">Tax periods and liability review</h1>
-        <p className="mt-3 text-muted-foreground">
-          Configured obligations, original transaction evidence and accountable
-          review. Preparing, approving or exporting a report does not file a
-          return or pay tax.
-        </p>
+    <div className="app-page">
+      <PageHeader
+        title={<>Tax periods and liability review</>}
+        description={
+          <>
+            Configured obligations, original transaction evidence and
+            accountable review. Preparing, approving or exporting a report does
+            not file a return or pay tax.
+          </>
+        }
+      >
         <Link
           href="/platform/tax/filings"
           className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
         >
           Record filing and remittance confirmations
         </Link>
-      </header>
+      </PageHeader>
       <TaxPeriodManager initial={initial} />
     </div>
   );

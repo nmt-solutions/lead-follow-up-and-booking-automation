@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -155,12 +156,12 @@ export function WhatsAppEvidenceReviewManager({
     c.observation.checks.permissions === "confirmed" &&
     c.observation.checks.number_verified === "confirmed";
   return (
-    <div className="space-y-8" aria-busy={pending}>
+    <div className="flex flex-col gap-8" aria-busy={pending}>
       <Card>
         <CardHeader>
           <CardTitle>Selected customer account</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p className="wrap-anywhere">Business {businessId}</p>
           {c ? (
             <dl className="grid gap-3 text-sm sm:grid-cols-2">
@@ -202,7 +203,7 @@ export function WhatsAppEvidenceReviewManager({
         </CardContent>
       </Card>
       {feedback && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <Alert
             variant={feedback.error ? "destructive" : "default"}
             role={feedback.error ? "alert" : "status"}
@@ -226,7 +227,7 @@ export function WhatsAppEvidenceReviewManager({
         <CardHeader>
           <CardTitle>Record an assisted evidence review</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="flex flex-col gap-5">
           <p>
             Inspect redacted, account-specific records showing customer control
             of this portfolio, WhatsApp account and number, and Meta payment
@@ -253,102 +254,109 @@ export function WhatsAppEvidenceReviewManager({
             <form
               key={`${c.id}:${c.version}:${c.providerKey}:${state.paymentEvidence.version}`}
               onSubmit={approve}
-              className="space-y-6"
+              className="flex flex-col gap-6"
             >
-              {[
-                { name: "control", title: "Customer control evidence" },
-                { name: "payment", title: "Direct Meta payment evidence" },
-              ].map(({ name, title }) => (
-                <fieldset
-                  key={name}
-                  disabled={pending}
-                  className="space-y-4 rounded-xl border border-border p-4"
-                >
-                  <legend className="px-1 font-medium">{title}</legend>
-                  <div className="space-y-2">
-                    <Label htmlFor={`${name}Reference`}>
-                      Secure case reference
-                    </Label>
-                    <Input
-                      id={`${name}Reference`}
-                      name={`${name}Reference`}
-                      required
-                      pattern="[A-Z][A-Z0-9]{1,15}(-[A-Z0-9]+)+"
-                      maxLength={81}
-                      autoComplete="off"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor={`${name}Sha256`}>
-                      Redacted record SHA-256 digest
-                    </Label>
-                    <Input
-                      id={`${name}Sha256`}
-                      name={`${name}Sha256`}
-                      required
-                      pattern="[a-f0-9]{64}"
-                      minLength={64}
-                      maxLength={64}
-                      autoComplete="off"
-                      className="font-mono"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor={`${name}ObservedAt`}>
-                      Evidence observed at (your local time)
-                    </Label>
-                    <Input
-                      id={`${name}ObservedAt`}
-                      name={`${name}ObservedAt`}
-                      type="datetime-local"
-                      required
-                    />
-                  </div>
-                </fieldset>
-              ))}
-              <div className="space-y-2">
-                <Label htmlFor="validUntil">
-                  Review expires at (your local time)
-                </Label>
-                <Input
-                  id="validUntil"
-                  name="validUntil"
-                  type="datetime-local"
-                  required
-                  disabled={pending}
-                />
-              </div>
-              <fieldset disabled={pending} className="space-y-3">
-                <legend className="mb-2 font-medium">
-                  I verified in the referenced evidence
-                </legend>
+              <FieldGroup className="gap-6">
                 {[
-                  [
-                    "customerControlsAssets",
-                    "The customer controls this exact portfolio, WhatsApp account and number.",
-                  ],
-                  [
-                    "customerPaysMetaDirectly",
-                    "The customer's own payment arrangement pays Meta directly for this account.",
-                  ],
-                  [
-                    "noPlatformCreditLine",
-                    "No platform credit line or paid BSP is attached as the payer.",
-                  ],
-                ].map(([name, text]) => (
-                  <Label
+                  { name: "control", title: "Customer control evidence" },
+                  { name: "payment", title: "Direct Meta payment evidence" },
+                ].map(({ name, title }) => (
+                  <fieldset
                     key={name}
-                    htmlFor={name}
-                    className="flex min-h-11 items-start gap-3 py-2 leading-relaxed"
+                    disabled={pending}
+                    className="flex flex-col gap-4 rounded-xl border border-border p-4"
                   >
-                    <Checkbox id={name} name={name} required className="mt-1" />
-                    {text}
-                  </Label>
+                    <legend className="px-1 font-medium">{title}</legend>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor={`${name}Reference`}>
+                        Secure case reference
+                      </Label>
+                      <Input
+                        id={`${name}Reference`}
+                        name={`${name}Reference`}
+                        required
+                        pattern="[A-Z][A-Z0-9]{1,15}(-[A-Z0-9]+)+"
+                        maxLength={81}
+                        autoComplete="off"
+                      />
+                    </Field>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor={`${name}Sha256`}>
+                        Redacted record SHA-256 digest
+                      </Label>
+                      <Input
+                        id={`${name}Sha256`}
+                        name={`${name}Sha256`}
+                        required
+                        pattern="[a-f0-9]{64}"
+                        minLength={64}
+                        maxLength={64}
+                        autoComplete="off"
+                        className="font-mono"
+                      />
+                    </Field>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor={`${name}ObservedAt`}>
+                        Evidence observed at (your local time)
+                      </Label>
+                      <Input
+                        id={`${name}ObservedAt`}
+                        name={`${name}ObservedAt`}
+                        type="datetime-local"
+                        required
+                      />
+                    </Field>
+                  </fieldset>
                 ))}
-              </fieldset>
-              <Button disabled={pending} type="submit">
-                {pending ? "Recording review…" : "Record evidence review"}
-              </Button>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="validUntil">
+                    Review expires at (your local time)
+                  </Label>
+                  <Input
+                    id="validUntil"
+                    name="validUntil"
+                    type="datetime-local"
+                    required
+                    disabled={pending}
+                  />
+                </Field>
+                <fieldset disabled={pending} className="flex flex-col gap-3">
+                  <legend className="mb-2 font-medium">
+                    I verified in the referenced evidence
+                  </legend>
+                  {[
+                    [
+                      "customerControlsAssets",
+                      "The customer controls this exact portfolio, WhatsApp account and number.",
+                    ],
+                    [
+                      "customerPaysMetaDirectly",
+                      "The customer's own payment arrangement pays Meta directly for this account.",
+                    ],
+                    [
+                      "noPlatformCreditLine",
+                      "No platform credit line or paid BSP is attached as the payer.",
+                    ],
+                  ].map(([name, text]) => (
+                    <Label
+                      key={name}
+                      htmlFor={name}
+                      className="flex min-h-11 items-start gap-3 py-2 leading-relaxed"
+                    >
+                      <Checkbox
+                        id={name}
+                        name={name}
+                        required
+                        className="mt-1"
+                      />
+                      {text}
+                    </Label>
+                  ))}
+                </fieldset>
+                <Button disabled={pending} type="submit">
+                  {pending ? "Recording review…" : "Record evidence review"}
+                </Button>
+              </FieldGroup>
             </form>
           )}
         </CardContent>
@@ -358,13 +366,13 @@ export function WhatsAppEvidenceReviewManager({
           <CardHeader>
             <CardTitle>Revoke the latest review</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex flex-col gap-4">
             <p className="text-sm">
               Revocation immediately removes this review&apos;s effective proof.
               The original record and revocation remain in history. A new review
               is required to restore proof.
             </p>
-            <div className="space-y-2">
+            <Field className="flex flex-col gap-2">
               <Label htmlFor="revoke-reason">Revocation reason</Label>
               <NativeSelect
                 id="revoke-reason"
@@ -381,7 +389,7 @@ export function WhatsAppEvidenceReviewManager({
                   Customer requested revocation
                 </option>
               </NativeSelect>
-            </div>
+            </Field>
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button

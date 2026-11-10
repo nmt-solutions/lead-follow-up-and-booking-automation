@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -25,24 +26,17 @@ export default async function KnowledgePage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <div>
-        <Link
-          href={`/businesses/${businessId}`}
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to overview
-        </Link>
-        <p className="mb-3 text-sm font-medium text-primary wrap-anywhere">
-          {state.profile.name}
-        </p>
-        <h1 className="page-title">Saved answers</h1>
-        <p className="mt-3 text-muted-foreground">
-          Review the information sales conversations can use. Profile
-          descriptions and private files become authoritative only after an
-          explicit review here.
-        </p>
-      </div>
+    <div className="app-page">
+      <PageHeader
+        title={<>Saved answers</>}
+        description={
+          <>
+            Review the information sales conversations can use. Profile
+            descriptions and private files become authoritative only after an
+            explicit review here.
+          </>
+        }
+      ></PageHeader>
       <KnowledgeManager
         businessId={businessId}
         initialState={state.workspace}

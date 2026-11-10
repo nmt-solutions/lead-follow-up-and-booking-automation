@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -139,7 +140,7 @@ export function MicrosoftCalendarManager({
       <CardHeader>
         <CardTitle>Microsoft Calendar</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="flex flex-col gap-6">
         <p className="text-sm text-muted-foreground">
           Allow calendar access separately from sign-in or mail. Choose a
           calendar you control for availability checks and appointments.
@@ -190,7 +191,7 @@ export function MicrosoftCalendarManager({
           </p>
         )}
         {state.accountEmail && (
-          <dl className="space-y-2 text-sm">
+          <dl className="flex flex-col gap-2 text-sm">
             <div>
               <dt className="text-muted-foreground">
                 Authorized Microsoft account
@@ -209,38 +210,41 @@ export function MicrosoftCalendarManager({
         )}
         {canSelect && (
           <form
-            className="space-y-3"
+            className="flex flex-col gap-3"
             onSubmit={(event) => {
               event.preventDefault();
               void command("select");
             }}
           >
-            <Label htmlFor="microsoft-calendar">Booking calendar</Label>
-            <NativeSelect
-              id="microsoft-calendar"
-              value={selection}
-              onChange={(e) => setSelection(e.target.value)}
-              disabled={pending}
-              required
-            >
-              <option value="">Choose a calendar</option>
-              {state.calendars.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                  {c.primary ? " (primary)" : ""}
-                </option>
-              ))}
-            </NativeSelect>
-            <p className="text-sm text-muted-foreground">
-              Work/school accounts support the owned primary calendar with
-              free/busy checks. Personal Outlook accounts support owned primary
-              and secondary calendars using event reads. Shared, delegated,
-              group and work secondary calendars are unavailable. Working hours
-              and appointment time zone are configured in Appointments.
-            </p>
-            <Button disabled={pending || !selection} type="submit">
-              Use this calendar
-            </Button>
+            <FieldGroup className="gap-3">
+              <Label htmlFor="microsoft-calendar">Booking calendar</Label>
+              <NativeSelect
+                id="microsoft-calendar"
+                value={selection}
+                onChange={(e) => setSelection(e.target.value)}
+                disabled={pending}
+                required
+              >
+                <option value="">Choose a calendar</option>
+                {state.calendars.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                    {c.primary ? " (primary)" : ""}
+                  </option>
+                ))}
+              </NativeSelect>
+              <p className="text-sm text-muted-foreground">
+                Work/school accounts support the owned primary calendar with
+                free/busy checks. Personal Outlook accounts support owned
+                primary and secondary calendars using event reads. Shared,
+                delegated, group and work secondary calendars are unavailable.
+                Working hours and appointment time zone are configured in
+                Appointments.
+              </p>
+              <Button disabled={pending || !selection} type="submit">
+                Use this calendar
+              </Button>
+            </FieldGroup>
           </form>
         )}
         <div className="flex flex-wrap gap-3">

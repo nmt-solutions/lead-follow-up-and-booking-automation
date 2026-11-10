@@ -1,27 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
+  BookOpen,
   Building2,
   Check,
+  ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  CircleHelp,
+  FileText,
+  Folder,
+  HelpCircle,
+  Inbox,
   LayoutDashboard,
+  Mail,
   Plus,
   Search,
-  Inbox,
   Send,
-  BarChart3,
   Settings2,
-  CreditCard,
-  Users,
-  Plug,
-  Folder,
   ShieldCheck,
-  Bell,
-  SlidersHorizontal,
+  Sparkles,
+  Users,
+  Wallet,
+  BarChart3,
+  CalendarDays,
 } from "lucide-react";
 import { MotionConfig } from "framer-motion";
 import { Brand } from "./brand";
@@ -43,6 +47,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -53,6 +58,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "./ui/collapsible";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "./ui/command";
+import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Separator } from "./ui/separator";
 import { Button } from "./ui/button";
 
 export type NavigationBusiness = {
@@ -61,70 +77,111 @@ export type NavigationBusiness = {
   canManage: boolean;
   canManageAi: boolean;
 };
-const sales = [
+type Item = {
+  path: string;
+  label: string;
+  icon: typeof Search;
+  manage?: boolean;
+  ai?: boolean;
+};
+const work: Item[] = [
   { path: "", label: "Overview", icon: LayoutDashboard },
   { path: "/discovery", label: "Find prospects", icon: Search },
-  { path: "/inbox", label: "Sales inbox", icon: Inbox },
+  { path: "/inbox", label: "Conversations", icon: Inbox },
   { path: "/campaigns", label: "Outreach", icon: Send },
   { path: "/reports", label: "Reports", icon: BarChart3 },
+  { path: "/ai", label: "AI assistant", icon: Sparkles, ai: true },
 ];
-const settings = [
+const resources: Item[] = [
+  { path: "/knowledge", label: "Business knowledge", icon: BookOpen },
+  { path: "/files", label: "Files", icon: Folder },
+];
+const settings: Item[] = [
   { path: "/configuration", label: "Business setup", icon: Settings2 },
-  { path: "/mailboxes", label: "Email inboxes", icon: Inbox },
-  { path: "/calendar", label: "Booking calendar", icon: Plug },
-  { path: "/whatsapp", label: "WhatsApp", icon: Plug },
+  { path: "/profile", label: "Business profile", icon: Building2 },
+  { path: "/mailboxes", label: "Email inboxes", icon: Mail },
+  {
+    path: "/calendar",
+    label: "Booking calendar",
+    icon: CalendarDays,
+    manage: true,
+  },
+  { path: "/whatsapp", label: "WhatsApp", icon: Inbox, manage: true },
   { path: "/senders", label: "Email senders", icon: Send },
-  { path: "/knowledge", label: "Saved answers", icon: CircleHelp },
-  { path: "/team", label: "Team", icon: Users },
-  { path: "/billing", label: "Billing details", icon: CreditCard },
-  { path: "/subscription-payments", label: "Subscription", icon: CreditCard },
-  { path: "/seller-documents", label: "Invoices", icon: Folder },
-];
-const more = [
-  { path: "/profile", label: "Business profile" },
-  { path: "/notifications", label: "Notifications" },
-  { path: "/files", label: "Files" },
-  { path: "/operations", label: "Activity and recovery" },
-  { path: "/email-eligibility", label: "Email permissions" },
+  { path: "/team", label: "Team members", icon: Users, manage: true },
   {
     path: "/commercial-authority",
     label: "Sales approval rules",
+    icon: ShieldCheck,
     manage: true,
   },
-  { path: "/sender-health", label: "Email delivery health", manage: true },
-  { path: "/subscription-quotes", label: "Subscription quotes", manage: true },
-  { path: "/reach-changes", label: "Search coverage", manage: true },
-  { path: "/pilots", label: "Paid pilot", manage: true },
+  { path: "/email-eligibility", label: "Email permissions", icon: ShieldCheck },
+  {
+    path: "/sender-health",
+    label: "Email delivery health",
+    icon: Mail,
+    manage: true,
+  },
+  { path: "/notifications", label: "Notifications", icon: Inbox },
+  { path: "/billing", label: "Billing details", icon: Wallet, manage: true },
+  {
+    path: "/subscription-payments",
+    label: "Subscription",
+    icon: Wallet,
+    manage: true,
+  },
+  {
+    path: "/subscription-quotes",
+    label: "Subscription quotes",
+    icon: FileText,
+    manage: true,
+  },
+  {
+    path: "/seller-documents",
+    label: "Invoices",
+    icon: FileText,
+    manage: true,
+  },
+  {
+    path: "/reach-changes",
+    label: "Search coverage",
+    icon: Search,
+    manage: true,
+  },
   {
     path: "/financial-adjustments",
     label: "Refunds and disputes",
+    icon: Wallet,
     manage: true,
   },
-  { path: "/tax", label: "Tax details", manage: true },
-  { path: "/data", label: "Export or remove data" },
+  { path: "/tax", label: "Tax details", icon: FileText, manage: true },
+  { path: "/pilots", label: "Paid pilot", icon: CalendarDays, manage: true },
+  { path: "/operations", label: "Activity and recovery", icon: FileText },
+  { path: "/data", label: "Export or remove data", icon: Folder },
 ];
-
 function Navigation({
   businesses,
+  email,
   children,
 }: {
   businesses: NavigationBusiness[];
+  email: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { setOpenMobile } = useSidebar();
+  const [searchOpen, setSearchOpen] = useState(false);
   const business = businesses.find(
     (item) =>
       pathname === `/businesses/${item.id}` ||
       pathname.startsWith(`/businesses/${item.id}/`),
   );
   const base = business ? `/businesses/${business.id}` : "";
-  const current = [
-    ...sales,
-    ...settings,
-    ...more,
-    { path: "/ai", label: "AI settings" },
-  ].find(
+  const visible = (item: Item) =>
+    (!item.manage || business?.canManage) &&
+    (!item.ai || business?.canManageAi);
+  const current = [...work, ...resources, ...settings].find(
     (item) =>
       item.path &&
       (pathname === base + item.path ||
@@ -133,275 +190,383 @@ function Navigation({
   const title = business
     ? (current?.label ?? "Overview")
     : pathname === "/businesses/new"
-      ? "Add business"
+      ? "Business setup"
       : pathname === "/security"
-        ? "Security"
+        ? "Account security"
         : pathname.startsWith("/platform")
           ? "Platform administration"
           : "Your businesses";
   const close = () => setOpenMobile(false);
+  const navigate = (href: string) => {
+    setSearchOpen(false);
+    close();
+    router.push(href);
+  };
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+  function menu(items: Item[]) {
+    return (
+      <SidebarMenu>
+        {items.filter(visible).map((item) => {
+          const href = base + item.path;
+          const active = item.path
+            ? pathname === href || pathname.startsWith(href + "/")
+            : pathname === base;
+          return (
+            <SidebarMenuItem key={item.path}>
+              <SidebarMenuButton asChild isActive={active}>
+                <Link
+                  href={href}
+                  onClick={close}
+                  aria-current={active ? "page" : undefined}
+                >
+                  <item.icon aria-hidden="true" />
+                  <span>{item.label}</span>
+                  {item.ai && (
+                    <span className="ml-auto text-[0.65rem] text-primary">
+                      AI
+                    </span>
+                  )}
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          );
+        })}
+      </SidebarMenu>
+    );
+  }
   return (
     <>
-      <Sidebar variant="inset" collapsible="offcanvas">
-        <SidebarHeader className="gap-5 p-4">
-          <Link href="/businesses" onClick={close} aria-label="LeadRelay home">
+      <Sidebar collapsible="offcanvas" className="border-r border-border">
+        <SidebarHeader className="gap-6 px-5 pb-4 pt-6">
+          <Link href="/businesses" aria-label="LeadRelay home" onClick={close}>
             <Brand />
           </Link>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
-                className="h-auto w-full justify-start gap-3 border-border bg-card p-3 text-left"
+                className="w-full justify-start gap-3 px-3 text-left"
               >
-                <Building2 className="size-5 text-primary" aria-hidden="true" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">
-                    {business?.name ?? "Choose a business"}
-                  </span>
-                  <span className="block text-xs font-normal text-muted-foreground">
-                    {business
-                      ? "Switch business"
-                      : `${businesses.length} available`}
-                  </span>
+                <Avatar className="size-7 rounded-md">
+                  <AvatarFallback className="rounded-md text-xs">
+                    {business?.name.slice(0, 2).toUpperCase() || "B"}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {business?.name || "Your businesses"}
                 </span>
-                <ChevronsUpDown
-                  aria-hidden="true"
-                  className="size-4 shrink-0 text-muted-foreground"
-                />
+                <ChevronsUpDown data-icon="inline-end" aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="max-h-96 w-[var(--radix-dropdown-menu-trigger-width)] min-w-60 overflow-y-auto"
-            >
-              <DropdownMenuLabel>Your businesses</DropdownMenuLabel>
-              {businesses.map((item) => (
-                <DropdownMenuItem asChild key={item.id} className="min-h-11">
-                  <Link onClick={close} href={`/businesses/${item.id}`}>
-                    <Building2 aria-hidden="true" />
-                    <span className="flex-1 truncate">{item.name}</span>
-                    {business?.id === item.id && <Check aria-hidden="true" />}
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel>Switch business</DropdownMenuLabel>
+              <DropdownMenuGroup>
+                {businesses.map((item) => (
+                  <DropdownMenuItem key={item.id} asChild>
+                    <Link href={`/businesses/${item.id}`} onClick={close}>
+                      <Building2 aria-hidden="true" />
+                      <span className="flex-1 truncate">{item.name}</span>
+                      {item.id === business?.id && <Check aria-hidden="true" />}
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem asChild>
+                  <Link href="/businesses/new" onClick={close}>
+                    <Plus aria-hidden="true" />
+                    Add business
                   </Link>
                 </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="min-h-11">
-                <Link href="/businesses/new" onClick={close}>
-                  <Plus aria-hidden="true" />
-                  Add business
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild className="min-h-11">
-                <Link href="/businesses" onClick={close}>
-                  View all businesses
-                </Link>
-              </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/businesses" onClick={close}>
+                    View all businesses
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-start gap-3"
+            onClick={() => setSearchOpen(true)}
+          >
+            <Search data-icon="inline-start" aria-hidden="true" />
+            <span className="flex-1 text-left">Go to a page</span>
+            <kbd className="rounded border border-border px-1.5 py-0.5 text-[0.65rem] font-normal">
+              Ctrl K
+            </kbd>
+          </Button>
         </SidebarHeader>
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>
-              {business ? "Sales" : "Get started"}
-            </SidebarGroupLabel>
-            <SidebarMenu>
-              {(business
-                ? sales
-                : [
-                    {
-                      path: "/businesses",
-                      label: "Your businesses",
-                      icon: Building2,
-                    },
-                    {
-                      path: "/businesses/new",
-                      label: "Add business",
-                      icon: Plus,
-                    },
-                  ]
-              ).map((item) => {
-                const href = business ? base + item.path : item.path;
-                const active = business
-                  ? item.path
-                    ? pathname.startsWith(href)
-                    : pathname === href
-                  : pathname === href;
-                return (
-                  <SidebarMenuItem key={href}>
-                    <SidebarMenuButton asChild isActive={active}>
-                      <Link
-                        href={href}
-                        onClick={close}
-                        aria-current={active ? "page" : undefined}
-                      >
+        <SidebarContent className="gap-4 px-3">
+          {business ? (
+            <>
+              <SidebarGroup>
+                <SidebarGroupLabel>Sales</SidebarGroupLabel>
+                {menu(work)}
+              </SidebarGroup>
+              <SidebarGroup>
+                <SidebarGroupLabel>Resources</SidebarGroupLabel>
+                {menu(resources)}
+              </SidebarGroup>
+              <SidebarGroup>
+                <Collapsible
+                  key={`${base}:${settings.some((item) => pathname === base + item.path || pathname.startsWith(base + item.path + "/"))}`}
+                  defaultOpen={settings.some(
+                    (item) =>
+                      pathname === base + item.path ||
+                      pathname.startsWith(base + item.path + "/"),
+                  )}
+                  className="group/settings"
+                >
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton>
+                      <Settings2 aria-hidden="true" />
+                      <span>Business settings</span>
+                      <ChevronDown
+                        className="ml-auto transition-transform group-data-[state=open]/settings:rotate-180"
+                        aria-hidden="true"
+                      />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-1 border-l border-border pl-2">
+                    {menu(settings)}
+                  </CollapsibleContent>
+                </Collapsible>
+              </SidebarGroup>
+            </>
+          ) : (
+            <SidebarGroup>
+              <SidebarGroupLabel>Businesses</SidebarGroupLabel>
+              <SidebarMenu>
+                {[
+                  {
+                    href: "/businesses",
+                    label: "Your businesses",
+                    icon: Building2,
+                  },
+                  {
+                    href: "/businesses/new",
+                    label: "Add business",
+                    icon: Plus,
+                  },
+                ].map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === item.href}
+                    >
+                      <Link href={item.href} onClick={close}>
                         <item.icon aria-hidden="true" />
                         <span>{item.label}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroup>
-          {business && (
-            <>
-              <SidebarGroup>
-                <SidebarGroupLabel>Manage business</SidebarGroupLabel>
-                <SidebarMenu>
-                  {settings
-                    .filter(
-                      (item) =>
-                        business.canManage ||
-                        [
-                          "/configuration",
-                          "/knowledge",
-                          "/mailboxes",
-                          "/senders",
-                        ].includes(item.path),
-                    )
-                    .map((item) => (
-                      <SidebarMenuItem key={item.path}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={pathname.startsWith(base + item.path)}
-                        >
-                          <Link
-                            href={base + item.path}
-                            onClick={close}
-                            aria-current={
-                              pathname.startsWith(base + item.path)
-                                ? "page"
-                                : undefined
-                            }
-                          >
-                            <item.icon aria-hidden="true" />
-                            <span>{item.label}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                </SidebarMenu>
-              </SidebarGroup>
-              <SidebarGroup>
-                <Collapsible
-                  defaultOpen={
-                    more.some((item) => pathname === base + item.path) ||
-                    pathname === base + "/ai"
-                  }
-                  className="group/more"
-                >
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton>
-                      <SlidersHorizontal aria-hidden="true" />
-                      <span>More settings</span>
-                      <ChevronRight
-                        className="ml-auto transition-transform group-data-[state=open]/more:rotate-90"
-                        aria-hidden="true"
-                      />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenu className="mt-1 border-l border-border pl-3">
-                      {more
-                        .filter((item) => !item.manage || business.canManage)
-                        .map((item) => (
-                          <SidebarMenuItem key={item.path}>
-                            <SidebarMenuButton
-                              asChild
-                              isActive={pathname === base + item.path}
-                            >
-                              <Link href={base + item.path} onClick={close}>
-                                {item.label}
-                              </Link>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        ))}
-                      {business.canManageAi && (
-                        <SidebarMenuItem>
-                          <SidebarMenuButton
-                            asChild
-                            isActive={pathname === base + "/ai"}
-                          >
-                            <Link href={base + "/ai"} onClick={close}>
-                              AI settings
-                            </Link>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      )}
-                    </SidebarMenu>
-                  </CollapsibleContent>
-                </Collapsible>
-              </SidebarGroup>
-            </>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
           )}
         </SidebarContent>
-        <SidebarFooter className="border-t border-border p-4">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={pathname === "/security"}>
-                <Link href="/security" onClick={close}>
-                  <ShieldCheck aria-hidden="true" />
-                  <span>Account security</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <div className="flex items-center justify-between gap-2">
-            <a
-              className="text-xs text-muted-foreground hover:text-primary"
-              href="https://nmtsolutions.in"
-              target="_blank"
-              rel="noreferrer"
-            >
-              NMT Solutions
-            </a>
-            <SignOut />
+        <SidebarFooter className="gap-4 p-4">
+          <div className="flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-4">
+            <BookOpen className="size-5 text-primary" aria-hidden="true" />
+            <p className="text-sm font-semibold">New to LeadRelay?</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Set up your business and run your first search.
+            </p>
+            <Button asChild variant="outline" className="mt-1 w-full">
+              <Link href="/getting-started">
+                Read the vendor guide
+                <ChevronRight data-icon="inline-end" aria-hidden="true" />
+              </Link>
+            </Button>
           </div>
+          <Separator />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 px-1"
+              >
+                <Avatar className="size-8">
+                  <AvatarFallback>
+                    {email.slice(0, 1).toUpperCase() || "U"}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-xs">
+                    {email || "Your account"}
+                  </span>
+                  <span className="block text-[0.65rem] text-muted-foreground">
+                    Account and security
+                  </span>
+                </span>
+                <ChevronsUpDown data-icon="inline-end" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" className="w-64">
+              <DropdownMenuLabel>Your account</DropdownMenuLabel>
+              <DropdownMenuGroup>
+                <DropdownMenuItem asChild>
+                  <Link href="/security" onClick={close}>
+                    <ShieldCheck aria-hidden="true" />
+                    Account security
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/privacy-policy">Privacy policy</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/terms">Terms and conditions</Link>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <div className="px-1">
+                <SignOut />
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </SidebarFooter>
       </Sidebar>
-      <div className="min-w-0 flex-1 bg-background md:m-2 md:ml-0 md:rounded-2xl md:border md:border-border">
-        <header className="glass-chrome sticky top-0 z-20 flex min-h-16 items-center gap-3 border-x-0 border-t-0 px-4 shadow-none sm:px-6 md:rounded-t-2xl">
+      <div className="min-w-0 flex-1">
+        <header className="glass-chrome sticky top-0 z-20 flex min-h-17 items-center gap-4 border-x-0 border-t-0 px-4 shadow-none sm:px-8">
           <SidebarTrigger />
-          <span className="h-5 border-l border-border" aria-hidden="true" />
+          <Separator orientation="vertical" className="h-5" />
           <nav
             aria-label="Breadcrumb"
-            className="flex min-w-0 items-center gap-2 text-sm"
+            className="flex min-w-0 items-center gap-2 text-xs"
           >
             <Link
               href={base || "/businesses"}
-              className="hidden max-w-52 truncate text-muted-foreground sm:block"
+              className="hidden max-w-56 truncate text-muted-foreground sm:block"
             >
-              {business?.name ?? "LeadRelay"}
+              {business?.name || "LeadRelay"}
             </Link>
             <ChevronRight
+              className="hidden size-3 text-muted-foreground sm:block"
               aria-hidden="true"
-              className="hidden size-4 text-muted-foreground sm:block"
             />
             <span className="truncate font-medium" aria-current="page">
               {title}
             </span>
           </nav>
-          {business && (
-            <Button asChild variant="ghost" size="icon" className="ml-auto">
-              <Link href={`${base}/notifications`} aria-label="Notifications">
-                <Bell aria-hidden="true" />
+          <div className="ml-auto flex items-center gap-2">
+            <Button asChild variant="ghost" size="icon">
+              <Link
+                href="/getting-started"
+                aria-label="Help and getting started"
+              >
+                <HelpCircle aria-hidden="true" />
               </Link>
             </Button>
-          )}
+            {business?.canManageAi && (
+              <Button
+                asChild
+                variant="outline"
+                className="hidden sm:inline-flex"
+              >
+                <Link href={base + "/ai"}>
+                  <Sparkles data-icon="inline-start" aria-hidden="true" />
+                  AI assistant
+                </Link>
+              </Button>
+            )}
+          </div>
         </header>
         <main
           id="main-content"
-          className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-8 sm:py-10 lg:px-10"
+          className="app-content px-4 py-7 sm:px-8 lg:px-10 lg:py-9"
         >
           {children}
         </main>
       </div>
+      <CommandDialog
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        title="Go to a page"
+        description="Find a LeadRelay page or switch your business."
+      >
+        <CommandInput
+          aria-label="Search pages or businesses"
+          placeholder="Search pages or businesses..."
+        />
+        <CommandList>
+          <CommandEmpty>No matching pages.</CommandEmpty>
+          {business && (
+            <>
+              <CommandGroup heading="Sales">
+                {[...work, ...resources].filter(visible).map((item) => (
+                  <CommandItem
+                    key={item.path}
+                    onSelect={() => navigate(base + item.path)}
+                  >
+                    <item.icon aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+              <CommandSeparator />
+              <CommandGroup heading="Business settings">
+                {settings.filter(visible).map((item) => (
+                  <CommandItem
+                    key={item.path}
+                    onSelect={() => navigate(base + item.path)}
+                  >
+                    <item.icon aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          )}
+          <CommandGroup heading="Businesses">
+            {businesses.map((item) => (
+              <CommandItem
+                key={item.id}
+                onSelect={() => navigate(`/businesses/${item.id}`)}
+              >
+                <Building2 aria-hidden="true" />
+                {item.name}
+              </CommandItem>
+            ))}
+            <CommandItem onSelect={() => navigate("/businesses/new")}>
+              <Plus aria-hidden="true" />
+              Add business
+            </CommandItem>
+          </CommandGroup>
+          <CommandGroup heading="Help">
+            <CommandItem onSelect={() => navigate("/getting-started")}>
+              <BookOpen aria-hidden="true" />
+              Vendor getting-started guide
+            </CommandItem>
+            <CommandItem onSelect={() => navigate("/security")}>
+              <ShieldCheck aria-hidden="true" />
+              Account security
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
     </>
   );
 }
-
-export function AppNavigation(props: {
+export function AppNavigation({
+  defaultOpen = true,
+  ...props
+}: {
   businesses: NavigationBusiness[];
+  email?: string;
+  defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -412,8 +577,8 @@ export function AppNavigation(props: {
       >
         Skip to content
       </a>
-      <SidebarProvider>
-        <Navigation {...props} />
+      <SidebarProvider defaultOpen={defaultOpen}>
+        <Navigation {...props} email={props.email ?? ""} />
       </SidebarProvider>
     </MotionConfig>
   );

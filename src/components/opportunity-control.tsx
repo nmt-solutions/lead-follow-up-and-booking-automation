@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -167,7 +168,7 @@ export function OpportunityControl({
       setSavedVersion(control.version);
   }
   return (
-    <div className="space-y-4 border-t border-border pt-4">
+    <div className="flex flex-col gap-4 border-t border-border pt-4">
       <p className="text-sm">
         Assigned owner: {control.ownerName ?? "Unassigned"}
       </p>
@@ -181,65 +182,67 @@ export function OpportunityControl({
           ? "Only an explicit handback allows automation to evaluate new actions. New messages and elapsed time do not resume it."
           : "Each new action still needs current authority, owner, association and channel checks. Handback grants no sending or commercial authority."}
       </p>
-      <form onSubmit={save} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-command`}>Control action</Label>
-          <NativeSelect
-            id={`${prefix}-command`}
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
+      <form onSubmit={save} className="flex flex-col gap-4">
+        <FieldGroup className="gap-4">
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-command`}>Control action</Label>
+            <NativeSelect
+              id={`${prefix}-command`}
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+            >
+              <option value="takeover">Take over and assign to me</option>
+              {control.state === "human" && (
+                <option value="update">Update handoff details</option>
+              )}
+              {control.ownerId && (
+                <option value="handback">
+                  Explicitly hand back to automation
+                </option>
+              )}
+            </NativeSelect>
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-reason`}>
+              {command === "handback"
+                ? "Handback reason"
+                : "Takeover or handoff reason"}
+            </Label>
+            <Textarea
+              id={`${prefix}-reason`}
+              name="reason"
+              required
+              maxLength={1000}
+            />
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`${prefix}-next`}>Next action</Label>
+            <Textarea
+              id={`${prefix}-next`}
+              name="nextAction"
+              required
+              maxLength={1000}
+              defaultValue={control.nextAction}
+            />
+          </Field>
+          <Button disabled={status.pending || savedVersion === control.version}>
+            {status.pending
+              ? "Saving..."
+              : command === "handback"
+                ? "Hand back to automation"
+                : command === "update"
+                  ? "Save handoff details"
+                  : "Take over Opportunity"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => window.location.reload()}
           >
-            <option value="takeover">Take over and assign to me</option>
-            {control.state === "human" && (
-              <option value="update">Update handoff details</option>
-            )}
-            {control.ownerId && (
-              <option value="handback">
-                Explicitly hand back to automation
-              </option>
-            )}
-          </NativeSelect>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-reason`}>
-            {command === "handback"
-              ? "Handback reason"
-              : "Takeover or handoff reason"}
-          </Label>
-          <Textarea
-            id={`${prefix}-reason`}
-            name="reason"
-            required
-            maxLength={1000}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${prefix}-next`}>Next action</Label>
-          <Textarea
-            id={`${prefix}-next`}
-            name="nextAction"
-            required
-            maxLength={1000}
-            defaultValue={control.nextAction}
-          />
-        </div>
-        <Button disabled={status.pending || savedVersion === control.version}>
-          {status.pending
-            ? "Saving..."
-            : command === "handback"
-              ? "Hand back to automation"
-              : command === "update"
-                ? "Save handoff details"
-                : "Take over Opportunity"}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => window.location.reload()}
-        >
-          Reload current state
-        </Button>
-        <Feedback status={status} />
+            Reload current state
+          </Button>
+          <Feedback status={status} />
+        </FieldGroup>
       </form>
       <p className="text-sm text-muted-foreground">
         Queued actions are cancelled on a control change. A send already started
@@ -250,9 +253,9 @@ export function OpportunityControl({
           Control history and queued actions
         </summary>
         {control.history.length ? (
-          <ol className="space-y-3">
+          <ol className="flex flex-col gap-3">
             {control.history.map((entry) => (
-              <li key={entry.id} className="space-y-1">
+              <li key={entry.id} className="flex flex-col gap-1">
                 <p className="font-medium">
                   {entry.command.replaceAll("_", " ")}: {entry.after.reason}
                 </p>
@@ -295,7 +298,7 @@ export function OpportunityControl({
           <p>No control changes recorded. Initial review remains paused.</p>
         )}
         {control.actions.length ? (
-          <ul className="mt-4 space-y-2">
+          <ul className="flex flex-col mt-4 gap-2">
             {control.actions.map((action) => (
               <li key={action.id}>
                 {action.state === "committed"
@@ -365,7 +368,7 @@ export function ManualReplyRecord({
       <CardHeader>
         <CardTitle>Record a supported manual reply</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           This records activity you already performed; it does not send a
           message. Authenticated normalized records are supported for selected
@@ -373,79 +376,81 @@ export function ManualReplyRecord({
           live here. Use Take over for unobservable activity.
         </p>
         {supported ? (
-          <form onSubmit={save} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="manual-reply-source">
-                Received message being answered
-              </Label>
-              <NativeSelect
-                id="manual-reply-source"
-                name="replyToMessageRef"
-                required
-              >
-                {conversation.messages.map((message, index) => (
-                  <option key={message.id} value={message.messageRef}>
-                    Message {index + 1}: {message.subject} -{" "}
-                    {message.opportunityId
-                      ? "Associated need"
-                      : "Needs association review"}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-            {[
-              ["eventId", "Source event reference"],
-              ["messageRef", "Sent-message reference"],
-              ["occurredAt", "Observed at (UTC, e.g. 2026-11-06T09:00:00Z)"],
-            ].map(([name, label]) => (
-              <div key={name} className="space-y-2">
-                <Label htmlFor={`manual-${name}`}>{label}</Label>
-                <Input
-                  id={`manual-${name}`}
-                  name={name}
+          <form onSubmit={save} className="flex flex-col gap-4">
+            <FieldGroup className="gap-4">
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="manual-reply-source">
+                  Received message being answered
+                </Label>
+                <NativeSelect
+                  id="manual-reply-source"
+                  name="replyToMessageRef"
                   required
-                  maxLength={256}
+                >
+                  {conversation.messages.map((message, index) => (
+                    <option key={message.id} value={message.messageRef}>
+                      Message {index + 1}: {message.subject} -{" "}
+                      {message.opportunityId
+                        ? "Associated need"
+                        : "Needs association review"}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              {[
+                ["eventId", "Source event reference"],
+                ["messageRef", "Sent-message reference"],
+                ["occurredAt", "Observed at (UTC, e.g. 2026-11-06T09:00:00Z)"],
+              ].map(([name, label]) => (
+                <Field key={name} className="flex flex-col gap-2">
+                  <Label htmlFor={`manual-${name}`}>{label}</Label>
+                  <Input
+                    id={`manual-${name}`}
+                    name={name}
+                    required
+                    maxLength={256}
+                  />
+                </Field>
+              ))}
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="manual-reason">Handoff reason</Label>
+                <Textarea
+                  id="manual-reason"
+                  name="reason"
+                  required
+                  maxLength={1000}
                 />
-              </div>
-            ))}
-            <div className="space-y-2">
-              <Label htmlFor="manual-reason">Handoff reason</Label>
-              <Textarea
-                id="manual-reason"
-                name="reason"
-                required
-                maxLength={1000}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="manual-next">Next action</Label>
-              <Textarea
-                id="manual-next"
-                name="nextAction"
-                required
-                maxLength={1000}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              The received message&apos;s current association determines the
-              Opportunity. Your signed-in identity becomes its owner.
-              Unassociated messages require association review first.
-            </p>
-            <Button disabled={status.pending || recorded}>
-              {status.pending
-                ? "Recording..."
-                : "Record manual reply and pause"}
-            </Button>
-            {recorded && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setRecorded(false)}
-              >
-                Record another reply
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="manual-next">Next action</Label>
+                <Textarea
+                  id="manual-next"
+                  name="nextAction"
+                  required
+                  maxLength={1000}
+                />
+              </Field>
+              <p className="text-sm text-muted-foreground">
+                The received message&apos;s current association determines the
+                Opportunity. Your signed-in identity becomes its owner.
+                Unassociated messages require association review first.
+              </p>
+              <Button disabled={status.pending || recorded}>
+                {status.pending
+                  ? "Recording..."
+                  : "Record manual reply and pause"}
               </Button>
-            )}
-            <Feedback status={status} />
+              {recorded && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setRecorded(false)}
+                >
+                  Record another reply
+                </Button>
+              )}
+              <Feedback status={status} />
+            </FieldGroup>
           </form>
         ) : (
           <p>

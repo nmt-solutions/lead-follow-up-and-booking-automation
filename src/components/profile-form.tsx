@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -165,172 +166,179 @@ export function ProfileForm({
         }
       }}
     >
-      <fieldset disabled={pending} className="min-w-0 space-y-7 p-6 sm:p-8">
-        <legend className="sr-only">Business profile</legend>
-        <div className="space-y-2">
-          <Label htmlFor="name">Business name</Label>
-          <Input
-            id="name"
-            name="name"
-            autoComplete="organization"
-            required
-            maxLength={120}
-            value={profile.name}
-            onChange={(event) => change("name", event.target.value)}
-            onBlur={() => validateField("name")}
-            aria-invalid={Boolean(fieldErrors.name)}
-            aria-describedby={fieldErrors.name ? "name-error" : undefined}
-          />
-          {fieldErrors.name && (
-            <p id="name-error" className="text-sm text-destructive">
-              {fieldErrors.name}
-            </p>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="offering">Products or services</Label>
-          <Textarea
-            id="offering"
-            name="offering"
-            required
-            maxLength={4000}
-            value={profile.offering}
-            onChange={(event) => change("offering", event.target.value)}
-            onBlur={() => validateField("offering")}
-            aria-invalid={Boolean(fieldErrors.offering)}
-            aria-describedby="offering-hint offering-error"
-          />
-          <p
-            id="offering-hint"
-            className="text-sm leading-relaxed text-muted-foreground"
-          >
-            Describe what your Business offers, in your own words.
-          </p>
-          <p
-            id="offering-error"
-            className="text-sm text-destructive empty:hidden"
-          >
-            {fieldErrors.offering}
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="homeMarket">
-            Default search area{" "}
-            <span className="font-normal text-muted-foreground">
-              (optional)
-            </span>
-          </Label>
-          <Input
-            id="homeMarket"
-            name="homeMarket"
-            maxLength={200}
-            value={profile.homeMarket}
-            onChange={(event) => change("homeMarket", event.target.value)}
-            onBlur={() => validateField("homeMarket")}
-            aria-invalid={Boolean(fieldErrors.homeMarket)}
-            aria-describedby="market-hint market-error"
-          />
-          <p
-            id="market-hint"
-            className="text-sm leading-relaxed text-muted-foreground"
-          >
-            The city, region or country where you operate or provide your
-            services. If you change it, review and confirm the new area in
-            Business setup.
-          </p>
-          <p
-            id="market-error"
-            className="text-sm text-destructive empty:hidden"
-          >
-            {fieldErrors.homeMarket}
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="website">
-            Website{" "}
-            <span className="font-normal text-muted-foreground">
-              (optional)
-            </span>
-          </Label>
-          <Input
-            id="website"
-            name="website"
-            type="url"
-            autoComplete="url"
-            maxLength={2048}
-            placeholder="https://"
-            value={profile.website}
-            onChange={(event) => change("website", event.target.value)}
-            onBlur={() => validateField("website")}
-            aria-invalid={Boolean(fieldErrors.website)}
-            aria-describedby={fieldErrors.website ? "website-error" : undefined}
-          />
-          {fieldErrors.website && (
-            <p id="website-error" className="text-sm text-destructive">
-              {fieldErrors.website}
-            </p>
-          )}
-        </div>
-      </fieldset>
-      <div className="space-y-4 border-t border-border px-6 py-5 sm:px-8">
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-        {error && (
-          <a
-            href="/security"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4"
-          >
-            Open Security in a new tab
-          </a>
-        )}
-        {sessionExpired && (
-          <a
-            href="/sign-in"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4"
-          >
-            Sign in in a new tab
-          </a>
-        )}
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <p
-            role="status"
-            className="flex items-center gap-2 text-sm text-muted-foreground"
-          >
-            {message ? (
-              <>
-                <Check className="size-4" aria-hidden="true" />
-                {message}
-              </>
-            ) : pending ? (
-              "Saving your profile…"
-            ) : dirty ? (
-              "You have unsaved changes."
-            ) : (
-              <>
-                <LockKeyhole className="size-4 shrink-0" aria-hidden="true" />
-                Private to your Business
-              </>
+      <FieldGroup className="gap-5">
+        <fieldset
+          disabled={pending}
+          className="flex flex-col min-w-0 gap-7 p-6 sm:p-8"
+        >
+          <legend className="sr-only">Business profile</legend>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor="name">Business name</Label>
+            <Input
+              id="name"
+              name="name"
+              autoComplete="organization"
+              required
+              maxLength={120}
+              value={profile.name}
+              onChange={(event) => change("name", event.target.value)}
+              onBlur={() => validateField("name")}
+              aria-invalid={Boolean(fieldErrors.name)}
+              aria-describedby={fieldErrors.name ? "name-error" : undefined}
+            />
+            {fieldErrors.name && (
+              <p id="name-error" className="text-sm text-destructive">
+                {fieldErrors.name}
+              </p>
             )}
-          </p>
-          <Button
-            type="submit"
-            disabled={pending || Boolean(businessId && !dirty)}
-          >
-            {pending
-              ? "Saving…"
-              : businessId
-                ? "Save changes"
-                : "Create Business"}
-          </Button>
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor="offering">Products or services</Label>
+            <Textarea
+              id="offering"
+              name="offering"
+              required
+              maxLength={4000}
+              value={profile.offering}
+              onChange={(event) => change("offering", event.target.value)}
+              onBlur={() => validateField("offering")}
+              aria-invalid={Boolean(fieldErrors.offering)}
+              aria-describedby="offering-hint offering-error"
+            />
+            <p
+              id="offering-hint"
+              className="text-sm leading-relaxed text-muted-foreground"
+            >
+              Describe what your Business offers, in your own words.
+            </p>
+            <p
+              id="offering-error"
+              className="text-sm text-destructive empty:hidden"
+            >
+              {fieldErrors.offering}
+            </p>
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor="homeMarket">
+              Default search area{" "}
+              <span className="font-normal text-muted-foreground">
+                (optional)
+              </span>
+            </Label>
+            <Input
+              id="homeMarket"
+              name="homeMarket"
+              maxLength={200}
+              value={profile.homeMarket}
+              onChange={(event) => change("homeMarket", event.target.value)}
+              onBlur={() => validateField("homeMarket")}
+              aria-invalid={Boolean(fieldErrors.homeMarket)}
+              aria-describedby="market-hint market-error"
+            />
+            <p
+              id="market-hint"
+              className="text-sm leading-relaxed text-muted-foreground"
+            >
+              The city, region or country where you operate or provide your
+              services. If you change it, review and confirm the new area in
+              Business setup.
+            </p>
+            <p
+              id="market-error"
+              className="text-sm text-destructive empty:hidden"
+            >
+              {fieldErrors.homeMarket}
+            </p>
+          </Field>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor="website">
+              Website{" "}
+              <span className="font-normal text-muted-foreground">
+                (optional)
+              </span>
+            </Label>
+            <Input
+              id="website"
+              name="website"
+              type="url"
+              autoComplete="url"
+              maxLength={2048}
+              placeholder="https://"
+              value={profile.website}
+              onChange={(event) => change("website", event.target.value)}
+              onBlur={() => validateField("website")}
+              aria-invalid={Boolean(fieldErrors.website)}
+              aria-describedby={
+                fieldErrors.website ? "website-error" : undefined
+              }
+            />
+            {fieldErrors.website && (
+              <p id="website-error" className="text-sm text-destructive">
+                {fieldErrors.website}
+              </p>
+            )}
+          </Field>
+        </fieldset>
+        <div className="flex flex-col gap-4 border-t border-border px-6 py-5 sm:px-8">
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {error && (
+            <a
+              href="/security"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4"
+            >
+              Open Security in a new tab
+            </a>
+          )}
+          {sessionExpired && (
+            <a
+              href="/sign-in"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4"
+            >
+              Sign in in a new tab
+            </a>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <p
+              role="status"
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+            >
+              {message ? (
+                <>
+                  <Check className="size-4" aria-hidden="true" />
+                  {message}
+                </>
+              ) : pending ? (
+                "Saving your profile…"
+              ) : dirty ? (
+                "You have unsaved changes."
+              ) : (
+                <>
+                  <LockKeyhole className="size-4 shrink-0" aria-hidden="true" />
+                  Private to your Business
+                </>
+              )}
+            </p>
+            <Button
+              type="submit"
+              disabled={pending || Boolean(businessId && !dirty)}
+            >
+              {pending
+                ? "Saving…"
+                : businessId
+                  ? "Save changes"
+                  : "Create Business"}
+            </Button>
+          </div>
         </div>
-      </div>
+      </FieldGroup>
     </form>
   );
 }

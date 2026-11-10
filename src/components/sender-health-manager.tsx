@@ -1,4 +1,5 @@
 "use client";
+import { FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -35,7 +36,7 @@ function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       {children}
     </div>
@@ -174,7 +175,7 @@ export function SenderHealthManager({
     });
   }
   return (
-    <div className="space-y-8" aria-busy={pending}>
+    <div className="flex flex-col gap-8" aria-busy={pending}>
       {pending && <p role="status">Recording sender health…</p>}
       {error && (
         <Alert role="alert">
@@ -192,7 +193,7 @@ export function SenderHealthManager({
         <CardHeader>
           <CardTitle>Sender alerts</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
             These are durable in-app alerts for the{" "}
             {operator ? "responsible sender-health operator" : "Business team"}.
@@ -203,7 +204,10 @@ export function SenderHealthManager({
             <p>No sender incidents have been reported.</p>
           )}
           {state.alerts.map((a) => (
-            <div key={a.id} className="space-y-2 rounded-xl border p-4">
+            <div
+              key={a.id}
+              className="flex flex-col gap-2 rounded-xl border p-4"
+            >
               <p className="break-all">
                 Sender{" "}
                 {state.identities.find((i) => i.id === a.identityId)?.address ??
@@ -248,7 +252,7 @@ export function SenderHealthManager({
             <CardHeader>
               <CardTitle className="break-all">{identity.address}</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="flex flex-col gap-6">
               <Badge>
                 {identity.issues.length
                   ? "Outbound paused / evidence required"
@@ -308,7 +312,7 @@ export function SenderHealthManager({
                 )}
               </dl>
               {identity.evidence && (
-                <div className="space-y-2 rounded-xl bg-muted p-4">
+                <div className="flex flex-col gap-2 rounded-xl bg-muted p-4">
                   <p>Observed {identity.evidence.observedAt}</p>
                   <p className="break-words text-sm">
                     Reviewed by {identity.evidence.actorId} · recorded{" "}
@@ -335,7 +339,10 @@ export function SenderHealthManager({
                 </div>
               )}
               {identity.incidents.map((i) => (
-                <div key={i.id} className="space-y-2 rounded-xl border p-4">
+                <div
+                  key={i.id}
+                  className="flex flex-col gap-2 rounded-xl border p-4"
+                >
                   <p className="font-medium">
                     {i.resolved ? "Repaired" : "Open incident"}:{" "}
                     {i.failures.join(", ")}
@@ -373,45 +380,20 @@ export function SenderHealthManager({
                     <form
                       key={identity.policy?.version ?? 0}
                       onSubmit={(e) => policySubmit(e, identity)}
-                      className="space-y-4 pt-4"
+                      className="flex flex-col gap-4 pt-4"
                     >
-                      <p>
-                        Only submit an authorized source policy with actual
-                        reviewed inputs. Rates are fractions; equality fails.
-                        Snapshots are never added together. Missing or
-                        undersized samples remain unknown.
-                      </p>
-                      {(
-                        [
-                          ["sourceAuthority", "Source authority"],
-                          ["sourceOrigin", "HTTPS source origin (no path)"],
-                          ["population", "Exact sender population"],
-                        ] as const
-                      ).map(([name, label]) => (
-                        <Field
-                          key={name}
-                          id={`${prefix}-${name}`}
-                          label={label}
-                        >
-                          <Input
-                            id={`${prefix}-${name}`}
-                            name={name}
-                            defaultValue={p?.[name] ?? ""}
-                            required
-                            maxLength={240}
-                          />
-                        </Field>
-                      ))}
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <FieldGroup className="gap-4">
+                        <p>
+                          Only submit an authorized source policy with actual
+                          reviewed inputs. Rates are fractions; equality fails.
+                          Snapshots are never added together. Missing or
+                          undersized samples remain unknown.
+                        </p>
                         {(
                           [
-                            ["windowSeconds", "Evidence window (seconds)"],
-                            ["freshnessSeconds", "Freshness (seconds)"],
-                            [
-                              "maximumLatenessSeconds",
-                              "Maximum reporting delay (seconds)",
-                            ],
-                            ["retentionDays", "Artifact retention (days)"],
+                            ["sourceAuthority", "Source authority"],
+                            ["sourceOrigin", "HTTPS source origin (no path)"],
+                            ["population", "Exact sender population"],
                           ] as const
                         ).map(([name, label]) => (
                           <Field
@@ -422,73 +404,100 @@ export function SenderHealthManager({
                             <Input
                               id={`${prefix}-${name}`}
                               name={name}
-                              type="number"
-                              min={name === "maximumLatenessSeconds" ? 0 : 1}
-                              step="1"
                               defaultValue={p?.[name] ?? ""}
                               required
+                              maxLength={240}
                             />
                           </Field>
                         ))}
-                      </div>
-                      {healthMetrics.map((m) => (
-                        <fieldset
-                          key={m}
-                          className="space-y-3 rounded-xl border p-4"
-                        >
-                          <legend className="px-2 text-sm">
-                            {metricMeaning[m]}
-                          </legend>
-                          <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {(
+                            [
+                              ["windowSeconds", "Evidence window (seconds)"],
+                              ["freshnessSeconds", "Freshness (seconds)"],
+                              [
+                                "maximumLatenessSeconds",
+                                "Maximum reporting delay (seconds)",
+                              ],
+                              ["retentionDays", "Artifact retention (days)"],
+                            ] as const
+                          ).map(([name, label]) => (
                             <Field
-                              id={`${prefix}-${m}-unit`}
-                              label="Threshold unit"
-                            >
-                              <NativeSelect
-                                id={`${prefix}-${m}-unit`}
-                                name={`${m}-unit`}
-                                defaultValue={p?.thresholds[m].unit ?? ""}
-                                required
-                              >
-                                <option value="">Choose unit</option>
-                                <option value="count">Failure count</option>
-                                <option value="rate">Failure fraction</option>
-                              </NativeSelect>
-                            </Field>
-                            <Field
-                              id={`${prefix}-${m}-limit`}
-                              label="Fail at or above"
+                              key={name}
+                              id={`${prefix}-${name}`}
+                              label={label}
                             >
                               <Input
-                                id={`${prefix}-${m}-limit`}
-                                name={`${m}-limit`}
+                                id={`${prefix}-${name}`}
+                                name={name}
                                 type="number"
-                                step="any"
-                                min="0.000000001"
-                                defaultValue={p?.thresholds[m].limit ?? ""}
-                                required
-                              />
-                            </Field>
-                            <Field
-                              id={`${prefix}-${m}-sample`}
-                              label="Minimum denominator"
-                            >
-                              <Input
-                                id={`${prefix}-${m}-sample`}
-                                name={`${m}-sample`}
-                                type="number"
-                                min="1"
+                                min={name === "maximumLatenessSeconds" ? 0 : 1}
                                 step="1"
-                                defaultValue={
-                                  p?.thresholds[m].minimumSample ?? ""
-                                }
+                                defaultValue={p?.[name] ?? ""}
                                 required
                               />
                             </Field>
-                          </div>
-                        </fieldset>
-                      ))}
-                      <Button disabled={pending}>Save policy version</Button>
+                          ))}
+                        </div>
+                        {healthMetrics.map((m) => (
+                          <fieldset
+                            key={m}
+                            className="flex flex-col gap-3 rounded-xl border p-4"
+                          >
+                            <legend className="px-2 text-sm">
+                              {metricMeaning[m]}
+                            </legend>
+                            <div className="grid gap-4 sm:grid-cols-3">
+                              <Field
+                                id={`${prefix}-${m}-unit`}
+                                label="Threshold unit"
+                              >
+                                <NativeSelect
+                                  id={`${prefix}-${m}-unit`}
+                                  name={`${m}-unit`}
+                                  defaultValue={p?.thresholds[m].unit ?? ""}
+                                  required
+                                >
+                                  <option value="">Choose unit</option>
+                                  <option value="count">Failure count</option>
+                                  <option value="rate">Failure fraction</option>
+                                </NativeSelect>
+                              </Field>
+                              <Field
+                                id={`${prefix}-${m}-limit`}
+                                label="Fail at or above"
+                              >
+                                <Input
+                                  id={`${prefix}-${m}-limit`}
+                                  name={`${m}-limit`}
+                                  type="number"
+                                  step="any"
+                                  min="0.000000001"
+                                  defaultValue={p?.thresholds[m].limit ?? ""}
+                                  required
+                                />
+                              </Field>
+                              <Field
+                                id={`${prefix}-${m}-sample`}
+                                label="Minimum denominator"
+                              >
+                                <Input
+                                  id={`${prefix}-${m}-sample`}
+                                  name={`${m}-sample`}
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  defaultValue={
+                                    p?.thresholds[m].minimumSample ?? ""
+                                  }
+                                  required
+                                />
+                              </Field>
+                            </div>
+                          </fieldset>
+                        ))}
+                        <Button disabled={pending}>Save policy version</Button>
+                      </FieldGroup>
                     </form>
                   </details>
                   {p && (
@@ -498,121 +507,124 @@ export function SenderHealthManager({
                       </summary>
                       <form
                         onSubmit={(e) => evidenceSubmit(e, identity)}
-                        className="space-y-4 pt-4"
+                        className="flex flex-col gap-4 pt-4"
                       >
-                        <p>
-                          Review actual provider reports or trusted receiver
-                          authentication results and attributable
-                          delivery/complaint records for this exact account. Do
-                          not infer zero complaints from no data. This records
-                          your authenticated assisted review, not an automated
-                          Gmail or Graph telemetry feed. Include no message
-                          bodies, recipient identities, tokens or sensitive URL
-                          parameters.
-                        </p>
-                        <p className="text-sm">
-                          SPF/DKIM/DMARC use trusted receiver results. Bounces
-                          count permanent failures among accepted submissions.
-                          Complaints count attributable recipient reports among
-                          delivered messages in the stated reviewed population.
-                          Different populations require a different approved
-                          source policy.
-                        </p>
-                        {(
-                          [
-                            ["eventKey", "Stable source report key"],
-                            [
-                              "reference",
-                              "HTTPS artifact reference (no query or credentials)",
-                            ],
-                            ["artifactSha256", "Reviewed artifact SHA-256"],
-                            ["observedAt", dateLabel("Observed at")],
-                            ["windowStart", dateLabel("Window start")],
-                            ["windowEnd", dateLabel("Window end")],
-                          ] as const
-                        ).map(([name, label]) => (
-                          <Field
-                            key={name}
-                            id={`${prefix}-${name}`}
-                            label={label}
-                          >
-                            <Input
-                              id={`${prefix}-${name}`}
-                              name={name}
-                              required
-                              autoComplete="off"
-                              maxLength={name === "reference" ? 512 : 128}
-                              placeholder={
-                                name.endsWith("At") || name.startsWith("window")
-                                  ? "YYYY-MM-DDTHH:mm:ssZ"
-                                  : undefined
-                              }
-                            />
-                          </Field>
-                        ))}
-                        {healthMetrics.map((m) => (
-                          <fieldset
-                            key={m}
-                            className="space-y-3 rounded-xl border p-4"
-                          >
-                            <legend className="px-2 text-sm">
-                              {metricMeaning[m]}
-                            </legend>
-                            <div className="grid gap-4 sm:grid-cols-2">
-                              {(["failed", "total"] as const).map((n) => (
-                                <Field
-                                  key={n}
-                                  id={`${prefix}-${m}-${n}`}
-                                  label={
-                                    n === "failed"
-                                      ? "Failures"
-                                      : "Assessed denominator"
-                                  }
-                                >
-                                  <Input
-                                    id={`${prefix}-${m}-${n}`}
-                                    name={`${m}-${n}`}
-                                    type="number"
-                                    min="0"
-                                    step="1"
-                                    required
-                                  />
-                                </Field>
-                              ))}
-                            </div>
-                          </fieldset>
-                        ))}
-                        <fieldset className="space-y-2">
-                          <legend className="font-medium">
-                            Incidents this evidence repairs
-                          </legend>
-                          {identity.incidents
-                            .filter((i) => !i.resolved)
-                            .map((i) => (
-                              <label
-                                key={i.id}
-                                htmlFor={`${prefix}-repair-${i.id}`}
-                                className="flex min-h-11 items-center gap-3"
-                              >
-                                <Checkbox
-                                  id={`${prefix}-repair-${i.id}`}
-                                  name="repairs"
-                                  value={i.id}
-                                />
-                                <span className="break-all">
-                                  {i.failures.join(", ")} · {i.id}
-                                </span>
-                              </label>
-                            ))}
-                          <p className="text-sm text-muted-foreground">
-                            Select only incidents whose failed condition this
-                            newer window addresses. Healthy evidence alone never
-                            silently repairs an incident.
+                        <FieldGroup className="gap-4">
+                          <p>
+                            Review actual provider reports or trusted receiver
+                            authentication results and attributable
+                            delivery/complaint records for this exact account.
+                            Do not infer zero complaints from no data. This
+                            records your authenticated assisted review, not an
+                            automated Gmail or Graph telemetry feed. Include no
+                            message bodies, recipient identities, tokens or
+                            sensitive URL parameters.
                           </p>
-                        </fieldset>
-                        <Button disabled={pending}>
-                          Record reviewed evidence
-                        </Button>
+                          <p className="text-sm">
+                            SPF/DKIM/DMARC use trusted receiver results. Bounces
+                            count permanent failures among accepted submissions.
+                            Complaints count attributable recipient reports
+                            among delivered messages in the stated reviewed
+                            population. Different populations require a
+                            different approved source policy.
+                          </p>
+                          {(
+                            [
+                              ["eventKey", "Stable source report key"],
+                              [
+                                "reference",
+                                "HTTPS artifact reference (no query or credentials)",
+                              ],
+                              ["artifactSha256", "Reviewed artifact SHA-256"],
+                              ["observedAt", dateLabel("Observed at")],
+                              ["windowStart", dateLabel("Window start")],
+                              ["windowEnd", dateLabel("Window end")],
+                            ] as const
+                          ).map(([name, label]) => (
+                            <Field
+                              key={name}
+                              id={`${prefix}-${name}`}
+                              label={label}
+                            >
+                              <Input
+                                id={`${prefix}-${name}`}
+                                name={name}
+                                required
+                                autoComplete="off"
+                                maxLength={name === "reference" ? 512 : 128}
+                                placeholder={
+                                  name.endsWith("At") ||
+                                  name.startsWith("window")
+                                    ? "YYYY-MM-DDTHH:mm:ssZ"
+                                    : undefined
+                                }
+                              />
+                            </Field>
+                          ))}
+                          {healthMetrics.map((m) => (
+                            <fieldset
+                              key={m}
+                              className="flex flex-col gap-3 rounded-xl border p-4"
+                            >
+                              <legend className="px-2 text-sm">
+                                {metricMeaning[m]}
+                              </legend>
+                              <div className="grid gap-4 sm:grid-cols-2">
+                                {(["failed", "total"] as const).map((n) => (
+                                  <Field
+                                    key={n}
+                                    id={`${prefix}-${m}-${n}`}
+                                    label={
+                                      n === "failed"
+                                        ? "Failures"
+                                        : "Assessed denominator"
+                                    }
+                                  >
+                                    <Input
+                                      id={`${prefix}-${m}-${n}`}
+                                      name={`${m}-${n}`}
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      required
+                                    />
+                                  </Field>
+                                ))}
+                              </div>
+                            </fieldset>
+                          ))}
+                          <fieldset className="flex flex-col gap-2">
+                            <legend className="font-medium">
+                              Incidents this evidence repairs
+                            </legend>
+                            {identity.incidents
+                              .filter((i) => !i.resolved)
+                              .map((i) => (
+                                <label
+                                  key={i.id}
+                                  htmlFor={`${prefix}-repair-${i.id}`}
+                                  className="flex min-h-11 items-center gap-3"
+                                >
+                                  <Checkbox
+                                    id={`${prefix}-repair-${i.id}`}
+                                    name="repairs"
+                                    value={i.id}
+                                  />
+                                  <span className="break-all">
+                                    {i.failures.join(", ")} · {i.id}
+                                  </span>
+                                </label>
+                              ))}
+                            <p className="text-sm text-muted-foreground">
+                              Select only incidents whose failed condition this
+                              newer window addresses. Healthy evidence alone
+                              never silently repairs an incident.
+                            </p>
+                          </fieldset>
+                          <Button disabled={pending}>
+                            Record reviewed evidence
+                          </Button>
+                        </FieldGroup>
                       </form>
                     </details>
                   )}

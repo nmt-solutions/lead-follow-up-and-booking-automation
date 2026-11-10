@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -19,20 +20,16 @@ export default async function ReviewPage({
     }
   })();
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <header>
-        <Link
-          href="/platform/sender-health"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to operator alerts
-        </Link>
-        <h1 className="page-title">Review sender health</h1>
-        <p className="mt-3 break-all text-muted-foreground">
-          Business {businessId}. Your current sender-health capability and
-          recent authenticator verification are required for every operation.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Review sender health</>}
+        description={
+          <>
+            Business {businessId}. Your current sender-health capability and
+            recent authenticator verification are required for every operation.
+          </>
+        }
+      ></PageHeader>
       <SenderHealthManager state={state} operator />
     </div>
   );

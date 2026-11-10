@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState } from "react";
 import Link from "next/link";
@@ -148,7 +149,7 @@ function ScheduleEditor({
     markets.every((market) => state.availableMarkets.includes(market));
   return (
     <form
-      className="space-y-5 rounded-xl border border-border bg-card p-5"
+      className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5"
       onSubmit={(event) => {
         event.preventDefault();
         if (busy) return;
@@ -169,245 +170,253 @@ function ScheduleEditor({
           .finally(() => setBusy(false));
       }}
     >
-      <h3 className="font-semibold">
-        {saved ? "Edit saved search" : "New saved search"}
-      </h3>
-      <fieldset disabled={busy} className="space-y-5">
-        <div className="space-y-2">
-          <Label htmlFor={`schedule-name-${formId}`}>Saved-search name</Label>
-          <Input
-            id={`schedule-name-${formId}`}
-            value={name}
-            maxLength={120}
-            required
-            onChange={(e) => {
-              edit();
-              setName(e.target.value);
-            }}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`schedule-offering-${formId}`}>
-            Public offering phrase
-          </Label>
-          {state.policy?.exa ? (
-            <NativeSelect
-              id={`schedule-offering-${formId}`}
-              value={publicOffering}
-              required
-              onChange={(e) => {
-                edit();
-                setPublicOffering(e.target.value);
-              }}
-            >
-              {!state.policy.exa.publicOfferings.includes(publicOffering) && (
-                <option value={publicOffering} disabled>
-                  {publicOffering} (no longer approved)
-                </option>
-              )}
-              {state.policy.exa.publicOfferings.map((phrase) => (
-                <option key={phrase} value={phrase}>
-                  {phrase}
-                </option>
-              ))}
-            </NativeSelect>
-          ) : (
+      <FieldGroup className="gap-5">
+        <h3 className="font-semibold">
+          {saved ? "Edit saved search" : "New saved search"}
+        </h3>
+        <fieldset disabled={busy} className="flex flex-col gap-5">
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`schedule-name-${formId}`}>Saved-search name</Label>
             <Input
-              id={`schedule-offering-${formId}`}
-              value={publicOffering}
-              maxLength={400}
+              id={`schedule-name-${formId}`}
+              value={name}
+              maxLength={120}
               required
               onChange={(e) => {
                 edit();
-                setPublicOffering(e.target.value);
+                setName(e.target.value);
               }}
             />
-          )}
-        </div>
-        <fieldset className="space-y-2">
-          <legend className="mb-2 text-sm font-medium">
-            Markets within current reach and coverage
-          </legend>
-          {[...new Set([...markets, ...state.availableMarkets])].map(
-            (market) => (
-              <Label key={market} className="flex min-h-11 items-center gap-3">
+          </Field>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`schedule-offering-${formId}`}>
+              Public offering phrase
+            </Label>
+            {state.policy?.exa ? (
+              <NativeSelect
+                id={`schedule-offering-${formId}`}
+                value={publicOffering}
+                required
+                onChange={(e) => {
+                  edit();
+                  setPublicOffering(e.target.value);
+                }}
+              >
+                {!state.policy.exa.publicOfferings.includes(publicOffering) && (
+                  <option value={publicOffering} disabled>
+                    {publicOffering} (no longer approved)
+                  </option>
+                )}
+                {state.policy.exa.publicOfferings.map((phrase) => (
+                  <option key={phrase} value={phrase}>
+                    {phrase}
+                  </option>
+                ))}
+              </NativeSelect>
+            ) : (
+              <Input
+                id={`schedule-offering-${formId}`}
+                value={publicOffering}
+                maxLength={400}
+                required
+                onChange={(e) => {
+                  edit();
+                  setPublicOffering(e.target.value);
+                }}
+              />
+            )}
+          </div>
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-2 text-sm font-medium">
+              Markets within current reach and coverage
+            </legend>
+            {[...new Set([...markets, ...state.availableMarkets])].map(
+              (market) => (
+                <Label
+                  key={market}
+                  className="flex min-h-11 items-center gap-3"
+                >
+                  <Input
+                    type="checkbox"
+                    className="size-5 min-h-5 shrink-0"
+                    checked={markets.includes(market)}
+                    onChange={(e) => {
+                      edit();
+                      setMarkets(
+                        e.target.checked
+                          ? [...markets, market]
+                          : markets.filter((m) => m !== market),
+                      );
+                    }}
+                  />
+                  {market}
+                  {!state.availableMarkets.includes(market) &&
+                    " (no longer eligible; remove before saving)"}
+                </Label>
+              ),
+            )}
+            {!state.availableMarkets.length && (
+              <p className="text-sm text-muted-foreground">
+                No eligible markets. Review Business configuration and operator
+                coverage.
+              </p>
+            )}
+          </fieldset>
+          <Field className="flex flex-col gap-2">
+            <Label htmlFor={`schedule-budget-${formId}`}>
+              Allowance for each run (
+              {state.policy?.allowanceUnit ?? "not configured"})
+            </Label>
+            <Input
+              id={`schedule-budget-${formId}`}
+              type="number"
+              min={1}
+              max={state.policy?.maxRunBudget}
+              step={1}
+              required
+              value={budget}
+              onChange={(e) => {
+                edit();
+                setBudget(e.target.value);
+              }}
+            />
+            <p className="text-sm text-muted-foreground">
+              Configured maximum:{" "}
+              {state.policy?.maxRunBudget ?? "not configured"}. Each new
+              occurrence has this allowance. Recovery retains the consumed and
+              reserved units for that run; extra usage requires separate
+              approval.
+            </p>
+          </Field>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`schedule-zone-${formId}`}>
+                Business time zone (IANA)
+              </Label>
+              <Input
+                id={`schedule-zone-${formId}`}
+                value={timeZone}
+                placeholder="e.g. America/New_York"
+                aria-invalid={zoneInvalid}
+                required
+                maxLength={100}
+                aria-describedby={`schedule-timing-${formId}`}
+                onChange={(e) => {
+                  edit();
+                  setTimeZone(e.target.value);
+                }}
+              />
+              {zoneInvalid && (
+                <p className="text-sm text-destructive">
+                  Enter a supported IANA time zone, such as America/New_York.
+                </p>
+              )}
+            </Field>
+            <Field className="flex flex-col gap-2">
+              <Label htmlFor={`schedule-time-${formId}`}>Local run time</Label>
+              <Input
+                id={`schedule-time-${formId}`}
+                type="time"
+                step={60}
+                required
+                value={localTime}
+                onChange={(e) => {
+                  edit();
+                  setLocalTime(e.target.value);
+                }}
+              />
+            </Field>
+          </div>
+          <fieldset className="flex flex-wrap gap-x-5 gap-y-2">
+            <legend className="mb-2 text-sm font-medium">
+              Run on these local weekdays
+            </legend>
+            {weekdays.map((day, i) => (
+              <Label key={day} className="flex min-h-11 items-center gap-3">
                 <Input
                   type="checkbox"
                   className="size-5 min-h-5 shrink-0"
-                  checked={markets.includes(market)}
+                  checked={days.includes(i + 1)}
                   onChange={(e) => {
                     edit();
-                    setMarkets(
+                    setDays(
                       e.target.checked
-                        ? [...markets, market]
-                        : markets.filter((m) => m !== market),
+                        ? [...days, i + 1]
+                        : days.filter((d) => d !== i + 1),
                     );
                   }}
                 />
-                {market}
-                {!state.availableMarkets.includes(market) &&
-                  " (no longer eligible; remove before saving)"}
+                {day}
               </Label>
-            ),
-          )}
-          {!state.availableMarkets.length && (
-            <p className="text-sm text-muted-foreground">
-              No eligible markets. Review Business configuration and operator
-              coverage.
-            </p>
-          )}
-        </fieldset>
-        <div className="space-y-2">
-          <Label htmlFor={`schedule-budget-${formId}`}>
-            Allowance for each run (
-            {state.policy?.allowanceUnit ?? "not configured"})
-          </Label>
-          <Input
-            id={`schedule-budget-${formId}`}
-            type="number"
-            min={1}
-            max={state.policy?.maxRunBudget}
-            step={1}
-            required
-            value={budget}
-            onChange={(e) => {
-              edit();
-              setBudget(e.target.value);
-            }}
-          />
-          <p className="text-sm text-muted-foreground">
-            Configured maximum: {state.policy?.maxRunBudget ?? "not configured"}
-            . Each new occurrence has this allowance. Recovery retains the
-            consumed and reserved units for that run; extra usage requires
-            separate approval.
-          </p>
-        </div>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor={`schedule-zone-${formId}`}>
-              Business time zone (IANA)
-            </Label>
-            <Input
-              id={`schedule-zone-${formId}`}
-              value={timeZone}
-              placeholder="e.g. America/New_York"
-              aria-invalid={zoneInvalid}
-              required
-              maxLength={100}
-              aria-describedby={`schedule-timing-${formId}`}
-              onChange={(e) => {
-                edit();
-                setTimeZone(e.target.value);
-              }}
-            />
-            {zoneInvalid && (
-              <p className="text-sm text-destructive">
-                Enter a supported IANA time zone, such as America/New_York.
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`schedule-time-${formId}`}>Local run time</Label>
-            <Input
-              id={`schedule-time-${formId}`}
-              type="time"
-              step={60}
-              required
-              value={localTime}
-              onChange={(e) => {
-                edit();
-                setLocalTime(e.target.value);
-              }}
-            />
-          </div>
-        </div>
-        <fieldset className="flex flex-wrap gap-x-5 gap-y-2">
-          <legend className="mb-2 text-sm font-medium">
-            Run on these local weekdays
-          </legend>
-          {weekdays.map((day, i) => (
-            <Label key={day} className="flex min-h-11 items-center gap-3">
-              <Input
-                type="checkbox"
-                className="size-5 min-h-5 shrink-0"
-                checked={days.includes(i + 1)}
-                onChange={(e) => {
-                  edit();
-                  setDays(
-                    e.target.checked
-                      ? [...days, i + 1]
-                      : days.filter((d) => d !== i + 1),
-                  );
-                }}
-              />
-              {day}
-            </Label>
-          ))}
-        </fieldset>
-        <p
-          id={`schedule-timing-${formId}`}
-          className="text-sm text-muted-foreground"
-        >
-          Timing rules: skip expired local days and overlapping runs.
-          Daylight-saving changes move a missing local time forward by the clock
-          gap and use the first occurrence of a repeated time. Pausing or
-          editing invalidates queued occurrences. A running provider request may
-          already have consumed its reservation; completed evidence is retained.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Saving approves the current reviewed offering, requirements, buyers
-          and exclusions shown above. Changed targeting, reach, allowances or
-          provider capabilities block the next run until reviewed again. Current
-          authorizer access and MFA are required at every start.
-        </p>
-        <Label className="flex min-h-11 items-start gap-3">
-          <Input
-            type="checkbox"
-            className="mt-1 size-5 min-h-5 shrink-0"
-            checked={publicApproved}
-            onChange={(e) => setPublicApproved(e.target.checked)}
-          />
-          I approve this public phrase and selected markets for search.
-        </Label>
-        <Label className="flex min-h-11 items-start gap-3">
-          <Input
-            type="checkbox"
-            className="mt-1 size-5 min-h-5 shrink-0"
-            checked={recurringApproved}
-            onChange={(e) => setRecurringApproved(e.target.checked)}
-          />
-          I authorize recurring discovery with this allowance for each run, time
-          zone and timing rules. This does not approve outreach or extra usage.
-        </Label>
-        <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={!eligible || busy}>
-            {busy ? "Saving..." : "Save schedule"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy}
-            onClick={close}
+            ))}
+          </fieldset>
+          <p
+            id={`schedule-timing-${formId}`}
+            className="text-sm text-muted-foreground"
           >
-            Cancel edit
-          </Button>
-        </div>
-      </fieldset>
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            {error}{" "}
-            <Link
-              className="underline"
-              href="/security"
-              target="_blank"
-              rel="noopener noreferrer"
+            Timing rules: skip expired local days and overlapping runs.
+            Daylight-saving changes move a missing local time forward by the
+            clock gap and use the first occurrence of a repeated time. Pausing
+            or editing invalidates queued occurrences. A running provider
+            request may already have consumed its reservation; completed
+            evidence is retained.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Saving approves the current reviewed offering, requirements, buyers
+            and exclusions shown above. Changed targeting, reach, allowances or
+            provider capabilities block the next run until reviewed again.
+            Current authorizer access and MFA are required at every start.
+          </p>
+          <Label className="flex min-h-11 items-start gap-3">
+            <Input
+              type="checkbox"
+              className="mt-1 size-5 min-h-5 shrink-0"
+              checked={publicApproved}
+              onChange={(e) => setPublicApproved(e.target.checked)}
+            />
+            I approve this public phrase and selected markets for search.
+          </Label>
+          <Label className="flex min-h-11 items-start gap-3">
+            <Input
+              type="checkbox"
+              className="mt-1 size-5 min-h-5 shrink-0"
+              checked={recurringApproved}
+              onChange={(e) => setRecurringApproved(e.target.checked)}
+            />
+            I authorize recurring discovery with this allowance for each run,
+            time zone and timing rules. This does not approve outreach or extra
+            usage.
+          </Label>
+          <div className="flex flex-wrap gap-3">
+            <Button type="submit" disabled={!eligible || busy}>
+              {busy ? "Saving..." : "Save schedule"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={close}
             >
-              Open Security in a new tab
-            </Link>
-          </AlertDescription>
-        </Alert>
-      )}
+              Cancel edit
+            </Button>
+          </div>
+        </fieldset>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {error}{" "}
+              <Link
+                className="underline"
+                href="/security"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open Security in a new tab
+              </Link>
+            </AlertDescription>
+          </Alert>
+        )}
+      </FieldGroup>
     </form>
   );
 }
@@ -470,7 +479,7 @@ function SavedSearch({
     }
   }
   return (
-    <article className="space-y-4 rounded-xl border border-border bg-card p-5">
+    <article className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h3 className="font-semibold wrap-anywhere">{saved.name}</h3>
         <Badge>
@@ -510,7 +519,7 @@ function SavedSearch({
         <summary className="min-h-11 cursor-pointer text-sm font-medium">
           Saved brief and timing rules
         </summary>
-        <div className="space-y-2 text-sm text-muted-foreground">
+        <div className="flex flex-col gap-2 text-sm text-muted-foreground">
           <p className="whitespace-pre-wrap wrap-anywhere">
             {saved.brief.offering}
           </p>
@@ -623,7 +632,10 @@ export function DiscoverySchedules({
   const [message, setMessage] = useState("");
   const endpoint = `/api/businesses/${businessId}/discovery/schedules`;
   return (
-    <section className="space-y-5" aria-labelledby="saved-searches-heading">
+    <section
+      className="flex flex-col gap-5"
+      aria-labelledby="saved-searches-heading"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="saved-searches-heading" className="text-lg font-semibold">
           Saved searches

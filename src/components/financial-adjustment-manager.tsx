@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
@@ -72,7 +73,7 @@ async function response<T>(r: Response, schema: z.ZodType<T>): Promise<T> {
 }
 function Status({ c }: { c: AdjustmentView }) {
   return (
-    <div className="space-y-3 wrap-anywhere">
+    <div className="flex flex-col gap-3 wrap-anywhere">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-semibold">
           {c.kind === "refund" ? "Refund" : "Dispute"} ·{" "}
@@ -184,7 +185,7 @@ function Status({ c }: { c: AdjustmentView }) {
           <summary className="min-h-11 cursor-pointer py-3">
             Customer notices in this app
           </summary>
-          <ul className="space-y-2">
+          <ul className="flex flex-col gap-2">
             {c.notices.map((n) => (
               <li key={n.id}>
                 {n.message}{" "}
@@ -400,7 +401,7 @@ export function FinancialAdjustmentManager({
   }
   const invoice = state.invoices.find((d) => d.id === invoiceId);
   return (
-    <div className="space-y-8" aria-busy={busy}>
+    <div className="flex flex-col gap-8" aria-busy={busy}>
       <div className="flex flex-wrap items-center gap-4">
         <Button
           variant="outline"
@@ -437,7 +438,7 @@ export function FinancialAdjustmentManager({
       {error && <Alert>{error}</Alert>}
       {notice && <p role="status">{notice}</p>}
       {operator && (
-        <section className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
+        <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
           <h2 className="text-xl font-semibold">Review an original charge</h2>
           {!state.ready && (
             <p className="text-warning">
@@ -464,7 +465,7 @@ export function FinancialAdjustmentManager({
             </p>
           ) : (
             <form
-              className="space-y-5"
+              className="flex flex-col gap-5"
               onSubmit={(e) => {
                 e.preventDefault();
                 void run(async () => {
@@ -497,144 +498,150 @@ export function FinancialAdjustmentManager({
                 });
               }}
             >
-              <div className="space-y-2">
-                <Label htmlFor="adjustment-invoice">
-                  Original seller invoice
-                </Label>
-                <NativeSelect
-                  id="adjustment-invoice"
-                  value={invoiceId}
-                  onChange={(e) => {
-                    setInvoiceId(e.target.value);
-                    setLines({});
-                  }}
-                >
-                  {state.invoices.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.number} ·{" "}
-                      {formatTaxMoney(
-                        d.snapshot.totals.totalMinor,
-                        d.snapshot.currency,
-                      )}{" "}
-                      · {d.snapshot.source.paymentId}
+              <FieldGroup className="gap-5">
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="adjustment-invoice">
+                    Original seller invoice
+                  </Label>
+                  <NativeSelect
+                    id="adjustment-invoice"
+                    value={invoiceId}
+                    onChange={(e) => {
+                      setInvoiceId(e.target.value);
+                      setLines({});
+                    }}
+                  >
+                    {state.invoices.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.number} ·{" "}
+                        {formatTaxMoney(
+                          d.snapshot.totals.totalMinor,
+                          d.snapshot.currency,
+                        )}{" "}
+                        · {d.snapshot.source.paymentId}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="adjustment-kind">Review type</Label>
+                  <NativeSelect
+                    id="adjustment-kind"
+                    value={kind}
+                    onChange={(e) => {
+                      if (
+                        e.target.value === "refund" ||
+                        e.target.value === "dispute"
+                      )
+                        setKind(e.target.value);
+                    }}
+                  >
+                    <option value="refund">
+                      Normal full or partial refund
                     </option>
+                    <option value="dispute">Existing native dispute</option>
+                  </NativeSelect>
+                </Field>
+                {kind === "dispute" && (
+                  <>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="adjustment-dispute">
+                        Native dispute ID
+                      </Label>
+                      <Input
+                        id="adjustment-dispute"
+                        value={disputeId}
+                        onChange={(e) => setDisputeId(e.target.value)}
+                        required
+                        pattern="disp_[A-Za-z0-9]+"
+                      />
+                    </Field>
+                    <Field className="flex flex-col gap-2">
+                      <Label htmlFor="adjustment-disputed-amount">
+                        Reviewed native claim amount, in currency subunits
+                      </Label>
+                      <Input
+                        id="adjustment-disputed-amount"
+                        value={disputeAmountMinor}
+                        onChange={(e) => setDisputeAmountMinor(e.target.value)}
+                        inputMode="numeric"
+                        pattern="[1-9][0-9]*"
+                        maxLength={15}
+                        required
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        Use the exact claimed amount from the dispute in the
+                        selected merchant account. Native reads must confirm it
+                        against this charge. The original-tax credit basis below
+                        is separate; any difference needs an explicit credit
+                        review after an actual deduction.
+                      </p>
+                    </Field>
+                  </>
+                )}
+                <fieldset className="flex flex-col gap-3">
+                  <legend className="mb-3 font-medium">
+                    Original line amounts to adjust
+                  </legend>
+                  <p className="text-sm text-muted-foreground">
+                    Enter net amounts in currency subunits (100 = 1.00). Leave
+                    other lines blank. Tax comes from the original cumulative
+                    allocation. Saved credits and pending cases reserve their
+                    selected amounts.
+                  </p>
+                  {invoice.snapshot.lines.map((l) => (
+                    <Field key={l.input.id} className="flex flex-col gap-2">
+                      <Label htmlFor={`adjustment-line-${l.input.id}`}>
+                        {l.input.description} · original net {l.netMinor}
+                      </Label>
+                      <Input
+                        id={`adjustment-line-${l.input.id}`}
+                        inputMode="numeric"
+                        pattern="[0-9]+"
+                        value={lines[l.input.id] ?? ""}
+                        onChange={(e) =>
+                          setLines({ ...lines, [l.input.id]: e.target.value })
+                        }
+                      />
+                    </Field>
                   ))}
-                </NativeSelect>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="adjustment-kind">Review type</Label>
-                <NativeSelect
-                  id="adjustment-kind"
-                  value={kind}
-                  onChange={(e) => {
-                    if (
-                      e.target.value === "refund" ||
-                      e.target.value === "dispute"
-                    )
-                      setKind(e.target.value);
-                  }}
-                >
-                  <option value="refund">Normal full or partial refund</option>
-                  <option value="dispute">Existing native dispute</option>
-                </NativeSelect>
-              </div>
-              {kind === "dispute" && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="adjustment-dispute">
-                      Native dispute ID
-                    </Label>
-                    <Input
-                      id="adjustment-dispute"
-                      value={disputeId}
-                      onChange={(e) => setDisputeId(e.target.value)}
-                      required
-                      pattern="disp_[A-Za-z0-9]+"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="adjustment-disputed-amount">
-                      Reviewed native claim amount, in currency subunits
-                    </Label>
-                    <Input
-                      id="adjustment-disputed-amount"
-                      value={disputeAmountMinor}
-                      onChange={(e) => setDisputeAmountMinor(e.target.value)}
-                      inputMode="numeric"
-                      pattern="[1-9][0-9]*"
-                      maxLength={15}
-                      required
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Use the exact claimed amount from the dispute in the
-                      selected merchant account. Native reads must confirm it
-                      against this charge. The original-tax credit basis below
-                      is separate; any difference needs an explicit credit
-                      review after an actual deduction.
-                    </p>
-                  </div>
-                </>
-              )}
-              <fieldset className="space-y-3">
-                <legend className="mb-3 font-medium">
-                  Original line amounts to adjust
-                </legend>
-                <p className="text-sm text-muted-foreground">
-                  Enter net amounts in currency subunits (100 = 1.00). Leave
-                  other lines blank. Tax comes from the original cumulative
-                  allocation. Saved credits and pending cases reserve their
-                  selected amounts.
-                </p>
-                {invoice.snapshot.lines.map((l) => (
-                  <div key={l.input.id} className="space-y-2">
-                    <Label htmlFor={`adjustment-line-${l.input.id}`}>
-                      {l.input.description} · original net {l.netMinor}
-                    </Label>
-                    <Input
-                      id={`adjustment-line-${l.input.id}`}
-                      inputMode="numeric"
-                      pattern="[0-9]+"
-                      value={lines[l.input.id] ?? ""}
-                      onChange={(e) =>
-                        setLines({ ...lines, [l.input.id]: e.target.value })
-                      }
-                    />
-                  </div>
-                ))}
-              </fieldset>
-              <div className="space-y-2">
-                <Label htmlFor="adjustment-reason">Private review reason</Label>
-                <Textarea
-                  id="adjustment-reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  required
-                  maxLength={1000}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="adjustment-evidence">
-                  Private evidence references, one per line
-                </Label>
-                <Textarea
-                  id="adjustment-evidence"
-                  value={evidence}
-                  onChange={(e) => setEvidence(e.target.value)}
-                  required
-                />
-                <p className="text-sm text-muted-foreground">
-                  Retain attributable request or review references. These
-                  private notes do not appear on the customer credit note.
-                </p>
-              </div>
-              <Button disabled={busy || !state.ready}>
-                Save review and reserve amount
-              </Button>
+                </fieldset>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="adjustment-reason">
+                    Private review reason
+                  </Label>
+                  <Textarea
+                    id="adjustment-reason"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    required
+                    maxLength={1000}
+                  />
+                </Field>
+                <Field className="flex flex-col gap-2">
+                  <Label htmlFor="adjustment-evidence">
+                    Private evidence references, one per line
+                  </Label>
+                  <Textarea
+                    id="adjustment-evidence"
+                    value={evidence}
+                    onChange={(e) => setEvidence(e.target.value)}
+                    required
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Retain attributable request or review references. These
+                    private notes do not appear on the customer credit note.
+                  </p>
+                </Field>
+                <Button disabled={busy || !state.ready}>
+                  Save review and reserve amount
+                </Button>
+              </FieldGroup>
             </form>
           )}
         </section>
       )}
-      <section className="space-y-5">
+      <section className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold">Refund and dispute history</h2>
         {state.cases.length === 0 && (
           <p>No refund or dispute review is recorded for this Business.</p>
@@ -642,7 +649,7 @@ export function FinancialAdjustmentManager({
         {state.cases.map((c) => (
           <article
             key={c.id}
-            className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
+            className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
           >
             <Status c={c} />
             {operator && (
@@ -718,175 +725,187 @@ export function FinancialAdjustmentManager({
                     Review or correct the credit basis
                   </summary>
                   <form
-                    className="space-y-4"
+                    className="flex flex-col gap-4"
                     onSubmit={(e) => {
                       e.preventDefault();
                       void run(() => reviewCredit(c));
                     }}
                   >
-                    <p className="text-sm text-muted-foreground">
-                      Select original net lines for the applicable credit. Tax
-                      uses the original cumulative components. The credit cannot
-                      exceed the actual refund or deduction. Any difference
-                      remains visible for reconciliation. This review requires
-                      current refund and seller-document authority and does not
-                      issue a document.
-                    </p>
-                    {state.invoices
-                      .find((i) => i.id === c.invoiceId)
-                      ?.snapshot.lines.map((line) => (
-                        <div key={line.input.id} className="space-y-2">
-                          <Label htmlFor={`credit-${c.id}-${line.input.id}`}>
-                            {line.input.description} · net subunits, original{" "}
-                            {line.netMinor}
-                          </Label>
-                          <Input
-                            id={`credit-${c.id}-${line.input.id}`}
-                            inputMode="numeric"
-                            pattern="[0-9]+"
-                            value={creditForm(c.id).lines[line.input.id] ?? ""}
-                            onChange={(e) =>
-                              changeCredit(c.id, {
-                                lines: {
-                                  ...creditForm(c.id).lines,
-                                  [line.input.id]: e.target.value,
-                                },
-                              })
-                            }
-                          />
-                        </div>
-                      ))}
-                    <div className="space-y-2">
-                      <Label htmlFor={`credit-reason-${c.id}`}>
-                        Private rationale for the credit basis and any
-                        difference
-                      </Label>
-                      <Textarea
-                        id={`credit-reason-${c.id}`}
-                        required
-                        maxLength={1000}
-                        value={creditForm(c.id).reason}
-                        onChange={(e) =>
-                          changeCredit(c.id, { reason: e.target.value })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`credit-evidence-${c.id}`}>
-                        Private approval evidence, one reference per line
-                      </Label>
-                      <Textarea
-                        id={`credit-evidence-${c.id}`}
-                        required
-                        value={creditForm(c.id).evidence}
-                        onChange={(e) =>
-                          changeCredit(c.id, { evidence: e.target.value })
-                        }
-                      />
-                    </div>
-                    <Button variant="outline" disabled={busy}>
-                      Save reviewed credit basis
-                    </Button>
+                    <FieldGroup className="gap-4">
+                      <p className="text-sm text-muted-foreground">
+                        Select original net lines for the applicable credit. Tax
+                        uses the original cumulative components. The credit
+                        cannot exceed the actual refund or deduction. Any
+                        difference remains visible for reconciliation. This
+                        review requires current refund and seller-document
+                        authority and does not issue a document.
+                      </p>
+                      {state.invoices
+                        .find((i) => i.id === c.invoiceId)
+                        ?.snapshot.lines.map((line) => (
+                          <Field
+                            key={line.input.id}
+                            className="flex flex-col gap-2"
+                          >
+                            <Label htmlFor={`credit-${c.id}-${line.input.id}`}>
+                              {line.input.description} · net subunits, original{" "}
+                              {line.netMinor}
+                            </Label>
+                            <Input
+                              id={`credit-${c.id}-${line.input.id}`}
+                              inputMode="numeric"
+                              pattern="[0-9]+"
+                              value={
+                                creditForm(c.id).lines[line.input.id] ?? ""
+                              }
+                              onChange={(e) =>
+                                changeCredit(c.id, {
+                                  lines: {
+                                    ...creditForm(c.id).lines,
+                                    [line.input.id]: e.target.value,
+                                  },
+                                })
+                              }
+                            />
+                          </Field>
+                        ))}
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor={`credit-reason-${c.id}`}>
+                          Private rationale for the credit basis and any
+                          difference
+                        </Label>
+                        <Textarea
+                          id={`credit-reason-${c.id}`}
+                          required
+                          maxLength={1000}
+                          value={creditForm(c.id).reason}
+                          onChange={(e) =>
+                            changeCredit(c.id, { reason: e.target.value })
+                          }
+                        />
+                      </Field>
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor={`credit-evidence-${c.id}`}>
+                          Private approval evidence, one reference per line
+                        </Label>
+                        <Textarea
+                          id={`credit-evidence-${c.id}`}
+                          required
+                          value={creditForm(c.id).evidence}
+                          onChange={(e) =>
+                            changeCredit(c.id, { evidence: e.target.value })
+                          }
+                        />
+                      </Field>
+                      <Button variant="outline" disabled={busy}>
+                        Save reviewed credit basis
+                      </Button>
+                    </FieldGroup>
                   </form>
                 </details>
               )}
             {operator && c.kind === "dispute" && c.state === "open" && (
               <form
-                className="space-y-4 border-t border-border pt-5"
+                className="flex flex-col gap-4 border-t border-border pt-5"
                 onSubmit={(e) => {
                   e.preventDefault();
                   void run(() => dispute(c, "draft"));
                 }}
               >
-                <h4 className="font-semibold">
-                  Retain and send dispute evidence
-                </h4>
-                <p className="text-sm text-muted-foreground">
-                  Use a document already uploaded to the selected merchant for
-                  this payment. Its authenticated file content must match the
-                  reviewed SHA-256. A saved draft is separate from submission.
-                </p>
-                <div className="space-y-2">
-                  <Label htmlFor={`summary-${c.id}`}>Evidence summary</Label>
-                  <Textarea
-                    id={`summary-${c.id}`}
-                    value={disputeForm(c.id).summary}
-                    onChange={(e) =>
-                      changeDispute(c.id, { summary: e.target.value })
-                    }
-                    required
-                    maxLength={1000}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`category-${c.id}`}>Evidence type</Label>
-                  <NativeSelect
-                    id={`category-${c.id}`}
-                    value={disputeForm(c.id).category}
-                    onChange={(e) => {
-                      const r = disputeActionSchema.shape.documents
+                <FieldGroup className="gap-4">
+                  <h4 className="font-semibold">
+                    Retain and send dispute evidence
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    Use a document already uploaded to the selected merchant for
+                    this payment. Its authenticated file content must match the
+                    reviewed SHA-256. A saved draft is separate from submission.
+                  </p>
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor={`summary-${c.id}`}>Evidence summary</Label>
+                    <Textarea
+                      id={`summary-${c.id}`}
+                      value={disputeForm(c.id).summary}
+                      onChange={(e) =>
+                        changeDispute(c.id, { summary: e.target.value })
+                      }
+                      required
+                      maxLength={1000}
+                    />
+                  </Field>
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor={`category-${c.id}`}>Evidence type</Label>
+                    <NativeSelect
+                      id={`category-${c.id}`}
+                      value={disputeForm(c.id).category}
+                      onChange={(e) => {
+                        const r = disputeActionSchema.shape.documents
+                          .unwrap()
+                          .element.shape.category.safeParse(e.target.value);
+                        if (r.success)
+                          changeDispute(c.id, { category: r.data });
+                      }}
+                    >
+                      {disputeActionSchema.shape.documents
                         .unwrap()
-                        .element.shape.category.safeParse(e.target.value);
-                      if (r.success) changeDispute(c.id, { category: r.data });
-                    }}
-                  >
-                    {disputeActionSchema.shape.documents
-                      .unwrap()
-                      .element.shape.category.options.map((v) => (
-                        <option key={v} value={v}>
-                          {v.replaceAll("_", " ")}
-                        </option>
-                      ))}
-                  </NativeSelect>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`doc-${c.id}`}>Native document ID</Label>
-                  <Input
-                    id={`doc-${c.id}`}
-                    value={disputeForm(c.id).docId}
-                    onChange={(e) =>
-                      changeDispute(c.id, { docId: e.target.value })
-                    }
-                    pattern="doc_[A-Za-z0-9]+"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`hash-${c.id}`}>Reviewed file SHA-256</Label>
-                  <Input
-                    id={`hash-${c.id}`}
-                    value={disputeForm(c.id).docHash}
-                    onChange={(e) =>
-                      changeDispute(c.id, { docHash: e.target.value })
-                    }
-                    pattern="[a-f0-9]{64}"
-                  />
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="outline"
-                    disabled={
-                      busy || c.actions.some((a) => a.state === "unknown")
-                    }
-                  >
-                    Save evidence draft
-                  </Button>
-                  <Confirm
-                    label="Submit evidence for review"
-                    disabled={
-                      busy ||
-                      !disputeForm(c.id).docId ||
-                      !disputeForm(c.id).docHash ||
-                      !disputeForm(c.id).summary ||
-                      c.actions.some((a) => a.state === "unknown")
-                    }
-                    description="Submit this exact summary and selected native document to Razorpay. Submission starts review; it does not establish a win."
-                    onConfirm={() => void run(() => dispute(c, "submit"))}
-                  />
-                </div>
+                        .element.shape.category.options.map((v) => (
+                          <option key={v} value={v}>
+                            {v.replaceAll("_", " ")}
+                          </option>
+                        ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor={`doc-${c.id}`}>Native document ID</Label>
+                    <Input
+                      id={`doc-${c.id}`}
+                      value={disputeForm(c.id).docId}
+                      onChange={(e) =>
+                        changeDispute(c.id, { docId: e.target.value })
+                      }
+                      pattern="doc_[A-Za-z0-9]+"
+                    />
+                  </Field>
+                  <Field className="flex flex-col gap-2">
+                    <Label htmlFor={`hash-${c.id}`}>
+                      Reviewed file SHA-256
+                    </Label>
+                    <Input
+                      id={`hash-${c.id}`}
+                      value={disputeForm(c.id).docHash}
+                      onChange={(e) =>
+                        changeDispute(c.id, { docHash: e.target.value })
+                      }
+                      pattern="[a-f0-9]{64}"
+                    />
+                  </Field>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      variant="outline"
+                      disabled={
+                        busy || c.actions.some((a) => a.state === "unknown")
+                      }
+                    >
+                      Save evidence draft
+                    </Button>
+                    <Confirm
+                      label="Submit evidence for review"
+                      disabled={
+                        busy ||
+                        !disputeForm(c.id).docId ||
+                        !disputeForm(c.id).docHash ||
+                        !disputeForm(c.id).summary ||
+                        c.actions.some((a) => a.state === "unknown")
+                      }
+                      description="Submit this exact summary and selected native document to Razorpay. Submission starts review; it does not establish a win."
+                      onConfirm={() => void run(() => dispute(c, "submit"))}
+                    />
+                  </div>
+                </FieldGroup>
               </form>
             )}
             {operator && selectedCase === c.id && details && (
-              <section className="space-y-3 border-t border-border pt-5">
+              <section className="flex flex-col gap-3 border-t border-border pt-5">
                 <h4 className="font-semibold">Protected review</h4>
                 <p>{details.input.reason}</p>
                 {details.creditReviews.map((review) => (

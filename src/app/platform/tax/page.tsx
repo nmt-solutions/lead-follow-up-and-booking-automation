@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -14,19 +15,16 @@ export default async function TaxReviewQueue() {
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href="/platform/billing"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to billing evidence review
-        </Link>
-        <h1 className="page-title">Tax calculation review</h1>
-        <p className="mt-3 text-muted-foreground">
-          Resolve evidence or supported treatment, then record a successor
-          calculation. Existing snapshots remain unchanged.
-        </p>
+    <div className="app-page">
+      <PageHeader
+        title={<>Tax calculation review</>}
+        description={
+          <>
+            Resolve evidence or supported treatment, then record a successor
+            calculation. Existing snapshots remain unchanged.
+          </>
+        }
+      >
         <Link
           href="/platform/tax/rules"
           className="mt-3 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
@@ -39,19 +37,19 @@ export default async function TaxReviewQueue() {
         >
           Prepare tax periods and review liability
         </Link>
-      </header>
+      </PageHeader>
       {!queue.length && (
         <p className="rounded-2xl border border-border bg-card p-6">
           No unresolved tax calculation requests. Rules and evidence still need
           approval before live calculations can succeed.
         </p>
       )}
-      <ul className="space-y-4">
+      <ul className="flex flex-col gap-4">
         {queue.map(({ businessId, calculation }) => (
           <li key={calculation.id}>
             <Link
               href={`/platform/tax/${businessId}`}
-              className="block space-y-3 rounded-2xl border border-border bg-card p-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="flex flex-col block gap-3 rounded-2xl border border-border bg-card p-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <h2 className="text-xl font-semibold wrap-anywhere">
                 {calculation.billing.current?.profile.legalName ||

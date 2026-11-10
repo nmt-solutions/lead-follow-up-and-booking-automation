@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -128,21 +129,17 @@ export default async function PilotPage({
         : [],
   };
   return (
-    <div className="space-y-8">
-      <header>
-        <Link
-          className="inline-flex min-h-11 items-center text-primary underline"
-          href={`/businesses/${businessId}`}
-        >
-          Back to overview
-        </Link>
-        <h1 className="page-title">Paid pilot preparation and evidence</h1>
-        <p className="mt-3 max-w-3xl text-muted-foreground">
-          Agree an actual bounded evaluation, verify each selected path, and
-          retain measured results before recording paid continuation and a
-          contrasting workflow.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Paid pilot preparation and evidence</>}
+        description={
+          <>
+            Agree an actual bounded evaluation, verify each selected path, and
+            retain measured results before recording paid continuation and a
+            contrasting workflow.
+          </>
+        }
+      ></PageHeader>
       <PilotManager
         businessId={businessId}
         initial={initial}

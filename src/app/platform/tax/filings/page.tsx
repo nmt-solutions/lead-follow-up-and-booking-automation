@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
@@ -17,21 +18,17 @@ export default async function TaxFilingsPage() {
     }
   })();
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
-      <header>
-        <Link
-          href="/platform/tax/periods"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-        >
-          Back to tax periods and liability review
-        </Link>
-        <h1 className="page-title">Tax filing and remittance confirmations</h1>
-        <p className="mt-3 text-muted-foreground">
-          Approved exports, separate manual approvals and evidence-backed
-          confirmations. Filing and remittance remain distinct; original records
-          survive corrections.
-        </p>
-      </header>
+    <div className="app-page">
+      <PageHeader
+        title={<>Tax filing and remittance confirmations</>}
+        description={
+          <>
+            Approved exports, separate manual approvals and evidence-backed
+            confirmations. Filing and remittance remain distinct; original
+            records survive corrections.
+          </>
+        }
+      ></PageHeader>
       <TaxFilingManager initial={initial} />
     </div>
   );

@@ -83,7 +83,7 @@ export function RecoveryPanel({
     }
   }
   return (
-    <div className="space-y-6" aria-busy={busy}>
+    <div className="flex flex-col gap-6" aria-busy={busy}>
       {state.setupIssues.map((issue) => (
         <Alert key={issue} variant="destructive">
           {issue}
@@ -139,7 +139,7 @@ export function RecoveryPanel({
                 : "Observation missing or stale"}
             </Badge>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex flex-col gap-4">
             {[r.vercel, r.neon, r.trigger, r.r2].map((s, i) => (
               <div key={i}>
                 <p className="font-medium">
@@ -149,7 +149,7 @@ export function RecoveryPanel({
                 <p className="text-sm text-muted-foreground">{s.next}</p>
               </div>
             ))}
-            <ul className="list-disc space-y-2 pl-5 text-sm">
+            <ul className="flex flex-col list-disc gap-2 pl-5 text-sm">
               {r.launchGates.map((g) => (
                 <li key={g}>{g}</li>
               ))}
@@ -166,7 +166,7 @@ export function RecoveryPanel({
               {plan.reviewedId}
             </p>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="flex flex-col gap-5">
             <dl className="grid gap-4 sm:grid-cols-2">
               <div>
                 <dt className="text-sm text-muted-foreground">
@@ -222,7 +222,7 @@ export function RecoveryPanel({
               <summary className="cursor-pointer font-medium">
                 Reviewed source, target and bundle
               </summary>
-              <dl className="mt-3 space-y-3 break-all text-sm">
+              <dl className="flex flex-col mt-3 gap-3 break-all text-sm">
                 <div>
                   <dt className="font-medium">Source</dt>
                   <dd>
@@ -306,7 +306,7 @@ export function RecoveryPanel({
               <summary className="cursor-pointer font-medium">
                 Service and retention cost evidence
               </summary>
-              <ul className="mt-3 space-y-2 text-sm">
+              <ul className="flex flex-col mt-3 gap-2 text-sm">
                 {plan.costs.map((c) => (
                   <li key={c.id} className="break-words">
                     {c.provider} · {c.kind} · {c.basis.replaceAll("_", " ")} ·{" "}
@@ -362,7 +362,7 @@ export function RecoveryPanel({
                 Operation {op.id} · requested by {op.actorId}
               </p>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="flex flex-col gap-4">
               <p>
                 {observedSeconds === null
                   ? "Restoration has not established verified application records."
@@ -391,9 +391,9 @@ export function RecoveryPanel({
                 <summary className="cursor-pointer font-medium">
                   Stage evidence and unresolved work
                 </summary>
-                <ol className="mt-4 space-y-4">
+                <ol className="flex flex-col mt-4 gap-4">
                   {op.events.map((e, i) => (
-                    <li key={i} className="space-y-2">
+                    <li key={i} className="flex flex-col gap-2">
                       <p className="font-medium">
                         {stageLabels[e.stage]} · {e.outcome}
                       </p>

@@ -1,4 +1,5 @@
 "use client";
+import { Field, FieldGroup } from "./ui/field";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -113,7 +114,7 @@ export function TeamManager({
   }
 
   return (
-    <div className="space-y-8" aria-busy={pending}>
+    <div className="flex flex-col gap-8" aria-busy={pending}>
       <Alert variant={mfaReady ? "success" : "warning"}>
         <AlertTitle>
           {mfaReady ? "Required MFA is enrolled" : "MFA setup is incomplete"}
@@ -167,55 +168,59 @@ export function TeamManager({
               form.reset();
           }}
         >
-          <fieldset
-            disabled={pending}
-            className="grid min-w-0 gap-4 sm:grid-cols-2"
-          >
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="invite-email">Teammate email</Label>
-              <Input
-                id="invite-email"
-                name="email"
-                type="email"
-                required
-                maxLength={254}
-                autoComplete="email"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-role">Role</Label>
-              <NativeSelect
-                id="invite-role"
-                name="role"
-                defaultValue="salesperson"
-                aria-describedby="role-hint"
-              >
-                <option value="salesperson">Salesperson</option>
-                {team.role === "owner" && <option value="admin">Admin</option>}
-              </NativeSelect>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-expiry">Expires in days</Label>
-              <Input
-                id="invite-expiry"
-                name="expiresInDays"
-                type="number"
-                min={1}
-                max={30}
-                required
-                defaultValue={7}
-              />
-            </div>
-            <Button
-              type="submit"
-              className="sm:col-span-2 sm:justify-self-start"
+          <FieldGroup className="gap-5">
+            <fieldset
+              disabled={pending}
+              className="grid min-w-0 gap-4 sm:grid-cols-2"
             >
-              {pending ? "Saving…" : "Send invitation"}
-            </Button>
-          </fieldset>
+              <Field className="flex flex-col gap-2 sm:col-span-2">
+                <Label htmlFor="invite-email">Teammate email</Label>
+                <Input
+                  id="invite-email"
+                  name="email"
+                  type="email"
+                  required
+                  maxLength={254}
+                  autoComplete="email"
+                />
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="invite-role">Role</Label>
+                <NativeSelect
+                  id="invite-role"
+                  name="role"
+                  defaultValue="salesperson"
+                  aria-describedby="role-hint"
+                >
+                  <option value="salesperson">Salesperson</option>
+                  {team.role === "owner" && (
+                    <option value="admin">Admin</option>
+                  )}
+                </NativeSelect>
+              </Field>
+              <Field className="flex flex-col gap-2">
+                <Label htmlFor="invite-expiry">Expires in days</Label>
+                <Input
+                  id="invite-expiry"
+                  name="expiresInDays"
+                  type="number"
+                  min={1}
+                  max={30}
+                  required
+                  defaultValue={7}
+                />
+              </Field>
+              <Button
+                type="submit"
+                className="sm:col-span-2 sm:justify-self-start"
+              >
+                {pending ? "Saving…" : "Send invitation"}
+              </Button>
+            </fieldset>
+          </FieldGroup>
         </form>
       </section>
-      <div className="space-y-3">
+      <div className="flex flex-col gap-3">
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -266,7 +271,10 @@ export function TeamManager({
               member.role !== "owner" &&
               (team.role === "owner" || member.role === "salesperson");
             return (
-              <li key={member.userId} className="space-y-4 p-5 sm:p-6">
+              <li
+                key={member.userId}
+                className="flex flex-col gap-4 p-5 sm:p-6"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium wrap-anywhere">
@@ -311,36 +319,38 @@ export function TeamManager({
                       );
                     }}
                   >
-                    <fieldset
-                      disabled={pending}
-                      className="flex min-w-0 flex-wrap items-end gap-3"
-                    >
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Label
-                          htmlFor={`role-${member.userId}`}
-                          className="wrap-anywhere"
-                        >
-                          Role for {member.email}
-                        </Label>
-                        <NativeSelect
-                          key={member.role}
-                          id={`role-${member.userId}`}
-                          name="role"
-                          defaultValue={member.role}
-                        >
-                          <option value="salesperson">Salesperson</option>
-                          <option value="admin">Admin</option>
-                        </NativeSelect>
-                      </div>
-                      <Button type="submit" variant="outline">
-                        Save role
-                      </Button>
-                    </fieldset>
+                    <FieldGroup className="gap-5">
+                      <fieldset
+                        disabled={pending}
+                        className="flex min-w-0 flex-wrap items-end gap-3"
+                      >
+                        <Field className="flex flex-col min-w-0 flex-1 gap-2">
+                          <Label
+                            htmlFor={`role-${member.userId}`}
+                            className="wrap-anywhere"
+                          >
+                            Role for {member.email}
+                          </Label>
+                          <NativeSelect
+                            key={member.role}
+                            id={`role-${member.userId}`}
+                            name="role"
+                            defaultValue={member.role}
+                          >
+                            <option value="salesperson">Salesperson</option>
+                            <option value="admin">Admin</option>
+                          </NativeSelect>
+                        </Field>
+                        <Button type="submit" variant="outline">
+                          Save role
+                        </Button>
+                      </fieldset>
+                    </FieldGroup>
                   </form>
                 )}
                 {removing === member.userId && (
                   <div
-                    className="space-y-3 rounded-lg border border-border bg-muted p-4"
+                    className="flex flex-col gap-3 rounded-lg border border-border bg-muted p-4"
                     role="group"
                     aria-label={`Confirm removal of ${member.email}`}
                   >
@@ -402,7 +412,7 @@ export function TeamManager({
                 key={invitation.id}
                 className="flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6"
               >
-                <div className="min-w-0 space-y-1">
+                <div className="flex flex-col min-w-0 gap-1">
                   <p className="font-medium wrap-anywhere">
                     {invitation.email}
                   </p>
@@ -482,7 +492,7 @@ export function TeamManager({
             Team changes will appear here.
           </p>
         ) : (
-          <ol className="space-y-4">
+          <ol className="flex flex-col gap-4">
             {audit.map((entry) => (
               <li
                 key={entry.id}

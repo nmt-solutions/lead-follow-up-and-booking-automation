@@ -1,14 +1,20 @@
 import { Suspense } from "react";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { AppNavigation, type NavigationBusiness } from "./app-navigation";
 import { PageSkeleton } from "./page-skeleton";
 
 async function NavigationData({ children }: { children: React.ReactNode }) {
   let businesses: NavigationBusiness[] = [];
+  let email = "";
+  const defaultOpen = (await cookies()).get("sidebar_state")?.value !== "false";
   try {
     const services = await getServices();
     const credentials = await headers();
+    const session = await services.auth.api.getSession({
+      headers: credentials,
+    });
+    email = session?.user.email ?? "";
     const profiles = await services.application.listBusinesses(credentials);
     businesses = await Promise.all(
       profiles.map(async (profile) => {
@@ -32,7 +38,15 @@ async function NavigationData({ children }: { children: React.ReactNode }) {
   } catch {
     // The page owns authentication and error recovery. Navigation must not hide it.
   }
-  return <AppNavigation businesses={businesses}>{children}</AppNavigation>;
+  return (
+    <AppNavigation
+      businesses={businesses}
+      email={email}
+      defaultOpen={defaultOpen}
+    >
+      {children}
+    </AppNavigation>
+  );
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {

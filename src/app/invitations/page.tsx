@@ -19,7 +19,7 @@ export default async function InvitationPage() {
     available = false;
   }
   return (
-    <main className="mx-auto max-w-xl space-y-8 px-5 py-12 sm:px-8">
+    <main className="flex flex-col mx-auto max-w-xl gap-8 px-5 py-12 sm:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/businesses"

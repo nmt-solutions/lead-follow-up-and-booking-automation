@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -25,24 +26,17 @@ export default async function SubscriptionPaymentReview() {
     }
   })();
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      <header>
-        <Link
-          href="/businesses"
-          className="mb-5 inline-flex min-h-11 items-center text-primary underline"
-        >
-          Back to Businesses
-        </Link>
-        <h1 className="page-title">Subscription payment review</h1>
+    <div className="app-page">
+      <PageHeader title={<>Subscription payment review</>}>
         <Link
           href="/platform/reach-changes"
           className="mt-3 inline-flex min-h-11 items-center text-primary underline"
         >
           Review and recover approved reach changes
         </Link>
-      </header>
+      </PageHeader>
       <SubscriptionPaymentOperator initial={initial} />
-      <section className="space-y-4">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xl font-semibold">
           Unmatched authenticated payment events
         </h2>
