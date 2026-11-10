@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { Field, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
@@ -217,174 +218,298 @@ export function TaxManager({
           {message}
         </p>
       )}
-      {operator ? (
-        <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <h2 className="text-xl font-semibold">Resolve tax review</h2>
-          <p>
-            Correct and review current billing evidence or approve unambiguous
-            effective rules first. Re-evaluation records a successor; it cannot
-            override missing evidence or invent treatment.
-          </p>
-          <Label htmlFor="tax-note">Resolution reason</Label>
-          <Textarea
-            id="tax-note"
-            value={note}
-            maxLength={1000}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </section>
-      ) : (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void act(calculate);
-          }}
-          className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
-          aria-busy={busy}
-        >
-          <FieldGroup className="gap-6">
-            <h2 className="text-xl font-semibold">Calculate a tax preview</h2>
-            <p className="text-muted-foreground">
-              Enter amounts before tax in the billing currency. These are
-              calculation inputs; subscription pricing and payment require a
-              separate agreed quote.
-            </p>
-            <Field className="flex flex-col gap-2">
-              <Label htmlFor="tax-currency">Billing currency</Label>
-              <NativeSelect
-                id="tax-currency"
-                value={currency}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value === "INR" || value === "USD") setCurrency(value);
-                }}
-              >
-                <option value="" disabled>
-                  Choose billing currency
-                </option>
-                <option value="INR">INR</option>
-                <option value="USD">USD</option>
-              </NativeSelect>
-            </Field>
-            {lines.map((line, index) => (
-              <fieldset
-                key={line.id}
-                className="flex flex-col gap-4 rounded-xl border border-border p-4"
-              >
-                <legend className="px-2 font-medium">Line {index + 1}</legend>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {(
-                    [
-                      ["description", "Description"],
-                      ["productCode", "Configured product code"],
-                      ["amount", `Unit amount before tax (${currency})`],
-                      ["quantity", "Whole quantity"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <Field key={key} className="flex flex-col gap-2">
-                      <Label htmlFor={`tax-${line.id}-${key}`}>{label}</Label>
-                      <Input
-                        id={`tax-${line.id}-${key}`}
-                        value={line[key]}
-                        inputMode={
-                          key === "amount"
-                            ? "decimal"
-                            : key === "quantity"
-                              ? "numeric"
-                              : "text"
-                        }
-                        maxLength={key === "amount" ? 25 : 200}
-                        required
-                        onChange={(event) =>
-                          setLines((current) =>
-                            current.map((row) =>
-                              row.id === line.id
-                                ? { ...row, [key]: event.target.value }
-                                : row,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                  ))}
-                </div>
-                {lines.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      setLines((current) =>
-                        current.filter((row) => row.id !== line.id),
-                      )
-                    }
+      <WorkspaceTabs
+        label="Tax sections"
+        tabs={[
+          ...(!operator
+            ? [
+                {
+                  id: "details",
+                  label: "Your tax details",
+                  description:
+                    "Your billing address and tax registration help determine the tax on a subscription. Checkout shows the calculation before you pay.",
+                  content: (
+                    <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
+                      <h2 className="text-lg font-medium">
+                        Billing details used for tax
+                      </h2>
+                      {state.billing.current ? (
+                        <dl className="grid gap-5 text-sm sm:grid-cols-2">
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Legal name
+                            </dt>
+                            <dd>
+                              {state.billing.current.profile.legalName ||
+                                "Not saved"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Billing address
+                            </dt>
+                            <dd>
+                              {Object.values(
+                                state.billing.current.profile.address,
+                              )
+                                .filter(Boolean)
+                                .join(", ") || "Not saved"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Tax registration
+                            </dt>
+                            <dd>
+                              {state.billing.current.profile.taxIdentifiers
+                                .length
+                                ? state.billing.current.profile.taxIdentifiers.map(
+                                    (item) => (
+                                      <p key={`${item.kind}-${item.value}`}>
+                                        {item.kind} {item.value}
+                                      </p>
+                                    ),
+                                  )
+                                : "No tax number provided"}
+                            </dd>
+                          </div>
+                        </dl>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Save your billing details before reviewing tax at
+                          checkout.
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-3">
+                        <Button asChild>
+                          <Link href={`/businesses/${businessId}/billing`}>
+                            Edit billing details
+                          </Link>
+                        </Button>
+                        <Button asChild variant="outline">
+                          <Link
+                            href={`/businesses/${businessId}/seller-documents`}
+                          >
+                            View invoices
+                          </Link>
+                        </Button>
+                      </div>
+                    </section>
+                  ),
+                },
+              ]
+            : []),
+          {
+            id: "preview",
+            label: operator ? "Tax review" : "Advanced tax preview",
+            description:
+              "Check the tax calculation for a proposed charge. The confirmed amount appears before payment and on your invoice.",
+            content: (
+              <>
+                {operator ? (
+                  <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:p-8">
+                    <h2 className="text-xl font-semibold">
+                      Review a tax issue
+                    </h2>
+                    <p>
+                      Correct and review current billing evidence or approve
+                      unambiguous effective rules first. Re-evaluation records a
+                      successor; it cannot override missing evidence or invent
+                      treatment.
+                    </p>
+                    <Label htmlFor="tax-note">Resolution reason</Label>
+                    <Textarea
+                      id="tax-note"
+                      value={note}
+                      maxLength={1000}
+                      onChange={(event) => setNote(event.target.value)}
+                    />
+                  </section>
+                ) : (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void act(calculate);
+                    }}
+                    className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6 sm:p-8"
+                    aria-busy={busy}
                   >
-                    Remove line {index + 1}
-                  </Button>
+                    <FieldGroup className="gap-6">
+                      <h2 className="text-xl font-semibold">
+                        Preview tax for a charge
+                      </h2>
+                      <p className="text-muted-foreground">
+                        Enter amounts before tax in the billing currency. These
+                        are calculation inputs; subscription pricing and payment
+                        require a separate agreed quote.
+                      </p>
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor="tax-currency">Billing currency</Label>
+                        <NativeSelect
+                          id="tax-currency"
+                          value={currency}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (value === "INR" || value === "USD")
+                              setCurrency(value);
+                          }}
+                        >
+                          <option value="" disabled>
+                            Choose billing currency
+                          </option>
+                          <option value="INR">INR</option>
+                          <option value="USD">USD</option>
+                        </NativeSelect>
+                      </Field>
+                      {lines.map((line, index) => (
+                        <fieldset
+                          key={line.id}
+                          className="flex flex-col gap-4 rounded-xl border border-border p-4"
+                        >
+                          <legend className="px-2 font-medium">
+                            Line {index + 1}
+                          </legend>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            {(
+                              [
+                                ["description", "Description"],
+                                ["productCode", "Configured product code"],
+                                [
+                                  "amount",
+                                  `Unit amount before tax (${currency})`,
+                                ],
+                                ["quantity", "Whole quantity"],
+                              ] as const
+                            ).map(([key, label]) => (
+                              <Field key={key} className="flex flex-col gap-2">
+                                <Label htmlFor={`tax-${line.id}-${key}`}>
+                                  {label}
+                                </Label>
+                                <Input
+                                  id={`tax-${line.id}-${key}`}
+                                  value={line[key]}
+                                  inputMode={
+                                    key === "amount"
+                                      ? "decimal"
+                                      : key === "quantity"
+                                        ? "numeric"
+                                        : "text"
+                                  }
+                                  maxLength={key === "amount" ? 25 : 200}
+                                  required
+                                  onChange={(event) =>
+                                    setLines((current) =>
+                                      current.map((row) =>
+                                        row.id === line.id
+                                          ? {
+                                              ...row,
+                                              [key]: event.target.value,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </Field>
+                            ))}
+                          </div>
+                          {lines.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                setLines((current) =>
+                                  current.filter((row) => row.id !== line.id),
+                                )
+                              }
+                            >
+                              Remove line {index + 1}
+                            </Button>
+                          )}
+                        </fieldset>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy || lines.length >= 40}
+                        onClick={() =>
+                          setLines((current) => [
+                            ...current,
+                            {
+                              id: String(nextLine.current++),
+                              description: "",
+                              productCode: "",
+                              amount: "",
+                              quantity: "1",
+                            },
+                          ])
+                        }
+                      >
+                        Add line
+                      </Button>
+                      <Field className="flex flex-col gap-2">
+                        <Label htmlFor="tax-note">
+                          Calculation reason or reference
+                        </Label>
+                        <Textarea
+                          id="tax-note"
+                          required
+                          value={note}
+                          maxLength={1000}
+                          onChange={(event) => setNote(event.target.value)}
+                        />
+                      </Field>
+                      <Button disabled={busy} type="submit">
+                        {busy ? "Calculating…" : "Record tax preview"}
+                      </Button>
+                    </FieldGroup>
+                  </form>
                 )}
-              </fieldset>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy || lines.length >= 40}
-              onClick={() =>
-                setLines((current) => [
-                  ...current,
-                  {
-                    id: String(nextLine.current++),
-                    description: "",
-                    productCode: "",
-                    amount: "",
-                    quantity: "1",
-                  },
-                ])
-              }
-            >
-              Add line
-            </Button>
-            <Field className="flex flex-col gap-2">
-              <Label htmlFor="tax-note">Calculation reason or reference</Label>
-              <Textarea
-                id="tax-note"
-                required
-                value={note}
-                maxLength={1000}
-                onChange={(event) => setNote(event.target.value)}
-              />
-            </Field>
-            <Button disabled={busy} type="submit">
-              {busy ? "Calculating…" : "Record tax preview"}
-            </Button>
-          </FieldGroup>
-        </form>
-      )}
-      <section className="flex flex-col gap-5" aria-labelledby="tax-history">
-        <h2 id="tax-history" className="text-xl font-semibold">
-          Calculation and review history
-        </h2>
-        {!state.calculations.length && (
-          <p>
-            No tax calculations yet. Submit a preview after completing your
-            billing profile.
-          </p>
-        )}
-        {[...state.calculations].reverse().map((record) => (
-          <div key={record.id} className="flex flex-col gap-3">
-            <TaxRecord record={record} />
-            {operator &&
-              record.status === "review_required" &&
-              !resolved.has(record.id) && (
-                <Button
-                  disabled={busy || !note.trim()}
-                  onClick={() => act(() => resolve(record.id))}
+              </>
+            ),
+          },
+          {
+            id: "history",
+            label: "Tax history",
+            description:
+              "Review tax calculations and any decisions requiring further review.",
+            content: (
+              <>
+                <section
+                  className="flex flex-col gap-5"
+                  aria-labelledby="tax-history"
                 >
-                  Re-evaluate calculation {record.version}
-                </Button>
-              )}
-          </div>
-        ))}
-      </section>
+                  <h2 id="tax-history" className="text-xl font-semibold">
+                    Tax history
+                  </h2>
+                  {!state.calculations.length && (
+                    <p>
+                      No tax calculations yet. Submit a preview after completing
+                      your billing profile.
+                    </p>
+                  )}
+                  {[...state.calculations].reverse().map((record) => (
+                    <div key={record.id} className="flex flex-col gap-3">
+                      <TaxRecord record={record} />
+                      {operator &&
+                        record.status === "review_required" &&
+                        !resolved.has(record.id) && (
+                          <Button
+                            disabled={busy || !note.trim()}
+                            onClick={() => act(() => resolve(record.id))}
+                          >
+                            Re-evaluate calculation {record.version}
+                          </Button>
+                        )}
+                    </div>
+                  ))}
+                </section>
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -27,16 +27,7 @@ export default async function AiPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>AI assistant</>}
-        description={
-          <>
-            Preview research reviews and sales drafts using approved business
-            information. Provider settings are available to authorized
-            operators.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="ai"></BusinessPageHeader>
       <AiManager businessId={businessId} initialState={state.workspace} />
     </div>
   );

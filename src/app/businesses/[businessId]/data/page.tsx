@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -24,12 +24,7 @@ export default async function BusinessDataPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Export or remove data</>}
-        description={
-          <>Keep agreed records and review each step of stopping the service.</>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="data"></BusinessPageHeader>
       <BusinessDataPanel
         businessId={businessId}
         initial={data.state}

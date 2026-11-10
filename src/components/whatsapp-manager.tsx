@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { Field, FieldGroup } from "./ui/field";
 
 import { useCallback, useState, type FormEvent } from "react";
@@ -306,457 +307,531 @@ export function WhatsAppManager({
   const lastObservation = c?.observation;
   return (
     <div className="flex flex-col gap-8">
-      <WhatsAppIntakeManager
-        key={`${c?.version}-${state.intake.inboxConnectionId}`}
-        businessId={businessId}
-        version={c?.version ?? null}
-        initialState={state.intake}
-        canManage={state.canManage}
-      />
-      <Card>
-        <CardHeader>
-          <CardTitle>Customer-owned channel, separate Meta bill</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <p>{state.billing.disclosure}</p>
-          <a
-            href="https://business.whatsapp.com/products/platform-pricing"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
-          >
-            Review Meta pricing (opens a new tab)
-          </a>
-          <p className="text-sm text-muted-foreground">
-            You retain your Meta portfolio, WhatsApp account, number, SIM/phone
-            access and payment method. We request access to provide automation.
-            Disconnecting here removes local access; revoke the app in Meta
-            Business settings to end Meta-side access. No number is deregistered
-            or transferred here.
-          </p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Connection readiness</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-3">
-            <Badge>{c ? statusLabels[c.status] : "Not connected"}</Badge>
-            <Badge>
-              {state.readiness.onboardingReady
-                ? "Onboarding checks confirmed"
-                : "Onboarding not ready"}
-            </Badge>
-            <Badge>
-              {state.readiness.sendingReady
-                ? "Sending account checks ready"
-                : "Sending requires separate setup"}
-            </Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Onboarding does not enable sending, recipient permission, approved
-            templates or conversation windows. Incoming capture and supported
-            manual activity have their own evidence above.
-          </p>
-          {c?.reason && (
-            <p className="rounded-lg bg-muted p-4 text-sm">
-              {reasonLabels[c.reason]}
-            </p>
-          )}
-          {state.readiness.issues.length > 0 && (
-            <ul className="flex flex-col list-disc gap-2 ps-5 text-sm">
-              {state.readiness.issues.map((issue, i) => (
-                <li key={`${issue}-${i}`}>
-                  {issueLabels[issue] ??
-                    "Review account setup with the operator."}
-                </li>
-              ))}
-            </ul>
-          )}
-          {lastObservation && (
-            <div className="flex flex-col gap-3">
-              <p className="text-sm text-muted-foreground">
-                Last provider observation. Current readiness above also requires
-                unexpired evidence.
-              </p>
-              <p className="font-medium wrap-anywhere">
-                {lastObservation.displayNumber}
-              </p>
-              <dl className="grid gap-3 sm:grid-cols-2">
-                {metaCheckNames.map((name) => (
-                  <div key={name}>
-                    <dt className="text-sm text-muted-foreground">
-                      {checkLabels[name]}
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium">
-                      {
-                        {
-                          confirmed: "Confirmed",
-                          missing: "Missing",
-                          unknown: "Not verified",
-                          unsupported: "Unsupported",
-                        }[lastObservation.checks[name]]
-                      }
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="text-sm text-muted-foreground">
-                Last checked{" "}
-                {new Date(lastObservation.observedAt).toLocaleString()}.
-                Evidence expires{" "}
-                {new Date(lastObservation.validUntil).toLocaleString()}.
-              </p>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pending}
-              onClick={() => void reload()}
-            >
-              Reload saved status
-            </Button>
-            {c && (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={
-                  pending || c.status !== "connected" || !state.setup.configured
-                }
-                onClick={() =>
-                  void command(
-                    "refresh",
-                    { expectedVersion: c.version },
-                    "read",
-                  )
-                }
-              >
-                {pending ? "Working…" : "Check connection"}
-              </Button>
-            )}
-          </div>
-          {feedbackFor("read")}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Customer control and direct Meta payment</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <WhatsAppEvidenceStatus evidence={state.paymentEvidence} />
-          <p className="text-sm text-muted-foreground">
-            For assisted review, share this Business ID with your onboarding
-            operator:{" "}
-            <span className="font-medium text-foreground wrap-anywhere">
-              {businessId}
-            </span>
-            . Show your customer portfolio, WhatsApp account and number control,
-            and Meta billing settings identifying your Business as the direct
-            payer. Use the agreed secure support channel for redacted documents;
-            never send card numbers, security codes, OTPs or access tokens.
-          </p>
-          {c?.assets && (
-            <p className="text-sm wrap-anywhere">
-              Selected portfolio {c.assets.portfolioId} · WhatsApp account{" "}
-              {c.assets.wabaId} · Number {c.assets.phoneNumberId} · Connection
-              version {c.version}
-            </p>
-          )}
-          <p className="text-sm text-muted-foreground">
-            The operator records the review in Platform → WhatsApp evidence.
-            Reload saved status after review. Changed terms, reconnection or
-            local disconnection require a new review; expired or revoked
-            evidence cannot complete onboarding.
-          </p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Number arrangement and control</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={save} className="flex flex-col gap-5">
-            <FieldGroup className="gap-5">
-              <fieldset disabled={pending} className="flex flex-col gap-5">
-                <p className="text-sm text-muted-foreground">
-                  Record the actual arrangement before authorizing Meta access.
-                  For assisted setup, state who buys the number, controls OTP
-                  access, pays the carrier and can authorize a transfer. Saving
-                  changes requires fresh Meta sign-in.
-                </p>
-                <Field className="flex flex-col gap-2">
-                  <Label htmlFor="wa-portfolio">
-                    Your Meta Business portfolio ID
-                  </Label>
-                  <Input
-                    id="wa-portfolio"
-                    name="portfolioId"
-                    inputMode="numeric"
-                    pattern="[0-9]{1,40}"
-                    required
-                    defaultValue={c?.configuration.portfolioId ?? ""}
-                  />
-                </Field>
-                <Field className="flex flex-col gap-2">
-                  <Label htmlFor="wa-number">
-                    Business phone number, including country code
-                  </Label>
-                  <Input
-                    id="wa-number"
-                    name="requestedNumber"
-                    type="tel"
-                    autoComplete="tel"
-                    pattern="\+[1-9][0-9]{6,14}"
-                    placeholder="+14155550123"
-                    required
-                    defaultValue={c?.configuration.requestedNumber ?? ""}
-                  />
-                </Field>
-                <Field className="flex flex-col gap-2">
-                  <Label htmlFor="wa-source">Number setup path</Label>
-                  <NativeSelect
-                    id="wa-source"
-                    name="numberSource"
-                    defaultValue={
-                      c?.configuration.numberSource ?? "existing_cloud"
-                    }
-                  >
-                    <option value="existing_cloud">
-                      Existing Cloud API number
-                    </option>
-                    <option value="business_app">
-                      Keep using the WhatsApp Business App (eligibility
-                      required)
-                    </option>
-                    <option value="assisted_new">
-                      Assisted setup of a new customer-controlled number
-                    </option>
-                  </NativeSelect>
-                  <p className="text-sm text-muted-foreground">
-                    {state.setup.coexistence
-                      ? "Business App use still needs Meta's supported coexistence completion and a number check."
-                      : "Business App coexistence is currently unavailable. Selecting this path records your request and cannot make it ready."}
-                  </p>
-                </Field>
-                <Field className="flex flex-col gap-2">
-                  <Label htmlFor="wa-terms">
-                    Provisioning, control and transfer terms
-                  </Label>
-                  <Textarea
-                    id="wa-terms"
-                    name="provisioningTerms"
-                    required
-                    minLength={30}
-                    maxLength={2000}
-                    rows={5}
-                    defaultValue={c?.configuration.provisioningTerms ?? ""}
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Include any carrier/provider restrictions and the steps
-                    needed to release or transfer the number. No automatic
-                    transfer or guaranteed retention of app features is
-                    promised.
-                  </p>
-                </Field>
-                <label
-                  htmlFor="wa-control"
-                  className="flex min-h-11 items-start gap-3 py-2"
-                >
-                  <Checkbox
-                    id="wa-control"
-                    name="customerControlsAssets"
-                    value="on"
-                    required
-                    defaultChecked={Boolean(c)}
-                  />
-                  <span className="text-sm">
-                    Our Business controls the Meta portfolio, account and
-                    number, or will retain those controls under the recorded
-                    assisted setup terms.
-                  </span>
-                </label>
-                <label
-                  htmlFor="wa-billing"
-                  className="flex min-h-11 items-start gap-3 py-2"
-                >
-                  <Checkbox
-                    id="wa-billing"
-                    name="customerPaysMeta"
-                    value="on"
-                    required
-                    defaultChecked={Boolean(c)}
-                  />
-                  <span className="text-sm">
-                    Our Business supplies its own Meta payment method and pays
-                    Meta usage separately from the automation subscription. This
-                    declaration does not verify billing setup.
-                  </span>
-                </label>
-                <Button type="submit">
-                  {pending ? "Working…" : "Save number arrangement"}
-                </Button>
-              </fieldset>
-              {feedbackFor("save")}
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
-      {c && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Authorize with Meta</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">
-              Use your own Meta administrator login. Complete account selection,
-              number verification and payment setup at Meta. A partial or
-              cancelled signup remains incomplete.
-            </p>
-            <Button
-              type="button"
-              disabled={
-                pending ||
-                !state.setup.configured ||
-                (c.configuration.numberSource === "business_app" &&
-                  !state.setup.coexistence)
-              }
-              onClick={() =>
-                void command("start", { expectedVersion: c.version }, "connect")
-              }
-            >
-              {signup ? "Prepare a fresh Meta sign-in" : "Prepare Meta sign-in"}
-            </Button>
-            {signup && (
-              <MetaSignup
-                key={signup.state}
-                signup={signup}
-                complete={complete}
-                reportError={reportError}
-              />
-            )}
-            {feedbackFor("connect")}
-          </CardContent>
-        </Card>
-      )}
-      {c &&
-        c.configuration.numberSource !== "business_app" &&
-        (c.observation?.checks.number_registered === "missing" ||
-          c.reason === "registration_uncertain" ||
-          feedback?.section === "register") && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Register your verified number</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {c.observation?.checks.number_registered === "missing" &&
-              c.reason === null ? (
-                <form
-                  className="flex flex-col gap-4"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = event.currentTarget;
-                    const pin = new FormData(form).get("pin");
-                    void command(
-                      "register",
-                      { expectedVersion: c.version, pin },
-                      "register",
-                    ).finally(() => form.reset());
-                  }}
-                >
-                  <FieldGroup className="gap-4">
+      <WorkspaceTabs
+        label="WhatsApp sections"
+        tabs={[
+          {
+            id: "connect",
+            label: "Connection",
+            description:
+              "Connect your own WhatsApp business account and number. Meta usage charges are separate from your Lead Relay plan.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      Your WhatsApp account and Meta charges
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4">
+                    <p>{state.billing.disclosure}</p>
+                    <a
+                      href="https://business.whatsapp.com/products/platform-pricing"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
+                    >
+                      Review Meta pricing (opens a new tab)
+                    </a>
                     <p className="text-sm text-muted-foreground">
-                      Registration uses your six-digit Meta two-step
-                      verification PIN. Keep the PIN with your Business; it is
-                      sent once to Meta and never saved here. Business App
-                      coexistence does not use this registration action.
+                      You retain your Meta portfolio, WhatsApp account, number,
+                      SIM/phone access and payment method. We request access to
+                      provide automation. Disconnecting here removes local
+                      access; revoke the app in Meta Business settings to end
+                      Meta-side access. No number is deregistered or transferred
+                      here.
                     </p>
-                    <Label htmlFor="wa-pin">Meta registration PIN</Label>
-                    <Input
-                      id="wa-pin"
-                      name="pin"
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                      required
-                    />
-                    <Button disabled={pending} type="submit">
-                      Register number with Meta
-                    </Button>
-                  </FieldGroup>
-                </form>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    Review the latest registration status before another
-                    attempt.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={pending || c.status !== "connected"}
-                    onClick={() =>
-                      void command(
-                        "refresh",
-                        { expectedVersion: c.version },
-                        "register",
-                      )
-                    }
-                  >
-                    Check registration status
-                  </Button>
-                </div>
-              )}
-              {feedbackFor("register")}
-            </CardContent>
-          </Card>
-        )}
-      {c && c.status !== "disconnected" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Remove local access</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button type="button" variant="outline" disabled={pending}>
-                  Disconnect locally
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogTitle>
-                  Disconnect this WhatsApp connection?
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  Local credentials and readiness evidence will be removed. Your
-                  customer-owned Meta account and number remain in Meta. Remove
-                  the app in Meta Business settings to revoke Meta-side
-                  permissions.
-                </AlertDialogDescription>
-                <div className="flex flex-wrap justify-end gap-3">
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() =>
-                      void command(
-                        "disconnect",
-                        { expectedVersion: c.version },
-                        "disconnect",
-                      )
-                    }
-                  >
-                    Disconnect locally
-                  </AlertDialogAction>
-                </div>
-              </AlertDialogContent>
-            </AlertDialog>
-          </CardContent>
-        </Card>
-      )}
-      {feedbackFor("disconnect")}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Connection status</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4">
+                    <div className="flex flex-wrap gap-3">
+                      <Badge>
+                        {c ? statusLabels[c.status] : "Not connected"}
+                      </Badge>
+                      <Badge>
+                        {state.readiness.onboardingReady
+                          ? "Onboarding checks confirmed"
+                          : "Onboarding not ready"}
+                      </Badge>
+                      <Badge>
+                        {state.readiness.sendingReady
+                          ? "Sending account checks ready"
+                          : "Sending requires separate setup"}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Onboarding does not enable sending, recipient permission,
+                      approved templates or conversation windows. Incoming
+                      capture and supported manual activity have their own
+                      evidence above.
+                    </p>
+                    {c?.reason && (
+                      <p className="rounded-lg bg-muted p-4 text-sm">
+                        {reasonLabels[c.reason]}
+                      </p>
+                    )}
+                    {state.readiness.issues.length > 0 && (
+                      <ul className="flex flex-col list-disc gap-2 ps-5 text-sm">
+                        {state.readiness.issues.map((issue, i) => (
+                          <li key={`${issue}-${i}`}>
+                            {issueLabels[issue] ??
+                              "Review account setup with the operator."}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {lastObservation && (
+                      <div className="flex flex-col gap-3">
+                        <p className="text-sm text-muted-foreground">
+                          Last provider observation. Current readiness above
+                          also requires unexpired evidence.
+                        </p>
+                        <p className="font-medium wrap-anywhere">
+                          {lastObservation.displayNumber}
+                        </p>
+                        <dl className="grid gap-3 sm:grid-cols-2">
+                          {metaCheckNames.map((name) => (
+                            <div key={name}>
+                              <dt className="text-sm text-muted-foreground">
+                                {checkLabels[name]}
+                              </dt>
+                              <dd className="mt-1 text-sm font-medium">
+                                {
+                                  {
+                                    confirmed: "Confirmed",
+                                    missing: "Missing",
+                                    unknown: "Not verified",
+                                    unsupported: "Unsupported",
+                                  }[lastObservation.checks[name]]
+                                }
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <p className="text-sm text-muted-foreground">
+                          Last checked{" "}
+                          {new Date(
+                            lastObservation.observedAt,
+                          ).toLocaleString()}
+                          . Evidence expires{" "}
+                          {new Date(
+                            lastObservation.validUntil,
+                          ).toLocaleString()}
+                          .
+                        </p>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={pending}
+                        onClick={() => void reload()}
+                      >
+                        Reload saved status
+                      </Button>
+                      {c && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={
+                            pending ||
+                            c.status !== "connected" ||
+                            !state.setup.configured
+                          }
+                          onClick={() =>
+                            void command(
+                              "refresh",
+                              { expectedVersion: c.version },
+                              "read",
+                            )
+                          }
+                        >
+                          {pending ? "Working…" : "Check connection"}
+                        </Button>
+                      )}
+                    </div>
+                    {feedbackFor("read")}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Choose your WhatsApp number</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={save} className="flex flex-col gap-5">
+                      <FieldGroup className="gap-5">
+                        <fieldset
+                          disabled={pending}
+                          className="flex flex-col gap-5"
+                        >
+                          <p className="text-sm text-muted-foreground">
+                            Record the actual arrangement before authorizing
+                            Meta access. For assisted setup, state who buys the
+                            number, controls OTP access, pays the carrier and
+                            can authorize a transfer. Saving changes requires
+                            fresh Meta sign-in.
+                          </p>
+                          <Field className="flex flex-col gap-2">
+                            <Label htmlFor="wa-portfolio">
+                              Your Meta Business portfolio ID
+                            </Label>
+                            <Input
+                              id="wa-portfolio"
+                              name="portfolioId"
+                              inputMode="numeric"
+                              pattern="[0-9]{1,40}"
+                              required
+                              defaultValue={c?.configuration.portfolioId ?? ""}
+                            />
+                          </Field>
+                          <Field className="flex flex-col gap-2">
+                            <Label htmlFor="wa-number">
+                              Business phone number, including country code
+                            </Label>
+                            <Input
+                              id="wa-number"
+                              name="requestedNumber"
+                              type="tel"
+                              autoComplete="tel"
+                              pattern="\+[1-9][0-9]{6,14}"
+                              placeholder="+14155550123"
+                              required
+                              defaultValue={
+                                c?.configuration.requestedNumber ?? ""
+                              }
+                            />
+                          </Field>
+                          <Field className="flex flex-col gap-2">
+                            <Label htmlFor="wa-source">Number setup path</Label>
+                            <NativeSelect
+                              id="wa-source"
+                              name="numberSource"
+                              defaultValue={
+                                c?.configuration.numberSource ??
+                                "existing_cloud"
+                              }
+                            >
+                              <option value="existing_cloud">
+                                Existing Cloud API number
+                              </option>
+                              <option value="business_app">
+                                Keep using the WhatsApp Business App
+                                (eligibility required)
+                              </option>
+                              <option value="assisted_new">
+                                Assisted setup of a new customer-controlled
+                                number
+                              </option>
+                            </NativeSelect>
+                            <p className="text-sm text-muted-foreground">
+                              {state.setup.coexistence
+                                ? "Business App use still needs Meta's supported coexistence completion and a number check."
+                                : "Business App coexistence is currently unavailable. Selecting this path records your request and cannot make it ready."}
+                            </p>
+                          </Field>
+                          <Field className="flex flex-col gap-2">
+                            <Label htmlFor="wa-terms">
+                              Provisioning, control and transfer terms
+                            </Label>
+                            <Textarea
+                              id="wa-terms"
+                              name="provisioningTerms"
+                              required
+                              minLength={30}
+                              maxLength={2000}
+                              rows={5}
+                              defaultValue={
+                                c?.configuration.provisioningTerms ?? ""
+                              }
+                            />
+                            <p className="text-sm text-muted-foreground">
+                              Include any carrier/provider restrictions and the
+                              steps needed to release or transfer the number. No
+                              automatic transfer or guaranteed retention of app
+                              features is promised.
+                            </p>
+                          </Field>
+                          <label
+                            htmlFor="wa-control"
+                            className="flex min-h-11 items-start gap-3 py-2"
+                          >
+                            <Checkbox
+                              id="wa-control"
+                              name="customerControlsAssets"
+                              value="on"
+                              required
+                              defaultChecked={Boolean(c)}
+                            />
+                            <span className="text-sm">
+                              Our Business controls the Meta portfolio, account
+                              and number, or will retain those controls under
+                              the recorded assisted setup terms.
+                            </span>
+                          </label>
+                          <label
+                            htmlFor="wa-billing"
+                            className="flex min-h-11 items-start gap-3 py-2"
+                          >
+                            <Checkbox
+                              id="wa-billing"
+                              name="customerPaysMeta"
+                              value="on"
+                              required
+                              defaultChecked={Boolean(c)}
+                            />
+                            <span className="text-sm">
+                              Our Business supplies its own Meta payment method
+                              and pays Meta usage separately from the automation
+                              subscription. This declaration does not verify
+                              billing setup.
+                            </span>
+                          </label>
+                          <Button type="submit">
+                            {pending ? "Working…" : "Save number arrangement"}
+                          </Button>
+                        </fieldset>
+                        {feedbackFor("save")}
+                      </FieldGroup>
+                    </form>
+                  </CardContent>
+                </Card>
+                {c && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Authorize with Meta</CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-4">
+                      <p className="text-sm text-muted-foreground">
+                        Use your own Meta administrator login. Complete account
+                        selection, number verification and payment setup at
+                        Meta. A partial or cancelled signup remains incomplete.
+                      </p>
+                      <Button
+                        type="button"
+                        disabled={
+                          pending ||
+                          !state.setup.configured ||
+                          (c.configuration.numberSource === "business_app" &&
+                            !state.setup.coexistence)
+                        }
+                        onClick={() =>
+                          void command(
+                            "start",
+                            { expectedVersion: c.version },
+                            "connect",
+                          )
+                        }
+                      >
+                        {signup
+                          ? "Prepare a fresh Meta sign-in"
+                          : "Prepare Meta sign-in"}
+                      </Button>
+                      {signup && (
+                        <MetaSignup
+                          key={signup.state}
+                          signup={signup}
+                          complete={complete}
+                          reportError={reportError}
+                        />
+                      )}
+                      {feedbackFor("connect")}
+                    </CardContent>
+                  </Card>
+                )}
+                {c &&
+                  c.configuration.numberSource !== "business_app" &&
+                  (c.observation?.checks.number_registered === "missing" ||
+                    c.reason === "registration_uncertain" ||
+                    feedback?.section === "register") && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Register your verified number</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {c.observation?.checks.number_registered ===
+                          "missing" && c.reason === null ? (
+                          <form
+                            className="flex flex-col gap-4"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              const form = event.currentTarget;
+                              const pin = new FormData(form).get("pin");
+                              void command(
+                                "register",
+                                { expectedVersion: c.version, pin },
+                                "register",
+                              ).finally(() => form.reset());
+                            }}
+                          >
+                            <FieldGroup className="gap-4">
+                              <p className="text-sm text-muted-foreground">
+                                Registration uses your six-digit Meta two-step
+                                verification PIN. Keep the PIN with your
+                                Business; it is sent once to Meta and never
+                                saved here. Business App coexistence does not
+                                use this registration action.
+                              </p>
+                              <Label htmlFor="wa-pin">
+                                Meta registration PIN
+                              </Label>
+                              <Input
+                                id="wa-pin"
+                                name="pin"
+                                type="password"
+                                inputMode="numeric"
+                                autoComplete="off"
+                                pattern="[0-9]{6}"
+                                maxLength={6}
+                                required
+                              />
+                              <Button disabled={pending} type="submit">
+                                Register number with Meta
+                              </Button>
+                            </FieldGroup>
+                          </form>
+                        ) : (
+                          <div className="flex flex-col gap-3">
+                            <p className="text-sm text-muted-foreground">
+                              Review the latest registration status before
+                              another attempt.
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={pending || c.status !== "connected"}
+                              onClick={() =>
+                                void command(
+                                  "refresh",
+                                  { expectedVersion: c.version },
+                                  "register",
+                                )
+                              }
+                            >
+                              Check registration status
+                            </Button>
+                          </div>
+                        )}
+                        {feedbackFor("register")}
+                      </CardContent>
+                    </Card>
+                  )}
+              </>
+            ),
+          },
+          {
+            id: "messages",
+            label: "Incoming messages",
+            description:
+              "Choose what incoming WhatsApp messages this business may process.",
+            content: (
+              <>
+                <WhatsAppIntakeManager
+                  key={`${c?.version}-${state.intake.inboxConnectionId}`}
+                  businessId={businessId}
+                  version={c?.version ?? null}
+                  initialState={state.intake}
+                  canManage={state.canManage}
+                />
+              </>
+            ),
+          },
+          {
+            id: "manage",
+            label: "Manage access",
+            description:
+              "Review account control or disconnect local access. Revoke the app in Meta settings to remove Meta-side access.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Your account and billing</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4">
+                    <WhatsAppEvidenceStatus evidence={state.paymentEvidence} />
+                    <p className="text-sm text-muted-foreground">
+                      For assisted review, share this Business ID with your
+                      onboarding operator:{" "}
+                      <span className="font-medium text-foreground wrap-anywhere">
+                        {businessId}
+                      </span>
+                      . Show your customer portfolio, WhatsApp account and
+                      number control, and Meta billing settings identifying your
+                      Business as the direct payer. Use the agreed secure
+                      support channel for redacted documents; never send card
+                      numbers, security codes, OTPs or access tokens.
+                    </p>
+                    {c?.assets && (
+                      <p className="text-sm wrap-anywhere">
+                        Selected portfolio {c.assets.portfolioId} · WhatsApp
+                        account {c.assets.wabaId} · Number{" "}
+                        {c.assets.phoneNumberId} · Connection version{" "}
+                        {c.version}
+                      </p>
+                    )}
+                    <p className="text-sm text-muted-foreground">
+                      The operator records the review in Platform → WhatsApp
+                      evidence. Reload saved status after review. Changed terms,
+                      reconnection or local disconnection require a new review;
+                      expired or revoked evidence cannot complete onboarding.
+                    </p>
+                  </CardContent>
+                </Card>
+                {c && c.status !== "disconnected" && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Disconnect from Lead Relay</CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-4">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={pending}
+                          >
+                            Disconnect locally
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogTitle>
+                            Disconnect this WhatsApp connection?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Local credentials and readiness evidence will be
+                            removed. Your customer-owned Meta account and number
+                            remain in Meta. Remove the app in Meta Business
+                            settings to revoke Meta-side permissions.
+                          </AlertDialogDescription>
+                          <div className="flex flex-wrap justify-end gap-3">
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() =>
+                                void command(
+                                  "disconnect",
+                                  { expectedVersion: c.version },
+                                  "disconnect",
+                                )
+                              }
+                            >
+                              Disconnect locally
+                            </AlertDialogAction>
+                          </div>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </CardContent>
+                  </Card>
+                )}
+                {feedbackFor("disconnect")}
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { FieldGroup } from "./ui/field";
 
 import { useState, type ReactNode, type FormEvent } from "react";
@@ -273,565 +274,720 @@ export function SenderManager({
           connections.
         </p>
       )}
-      <section
-        className="flex flex-col gap-4"
-        aria-labelledby="sender-status-title"
-      >
-        <h2 id="sender-status-title" className="text-xl font-semibold">
-          Sending and reply readiness
-        </h2>
-        {!state.identities.length && (
-          <Card>
-            <CardContent className="pt-6">
-              <p>
-                No sending identities yet. Save a connection, add a reply route
-                and configure a dedicated outreach or ordinary sales identity
-                below.
-              </p>
-            </CardContent>
-          </Card>
-        )}
-        {state.identities.map((row) => (
-          <Card key={row.id}>
-            <CardHeader>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <CardTitle className="wrap-anywhere">
-                    {row.identification.fromName}
-                  </CardTitle>
-                  <p className="mt-2 wrap-anywhere text-sm text-muted-foreground">
-                    {row.configuration.fromAddress} ·{" "}
-                    {purposes[row.configuration.purpose]} ·{" "}
-                    {origins[row.configuration.origin]}
-                  </p>
-                </div>
-                <Badge>
-                  {row.readiness.mode === "fixture"
-                    ? "Deterministic fixture only"
-                    : row.readiness.ready
-                      ? "Setup checks passed"
-                      : "Not ready"}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5">
-              <p className="text-sm">
-                Identification: {row.identification.platformDisclosure}
-              </p>
-              <dl className="grid gap-3 sm:grid-cols-2">
-                {senderUseSchema.options.map((use) => (
-                  <div key={use} className="rounded-lg bg-muted p-3">
-                    <dt className="text-sm font-medium">{useLabels[use]}</dt>
-                    <dd className="mt-1 text-sm">
-                      {row.readiness.uses[use].ready
-                        ? row.readiness.mode === "fixture"
-                          ? "Fixture checks passed · no live sending verified"
-                          : "Sender checks passed · recipient policy still applies"
-                        : row.readiness.uses[use].reasons.includes(
-                              "customer_identity_required",
-                            )
-                          ? "Blocked · customer-controlled identity required"
-                          : row.readiness.uses[use].reasons.includes(
-                                "use_not_configured",
-                              )
-                            ? "Not selected for this identity"
-                            : row.readiness.uses[use].reasons.includes(
-                                  "dedicated_outreach_required",
-                                )
-                              ? "Blocked · dedicated outreach identity required"
-                              : row.readiness.uses[use].reasons.includes(
-                                    "use_not_approved",
-                                  )
-                                ? "Blocked · approved use not established"
-                                : "Blocked · complete setup below"}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              {row.readiness.issues.length > 0 && (
-                <ul className="flex flex-col gap-2 text-sm">
-                  {row.readiness.issues.map((issue) => (
-                    <li key={issue.code}>{issue.action}</li>
-                  ))}
-                </ul>
-              )}
-              <details className="rounded-xl border border-border p-4">
-                <summary className="cursor-pointer font-medium">
-                  Authentication, permissions and reply checks
-                </summary>
-                <dl className="flex flex-col mt-4 gap-3">
-                  {senderCheckNames.map((check) => (
-                    <div key={check}>
-                      <dt className="text-sm font-medium">
-                        {check.replaceAll("_", " ")}
-                      </dt>
-                      <dd className="text-sm text-muted-foreground">
-                        {row.evidence?.checks[check].replaceAll("_", " ") ??
-                          "Not checked"}
-                        . {senderCheckLabels[check]}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-                {row.evidence && (
-                  <p className="mt-4 text-sm text-muted-foreground">
-                    Checked {row.evidence.observedAt}; valid until{" "}
-                    {row.evidence.validUntil}.{" "}
-                    {row.evidence.mode === "fixture"
-                      ? "Fixture evidence does not verify a live provider."
-                      : "Verification alone does not establish two-way mail access."}
-                  </p>
-                )}
-                {row.evidence?.adapterKey === "gmail-sequence-v1" && (
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    Gmail reply readiness covers exact references from approved
-                    sequences. General mailbox completeness and historical
-                    imports remain separate.
-                  </p>
-                )}
-                {row.evidence?.verificationReference && (
-                  <a
-                    href={row.evidence.verificationReference}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex min-h-11 items-center text-sm text-primary underline"
-                  >
-                    Review sender verification record (new tab)
-                  </a>
-                )}
-              </details>
-              {state.canManage && (
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() =>
-                      void command(`${row.id}/check`, {
-                        expectedVersion: row.version,
-                      })
-                    }
-                  >
-                    Check connection
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() => {
-                      setIdentityId(row.id);
-                      document
-                        .getElementById("identity-editor")
-                        ?.scrollIntoView({ block: "start" });
-                    }}
-                  >
-                    Edit identity
-                  </Button>
-                </div>
-              )}
-              {feedback(`${row.id}/check`)}
-            </CardContent>
-          </Card>
-        ))}
-      </section>
-      {state.canManage && (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Connection settings</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Choose the intended sending or reply connection. Saving these
-                settings does not grant mail access. Gmail and Microsoft mailbox
-                authorization and synchronization are separate from calendar
-                access. Customer-domain transport is not configured by domain
-                verification.
-              </p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5">
-              <Field id="edit-connection" label="Connection to edit">
-                <NativeSelect
-                  id="edit-connection"
-                  value={connectionId}
-                  onChange={(e) => setConnectionId(e.target.value)}
+      <WorkspaceTabs
+        label="Sending addresses sections"
+        tabs={[
+          {
+            id: "addresses",
+            label: "Your sending addresses",
+            description:
+              "Check sending and reply status. To connect Gmail or Outlook, use Email accounts.",
+            content: (
+              <>
+                <section
+                  className="flex flex-col gap-4"
+                  aria-labelledby="sender-status-title"
                 >
-                  <option value="">Add connection settings</option>
-                  {state.connections.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.configuration.label} · {row.configuration.account}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <form
-                key={`${connectionId}-${connection?.version ?? 0}`}
-                onSubmit={(e) =>
-                  void save(
-                    e,
-                    senderSaveSchema(senderConnectionSchema),
-                    "connections",
-                    (form) => ({
-                      id: connection?.id ?? null,
-                      expectedVersion: connection?.version ?? 0,
-                      configuration: {
-                        label: read(form, "label"),
-                        provider: read(form, "provider"),
-                        account: read(form, "account"),
-                        enabled: form.has("enabled"),
-                      },
-                    }),
-                  )
-                }
-              >
-                <FieldGroup className="gap-5">
-                  <fieldset disabled={pending} className="flex flex-col gap-4">
-                    <Field id="connection-label" label="Connection label">
-                      <Input
-                        id="connection-label"
-                        name="label"
-                        required
-                        maxLength={120}
-                        defaultValue={connection?.configuration.label ?? ""}
-                      />
-                    </Field>
-                    <Field id="connection-provider" label="Connection type">
-                      <NativeSelect
-                        id="connection-provider"
-                        name="provider"
-                        defaultValue={connection?.configuration.provider ?? ""}
-                        required
-                      >
-                        <option value="" disabled>
-                          Select a connection type
-                        </option>
-                        {Object.entries(providers).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <Field
-                      id="connection-account"
-                      label="Authorized email address"
-                    >
-                      <Input
-                        id="connection-account"
-                        name="account"
-                        type="email"
-                        autoComplete="email"
-                        required
-                        maxLength={254}
-                        defaultValue={connection?.configuration.account ?? ""}
-                      />
-                    </Field>
-                    <Enabled
-                      prefix="connection"
-                      value={connection?.configuration.enabled ?? true}
-                    />
-                    <Button type="submit">Save connection settings</Button>
-                  </fieldset>
-                  {feedback("connections")}
-                </FieldGroup>
-              </form>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Reply routing</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Route replies to an explicitly selected sales inbox. One
-                identity is selected for responses from each routed inbox; no
-                fallback sender is chosen. Reply-reading permission,
-                synchronization and capture must each be checked.
-              </p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5">
-              <Link
-                href={`/businesses/${businessId}/inbox`}
-                className="inline-flex min-h-11 items-center text-primary underline"
-              >
-                Manage selected inboxes
-              </Link>
-              {!state.inboxes.length && (
-                <p className="text-sm text-muted-foreground">
-                  Add an email inbox connection in the shared sales inbox before
-                  saving a reply route. An import connection alone does not
-                  establish live synchronization.
-                </p>
-              )}
-              <Field id="edit-route" label="Reply route to edit">
-                <NativeSelect
-                  id="edit-route"
-                  value={routeId}
-                  onChange={(e) => setRouteId(e.target.value)}
-                >
-                  <option value="">Add reply route</option>
-                  {state.replyRoutes.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.configuration.address}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <form
-                key={`${routeId}-${route?.version ?? 0}`}
-                onSubmit={(e) =>
-                  void save(
-                    e,
-                    senderSaveSchema(replyRouteSchema),
-                    "reply-routes",
-                    (form) => ({
-                      id: route?.id ?? null,
-                      expectedVersion: route?.version ?? 0,
-                      configuration: {
-                        address: read(form, "address"),
-                        connectionId: read(form, "connectionId"),
-                        inboxConnectionId: read(form, "inboxConnectionId"),
-                        enabled: form.has("enabled"),
-                      },
-                    }),
-                  )
-                }
-              >
-                <FieldGroup className="gap-5">
-                  <fieldset disabled={pending} className="flex flex-col gap-4">
-                    <Field id="route-address" label="Reply-to address">
-                      <Input
-                        id="route-address"
-                        name="address"
-                        type="email"
-                        required
-                        maxLength={254}
-                        defaultValue={route?.configuration.address ?? ""}
-                      />
-                    </Field>
-                    <Field
-                      id="route-connection"
-                      label="Reply-reading connection"
-                    >
-                      <NativeSelect
-                        id="route-connection"
-                        name="connectionId"
-                        required
-                        defaultValue={route?.configuration.connectionId ?? ""}
-                      >
-                        <option value="" disabled>
-                          Select a connection
-                        </option>
-                        {state.connections.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.configuration.label} ·{" "}
-                            {row.configuration.account}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <Field id="route-inbox" label="Inbox receiving replies">
-                      <NativeSelect
-                        id="route-inbox"
-                        name="inboxConnectionId"
-                        required
-                        defaultValue={
-                          route?.configuration.inboxConnectionId ?? ""
-                        }
-                      >
-                        <option value="" disabled>
-                          Select a sales inbox
-                        </option>
-                        {state.inboxes.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.label}
-                            {row.active ? "" : " (revoked)"}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <Enabled
-                      prefix="route"
-                      value={route?.configuration.enabled ?? true}
-                    />
-                    <Button type="submit">Save reply route</Button>
-                  </fieldset>
-                  {feedback("reply-routes")}
-                </FieldGroup>
-              </form>
-            </CardContent>
-          </Card>
-          <Card id="identity-editor">
-            <CardHeader>
-              <CardTitle>Identity and intended use</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Keep dedicated outreach separate from ordinary sales. Use an
-                address the Business controls or an approved service-provided
-                address. Setup checks must confirm control and truthful
-                identification.
-              </p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5">
-              <Field id="edit-identity" label="Identity to edit">
-                <NativeSelect
-                  id="edit-identity"
-                  value={identityId}
-                  onChange={(e) => setIdentityId(e.target.value)}
-                >
-                  <option value="">Add sending identity</option>
+                  <h2
+                    id="sender-status-title"
+                    className="text-xl font-semibold"
+                  >
+                    Sending addresses and replies
+                  </h2>
+                  {!state.identities.length && (
+                    <Card>
+                      <CardContent className="pt-6">
+                        <p>
+                          No sending identities yet. Save a connection, add a
+                          reply route and configure a dedicated outreach or
+                          ordinary sales identity below.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )}
                   {state.identities.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {purposes[row.configuration.purpose]} ·{" "}
-                      {row.configuration.fromAddress}
-                    </option>
+                    <Card key={row.id}>
+                      <CardHeader>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <CardTitle className="wrap-anywhere">
+                              {row.identification.fromName}
+                            </CardTitle>
+                            <p className="mt-2 wrap-anywhere text-sm text-muted-foreground">
+                              {row.configuration.fromAddress} ·{" "}
+                              {purposes[row.configuration.purpose]} ·{" "}
+                              {origins[row.configuration.origin]}
+                            </p>
+                          </div>
+                          <Badge>
+                            {row.readiness.mode === "fixture"
+                              ? "Deterministic fixture only"
+                              : row.readiness.ready
+                                ? "Setup checks passed"
+                                : "Not ready"}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="flex flex-col gap-5">
+                        <p className="text-sm">
+                          Identification:{" "}
+                          {row.identification.platformDisclosure}
+                        </p>
+                        <dl className="grid gap-3 sm:grid-cols-2">
+                          {senderUseSchema.options.map((use) => (
+                            <div key={use} className="rounded-lg bg-muted p-3">
+                              <dt className="text-sm font-medium">
+                                {useLabels[use]}
+                              </dt>
+                              <dd className="mt-1 text-sm">
+                                {row.readiness.uses[use].ready
+                                  ? row.readiness.mode === "fixture"
+                                    ? "Fixture checks passed · no live sending verified"
+                                    : "Sender checks passed · recipient policy still applies"
+                                  : row.readiness.uses[use].reasons.includes(
+                                        "customer_identity_required",
+                                      )
+                                    ? "Blocked · customer-controlled identity required"
+                                    : row.readiness.uses[use].reasons.includes(
+                                          "use_not_configured",
+                                        )
+                                      ? "Not selected for this identity"
+                                      : row.readiness.uses[
+                                            use
+                                          ].reasons.includes(
+                                            "dedicated_outreach_required",
+                                          )
+                                        ? "Blocked · dedicated outreach identity required"
+                                        : row.readiness.uses[
+                                              use
+                                            ].reasons.includes(
+                                              "use_not_approved",
+                                            )
+                                          ? "Blocked · approved use not established"
+                                          : "Blocked · complete setup below"}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                        {row.readiness.issues.length > 0 && (
+                          <ul className="flex flex-col gap-2 text-sm">
+                            {row.readiness.issues.map((issue) => (
+                              <li key={issue.code}>{issue.action}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <details className="rounded-xl border border-border p-4">
+                          <summary className="cursor-pointer font-medium">
+                            Connection and delivery checks
+                          </summary>
+                          <dl className="flex flex-col mt-4 gap-3">
+                            {senderCheckNames.map((check) => (
+                              <div key={check}>
+                                <dt className="text-sm font-medium">
+                                  {check.replaceAll("_", " ")}
+                                </dt>
+                                <dd className="text-sm text-muted-foreground">
+                                  {row.evidence?.checks[check].replaceAll(
+                                    "_",
+                                    " ",
+                                  ) ?? "Not checked"}
+                                  . {senderCheckLabels[check]}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                          {row.evidence && (
+                            <p className="mt-4 text-sm text-muted-foreground">
+                              Checked {row.evidence.observedAt}; valid until{" "}
+                              {row.evidence.validUntil}.{" "}
+                              {row.evidence.mode === "fixture"
+                                ? "Fixture evidence does not verify a live provider."
+                                : "Verification alone does not establish two-way mail access."}
+                            </p>
+                          )}
+                          {row.evidence?.adapterKey === "gmail-sequence-v1" && (
+                            <p className="mt-3 text-sm text-muted-foreground">
+                              Gmail reply readiness covers exact references from
+                              approved sequences. General mailbox completeness
+                              and historical imports remain separate.
+                            </p>
+                          )}
+                          {row.evidence?.verificationReference && (
+                            <a
+                              href={row.evidence.verificationReference}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex min-h-11 items-center text-sm text-primary underline"
+                            >
+                              Review sender verification record (new tab)
+                            </a>
+                          )}
+                        </details>
+                        {state.canManage && (
+                          <div className="flex flex-wrap gap-3">
+                            <Button
+                              variant="outline"
+                              disabled={pending}
+                              onClick={() =>
+                                void command(`${row.id}/check`, {
+                                  expectedVersion: row.version,
+                                })
+                              }
+                            >
+                              Check connection
+                            </Button>
+                            <Button
+                              variant="outline"
+                              disabled={pending}
+                              onClick={() => {
+                                setIdentityId(row.id);
+                                document
+                                  .getElementById("identity-editor")
+                                  ?.scrollIntoView({ block: "start" });
+                              }}
+                            >
+                              Edit identity
+                            </Button>
+                          </div>
+                        )}
+                        {feedback(`${row.id}/check`)}
+                      </CardContent>
+                    </Card>
                   ))}
-                </NativeSelect>
-              </Field>
-              <form
-                key={`${identityId}-${identity?.version ?? 0}`}
-                onSubmit={(e) =>
-                  void save(
-                    e,
-                    senderSaveSchema(senderIdentitySchema),
-                    "identities",
-                    (form) => ({
-                      id: identity?.id ?? null,
-                      expectedVersion: identity?.version ?? 0,
-                      configuration: {
-                        origin: read(form, "origin"),
-                        purpose: read(form, "purpose"),
-                        fromAddress: read(form, "fromAddress"),
-                        displayName: read(form, "displayName"),
-                        uses: form.getAll("uses"),
-                        connectionId: read(form, "connectionId") || null,
-                        replyRouteId: read(form, "replyRouteId") || null,
-                        enabled: form.has("enabled"),
-                      },
-                    }),
-                  )
-                }
-              >
-                <FieldGroup className="gap-5">
-                  <fieldset disabled={pending} className="flex flex-col gap-4">
-                    <Field id="identity-origin" label="Address origin">
-                      <NativeSelect
-                        id="identity-origin"
-                        name="origin"
-                        required
-                        defaultValue={identity?.configuration.origin ?? ""}
-                      >
-                        <option value="" disabled>
-                          Select address origin
-                        </option>
-                        {Object.entries(origins).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <Field id="identity-purpose" label="Identity purpose">
-                      <NativeSelect
-                        id="identity-purpose"
-                        name="purpose"
-                        defaultValue={
-                          identity?.configuration.purpose ?? "ordinary_sales"
-                        }
-                      >
-                        {Object.entries(purposes).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <Field id="identity-from" label="From address">
-                      <Input
-                        id="identity-from"
-                        name="fromAddress"
-                        type="email"
-                        required
-                        maxLength={254}
-                        defaultValue={identity?.configuration.fromAddress ?? ""}
-                      />
-                    </Field>
-                    <Field id="identity-name" label="Sender or team name">
-                      <Input
-                        id="identity-name"
-                        name="displayName"
-                        required
-                        maxLength={120}
-                        defaultValue={identity?.configuration.displayName ?? ""}
-                      />
-                    </Field>
-                    <p className="text-sm text-muted-foreground">
-                      The current Business name and platform identification
-                      accompany this name.
-                    </p>
-                    <Field id="identity-connection" label="Sending connection">
-                      <NativeSelect
-                        id="identity-connection"
-                        name="connectionId"
-                        defaultValue={
-                          identity?.configuration.connectionId ?? ""
-                        }
-                      >
-                        <option value="">Not configured</option>
-                        {state.connections.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.configuration.label} ·{" "}
-                            {row.configuration.account}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <Field id="identity-route" label="Reply route">
-                      <NativeSelect
-                        id="identity-route"
-                        name="replyRouteId"
-                        defaultValue={
-                          identity?.configuration.replyRouteId ?? ""
-                        }
-                      >
-                        <option value="">Not configured</option>
-                        {state.replyRoutes.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.configuration.address}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <fieldset className="flex flex-col gap-2">
-                      <legend className="text-sm font-medium">
-                        Intended uses
-                      </legend>
-                      {senderUseSchema.options.map((use) => (
-                        <label
-                          key={use}
-                          className="flex min-h-11 items-center gap-3"
-                        >
-                          <input
-                            type="checkbox"
-                            name="uses"
-                            value={use}
-                            defaultChecked={
-                              identity?.configuration.uses.includes(use) ??
-                              (use === "inbound" ||
-                                use === "existing_conversation")
-                            }
-                            className="size-5 accent-primary"
-                          />
-                          {useLabels[use]}
-                        </label>
-                      ))}
-                    </fieldset>
-                    <Enabled
-                      prefix="identity"
-                      value={identity?.configuration.enabled ?? true}
-                    />
-                    <Button type="submit">Save identity</Button>
-                  </fieldset>
-                  {feedback("identities")}
-                </FieldGroup>
-              </form>
-            </CardContent>
-          </Card>
-        </>
-      )}
+                </section>
+              </>
+            ),
+          },
+          ...(state.canManage
+            ? [
+                {
+                  id: "advanced",
+                  label: "Advanced setup",
+                  description:
+                    "Use these controls to repair an existing connection, reply route or sending identity. Normal mailbox setup creates the usual sales address for you.",
+                  content: (
+                    <>
+                      {state.canManage && (
+                        <>
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>
+                                Advanced connection settings
+                              </CardTitle>
+                              <p className="text-sm text-muted-foreground">
+                                Choose the intended sending or reply connection.
+                                Saving these settings does not grant mail
+                                access. Gmail and Microsoft mailbox
+                                authorization and synchronization are separate
+                                from calendar access. Customer-domain transport
+                                is not configured by domain verification.
+                              </p>
+                            </CardHeader>
+                            <CardContent className="flex flex-col gap-5">
+                              <Field
+                                id="edit-connection"
+                                label="Connection to edit"
+                              >
+                                <NativeSelect
+                                  id="edit-connection"
+                                  value={connectionId}
+                                  onChange={(e) =>
+                                    setConnectionId(e.target.value)
+                                  }
+                                >
+                                  <option value="">
+                                    Add connection settings
+                                  </option>
+                                  {state.connections.map((row) => (
+                                    <option key={row.id} value={row.id}>
+                                      {row.configuration.label} ·{" "}
+                                      {row.configuration.account}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                              </Field>
+                              <form
+                                key={`${connectionId}-${connection?.version ?? 0}`}
+                                onSubmit={(e) =>
+                                  void save(
+                                    e,
+                                    senderSaveSchema(senderConnectionSchema),
+                                    "connections",
+                                    (form) => ({
+                                      id: connection?.id ?? null,
+                                      expectedVersion: connection?.version ?? 0,
+                                      configuration: {
+                                        label: read(form, "label"),
+                                        provider: read(form, "provider"),
+                                        account: read(form, "account"),
+                                        enabled: form.has("enabled"),
+                                      },
+                                    }),
+                                  )
+                                }
+                              >
+                                <FieldGroup className="gap-5">
+                                  <fieldset
+                                    disabled={pending}
+                                    className="flex flex-col gap-4"
+                                  >
+                                    <Field
+                                      id="connection-label"
+                                      label="Connection label"
+                                    >
+                                      <Input
+                                        id="connection-label"
+                                        name="label"
+                                        required
+                                        maxLength={120}
+                                        defaultValue={
+                                          connection?.configuration.label ?? ""
+                                        }
+                                      />
+                                    </Field>
+                                    <Field
+                                      id="connection-provider"
+                                      label="Connection type"
+                                    >
+                                      <NativeSelect
+                                        id="connection-provider"
+                                        name="provider"
+                                        defaultValue={
+                                          connection?.configuration.provider ??
+                                          ""
+                                        }
+                                        required
+                                      >
+                                        <option value="" disabled>
+                                          Select a connection type
+                                        </option>
+                                        {Object.entries(providers).map(
+                                          ([value, label]) => (
+                                            <option key={value} value={value}>
+                                              {label}
+                                            </option>
+                                          ),
+                                        )}
+                                      </NativeSelect>
+                                    </Field>
+                                    <Field
+                                      id="connection-account"
+                                      label="Authorized email address"
+                                    >
+                                      <Input
+                                        id="connection-account"
+                                        name="account"
+                                        type="email"
+                                        autoComplete="email"
+                                        required
+                                        maxLength={254}
+                                        defaultValue={
+                                          connection?.configuration.account ??
+                                          ""
+                                        }
+                                      />
+                                    </Field>
+                                    <Enabled
+                                      prefix="connection"
+                                      value={
+                                        connection?.configuration.enabled ??
+                                        true
+                                      }
+                                    />
+                                    <Button type="submit">
+                                      Save connection settings
+                                    </Button>
+                                  </fieldset>
+                                  {feedback("connections")}
+                                </FieldGroup>
+                              </form>
+                            </CardContent>
+                          </Card>
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Where replies arrive</CardTitle>
+                              <p className="text-sm text-muted-foreground">
+                                Route replies to an explicitly selected sales
+                                inbox. One identity is selected for responses
+                                from each routed inbox; no fallback sender is
+                                chosen. Reply-reading permission,
+                                synchronization and capture must each be
+                                checked.
+                              </p>
+                            </CardHeader>
+                            <CardContent className="flex flex-col gap-5">
+                              <Link
+                                href={`/businesses/${businessId}/inbox`}
+                                className="inline-flex min-h-11 items-center text-primary underline"
+                              >
+                                Manage selected inboxes
+                              </Link>
+                              {!state.inboxes.length && (
+                                <p className="text-sm text-muted-foreground">
+                                  Add an email inbox connection in the shared
+                                  sales inbox before saving a reply route. An
+                                  import connection alone does not establish
+                                  live synchronization.
+                                </p>
+                              )}
+                              <Field
+                                id="edit-route"
+                                label="Reply route to edit"
+                              >
+                                <NativeSelect
+                                  id="edit-route"
+                                  value={routeId}
+                                  onChange={(e) => setRouteId(e.target.value)}
+                                >
+                                  <option value="">Add reply route</option>
+                                  {state.replyRoutes.map((row) => (
+                                    <option key={row.id} value={row.id}>
+                                      {row.configuration.address}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                              </Field>
+                              <form
+                                key={`${routeId}-${route?.version ?? 0}`}
+                                onSubmit={(e) =>
+                                  void save(
+                                    e,
+                                    senderSaveSchema(replyRouteSchema),
+                                    "reply-routes",
+                                    (form) => ({
+                                      id: route?.id ?? null,
+                                      expectedVersion: route?.version ?? 0,
+                                      configuration: {
+                                        address: read(form, "address"),
+                                        connectionId: read(
+                                          form,
+                                          "connectionId",
+                                        ),
+                                        inboxConnectionId: read(
+                                          form,
+                                          "inboxConnectionId",
+                                        ),
+                                        enabled: form.has("enabled"),
+                                      },
+                                    }),
+                                  )
+                                }
+                              >
+                                <FieldGroup className="gap-5">
+                                  <fieldset
+                                    disabled={pending}
+                                    className="flex flex-col gap-4"
+                                  >
+                                    <Field
+                                      id="route-address"
+                                      label="Reply-to address"
+                                    >
+                                      <Input
+                                        id="route-address"
+                                        name="address"
+                                        type="email"
+                                        required
+                                        maxLength={254}
+                                        defaultValue={
+                                          route?.configuration.address ?? ""
+                                        }
+                                      />
+                                    </Field>
+                                    <Field
+                                      id="route-connection"
+                                      label="Reply-reading connection"
+                                    >
+                                      <NativeSelect
+                                        id="route-connection"
+                                        name="connectionId"
+                                        required
+                                        defaultValue={
+                                          route?.configuration.connectionId ??
+                                          ""
+                                        }
+                                      >
+                                        <option value="" disabled>
+                                          Select a connection
+                                        </option>
+                                        {state.connections.map((row) => (
+                                          <option key={row.id} value={row.id}>
+                                            {row.configuration.label} ·{" "}
+                                            {row.configuration.account}
+                                          </option>
+                                        ))}
+                                      </NativeSelect>
+                                    </Field>
+                                    <Field
+                                      id="route-inbox"
+                                      label="Inbox receiving replies"
+                                    >
+                                      <NativeSelect
+                                        id="route-inbox"
+                                        name="inboxConnectionId"
+                                        required
+                                        defaultValue={
+                                          route?.configuration
+                                            .inboxConnectionId ?? ""
+                                        }
+                                      >
+                                        <option value="" disabled>
+                                          Select a sales inbox
+                                        </option>
+                                        {state.inboxes.map((row) => (
+                                          <option key={row.id} value={row.id}>
+                                            {row.label}
+                                            {row.active ? "" : " (revoked)"}
+                                          </option>
+                                        ))}
+                                      </NativeSelect>
+                                    </Field>
+                                    <Enabled
+                                      prefix="route"
+                                      value={
+                                        route?.configuration.enabled ?? true
+                                      }
+                                    />
+                                    <Button type="submit">
+                                      Save reply route
+                                    </Button>
+                                  </fieldset>
+                                  {feedback("reply-routes")}
+                                </FieldGroup>
+                              </form>
+                            </CardContent>
+                          </Card>
+                          <Card id="identity-editor">
+                            <CardHeader>
+                              <CardTitle>Sending address and purpose</CardTitle>
+                              <p className="text-sm text-muted-foreground">
+                                Keep dedicated outreach separate from ordinary
+                                sales. Use an address the Business controls or
+                                an approved service-provided address. Setup
+                                checks must confirm control and truthful
+                                identification.
+                              </p>
+                            </CardHeader>
+                            <CardContent className="flex flex-col gap-5">
+                              <Field
+                                id="edit-identity"
+                                label="Identity to edit"
+                              >
+                                <NativeSelect
+                                  id="edit-identity"
+                                  value={identityId}
+                                  onChange={(e) =>
+                                    setIdentityId(e.target.value)
+                                  }
+                                >
+                                  <option value="">Add sending identity</option>
+                                  {state.identities.map((row) => (
+                                    <option key={row.id} value={row.id}>
+                                      {purposes[row.configuration.purpose]} ·{" "}
+                                      {row.configuration.fromAddress}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                              </Field>
+                              <form
+                                key={`${identityId}-${identity?.version ?? 0}`}
+                                onSubmit={(e) =>
+                                  void save(
+                                    e,
+                                    senderSaveSchema(senderIdentitySchema),
+                                    "identities",
+                                    (form) => ({
+                                      id: identity?.id ?? null,
+                                      expectedVersion: identity?.version ?? 0,
+                                      configuration: {
+                                        origin: read(form, "origin"),
+                                        purpose: read(form, "purpose"),
+                                        fromAddress: read(form, "fromAddress"),
+                                        displayName: read(form, "displayName"),
+                                        uses: form.getAll("uses"),
+                                        connectionId:
+                                          read(form, "connectionId") || null,
+                                        replyRouteId:
+                                          read(form, "replyRouteId") || null,
+                                        enabled: form.has("enabled"),
+                                      },
+                                    }),
+                                  )
+                                }
+                              >
+                                <FieldGroup className="gap-5">
+                                  <fieldset
+                                    disabled={pending}
+                                    className="flex flex-col gap-4"
+                                  >
+                                    <Field
+                                      id="identity-origin"
+                                      label="Address origin"
+                                    >
+                                      <NativeSelect
+                                        id="identity-origin"
+                                        name="origin"
+                                        required
+                                        defaultValue={
+                                          identity?.configuration.origin ?? ""
+                                        }
+                                      >
+                                        <option value="" disabled>
+                                          Select address origin
+                                        </option>
+                                        {Object.entries(origins).map(
+                                          ([value, label]) => (
+                                            <option key={value} value={value}>
+                                              {label}
+                                            </option>
+                                          ),
+                                        )}
+                                      </NativeSelect>
+                                    </Field>
+                                    <Field
+                                      id="identity-purpose"
+                                      label="Identity purpose"
+                                    >
+                                      <NativeSelect
+                                        id="identity-purpose"
+                                        name="purpose"
+                                        defaultValue={
+                                          identity?.configuration.purpose ??
+                                          "ordinary_sales"
+                                        }
+                                      >
+                                        {Object.entries(purposes).map(
+                                          ([value, label]) => (
+                                            <option key={value} value={value}>
+                                              {label}
+                                            </option>
+                                          ),
+                                        )}
+                                      </NativeSelect>
+                                    </Field>
+                                    <Field
+                                      id="identity-from"
+                                      label="From address"
+                                    >
+                                      <Input
+                                        id="identity-from"
+                                        name="fromAddress"
+                                        type="email"
+                                        required
+                                        maxLength={254}
+                                        defaultValue={
+                                          identity?.configuration.fromAddress ??
+                                          ""
+                                        }
+                                      />
+                                    </Field>
+                                    <Field
+                                      id="identity-name"
+                                      label="Sender or team name"
+                                    >
+                                      <Input
+                                        id="identity-name"
+                                        name="displayName"
+                                        required
+                                        maxLength={120}
+                                        defaultValue={
+                                          identity?.configuration.displayName ??
+                                          ""
+                                        }
+                                      />
+                                    </Field>
+                                    <p className="text-sm text-muted-foreground">
+                                      The current Business name and platform
+                                      identification accompany this name.
+                                    </p>
+                                    <Field
+                                      id="identity-connection"
+                                      label="Sending connection"
+                                    >
+                                      <NativeSelect
+                                        id="identity-connection"
+                                        name="connectionId"
+                                        defaultValue={
+                                          identity?.configuration
+                                            .connectionId ?? ""
+                                        }
+                                      >
+                                        <option value="">Not configured</option>
+                                        {state.connections.map((row) => (
+                                          <option key={row.id} value={row.id}>
+                                            {row.configuration.label} ·{" "}
+                                            {row.configuration.account}
+                                          </option>
+                                        ))}
+                                      </NativeSelect>
+                                    </Field>
+                                    <Field
+                                      id="identity-route"
+                                      label="Reply route"
+                                    >
+                                      <NativeSelect
+                                        id="identity-route"
+                                        name="replyRouteId"
+                                        defaultValue={
+                                          identity?.configuration
+                                            .replyRouteId ?? ""
+                                        }
+                                      >
+                                        <option value="">Not configured</option>
+                                        {state.replyRoutes.map((row) => (
+                                          <option key={row.id} value={row.id}>
+                                            {row.configuration.address}
+                                          </option>
+                                        ))}
+                                      </NativeSelect>
+                                    </Field>
+                                    <fieldset className="flex flex-col gap-2">
+                                      <legend className="text-sm font-medium">
+                                        Intended uses
+                                      </legend>
+                                      {senderUseSchema.options.map((use) => (
+                                        <label
+                                          key={use}
+                                          className="flex min-h-11 items-center gap-3"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            name="uses"
+                                            value={use}
+                                            defaultChecked={
+                                              identity?.configuration.uses.includes(
+                                                use,
+                                              ) ??
+                                              (use === "inbound" ||
+                                                use === "existing_conversation")
+                                            }
+                                            className="size-5 accent-primary"
+                                          />
+                                          {useLabels[use]}
+                                        </label>
+                                      ))}
+                                    </fieldset>
+                                    <Enabled
+                                      prefix="identity"
+                                      value={
+                                        identity?.configuration.enabled ?? true
+                                      }
+                                    />
+                                    <Button type="submit">Save identity</Button>
+                                  </fieldset>
+                                  {feedback("identities")}
+                                </FieldGroup>
+                              </form>
+                            </CardContent>
+                          </Card>
+                        </>
+                      )}
+                    </>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
     </div>
   );
 }

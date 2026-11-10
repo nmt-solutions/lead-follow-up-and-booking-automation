@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { ConfigurationForm } from "@/components/configuration-form";
@@ -6,7 +6,7 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Business setup" };
+export const metadata = { title: "Search setup" };
 export default async function ConfigurationPage({
   params,
 }: {
@@ -33,10 +33,7 @@ export default async function ConfigurationPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Business setup</>}
-        description={<>Your saved products, customers, and search areas.</>}
-      ></PageHeader>
+      <BusinessPageHeader section="configuration"></BusinessPageHeader>
       <ConfigurationForm
         businessId={businessId}
         offering={state.profile.offering}

@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { TaxManager } from "@/components/tax-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Subscription tax preview" };
+export const metadata = { title: "Tax details" };
 export default async function TaxPage({
   params,
 }: {
@@ -23,16 +23,7 @@ export default async function TaxPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Subscription tax preview</>}
-        description={
-          <>
-            See a calculated total or the reasons an operator review is
-            required. Each request preserves its original evidence and
-            treatment.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="tax"></BusinessPageHeader>
       <TaxManager businessId={businessId} initial={state} />
     </div>
   );

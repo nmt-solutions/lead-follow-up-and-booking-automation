@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { Field, FieldGroup } from "./ui/field";
 
 import { useRef, useState, type FormEvent } from "react";
@@ -24,10 +25,10 @@ const responseSchema = z.discriminatedUnion("success", [
   z.object({ success: z.literal(false), code: z.string() }),
 ]);
 const groups = [
-  ["discovery", "Discovery quality"],
-  ["sales", "Sales outcomes"],
-  ["communication", "Communication"],
-  ["activity", "Human activity"],
+  ["discovery", "Prospect searches"],
+  ["sales", "Sales results"],
+  ["communication", "Messages"],
+  ["activity", "Team activity"],
   ["cost", "Usage and cost"],
 ] as const;
 const number = (value: number) =>
@@ -47,16 +48,16 @@ function MetricRow({ metric }: { metric: ReportMetric }) {
         </span>
         {metric.denominator !== null && (
           <span className="mt-2 block text-sm text-muted-foreground">
-            Population: {number(metric.denominator)} ·{" "}
+            Total included: {number(metric.denominator)} ·{" "}
             {metric.ratio === null
-              ? "Rate unavailable (no usable denominator)"
+              ? "No total available for this rate"
               : `${number(metric.ratio * 100)}% of this population`}
           </span>
         )}
       </summary>
       <div className="flex flex-col mt-3 gap-2 text-sm leading-relaxed">
         <p>{metric.definition}</p>
-        <p className="text-muted-foreground">Cohort: {metric.cohort}</p>
+        <p className="text-muted-foreground">Includes: {metric.cohort}</p>
       </div>
     </details>
   );
@@ -153,14 +154,14 @@ export function BusinessReportPanel({
     <div className="flex flex-col gap-8" aria-busy={busy}>
       <Card>
         <CardHeader>
-          <CardTitle>Reporting interval</CardTitle>
+          <CardTitle>Date range</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={submit} className="flex flex-col gap-4">
             <FieldGroup className="gap-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field className="flex flex-col gap-2">
-                  <Label htmlFor="report-from">From (UTC)</Label>
+                  <Label htmlFor="report-from">From, UTC</Label>
                   <Input
                     id="report-from"
                     type="datetime-local"
@@ -170,9 +171,7 @@ export function BusinessReportPanel({
                   />
                 </Field>
                 <Field className="flex flex-col gap-2">
-                  <Label htmlFor="report-to">
-                    Through (UTC; blank uses current time)
-                  </Label>
+                  <Label htmlFor="report-to">To, UTC, optional</Label>
                   <Input
                     id="report-to"
                     type="datetime-local"
@@ -182,15 +181,13 @@ export function BusinessReportPanel({
                 </Field>
               </div>
               <Field className="flex flex-col gap-2">
-                <Label htmlFor="report-detail-category">
-                  Source detail section
-                </Label>
+                <Label htmlFor="report-detail-category">Show details for</Label>
                 <NativeSelect
                   id="report-detail-category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                 >
-                  <option value="all">All source details</option>
+                  <option value="all">All activity</option>
                   <option value="discovery">Discovery</option>
                   <option value="sales">Sales</option>
                   <option value="communication">Communication</option>
@@ -201,10 +198,8 @@ export function BusinessReportPanel({
                 {busy ? "Loading report…" : "Update report"}
               </Button>
               <p className="text-sm text-muted-foreground">
-                Filters apply source event or cohort times named on each
-                measure. Current states and freshness use the report generation
-                time. Counts include all retained records, across every source
-                detail page.
+                The dates apply to the results below. The activity filter
+                changes the activity records only.
               </p>
               {error && (
                 <Alert role="alert">
@@ -240,129 +235,169 @@ export function BusinessReportPanel({
         </CardContent>
       </Card>
       {report && (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Coverage and interpretation</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Generated {report.asOf} · Interval {report.from} through{" "}
-                {report.to}
-              </p>
-            </CardHeader>
-            <CardContent>
-              <ul className="flex flex-col list-disc gap-2 pl-5 text-sm leading-relaxed">
-                {report.coverage.map((text) => (
-                  <li key={text}>{text}</li>
-                ))}
-              </ul>
-              <p className="mt-4 text-sm">
-                Contact accuracy and human hours need measurements that are not
-                currently recorded. Named-role coverage and written activity
-                remain visible separately.
-              </p>
-            </CardContent>
-          </Card>
-          <Tabs defaultValue="discovery" className="flex flex-col gap-5">
-            <TabsList className="h-auto flex-wrap justify-start">
-              {groups.map(([id, label]) => (
-                <TabsTrigger key={id} value={id}>
-                  {label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            {groups.map(([id, label]) => (
-              <TabsContent key={id} value={id}>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{label}</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      Expand a measure for its definition and denominator.
-                      Outcomes can overlap; these sections are not a single
-                      conversion funnel.
-                    </p>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-3">
-                    {report.metrics
-                      .filter((m) => m.group === id)
-                      .map((m) => (
-                        <MetricRow key={m.id} metric={m} />
-                      ))}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            ))}
-          </Tabs>
-          <Card>
-            <CardHeader>
-              <CardTitle>Source details</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                {report.details.total === 0
-                  ? "No retained source details in this interval. Try a wider interval or record sales activity through its normal workflow."
-                  : `Showing ${report.details.offset + 1}–${report.details.offset + report.details.items.length} of ${report.details.total} retained source details. Aggregates cover the complete populations described above.`}
-              </p>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <ol className="flex flex-col gap-3">
-                {report.details.items.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex flex-col gap-2 rounded-xl border border-border p-4 text-sm wrap-anywhere"
+        <WorkspaceTabs
+          tabs={[
+            {
+              id: "results",
+              label: "Results",
+              description:
+                "Review searches, sales and communication results for the selected dates.",
+              content: (
+                <>
+                  <Tabs
+                    defaultValue="discovery"
+                    className="flex flex-col gap-5"
                   >
-                    <div className="flex flex-wrap items-center gap-3">
-                      <Link
-                        className="inline-flex min-h-11 items-center font-medium text-primary underline"
-                        href={item.link}
-                      >
-                        {item.kind.replaceAll("_", " ")}
-                      </Link>
-                      <Badge>{item.state}</Badge>
-                      <span>{item.channel ?? "Shared sales context"}</span>
-                    </div>
-                    <p>{item.note}</p>
-                    <p className="text-muted-foreground">
-                      Source time: {item.at}
-                      {item.version !== null
-                        ? ` · Version ${item.version}`
-                        : ""}
-                    </p>
-                    <details>
-                      <summary className="min-h-11 cursor-pointer content-center rounded-lg focus-visible:outline-2 focus-visible:outline-ring">
-                        Source record identities
-                      </summary>
-                      <p className="mt-2 font-mono text-xs">
-                        {item.sourceIds.join(" · ")}
+                    <TabsList className="h-auto flex-wrap justify-start">
+                      {groups.map(([id, label]) => (
+                        <TabsTrigger key={id} value={id}>
+                          {label}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    {groups.map(([id, label]) => (
+                      <TabsContent key={id} value={id}>
+                        <Card>
+                          <CardHeader>
+                            <CardTitle>{label}</CardTitle>
+                            <p className="text-sm text-muted-foreground">
+                              Open a result to see how it is counted. Outcomes
+                              can overlap; these sections are not a single
+                              conversion funnel.
+                            </p>
+                          </CardHeader>
+                          <CardContent className="flex flex-col gap-3">
+                            {report.metrics
+                              .filter((m) => m.group === id)
+                              .map((m) => (
+                                <MetricRow key={m.id} metric={m} />
+                              ))}
+                          </CardContent>
+                        </Card>
+                      </TabsContent>
+                    ))}
+                  </Tabs>
+                </>
+              ),
+            },
+            {
+              id: "records",
+              label: "Activity records",
+              description:
+                "Review the records behind the counts. These records explain individual events and outcomes.",
+              content: (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Source details</CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        {report.details.total === 0
+                          ? "No retained source details in this interval. Try a wider interval or record sales activity through its normal workflow."
+                          : `Showing ${report.details.offset + 1}–${report.details.offset + report.details.items.length} of ${report.details.total} retained source details. Aggregates cover the complete populations described above.`}
                       </p>
-                    </details>
-                  </li>
-                ))}
-              </ol>
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  variant="outline"
-                  disabled={busy || report.details.offset === 0}
-                  onClick={() =>
-                    void load(
-                      Math.max(0, report.details.offset - report.details.limit),
-                      true,
-                    )
-                  }
-                >
-                  Previous source page
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={busy || report.details.nextOffset === null}
-                  onClick={() =>
-                    report.details.nextOffset !== null &&
-                    void load(report.details.nextOffset, true)
-                  }
-                >
-                  Next source page
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-4">
+                      <ol className="flex flex-col gap-3">
+                        {report.details.items.map((item) => (
+                          <li
+                            key={item.id}
+                            className="flex flex-col gap-2 rounded-xl border border-border p-4 text-sm wrap-anywhere"
+                          >
+                            <div className="flex flex-wrap items-center gap-3">
+                              <Link
+                                className="inline-flex min-h-11 items-center font-medium text-primary underline"
+                                href={item.link}
+                              >
+                                {item.kind.replaceAll("_", " ")}
+                              </Link>
+                              <Badge>{item.state}</Badge>
+                              <span>
+                                {item.channel ?? "Shared sales context"}
+                              </span>
+                            </div>
+                            <p>{item.note}</p>
+                            <p className="text-muted-foreground">
+                              Source time: {item.at}
+                              {item.version !== null
+                                ? ` · Version ${item.version}`
+                                : ""}
+                            </p>
+                            <details>
+                              <summary className="min-h-11 cursor-pointer content-center rounded-lg focus-visible:outline-2 focus-visible:outline-ring">
+                                Records behind these results
+                              </summary>
+                              <p className="mt-2 font-mono text-xs">
+                                {item.sourceIds.join(" · ")}
+                              </p>
+                            </details>
+                          </li>
+                        ))}
+                      </ol>
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          variant="outline"
+                          disabled={busy || report.details.offset === 0}
+                          onClick={() =>
+                            void load(
+                              Math.max(
+                                0,
+                                report.details.offset - report.details.limit,
+                              ),
+                              true,
+                            )
+                          }
+                        >
+                          Previous source page
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={busy || report.details.nextOffset === null}
+                          onClick={() =>
+                            report.details.nextOffset !== null &&
+                            void load(report.details.nextOffset, true)
+                          }
+                        >
+                          Next source page
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              ),
+            },
+            {
+              id: "definitions",
+              label: "How results are counted",
+              description:
+                "Check which records each measure includes and what has not been measured.",
+              content: (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>How to read these results</CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Generated {report.asOf} · Interval {report.from} through{" "}
+                        {report.to}
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="flex flex-col list-disc gap-2 pl-5 text-sm leading-relaxed">
+                        {report.coverage.map((text) => (
+                          <li key={text}>{text}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-4 text-sm">
+                        Contact accuracy and human hours need measurements that
+                        are not currently recorded. Named-role coverage and
+                        written activity remain visible separately.
+                      </p>
+                    </CardContent>
+                  </Card>
+                </>
+              ),
+            },
+          ]}
+        />
       )}
     </div>
   );

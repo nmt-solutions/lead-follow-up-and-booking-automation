@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { TeamManager } from "@/components/team-manager";
@@ -6,7 +6,7 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Manage team" };
+export const metadata = { title: "Team members" };
 export default async function TeamPage({
   params,
 }: {
@@ -30,12 +30,7 @@ export default async function TeamPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Team access</>}
-        description={
-          <>Invite people and control what they can do in this Business.</>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="team"></BusinessPageHeader>
       <TeamManager
         businessId={businessId}
         team={data.team}
@@ -45,7 +40,7 @@ export default async function TeamPage({
         href={`/businesses/${businessId}/notifications`}
         className="inline-flex min-h-11 items-center text-primary underline underline-offset-4"
       >
-        Review native invitation acceptance and delivery
+        Check invitation delivery
       </Link>
     </div>
   );

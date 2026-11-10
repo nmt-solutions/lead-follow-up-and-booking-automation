@@ -1,10 +1,10 @@
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 import { PlanBilling } from "@/components/plan-billing";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Plan & billing" };
+export const metadata = { title: "Plan and usage" };
 export default async function Page({
   params,
 }: {
@@ -22,10 +22,7 @@ export default async function Page({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title="Plan & billing"
-        description="Your subscription, monthly allowance and payment controls."
-      />
+      <BusinessPageHeader section="plan"></BusinessPageHeader>
       <PlanBilling businessId={businessId} initial={state} />
     </div>
   );

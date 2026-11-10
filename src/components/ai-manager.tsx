@@ -165,8 +165,8 @@ export function AiManager({
       <Tabs defaultValue="preview" className="flex flex-col gap-6">
         <TabsList>
           <TabsTrigger value="preview">Try the assistant</TabsTrigger>
-          <TabsTrigger value="profiles">AI profiles</TabsTrigger>
-          <TabsTrigger value="setup">Provider status</TabsTrigger>
+          <TabsTrigger value="profiles">Assistant settings</TabsTrigger>
+          <TabsTrigger value="setup">Connection status</TabsTrigger>
           <TabsTrigger value="history">Activity</TabsTrigger>
         </TabsList>
         <TabsContent
@@ -203,14 +203,9 @@ export function AiManager({
             </Field>
             {selected && (
               <p className="text-sm text-muted-foreground">
-                Used {selected.usedAttempts} of{" "}
-                {selected.profile.limits.allowanceAttempts} combined attempts;{" "}
-                {selected.usedFallbackAttempts} of{" "}
-                {selected.profile.limits.fallbackAllowanceAttempts} system
-                fallback attempts. Per task: at most{" "}
-                {selected.profile.limits.maxAttempts} combined attempts,
-                including at most {selected.profile.limits.maxFallbackAttempts}{" "}
-                fallback attempts.
+                AI calls used or reserved: {selected.usedAttempts} of{" "}
+                {selected.profile.limits.allowanceAttempts}. This preview can
+                use up to {selected.profile.limits.maxAttempts} calls.
               </p>
             )}
             <form
@@ -250,7 +245,7 @@ export function AiManager({
             >
               <FieldGroup className="gap-5">
                 <Field className="flex flex-col gap-2">
-                  <Label htmlFor="ai-task">Representative task</Label>
+                  <Label htmlFor="ai-task">What do you want to try?</Label>
                   <NativeSelect
                     id="ai-task"
                     value={task}
@@ -264,12 +259,12 @@ export function AiManager({
                       setReviewed(false);
                     }}
                   >
-                    <option value="extraction">Review source evidence</option>
+                    <option value="extraction">Read source information</option>
                     <option value="drafting">Draft a sales reply</option>
                   </NativeSelect>
                 </Field>
                 <Field className="flex flex-col gap-2">
-                  <Label htmlFor="ai-label">Name this preview</Label>
+                  <Label htmlFor="ai-label">Preview name</Label>
                   <Input
                     id="ai-label"
                     required
@@ -279,6 +274,7 @@ export function AiManager({
                       setLabel(event.target.value);
                       setReviewed(false);
                     }}
+                    placeholder="Example customer inquiry"
                   />
                 </Field>
                 <Field className="flex flex-col gap-2">
@@ -295,6 +291,7 @@ export function AiManager({
                       setText(event.target.value);
                       setReviewed(false);
                     }}
+                    placeholder="Paste a customer question or a short source excerpt to review..."
                   />
                 </Field>
                 <p className="text-sm text-muted-foreground">
@@ -311,8 +308,7 @@ export function AiManager({
                     onChange={(event) => setReviewed(event.target.checked)}
                   />
                   <span>
-                    I reviewed this representative sample and its use with the
-                    approved Business knowledge.
+                    I checked this sample and the approved business information.
                   </span>
                 </label>
                 <label className="flex min-h-11 items-start gap-3">
@@ -324,8 +320,8 @@ export function AiManager({
                     onChange={(event) => setAuthorized(event.target.checked)}
                   />
                   <span>
-                    I authorize this Business context to be sent to the approved
-                    AI provider for this preview.
+                    I allow the approved AI provider to process this sample with
+                    our business information for this preview.
                   </span>
                 </label>
                 <Button
@@ -457,7 +453,7 @@ export function AiManager({
             aria-labelledby="ai-draft"
           >
             <h2 id="ai-draft" className="text-xl font-semibold">
-              Configure an AI profile
+              Set up an assistant
             </h2>
             <p className="text-muted-foreground">
               Each save creates a version. Limits apply to all Businesses using
@@ -569,7 +565,7 @@ export function AiManager({
             aria-labelledby="ai-setup"
           >
             <h2 id="ai-setup" className="text-xl font-semibold">
-              AI provider status
+              AI connection status
             </h2>
             <p>
               Active shared profile:{" "}
@@ -758,7 +754,7 @@ function ExecutionResult({ execution }: { execution: AiExecutionView }) {
       {execution.output && (
         <details>
           <summary className="min-h-11 cursor-pointer py-2 font-medium">
-            Inspect complete proposed output
+            View the full suggested response
           </summary>
           <pre className="whitespace-pre-wrap text-sm wrap-anywhere">
             {JSON.stringify(execution.output, null, 2)}

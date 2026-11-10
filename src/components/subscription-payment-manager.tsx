@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { FieldGroup } from "./ui/field";
 import { openPilotCheckout } from "./razorpay-pilot-checkout";
 import { openReachCheckout } from "./razorpay-reach-checkout";
@@ -199,7 +200,7 @@ function PaymentDetail({ action: a }: { action: PaymentAction }) {
       )}
       <details>
         <summary className="min-h-11 cursor-pointer py-3 text-primary">
-          Saved financial snapshot and provider references
+          Saved payment details
         </summary>
         <pre className="max-h-96 overflow-auto rounded-xl bg-muted p-4 text-xs whitespace-pre-wrap">
           {JSON.stringify(
@@ -467,81 +468,6 @@ export function SubscriptionPaymentManager({
           currencies and merchant activation. Saved records remain available.
         </p>
       )}
-      {state.gateway.key === "razorpay" && (
-        <section
-          className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
-          aria-label="Recurring card readiness"
-        >
-          <h2 className="text-xl font-semibold">Recurring card readiness</h2>
-          <p>
-            Provider mode: {state.gateway.mode}. Card details and mandate
-            authorization stay on Razorpay. eMandate is unavailable.
-          </p>
-          {state.gateway.reasons?.length ? (
-            <ul className="list-disc pl-5">
-              {state.gateway.reasons.map((r) => (
-                <li key={r}>
-                  {r.replaceAll("_", " ")}. Ask the platform operator to review
-                  account setup.
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <p className="text-sm text-muted-foreground">
-            This checkout uses cards. For an eligible UPI AutoPay replacement,
-            open Reach changes and request a separate reviewed agreement. A
-            captured payment and matching invoice establish each paid period.
-          </p>
-        </section>
-      )}
-      <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
-        <h2 className="text-xl font-semibold">Review tax and checkout</h2>
-        <p>
-          Select a saved current quote. The server calculates tax from trusted
-          quote lines and current approved treatment.
-        </p>
-        <Label htmlFor="payment-quote">Subscription quote</Label>
-        <NativeSelect
-          id="payment-quote"
-          value={quoteId}
-          onChange={(e) => setQuoteId(e.target.value)}
-        >
-          <option value="">Choose a quote</option>
-          {quotes.map((q) => (
-            <option key={q.snapshot.id} value={q.snapshot.id}>
-              {q.snapshot.pricing.offer.label} · {q.snapshot.at}
-              {q.commercialReady ? "" : " · needs review"}
-            </option>
-          ))}
-        </NativeSelect>
-        <Button
-          disabled={busy || !quoteId || !state.gateway.ready}
-          onClick={() =>
-            run(async () => {
-              if (request.current?.quoteId !== quoteId)
-                request.current = { quoteId, key: crypto.randomUUID() };
-              await readCommercialResponse(
-                await fetch(base, {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    quoteId,
-                    requestKey: request.current!.key,
-                  }),
-                }),
-                paymentActionSchema,
-              );
-              await refresh();
-              request.current = null;
-              setMessage(
-                "Checkout review saved. Review its tax, total and period before continuing.",
-              );
-            })
-          }
-        >
-          {busy ? "Working…" : "Prepare checkout review"}
-        </Button>
-      </section>
       {error && (
         <Alert variant="destructive" role="alert">
           {error}
@@ -552,206 +478,336 @@ export function SubscriptionPaymentManager({
           {message}
         </p>
       )}
-      <SubscriptionDisclosures />
-      {state.periods.length > 0 && (
-        <section
-          className="flex flex-col gap-4"
-          aria-label="Confirmed charge periods"
-        >
-          <h2 className="text-xl font-semibold">Confirmed charge periods</h2>
-          {state.periods.toReversed().map((p) => (
-            <article
-              key={p.id}
-              className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
-            >
-              <h3 className="font-semibold">
-                {paymentTime(p.start)} through {paymentTime(p.end)}
-              </h3>
-              <p>
-                {p.snapshot.adjustment
-                  ? "Prorated reach adjustment"
-                  : p.snapshot.basis?.kind === "renewal"
-                    ? "Monthly renewal"
-                    : "Initial payment"}{" "}
-                ·{" "}
-                {p.snapshot.tax.totals
-                  ? formatTaxMoney(
-                      p.snapshot.tax.totals.totalMinor,
-                      p.snapshot.quote.currency,
-                    )
-                  : "Amount under review"}
-                ; tax{" "}
-                {p.snapshot.tax.totals
-                  ? formatTaxMoney(
-                      p.snapshot.tax.totals.taxMinor,
-                      p.snapshot.quote.currency,
-                    )
-                  : "under review"}
-                .
-              </p>
-              {p.charge?.charge && (
-                <p className="text-sm text-muted-foreground">
-                  {p.charge.charge.international ? "International" : "Domestic"}{" "}
-                  captured card payment {p.paymentId}.{" "}
-                  {p.charge.charge.invoiceId
-                    ? `Provider invoice reference: ${p.charge.charge.invoiceId}`
-                    : `Provider order reference: ${p.charge.charge.orderId}`}
-                  . This reference is collection evidence; seller invoices are
-                  issued separately.
-                </p>
-              )}
-              <details>
-                <summary className="min-h-11 cursor-pointer py-3 text-primary">
-                  Frozen charge, tax and allowance evidence
-                </summary>
-                <pre className="max-h-96 overflow-auto rounded-xl bg-muted p-4 text-xs whitespace-pre-wrap">
-                  {JSON.stringify(
-                    { periodId: p.id, snapshot: p.snapshot, charge: p.charge },
-                    null,
-                    2,
+      <WorkspaceTabs
+        label="Payments sections"
+        tabs={[
+          {
+            id: "payments",
+            label: "Payments",
+            description:
+              "Review completed, failed and pending payment attempts. Refresh a pending result before trying again.",
+            content: (
+              <>
+                <section className="flex flex-col gap-4">
+                  <h2 className="text-xl font-semibold">Payment history</h2>
+                  {!state.actions.length && (
+                    <p>No checkout reviews yet. Choose a quote above.</p>
                   )}
-                </pre>
-              </details>
-            </article>
-          ))}
-        </section>
-      )}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-xl font-semibold">Payment history</h2>
-        {!state.actions.length && (
-          <p>No checkout reviews yet. Choose a quote above.</p>
-        )}
-        {state.actions.toReversed().map((a) => (
-          <article
-            key={a.id}
-            className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
-          >
-            <PaymentDetail action={a} />
-            {a.snapshot.term.kind === "days" && a.state === "confirmed" && (
-              <details className="rounded-xl border border-border p-4">
-                <summary className="min-h-11 cursor-pointer font-medium">
-                  Approve a separate monthly mandate
-                </summary>
-                <p className="my-3">
-                  The pilot is a one-time payment. Monthly continuation needs a
-                  separate card mandate and explicit approval. The original
-                  agreed monthly price is{" "}
-                  {formatTaxMoney(
-                    String(a.snapshot.quote.renewal.subtotalMinor),
-                    a.snapshot.quote.currency,
-                  )}{" "}
-                  before current tax. Original pilot days and allowances stay
-                  unchanged. Select a future start; starting after the original
-                  paid end leaves a gap. Authorization alone is not paid
-                  renewal.
-                </p>
-                <form
-                  className="flex flex-col gap-4"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const form = e.currentTarget;
-                    void run(() => prepareMonthly(a, form));
-                  }}
-                >
-                  <FieldGroup className="gap-4">
-                    <Label htmlFor={`monthly-start-${a.id}`}>
-                      Monthly start (your local time)
-                    </Label>
-                    <Input
-                      id={`monthly-start-${a.id}`}
-                      name="startAt"
-                      type="datetime-local"
-                      required
-                    />
-                    <Label htmlFor={`monthly-expiry-${a.id}`}>
-                      Approval expiry before monthly start (your local time)
-                    </Label>
-                    <Input
-                      id={`monthly-expiry-${a.id}`}
-                      name="expiresAt"
-                      type="datetime-local"
-                      required
-                    />
-                    <label className="flex min-h-11 items-center gap-3">
-                      <input
-                        type="checkbox"
-                        name="agree"
-                        required
-                        className="size-5"
+                  {state.actions.toReversed().map((a) => (
+                    <article
+                      key={a.id}
+                      className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
+                    >
+                      <PaymentDetail action={a} />
+                      {a.snapshot.term.kind === "days" &&
+                        a.state === "confirmed" && (
+                          <details className="rounded-xl border border-border p-4">
+                            <summary className="min-h-11 cursor-pointer font-medium">
+                              Approve a separate monthly mandate
+                            </summary>
+                            <p className="my-3">
+                              The pilot is a one-time payment. Monthly
+                              continuation needs a separate card mandate and
+                              explicit approval. The original agreed monthly
+                              price is{" "}
+                              {formatTaxMoney(
+                                String(a.snapshot.quote.renewal.subtotalMinor),
+                                a.snapshot.quote.currency,
+                              )}{" "}
+                              before current tax. Original pilot days and
+                              allowances stay unchanged. Select a future start;
+                              starting after the original paid end leaves a gap.
+                              Authorization alone is not paid renewal.
+                            </p>
+                            <form
+                              className="flex flex-col gap-4"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                const form = e.currentTarget;
+                                void run(() => prepareMonthly(a, form));
+                              }}
+                            >
+                              <FieldGroup className="gap-4">
+                                <Label htmlFor={`monthly-start-${a.id}`}>
+                                  Monthly start (your local time)
+                                </Label>
+                                <Input
+                                  id={`monthly-start-${a.id}`}
+                                  name="startAt"
+                                  type="datetime-local"
+                                  required
+                                />
+                                <Label htmlFor={`monthly-expiry-${a.id}`}>
+                                  Approval expiry before monthly start (your
+                                  local time)
+                                </Label>
+                                <Input
+                                  id={`monthly-expiry-${a.id}`}
+                                  name="expiresAt"
+                                  type="datetime-local"
+                                  required
+                                />
+                                <label className="flex min-h-11 items-center gap-3">
+                                  <input
+                                    type="checkbox"
+                                    name="agree"
+                                    required
+                                    className="size-5"
+                                  />
+                                  I approve this separate mandate for the
+                                  original agreed monthly price and allowances
+                                  at the selected start.
+                                </label>
+                                <Button disabled={busy}>
+                                  Prepare monthly mandate review
+                                </Button>
+                              </FieldGroup>
+                            </form>
+                          </details>
+                        )}
+                      <SubscriptionLifecyclePanel
+                        action={a}
+                        busy={busy}
+                        onUpdate={() =>
+                          run(() => lifecycleCommand("update-payment", a.id))
+                        }
+                        onCancel={() =>
+                          run(() => lifecycleCommand("cancel", a.id))
+                        }
                       />
-                      I approve this separate mandate for the original agreed
-                      monthly price and allowances at the selected start.
-                    </label>
-                    <Button disabled={busy}>
-                      Prepare monthly mandate review
-                    </Button>
-                  </FieldGroup>
-                </form>
-              </details>
-            )}
-            <SubscriptionLifecyclePanel
-              action={a}
-              busy={busy}
-              onUpdate={() =>
-                run(() => lifecycleCommand("update-payment", a.id))
-              }
-              onCancel={() => run(() => lifecycleCommand("cancel", a.id))}
-            />
-            <div className="flex flex-wrap gap-3">
-              {a.state === "reviewed" && (
-                <Button
-                  disabled={busy}
-                  onClick={() => run(() => command("start", a.id))}
-                >
-                  {busy ? "Working…" : "Create hosted checkout"}
-                </Button>
-              )}
-              {a.checkout?.standard && (
-                <Button
-                  disabled={busy}
-                  onClick={() => run(() => pilotCheckout(a))}
-                >
-                  Pay the one-time pilot
-                </Button>
-              )}
-              {a.checkout?.mandate && a.state === "checkout" && (
-                <Button
-                  disabled={busy}
-                  onClick={() => run(() => monthlyCheckout(a))}
-                >
-                  Authorize the separate monthly mandate
-                </Button>
-              )}
-              {a.checkout &&
-                !a.checkout.standard &&
-                !a.checkout.mandate &&
-                a.state === "checkout" && (
-                  <Button asChild>
-                    <a href={a.checkout.url} rel="noreferrer">
-                      Continue to secure checkout
-                    </a>
-                  </Button>
-                )}
-              {a.started &&
-                [
-                  "pending",
-                  "checkout",
-                  "failed",
-                  "review_required",
-                  "confirmed",
-                ].includes(a.state) && (
-                  <Button
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => run(() => command("refresh", a.id))}
+                      <div className="flex flex-wrap gap-3">
+                        {a.state === "reviewed" && (
+                          <Button
+                            disabled={busy}
+                            onClick={() => run(() => command("start", a.id))}
+                          >
+                            {busy ? "Working…" : "Create hosted checkout"}
+                          </Button>
+                        )}
+                        {a.checkout?.standard && (
+                          <Button
+                            disabled={busy}
+                            onClick={() => run(() => pilotCheckout(a))}
+                          >
+                            Pay the one-time pilot
+                          </Button>
+                        )}
+                        {a.checkout?.mandate && a.state === "checkout" && (
+                          <Button
+                            disabled={busy}
+                            onClick={() => run(() => monthlyCheckout(a))}
+                          >
+                            Authorize the separate monthly mandate
+                          </Button>
+                        )}
+                        {a.checkout &&
+                          !a.checkout.standard &&
+                          !a.checkout.mandate &&
+                          a.state === "checkout" && (
+                            <Button asChild>
+                              <a href={a.checkout.url} rel="noreferrer">
+                                Continue to secure checkout
+                              </a>
+                            </Button>
+                          )}
+                        {a.started &&
+                          [
+                            "pending",
+                            "checkout",
+                            "failed",
+                            "review_required",
+                            "confirmed",
+                          ].includes(a.state) && (
+                            <Button
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                run(() => command("refresh", a.id))
+                              }
+                            >
+                              {busy ? "Working…" : "Reconcile payment status"}
+                            </Button>
+                          )}
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              </>
+            ),
+          },
+          {
+            id: "periods",
+            label: "Paid periods",
+            description:
+              "Check the service periods confirmed by captured payments.",
+            content: (
+              <>
+                {state.periods.length > 0 && (
+                  <section
+                    className="flex flex-col gap-4"
+                    aria-label="Confirmed paid periods"
                   >
-                    {busy ? "Working…" : "Reconcile payment status"}
-                  </Button>
+                    <h2 className="text-xl font-semibold">
+                      Confirmed paid periods
+                    </h2>
+                    {state.periods.toReversed().map((p) => (
+                      <article
+                        key={p.id}
+                        className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 wrap-anywhere"
+                      >
+                        <h3 className="font-semibold">
+                          {paymentTime(p.start)} through {paymentTime(p.end)}
+                        </h3>
+                        <p>
+                          {p.snapshot.adjustment
+                            ? "Prorated reach adjustment"
+                            : p.snapshot.basis?.kind === "renewal"
+                              ? "Monthly renewal"
+                              : "Initial payment"}{" "}
+                          ·{" "}
+                          {p.snapshot.tax.totals
+                            ? formatTaxMoney(
+                                p.snapshot.tax.totals.totalMinor,
+                                p.snapshot.quote.currency,
+                              )
+                            : "Amount under review"}
+                          ; tax{" "}
+                          {p.snapshot.tax.totals
+                            ? formatTaxMoney(
+                                p.snapshot.tax.totals.taxMinor,
+                                p.snapshot.quote.currency,
+                              )
+                            : "under review"}
+                          .
+                        </p>
+                        {p.charge?.charge && (
+                          <p className="text-sm text-muted-foreground">
+                            {p.charge.charge.international
+                              ? "International"
+                              : "Domestic"}{" "}
+                            captured card payment {p.paymentId}.{" "}
+                            {p.charge.charge.invoiceId
+                              ? `Provider invoice reference: ${p.charge.charge.invoiceId}`
+                              : `Provider order reference: ${p.charge.charge.orderId}`}
+                            . This reference is collection evidence; seller
+                            invoices are issued separately.
+                          </p>
+                        )}
+                        <details>
+                          <summary className="min-h-11 cursor-pointer py-3 text-primary">
+                            Price, tax and allowances for this payment
+                          </summary>
+                          <pre className="max-h-96 overflow-auto rounded-xl bg-muted p-4 text-xs whitespace-pre-wrap">
+                            {JSON.stringify(
+                              {
+                                periodId: p.id,
+                                snapshot: p.snapshot,
+                                charge: p.charge,
+                              },
+                              null,
+                              2,
+                            )}
+                          </pre>
+                        </details>
+                      </article>
+                    ))}
+                  </section>
                 )}
-            </div>
-          </article>
-        ))}
-      </section>
+              </>
+            ),
+          },
+          {
+            id: "checkout",
+            label: "Checkout review",
+            description:
+              "Review tax and the supported payment method before opening checkout.",
+            content: (
+              <>
+                {state.gateway.key === "razorpay" && (
+                  <section className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6">
+                    <h2 className="text-xl font-semibold">Pay by card</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Razorpay handles card entry and consent for recurring
+                      payments.
+                    </p>
+                    {!state.gateway.ready && (
+                      <p className="text-sm text-muted-foreground">
+                        Checkout needs configuration in Lead Relay.{" "}
+                        <Link
+                          href="/contact"
+                          className="text-primary underline"
+                        >
+                          Contact support for help
+                        </Link>
+                        . Your saved quotes and past payments remain available.
+                      </p>
+                    )}
+                    <p className="text-sm text-muted-foreground">
+                      Review the total and renewal terms before approving
+                      payment. Your paid period starts after payment is
+                      confirmed.
+                    </p>
+                  </section>
+                )}
+                <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
+                  <h2 className="text-xl font-semibold">
+                    Check the total before payment
+                  </h2>
+                  <p>
+                    Select a saved current quote. The server calculates tax from
+                    trusted quote lines and current approved treatment.
+                  </p>
+                  <Label htmlFor="payment-quote">Subscription quote</Label>
+                  <NativeSelect
+                    id="payment-quote"
+                    value={quoteId}
+                    onChange={(e) => setQuoteId(e.target.value)}
+                  >
+                    <option value="">Choose a quote</option>
+                    {quotes.map((q) => (
+                      <option key={q.snapshot.id} value={q.snapshot.id}>
+                        {q.snapshot.pricing.offer.label} · {q.snapshot.at}
+                        {q.commercialReady ? "" : " · needs review"}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <Button
+                    disabled={busy || !quoteId || !state.gateway.ready}
+                    onClick={() =>
+                      run(async () => {
+                        if (request.current?.quoteId !== quoteId)
+                          request.current = {
+                            quoteId,
+                            key: crypto.randomUUID(),
+                          };
+                        await readCommercialResponse(
+                          await fetch(base, {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({
+                              quoteId,
+                              requestKey: request.current!.key,
+                            }),
+                          }),
+                          paymentActionSchema,
+                        );
+                        await refresh();
+                        request.current = null;
+                        setMessage(
+                          "Checkout review saved. Review its tax, total and period before continuing.",
+                        );
+                      })
+                    }
+                  >
+                    {busy ? "Working…" : "Prepare checkout review"}
+                  </Button>
+                </section>
+                <SubscriptionDisclosures />
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

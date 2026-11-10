@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { PilotManager, type PilotChoices } from "@/components/pilot-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Paid pilot preparation and evidence" };
+export const metadata = { title: "Paid pilot projects" };
 export default async function PilotPage({
   params,
 }: PageProps<"/businesses/[businessId]/pilots">) {
@@ -130,16 +130,7 @@ export default async function PilotPage({
   };
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Paid pilot preparation and evidence</>}
-        description={
-          <>
-            Agree an actual bounded evaluation, verify each selected path, and
-            retain measured results before recording paid continuation and a
-            contrasting workflow.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="pilots"></BusinessPageHeader>
       <PilotManager
         businessId={businessId}
         initial={initial}

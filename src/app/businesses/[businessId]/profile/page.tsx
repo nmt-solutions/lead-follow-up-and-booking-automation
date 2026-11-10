@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { ProfileForm } from "@/components/profile-form";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Edit profile" };
+export const metadata = { title: "Business details" };
 export default async function BusinessPage({
   params,
 }: {
@@ -36,10 +36,7 @@ export default async function BusinessPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Business profile</>}
-        description={<>Update your name, website, and products or services.</>}
-      ></PageHeader>
+      <BusinessPageHeader section="profile"></BusinessPageHeader>
       {access.role === "salesperson" ? (
         <dl className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-6">
           {[

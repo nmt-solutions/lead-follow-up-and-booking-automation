@@ -5,7 +5,7 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { WhatsAppSendingManager } from "@/components/whatsapp-sending-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "WhatsApp messages" };
+export const metadata = { title: "WhatsApp campaigns" };
 export default async function Page({
   params,
 }: PageProps<"/businesses/[businessId]/whatsapp/sending">) {
@@ -22,11 +22,11 @@ export default async function Page({
   return (
     <div className="app-page">
       <PageHeader
-        title={<>WhatsApp messages</>}
+        title={<>WhatsApp campaigns</>}
         description={
           <>
-            Review recipient permission, exact messages and saved outcomes. Your
-            Business pays Meta separately.
+            Review contact permissions, templates and message outcomes. Meta
+            bills WhatsApp usage separately.
           </>
         }
       ></PageHeader>

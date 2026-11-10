@@ -53,6 +53,7 @@ import {
 import { ApplicationError } from "../models/application-error";
 import type { Actor } from "../models/business";
 import { paidAllowance, readPaidContract } from "./paid-access";
+import type { CreditUsage } from "../models/credit-usage";
 import { z } from "zod";
 import {
   billingState,
@@ -1073,6 +1074,36 @@ export function createSubscriptionPaymentRepository(database: Database) {
         },
         { lock: true },
       );
+    },
+    // Team members can see shared allowances, without invoices, prices or payment references.
+    usage(actor: Actor, businessId: string, at: Date): Promise<CreditUsage> {
+      return scoped(database, actor, businessId, async (tx) => {
+        await requireCapability(tx, actor, businessId, "profile.read");
+        await lockBusiness(tx, businessId);
+        await requireCapability(tx, actor, businessId, "profile.read");
+        const discovery = await paidAllowance(tx, businessId, "discovery", at);
+        const automation = await paidAllowance(
+          tx,
+          businessId,
+          "automation",
+          at,
+        );
+        const contract = await readPaidContract(tx, businessId, at);
+        const pool = (item: NonNullable<typeof discovery>) => ({
+          unit: item.allowance.unit,
+          included: item.allowance.quantity,
+          reserved: item.allowance.quantity - item.remaining,
+          remaining: item.remaining,
+        });
+        return {
+          active: Boolean(discovery && automation),
+          paidThrough: contract?.end ?? null,
+          allowances:
+            discovery && automation
+              ? { discovery: pool(discovery), automation: pool(automation) }
+              : null,
+        };
+      });
     },
     workspace(
       actor: Actor,

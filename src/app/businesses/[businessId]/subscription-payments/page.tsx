@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { SubscriptionPaymentManager } from "@/components/subscription-payment-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Subscription payments" };
+export const metadata = { title: "Payment history" };
 export default async function SubscriptionPaymentsPage({
   params,
 }: {
@@ -27,28 +27,20 @@ export default async function SubscriptionPaymentsPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Subscription payments</>}
-        description={
-          <>
-            Review the exact tax, total and intended period before hosted
-            checkout. Paid access starts after provider confirmation.
-          </>
-        }
-      >
+      <BusinessPageHeader section="subscription-payments">
         <Link
           href={`/businesses/${businessId}/reach-changes`}
           className="mt-3 mr-5 inline-flex min-h-11 items-center text-primary underline"
         >
-          Change geographic reach
+          Review search areas
         </Link>
         <Link
           href={`/businesses/${businessId}/seller-documents`}
           className="mt-3 inline-flex min-h-11 items-center text-primary underline"
         >
-          View invoices and credit notes
+          Invoices and credit notes
         </Link>
-      </PageHeader>
+      </BusinessPageHeader>
       <SubscriptionPaymentManager
         businessId={businessId}
         initial={data.state}

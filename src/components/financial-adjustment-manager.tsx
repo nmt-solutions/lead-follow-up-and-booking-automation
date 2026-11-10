@@ -183,7 +183,7 @@ function Status({ c }: { c: AdjustmentView }) {
       {c.notices.length > 0 && (
         <details>
           <summary className="min-h-11 cursor-pointer py-3">
-            Customer notices in this app
+            Updates about this payment
           </summary>
           <ul className="flex flex-col gap-2">
             {c.notices.map((n) => (
@@ -439,7 +439,7 @@ export function FinancialAdjustmentManager({
       {notice && <p role="status">{notice}</p>}
       {operator && (
         <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
-          <h2 className="text-xl font-semibold">Review an original charge</h2>
+          <h2 className="text-xl font-semibold">Review the original payment</h2>
           {!state.ready && (
             <p className="text-warning">
               Configure approved refund, dispute and access terms before new
@@ -643,6 +643,24 @@ export function FinancialAdjustmentManager({
       )}
       <section className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold">Refund and dispute history</h2>
+        {!operator && (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              For help with a charge, contact support with its invoice number.
+              To stop future subscription renewals, cancel from Plan and usage.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button asChild variant="outline">
+                <Link href="/contact">Get help with a charge</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href={`/businesses/${businessId}/plan`}>
+                  Manage renewal
+                </Link>
+              </Button>
+            </div>
+          </div>
+        )}
         {state.cases.length === 0 && (
           <p>No refund or dispute review is recorded for this Business.</p>
         )}
@@ -722,7 +740,7 @@ export function FinancialAdjustmentManager({
               ["pending", "review_required"].includes(c.creditState) && (
                 <details className="border-t border-border pt-4">
                   <summary className="min-h-11 cursor-pointer py-3 font-medium">
-                    Review or correct the credit basis
+                    Review the refund calculation
                   </summary>
                   <form
                     className="flex flex-col gap-4"
@@ -814,7 +832,7 @@ export function FinancialAdjustmentManager({
               >
                 <FieldGroup className="gap-4">
                   <h4 className="font-semibold">
-                    Retain and send dispute evidence
+                    Submit documents for this dispute
                   </h4>
                   <p className="text-sm text-muted-foreground">
                     Use a document already uploaded to the selected merchant for
@@ -906,7 +924,7 @@ export function FinancialAdjustmentManager({
             )}
             {operator && selectedCase === c.id && details && (
               <section className="flex flex-col gap-3 border-t border-border pt-5">
-                <h4 className="font-semibold">Protected review</h4>
+                <h4 className="font-semibold">Review adjustment details</h4>
                 <p>{details.input.reason}</p>
                 {details.creditReviews.map((review) => (
                   <p key={review.input.requestKey}>
@@ -936,7 +954,7 @@ export function FinancialAdjustmentManager({
                 {c.kind === "refund" && (
                   <details>
                     <summary className="min-h-11 cursor-pointer py-3">
-                      Exact saved native refund request
+                      Saved refund request
                     </summary>
                     <p className="font-mono text-sm wrap-anywhere">
                       Key: {details.key}

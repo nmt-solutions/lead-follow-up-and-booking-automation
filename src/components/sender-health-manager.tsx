@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { FieldGroup } from "./ui/field";
 
 import { useState, type FormEvent, type ReactNode } from "react";
@@ -191,7 +192,7 @@ export function SenderHealthManager({
       {message && <p role="status">{message}</p>}
       <Card>
         <CardHeader>
-          <CardTitle>Sender alerts</CardTitle>
+          <CardTitle>Delivery problems</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
@@ -255,8 +256,8 @@ export function SenderHealthManager({
             <CardContent className="flex flex-col gap-6">
               <Badge>
                 {identity.issues.length
-                  ? "Outbound paused / evidence required"
-                  : "Health evidence current"}
+                  ? "Sending paused, review needed"
+                  : "Delivery checks up to date"}
               </Badge>
               <p className="text-sm text-muted-foreground">
                 Health permits only this sender’s affected outbound work.
@@ -267,381 +268,498 @@ export function SenderHealthManager({
               {identity.issues.map((i) => (
                 <p key={i.code}>{i.action}</p>
               ))}
-              <dl className="grid gap-2 break-words text-sm">
-                <div>
-                  <dt className="font-medium">
-                    Exact account and connection generation
-                  </dt>
-                  <dd>
-                    {identity.binding.provider} · {identity.binding.account} ·
-                    generation{" "}
-                    {identity.binding.generation ?? "no native grant"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-medium">Policy</dt>
-                  <dd>
-                    {identity.policy
-                      ? `Version ${identity.policy.version} · reviewed ${identity.policy.at} · actor ${identity.policy.actorId}`
-                      : "Operator configuration required; no production thresholds are assumed."}
-                  </dd>
-                </div>
-                {p && (
-                  <>
-                    <div>
-                      <dt className="font-medium">
-                        Measured population and source authority
-                      </dt>
-                      <dd>
-                        {p.population} · {p.sourceAuthority} · {p.sourceOrigin}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-medium">
-                        Timing and artifact retention
-                      </dt>
-                      <dd>
-                        Window {p.windowSeconds}s · fresh for{" "}
-                        {p.freshnessSeconds}s · maximum reporting delay{" "}
-                        {p.maximumLatenessSeconds}s · source artifacts retained{" "}
-                        {p.retentionDays} days. Minimal incident, policy and
-                        replay audit remains for dispatch safety.
-                      </dd>
-                    </div>
-                  </>
-                )}
-              </dl>
-              {identity.evidence && (
-                <div className="flex flex-col gap-2 rounded-xl bg-muted p-4">
-                  <p>Observed {identity.evidence.observedAt}</p>
-                  <p className="break-words text-sm">
-                    Reviewed by {identity.evidence.actorId} · recorded{" "}
-                    {identity.evidence.recordedAt}
-                  </p>
-                  <p>
-                    Window {identity.evidence.windowStart} to{" "}
-                    {identity.evidence.windowEnd}
-                  </p>
-                  <p className="break-all">
-                    Source: {identity.evidence.reference}
-                  </p>
-                  <p className="break-all text-sm">
-                    Artifact SHA-256: {identity.evidence.artifactSha256}
-                  </p>
-                  {healthMetrics.map((m) => (
-                    <p key={m}>
-                      {metricMeaning[m]}: {identity.evidence!.metrics[m].failed}{" "}
-                      / {identity.evidence!.metrics[m].total}
-                      {p &&
-                        ` · fail at ≥ ${p.thresholds[m].limit} ${p.thresholds[m].unit} · minimum ${p.thresholds[m].minimumSample}`}
-                    </p>
-                  ))}
-                </div>
-              )}
-              {identity.incidents.map((i) => (
-                <div
-                  key={i.id}
-                  className="flex flex-col gap-2 rounded-xl border p-4"
-                >
-                  <p className="font-medium">
-                    {i.resolved ? "Repaired" : "Open incident"}:{" "}
-                    {i.failures.join(", ")}
-                  </p>
-                  <p className="break-all text-sm">
-                    {i.id} · {i.observedAt} · {i.reason}
-                  </p>
-                  <p>
-                    Repair needs newer attributable evidence for the current
-                    bindings, covering a full window after {i.lastWindowEnd},
-                    satisfying the original failed policy and the current
-                    policy. Reconnect revoked sending permission separately. A
-                    refresh or acknowledgement cannot resolve this incident.
-                  </p>
-                  {i.metrics &&
-                    i.policy &&
-                    i.failures.map((m) =>
-                      m === "sending_authorization" ? null : (
-                        <p key={m} className="text-sm">
-                          {m}: {i.metrics![m].failed}/{i.metrics![m].total} ·
-                          fail at ≥ {i.policy!.thresholds[m].limit}{" "}
-                          {i.policy!.thresholds[m].unit} · minimum{" "}
-                          {i.policy!.thresholds[m].minimumSample}
-                        </p>
-                      ),
-                    )}
-                </div>
-              ))}
-              {operator && (
-                <>
-                  <details>
-                    <summary className="min-h-11 cursor-pointer py-3 font-medium">
-                      Configure reviewed source and thresholds
-                    </summary>
-                    <form
-                      key={identity.policy?.version ?? 0}
-                      onSubmit={(e) => policySubmit(e, identity)}
-                      className="flex flex-col gap-4 pt-4"
-                    >
-                      <FieldGroup className="gap-4">
-                        <p>
-                          Only submit an authorized source policy with actual
-                          reviewed inputs. Rates are fractions; equality fails.
-                          Snapshots are never added together. Missing or
-                          undersized samples remain unknown.
-                        </p>
-                        {(
-                          [
-                            ["sourceAuthority", "Source authority"],
-                            ["sourceOrigin", "HTTPS source origin (no path)"],
-                            ["population", "Exact sender population"],
-                          ] as const
-                        ).map(([name, label]) => (
-                          <Field
-                            key={name}
-                            id={`${prefix}-${name}`}
-                            label={label}
+              <WorkspaceTabs
+                tabs={[
+                  {
+                    id: "checks",
+                    label: "Delivery checks",
+                    description:
+                      "Review this address's authentication and recent delivery evidence.",
+                    content: (
+                      <>
+                        <dl className="grid gap-2 break-words text-sm">
+                          <div>
+                            <dt className="font-medium">
+                              Exact account and connection generation
+                            </dt>
+                            <dd>
+                              {identity.binding.provider} ·{" "}
+                              {identity.binding.account} · generation{" "}
+                              {identity.binding.generation ?? "no native grant"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="font-medium">Policy</dt>
+                            <dd>
+                              {identity.policy
+                                ? `Version ${identity.policy.version} · reviewed ${identity.policy.at} · actor ${identity.policy.actorId}`
+                                : "Operator configuration required; no production thresholds are assumed."}
+                            </dd>
+                          </div>
+                          {p && (
+                            <>
+                              <div>
+                                <dt className="font-medium">
+                                  Measured population and source authority
+                                </dt>
+                                <dd>
+                                  {p.population} · {p.sourceAuthority} ·{" "}
+                                  {p.sourceOrigin}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="font-medium">
+                                  Timing and artifact retention
+                                </dt>
+                                <dd>
+                                  Window {p.windowSeconds}s · fresh for{" "}
+                                  {p.freshnessSeconds}s · maximum reporting
+                                  delay {p.maximumLatenessSeconds}s · source
+                                  artifacts retained {p.retentionDays} days.
+                                  Minimal incident, policy and replay audit
+                                  remains for dispatch safety.
+                                </dd>
+                              </div>
+                            </>
+                          )}
+                        </dl>
+                        {identity.evidence && (
+                          <div className="flex flex-col gap-2 rounded-xl bg-muted p-4">
+                            <p>Observed {identity.evidence.observedAt}</p>
+                            <p className="break-words text-sm">
+                              Reviewed by {identity.evidence.actorId} · recorded{" "}
+                              {identity.evidence.recordedAt}
+                            </p>
+                            <p>
+                              Window {identity.evidence.windowStart} to{" "}
+                              {identity.evidence.windowEnd}
+                            </p>
+                            <p className="break-all">
+                              Source: {identity.evidence.reference}
+                            </p>
+                            <p className="break-all text-sm">
+                              Artifact SHA-256:{" "}
+                              {identity.evidence.artifactSha256}
+                            </p>
+                            {healthMetrics.map((m) => (
+                              <p key={m}>
+                                {metricMeaning[m]}:{" "}
+                                {identity.evidence!.metrics[m].failed} /{" "}
+                                {identity.evidence!.metrics[m].total}
+                                {p &&
+                                  ` · fail at ≥ ${p.thresholds[m].limit} ${p.thresholds[m].unit} · minimum ${p.thresholds[m].minimumSample}`}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    id: "issues",
+                    label: "Issues",
+                    description:
+                      "Review delivery incidents and what needs to be repaired.",
+                    content: (
+                      <>
+                        {identity.incidents.map((i) => (
+                          <div
+                            key={i.id}
+                            className="flex flex-col gap-2 rounded-xl border p-4"
                           >
-                            <Input
-                              id={`${prefix}-${name}`}
-                              name={name}
-                              defaultValue={p?.[name] ?? ""}
-                              required
-                              maxLength={240}
-                            />
-                          </Field>
+                            <p className="font-medium">
+                              {i.resolved ? "Repaired" : "Open incident"}:{" "}
+                              {i.failures.join(", ")}
+                            </p>
+                            <p className="break-all text-sm">
+                              {i.id} · {i.observedAt} · {i.reason}
+                            </p>
+                            <p>
+                              Repair needs newer attributable evidence for the
+                              current bindings, covering a full window after{" "}
+                              {i.lastWindowEnd}, satisfying the original failed
+                              policy and the current policy. Reconnect revoked
+                              sending permission separately. A refresh or
+                              acknowledgement cannot resolve this incident.
+                            </p>
+                            {i.metrics &&
+                              i.policy &&
+                              i.failures.map((m) =>
+                                m === "sending_authorization" ? null : (
+                                  <p key={m} className="text-sm">
+                                    {m}: {i.metrics![m].failed}/
+                                    {i.metrics![m].total} · fail at ≥{" "}
+                                    {i.policy!.thresholds[m].limit}{" "}
+                                    {i.policy!.thresholds[m].unit} · minimum{" "}
+                                    {i.policy!.thresholds[m].minimumSample}
+                                  </p>
+                                ),
+                              )}
+                          </div>
                         ))}
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          {(
-                            [
-                              ["windowSeconds", "Evidence window (seconds)"],
-                              ["freshnessSeconds", "Freshness (seconds)"],
-                              [
-                                "maximumLatenessSeconds",
-                                "Maximum reporting delay (seconds)",
-                              ],
-                              ["retentionDays", "Artifact retention (days)"],
-                            ] as const
-                          ).map(([name, label]) => (
-                            <Field
-                              key={name}
-                              id={`${prefix}-${name}`}
-                              label={label}
-                            >
-                              <Input
-                                id={`${prefix}-${name}`}
-                                name={name}
-                                type="number"
-                                min={name === "maximumLatenessSeconds" ? 0 : 1}
-                                step="1"
-                                defaultValue={p?.[name] ?? ""}
-                                required
-                              />
-                            </Field>
-                          ))}
-                        </div>
-                        {healthMetrics.map((m) => (
-                          <fieldset
-                            key={m}
-                            className="flex flex-col gap-3 rounded-xl border p-4"
-                          >
-                            <legend className="px-2 text-sm">
-                              {metricMeaning[m]}
-                            </legend>
-                            <div className="grid gap-4 sm:grid-cols-3">
-                              <Field
-                                id={`${prefix}-${m}-unit`}
-                                label="Threshold unit"
-                              >
-                                <NativeSelect
-                                  id={`${prefix}-${m}-unit`}
-                                  name={`${m}-unit`}
-                                  defaultValue={p?.thresholds[m].unit ?? ""}
-                                  required
-                                >
-                                  <option value="">Choose unit</option>
-                                  <option value="count">Failure count</option>
-                                  <option value="rate">Failure fraction</option>
-                                </NativeSelect>
-                              </Field>
-                              <Field
-                                id={`${prefix}-${m}-limit`}
-                                label="Fail at or above"
-                              >
-                                <Input
-                                  id={`${prefix}-${m}-limit`}
-                                  name={`${m}-limit`}
-                                  type="number"
-                                  step="any"
-                                  min="0.000000001"
-                                  defaultValue={p?.thresholds[m].limit ?? ""}
-                                  required
-                                />
-                              </Field>
-                              <Field
-                                id={`${prefix}-${m}-sample`}
-                                label="Minimum denominator"
-                              >
-                                <Input
-                                  id={`${prefix}-${m}-sample`}
-                                  name={`${m}-sample`}
-                                  type="number"
-                                  min="1"
-                                  step="1"
-                                  defaultValue={
-                                    p?.thresholds[m].minimumSample ?? ""
-                                  }
-                                  required
-                                />
-                              </Field>
-                            </div>
-                          </fieldset>
-                        ))}
-                        <Button disabled={pending}>Save policy version</Button>
-                      </FieldGroup>
-                    </form>
-                  </details>
-                  {p && (
-                    <details>
-                      <summary className="min-h-11 cursor-pointer py-3 font-medium">
-                        Record provider evidence or repair
-                      </summary>
-                      <form
-                        onSubmit={(e) => evidenceSubmit(e, identity)}
-                        className="flex flex-col gap-4 pt-4"
-                      >
-                        <FieldGroup className="gap-4">
-                          <p>
-                            Review actual provider reports or trusted receiver
-                            authentication results and attributable
-                            delivery/complaint records for this exact account.
-                            Do not infer zero complaints from no data. This
-                            records your authenticated assisted review, not an
-                            automated Gmail or Graph telemetry feed. Include no
-                            message bodies, recipient identities, tokens or
-                            sensitive URL parameters.
-                          </p>
-                          <p className="text-sm">
-                            SPF/DKIM/DMARC use trusted receiver results. Bounces
-                            count permanent failures among accepted submissions.
-                            Complaints count attributable recipient reports
-                            among delivered messages in the stated reviewed
-                            population. Different populations require a
-                            different approved source policy.
-                          </p>
-                          {(
-                            [
-                              ["eventKey", "Stable source report key"],
-                              [
-                                "reference",
-                                "HTTPS artifact reference (no query or credentials)",
-                              ],
-                              ["artifactSha256", "Reviewed artifact SHA-256"],
-                              ["observedAt", dateLabel("Observed at")],
-                              ["windowStart", dateLabel("Window start")],
-                              ["windowEnd", dateLabel("Window end")],
-                            ] as const
-                          ).map(([name, label]) => (
-                            <Field
-                              key={name}
-                              id={`${prefix}-${name}`}
-                              label={label}
-                            >
-                              <Input
-                                id={`${prefix}-${name}`}
-                                name={name}
-                                required
-                                autoComplete="off"
-                                maxLength={name === "reference" ? 512 : 128}
-                                placeholder={
-                                  name.endsWith("At") ||
-                                  name.startsWith("window")
-                                    ? "YYYY-MM-DDTHH:mm:ssZ"
-                                    : undefined
-                                }
-                              />
-                            </Field>
-                          ))}
-                          {healthMetrics.map((m) => (
-                            <fieldset
-                              key={m}
-                              className="flex flex-col gap-3 rounded-xl border p-4"
-                            >
-                              <legend className="px-2 text-sm">
-                                {metricMeaning[m]}
-                              </legend>
-                              <div className="grid gap-4 sm:grid-cols-2">
-                                {(["failed", "total"] as const).map((n) => (
-                                  <Field
-                                    key={n}
-                                    id={`${prefix}-${m}-${n}`}
-                                    label={
-                                      n === "failed"
-                                        ? "Failures"
-                                        : "Assessed denominator"
+                      </>
+                    ),
+                  },
+                  ...(operator
+                    ? [
+                        {
+                          id: "repair",
+                          label: "Advanced repair",
+                          description:
+                            "Operator controls for reviewed delivery evidence and alert thresholds.",
+                          content: (
+                            <>
+                              {operator && (
+                                <>
+                                  <details>
+                                    <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                                      Configure reviewed source and thresholds
+                                    </summary>
+                                    <form
+                                      key={identity.policy?.version ?? 0}
+                                      onSubmit={(e) =>
+                                        policySubmit(e, identity)
+                                      }
+                                      className="flex flex-col gap-4 pt-4"
+                                    >
+                                      <FieldGroup className="gap-4">
+                                        <p>
+                                          Only submit an authorized source
+                                          policy with actual reviewed inputs.
+                                          Rates are fractions; equality fails.
+                                          Snapshots are never added together.
+                                          Missing or undersized samples remain
+                                          unknown.
+                                        </p>
+                                        {(
+                                          [
+                                            [
+                                              "sourceAuthority",
+                                              "Source authority",
+                                            ],
+                                            [
+                                              "sourceOrigin",
+                                              "HTTPS source origin (no path)",
+                                            ],
+                                            [
+                                              "population",
+                                              "Exact sender population",
+                                            ],
+                                          ] as const
+                                        ).map(([name, label]) => (
+                                          <Field
+                                            key={name}
+                                            id={`${prefix}-${name}`}
+                                            label={label}
+                                          >
+                                            <Input
+                                              id={`${prefix}-${name}`}
+                                              name={name}
+                                              defaultValue={p?.[name] ?? ""}
+                                              required
+                                              maxLength={240}
+                                            />
+                                          </Field>
+                                        ))}
+                                        <div className="grid gap-4 sm:grid-cols-2">
+                                          {(
+                                            [
+                                              [
+                                                "windowSeconds",
+                                                "Evidence window (seconds)",
+                                              ],
+                                              [
+                                                "freshnessSeconds",
+                                                "Freshness (seconds)",
+                                              ],
+                                              [
+                                                "maximumLatenessSeconds",
+                                                "Maximum reporting delay (seconds)",
+                                              ],
+                                              [
+                                                "retentionDays",
+                                                "Artifact retention (days)",
+                                              ],
+                                            ] as const
+                                          ).map(([name, label]) => (
+                                            <Field
+                                              key={name}
+                                              id={`${prefix}-${name}`}
+                                              label={label}
+                                            >
+                                              <Input
+                                                id={`${prefix}-${name}`}
+                                                name={name}
+                                                type="number"
+                                                min={
+                                                  name ===
+                                                  "maximumLatenessSeconds"
+                                                    ? 0
+                                                    : 1
+                                                }
+                                                step="1"
+                                                defaultValue={p?.[name] ?? ""}
+                                                required
+                                              />
+                                            </Field>
+                                          ))}
+                                        </div>
+                                        {healthMetrics.map((m) => (
+                                          <fieldset
+                                            key={m}
+                                            className="flex flex-col gap-3 rounded-xl border p-4"
+                                          >
+                                            <legend className="px-2 text-sm">
+                                              {metricMeaning[m]}
+                                            </legend>
+                                            <div className="grid gap-4 sm:grid-cols-3">
+                                              <Field
+                                                id={`${prefix}-${m}-unit`}
+                                                label="Threshold unit"
+                                              >
+                                                <NativeSelect
+                                                  id={`${prefix}-${m}-unit`}
+                                                  name={`${m}-unit`}
+                                                  defaultValue={
+                                                    p?.thresholds[m].unit ?? ""
+                                                  }
+                                                  required
+                                                >
+                                                  <option value="">
+                                                    Choose unit
+                                                  </option>
+                                                  <option value="count">
+                                                    Failure count
+                                                  </option>
+                                                  <option value="rate">
+                                                    Failure fraction
+                                                  </option>
+                                                </NativeSelect>
+                                              </Field>
+                                              <Field
+                                                id={`${prefix}-${m}-limit`}
+                                                label="Fail at or above"
+                                              >
+                                                <Input
+                                                  id={`${prefix}-${m}-limit`}
+                                                  name={`${m}-limit`}
+                                                  type="number"
+                                                  step="any"
+                                                  min="0.000000001"
+                                                  defaultValue={
+                                                    p?.thresholds[m].limit ?? ""
+                                                  }
+                                                  required
+                                                />
+                                              </Field>
+                                              <Field
+                                                id={`${prefix}-${m}-sample`}
+                                                label="Minimum denominator"
+                                              >
+                                                <Input
+                                                  id={`${prefix}-${m}-sample`}
+                                                  name={`${m}-sample`}
+                                                  type="number"
+                                                  min="1"
+                                                  step="1"
+                                                  defaultValue={
+                                                    p?.thresholds[m]
+                                                      .minimumSample ?? ""
+                                                  }
+                                                  required
+                                                />
+                                              </Field>
+                                            </div>
+                                          </fieldset>
+                                        ))}
+                                        <Button disabled={pending}>
+                                          Save policy version
+                                        </Button>
+                                      </FieldGroup>
+                                    </form>
+                                  </details>
+                                  {p && (
+                                    <details>
+                                      <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                                        Record provider evidence or repair
+                                      </summary>
+                                      <form
+                                        onSubmit={(e) =>
+                                          evidenceSubmit(e, identity)
+                                        }
+                                        className="flex flex-col gap-4 pt-4"
+                                      >
+                                        <FieldGroup className="gap-4">
+                                          <p>
+                                            Review actual provider reports or
+                                            trusted receiver authentication
+                                            results and attributable
+                                            delivery/complaint records for this
+                                            exact account. Do not infer zero
+                                            complaints from no data. This
+                                            records your authenticated assisted
+                                            review, not an automated Gmail or
+                                            Graph telemetry feed. Include no
+                                            message bodies, recipient
+                                            identities, tokens or sensitive URL
+                                            parameters.
+                                          </p>
+                                          <p className="text-sm">
+                                            SPF/DKIM/DMARC use trusted receiver
+                                            results. Bounces count permanent
+                                            failures among accepted submissions.
+                                            Complaints count attributable
+                                            recipient reports among delivered
+                                            messages in the stated reviewed
+                                            population. Different populations
+                                            require a different approved source
+                                            policy.
+                                          </p>
+                                          {(
+                                            [
+                                              [
+                                                "eventKey",
+                                                "Stable source report key",
+                                              ],
+                                              [
+                                                "reference",
+                                                "HTTPS artifact reference (no query or credentials)",
+                                              ],
+                                              [
+                                                "artifactSha256",
+                                                "Reviewed artifact SHA-256",
+                                              ],
+                                              [
+                                                "observedAt",
+                                                dateLabel("Observed at"),
+                                              ],
+                                              [
+                                                "windowStart",
+                                                dateLabel("Window start"),
+                                              ],
+                                              [
+                                                "windowEnd",
+                                                dateLabel("Window end"),
+                                              ],
+                                            ] as const
+                                          ).map(([name, label]) => (
+                                            <Field
+                                              key={name}
+                                              id={`${prefix}-${name}`}
+                                              label={label}
+                                            >
+                                              <Input
+                                                id={`${prefix}-${name}`}
+                                                name={name}
+                                                required
+                                                autoComplete="off"
+                                                maxLength={
+                                                  name === "reference"
+                                                    ? 512
+                                                    : 128
+                                                }
+                                                placeholder={
+                                                  name.endsWith("At") ||
+                                                  name.startsWith("window")
+                                                    ? "YYYY-MM-DDTHH:mm:ssZ"
+                                                    : undefined
+                                                }
+                                              />
+                                            </Field>
+                                          ))}
+                                          {healthMetrics.map((m) => (
+                                            <fieldset
+                                              key={m}
+                                              className="flex flex-col gap-3 rounded-xl border p-4"
+                                            >
+                                              <legend className="px-2 text-sm">
+                                                {metricMeaning[m]}
+                                              </legend>
+                                              <div className="grid gap-4 sm:grid-cols-2">
+                                                {(
+                                                  ["failed", "total"] as const
+                                                ).map((n) => (
+                                                  <Field
+                                                    key={n}
+                                                    id={`${prefix}-${m}-${n}`}
+                                                    label={
+                                                      n === "failed"
+                                                        ? "Failures"
+                                                        : "Assessed denominator"
+                                                    }
+                                                  >
+                                                    <Input
+                                                      id={`${prefix}-${m}-${n}`}
+                                                      name={`${m}-${n}`}
+                                                      type="number"
+                                                      min="0"
+                                                      step="1"
+                                                      required
+                                                    />
+                                                  </Field>
+                                                ))}
+                                              </div>
+                                            </fieldset>
+                                          ))}
+                                          <fieldset className="flex flex-col gap-2">
+                                            <legend className="font-medium">
+                                              Incidents this evidence repairs
+                                            </legend>
+                                            {identity.incidents
+                                              .filter((i) => !i.resolved)
+                                              .map((i) => (
+                                                <label
+                                                  key={i.id}
+                                                  htmlFor={`${prefix}-repair-${i.id}`}
+                                                  className="flex min-h-11 items-center gap-3"
+                                                >
+                                                  <Checkbox
+                                                    id={`${prefix}-repair-${i.id}`}
+                                                    name="repairs"
+                                                    value={i.id}
+                                                  />
+                                                  <span className="break-all">
+                                                    {i.failures.join(", ")} ·{" "}
+                                                    {i.id}
+                                                  </span>
+                                                </label>
+                                              ))}
+                                            <p className="text-sm text-muted-foreground">
+                                              Select only incidents whose failed
+                                              condition this newer window
+                                              addresses. Healthy evidence alone
+                                              never silently repairs an
+                                              incident.
+                                            </p>
+                                          </fieldset>
+                                          <Button disabled={pending}>
+                                            Record reviewed evidence
+                                          </Button>
+                                        </FieldGroup>
+                                      </form>
+                                    </details>
+                                  )}
+                                  <Button
+                                    variant="outline"
+                                    disabled={pending}
+                                    onClick={() =>
+                                      void command({
+                                        command: "prune",
+                                        identityId: identity.id,
+                                      })
                                     }
                                   >
-                                    <Input
-                                      id={`${prefix}-${m}-${n}`}
-                                      name={`${m}-${n}`}
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      required
-                                    />
-                                  </Field>
-                                ))}
-                              </div>
-                            </fieldset>
-                          ))}
-                          <fieldset className="flex flex-col gap-2">
-                            <legend className="font-medium">
-                              Incidents this evidence repairs
-                            </legend>
-                            {identity.incidents
-                              .filter((i) => !i.resolved)
-                              .map((i) => (
-                                <label
-                                  key={i.id}
-                                  htmlFor={`${prefix}-repair-${i.id}`}
-                                  className="flex min-h-11 items-center gap-3"
-                                >
-                                  <Checkbox
-                                    id={`${prefix}-repair-${i.id}`}
-                                    name="repairs"
-                                    value={i.id}
-                                  />
-                                  <span className="break-all">
-                                    {i.failures.join(", ")} · {i.id}
-                                  </span>
-                                </label>
-                              ))}
-                            <p className="text-sm text-muted-foreground">
-                              Select only incidents whose failed condition this
-                              newer window addresses. Healthy evidence alone
-                              never silently repairs an incident.
-                            </p>
-                          </fieldset>
-                          <Button disabled={pending}>
-                            Record reviewed evidence
-                          </Button>
-                        </FieldGroup>
-                      </form>
-                    </details>
-                  )}
-                  <Button
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() =>
-                      void command({
-                        command: "prune",
-                        identityId: identity.id,
-                      })
-                    }
-                  >
-                    Remove expired source artifacts
-                  </Button>
-                </>
-              )}
+                                    Remove expired source artifacts
+                                  </Button>
+                                </>
+                              )}
+                            </>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             </CardContent>
           </Card>
         );

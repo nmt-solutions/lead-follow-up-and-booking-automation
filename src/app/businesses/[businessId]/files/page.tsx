@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { FileManager } from "@/components/file-manager";
@@ -6,7 +6,7 @@ import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Private Business files" };
+export const metadata = { title: "Documents" };
 export default async function FilesPage({
   params,
 }: {
@@ -27,14 +27,7 @@ export default async function FilesPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Private Business files</>}
-        description={
-          <>
-            Upload approved documents and track ownership, access and deletion.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="files"></BusinessPageHeader>
       <FileManager businessId={businessId} initial={state.listing} />
     </div>
   );

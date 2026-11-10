@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { BusinessNotifications } from "@/components/notification-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Notification delivery" };
+export const metadata = { title: "Notifications" };
 export default async function Notifications({
   params,
 }: PageProps<"/businesses/[businessId]/notifications">) {
@@ -30,16 +30,7 @@ export default async function Notifications({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Notification delivery</>}
-        description={
-          <>
-            Review this Business’s invitation attempts and selected platform
-            notices. Customer prospecting uses its separately authorized sales
-            channel.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="notifications"></BusinessPageHeader>
       <BusinessNotifications businessId={businessId} initial={initial} />
     </div>
   );

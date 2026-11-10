@@ -73,11 +73,11 @@ const steps = [
     title: "Give the AI approved business information",
     icon: BookOpen,
     description:
-      "Open Business knowledge to add the answers and requirements your team can use in sales conversations.",
+      "Open Answers and sales info. Add products, common answers and questions for new leads, then choose who handles questions the assistant cannot answer.",
     tasks: [
       "Add accurate product or service information, qualification questions, and approved answers.",
       "Review and approve the relevant knowledge revision. Draft or outdated information may not be available to an AI workflow.",
-      "Open Sales approval rules in More settings to choose who may quote, discount, or make a commercial commitment. An AI draft does not grant those permissions.",
+      "Open Sales approval rules in Business settings to choose who may quote, discount, or make a commercial commitment. An AI draft does not grant those permissions.",
     ],
     outcome:
       "Your team and enabled AI workflows have approved information to work from.",
@@ -87,7 +87,7 @@ const steps = [
     title: "Connect only the channels you need",
     icon: Mail,
     description:
-      "Connect Gmail or Outlook and your calendar during setup, or use Email and Calendar in the sidebar later. Each connection is optional.",
+      "Connect Gmail or Outlook and your calendar during setup, or use Email accounts and Calendar in the sidebar later. Each connection is optional.",
     tasks: [
       "For email, choose Connect Gmail or Connect Outlook. Choose your account and approve access on the provider page. Lead Relay saves the connection using the email address confirmed by your provider.",
       "Your connection starts with new email. To import older messages or change the selection, open Advanced email settings. Choose the date range and message limit before importing.",
@@ -102,11 +102,11 @@ const steps = [
     title: "Run your first prospect search",
     icon: Search,
     description:
-      "Open Find prospects. Review the search phrase, selected markets, and usage allowance before starting.",
+      "Open Search setup to check your saved product, buyers and location. Then open Find prospects to review the search phrase, areas and credit limit.",
     tasks: [
       "Choose an available search area. The saved location does not automatically buy paid coverage or enable a search provider.",
       "Keep private customer details and confidential requirements out of the public search phrase.",
-      "Approve the stated allowance and start the search. Refresh to see queued work, progress, and saved results.",
+      "Approve the stated allowance and start the search. Refresh to see queued work, progress, and saved results. The sidebar shows used and remaining credits for this business, including work already started.",
       "Read the source links behind each match. A relevant business and a usable contact are different things. Neither proves permission to send.",
     ],
     outcome:
@@ -117,7 +117,7 @@ const steps = [
     title: "Review outreach before it runs",
     icon: Send,
     description:
-      "Open Outreach to prepare a campaign for selected prospects and contacts.",
+      "Open Email campaigns to prepare a campaign for selected prospects and contacts.",
     tasks: [
       "Review the exact recipients, sending identity, reply route, message text, timing, and maximum attempts.",
       "Use AI drafts as a starting point. Check names, facts, prices, promises, and whether a recipient may lawfully receive the message.",
@@ -137,7 +137,7 @@ const steps = [
       "Associate a message with the correct opportunity when the app asks for a review.",
       "Use human takeover when a person should manage the conversation. Automation stays paused until control is explicitly returned.",
       "Use approved booking or quotation actions only when the required permissions and connected services are ready.",
-      "Use Reports to review recorded results. A sent message is not the same as a delivered message, an interested buyer, or a sale.",
+      "Open Results to review recorded outcomes. A sent message is not the same as a delivered message, an interested buyer, or a sale.",
     ],
     outcome:
       "Your team can see the conversation, its current owner, and the next approved action.",
@@ -170,7 +170,7 @@ const questions = [
   ],
   [
     "How do I leave or export my information?",
-    "Owners and admins can open Export or remove data in More settings. Export, ending business access, removing provider permissions, and cancelling a subscription are separate steps. Follow the status shown for each action or contact NMT Solutions for help.",
+    "Owners and admins can open Export or remove data in Business settings. Export, ending business access, removing provider permissions, and cancelling a subscription are separate steps. Follow the status shown for each action or contact NMT Solutions for help.",
   ],
 ];
 

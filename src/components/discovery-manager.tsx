@@ -1,4 +1,5 @@
 "use client";
+import { SearchSetupNotice } from "./search-setup-notice";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 import { Field, FieldGroup } from "./ui/field";
@@ -651,14 +652,7 @@ export function DiscoveryManager({
   return (
     <div className="flex flex-col gap-8">
       {state.setup.length > 0 && (
-        <section className="rounded-xl border border-border bg-muted p-5">
-          <h2 className="font-semibold">Complete search setup</h2>
-          <ul className="flex flex-col mt-3 list-disc gap-2 pl-5 text-sm">
-            {state.setup.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
+        <SearchSetupNotice businessId={businessId} issues={state.setup} />
       )}
       {error && (
         <Alert variant="destructive">
@@ -690,6 +684,7 @@ export function DiscoveryManager({
           </TabsTrigger>
           <TabsTrigger value="saved">Saved searches</TabsTrigger>
           <TabsTrigger value="history">Search history</TabsTrigger>
+          <TabsTrigger value="details">Search details</TabsTrigger>
         </TabsList>
         <TabsContent
           forceMount
@@ -699,11 +694,9 @@ export function DiscoveryManager({
           <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
             <h2 className="text-lg font-semibold">Start a prospect search</h2>
             <p className="text-sm text-muted-foreground">
-              AI reviews source evidence against your saved offering, product
-              requirements, buyer categories and exclusions. Search receives
-              only the public offering phrase, buyer category and selected
-              market. Private files, approved answers and mailbox content are
-              never included.
+              Choose what to search for, check the search area and set the
+              maximum credits to use. We use your saved customer requirements to
+              review the matches.
             </p>
             <Link
               href={`/businesses/${businessId}/configuration`}
@@ -735,81 +728,11 @@ export function DiscoveryManager({
                 </div>
               </dl>
             )}
-            {state.policy && (
+
+            {state.capacity?.status === "busy" && (
               <p className="text-sm text-muted-foreground">
-                Coverage:{" "}
-                {state.policy.coverage
-                  .map((coverage) => `${coverage.market} (public web)`)
-                  .join("; ")}
-                . Active reach: {state.policy.activeMarkets.join("; ")}. Search:{" "}
-                {state.policy.searchUnits}; AI review:{" "}
-                {state.policy.reviewUnits} {state.policy.allowanceUnit} per
-                call. At most {state.policy.maxResults} results per search.
-                {state.policy.exa && (
-                  <>
-                    {" "}
-                    Exa retrieves at most{" "}
-                    {state.policy.exa.maxContentsPerSearch} shortlisted URLs per
-                    search as {state.policy.exa.contentsType} excerpts, at{" "}
-                    {state.policy.exa.contentsUnits}{" "}
-                    {state.policy.allowanceUnit} per URL. The whole run allows
-                    at most {state.policy.exa.maxCalls} Exa calls and{" "}
-                    {state.policy.exa.maxAttemptsPerStep} attempts per step,
-                    including explicit resumes. No automatic source retries.
-                  </>
-                )}
+                Other searches are running. New searches will wait in the queue.
               </p>
-            )}
-            {state.capacity && (
-              <section
-                className="flex flex-col gap-2 rounded-xl border border-border bg-muted p-4"
-                aria-label="Execution capacity"
-              >
-                <h3 className="font-medium">
-                  {state.capacity.mode === "reserved"
-                    ? "Reserved discovery capacity"
-                    : state.capacity.mode === "pooled"
-                      ? "Pooled discovery capacity"
-                      : "Discovery capacity setup required"}
-                </h3>
-                <p className="text-sm">
-                  {
-                    {
-                      available: "Available",
-                      busy: "Busy — queued work waits for capacity",
-                      setup_required:
-                        "Current paid entitlement, approved allocation and worker deployment are required",
-                      unavailable:
-                        "Provider capacity could not be verified — queued work waits",
-                      stale:
-                        "Provider observation is stale — refresh to check again",
-                      entitlement_changed:
-                        "Entitlement changed — review configuration before resuming",
-                    }[state.capacity.status]
-                  }
-                </p>
-                {state.capacity.mode && (
-                  <p className="text-sm">
-                    {state.capacity.slots} concurrent discovery runs allocated.{" "}
-                    {state.capacity.running !== null
-                      ? `${state.capacity.running} running · ${state.capacity.queued} queued in this lane.`
-                      : "Current running and queued counts are unknown."}
-                  </p>
-                )}
-                {state.capacity.observedAt && (
-                  <p className="text-xs text-muted-foreground">
-                    Observed{" "}
-                    {new Date(state.capacity.observedAt).toLocaleString()}.
-                    Refresh runs for a current observation.
-                  </p>
-                )}
-                <p className="text-sm text-muted-foreground">
-                  Capacity does not guarantee leads or throughput. Privacy,
-                  source permissions and approved budgets apply in both modes.
-                  Reserved work waits in its approved lane; it never silently
-                  moves to pooled execution.
-                </p>
-              </section>
             )}
             {!state.canRun ? (
               <p className="text-sm text-muted-foreground">
@@ -886,6 +809,7 @@ export function DiscoveryManager({
                           setPublicOffering(event.target.value);
                           setConfirmed(false);
                         }}
+                        placeholder="For example, data extraction software for online stores"
                       />
                     )}
                     <p className="text-sm text-muted-foreground">
@@ -926,7 +850,7 @@ export function DiscoveryManager({
                   </fieldset>
                   <Field className="flex flex-col gap-2">
                     <Label htmlFor="discovery-budget">
-                      Search allowance
+                      Maximum credits for this search
                       {state.policy ? ` (${state.policy.allowanceUnit})` : ""}
                     </Label>
                     <Input
@@ -1112,6 +1036,95 @@ export function DiscoveryManager({
               <p className="text-sm text-muted-foreground">
                 Showing the most recent 50 runs.
               </p>
+            )}
+          </section>
+        </TabsContent>
+        <TabsContent
+          forceMount
+          value="details"
+          className="data-[state=inactive]:hidden"
+        >
+          <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 sm:p-8">
+            <h2 className="text-lg font-medium">How this search runs</h2>
+            <p className="text-sm text-muted-foreground">
+              Check the source limits, credit rates and current search service
+              status.
+            </p>
+            {state.policy && (
+              <p className="text-sm text-muted-foreground">
+                Coverage:{" "}
+                {state.policy.coverage
+                  .map((coverage) => `${coverage.market} (public web)`)
+                  .join("; ")}
+                . Active reach: {state.policy.activeMarkets.join("; ")}. Search:{" "}
+                {state.policy.searchUnits}; AI review:{" "}
+                {state.policy.reviewUnits} {state.policy.allowanceUnit} per
+                call. At most {state.policy.maxResults} results per search.
+                {state.policy.exa && (
+                  <>
+                    {" "}
+                    Exa retrieves at most{" "}
+                    {state.policy.exa.maxContentsPerSearch} shortlisted URLs per
+                    search as {state.policy.exa.contentsType} excerpts, at{" "}
+                    {state.policy.exa.contentsUnits}{" "}
+                    {state.policy.allowanceUnit} per URL. The whole run allows
+                    at most {state.policy.exa.maxCalls} Exa calls and{" "}
+                    {state.policy.exa.maxAttemptsPerStep} attempts per step,
+                    including explicit resumes. No automatic source retries.
+                  </>
+                )}
+              </p>
+            )}
+            {state.capacity && (
+              <section
+                className="flex flex-col gap-2 rounded-xl border border-border bg-muted p-4"
+                aria-label="Execution capacity"
+              >
+                <h3 className="font-medium">
+                  {state.capacity.mode === "reserved"
+                    ? "Reserved discovery capacity"
+                    : state.capacity.mode === "pooled"
+                      ? "Pooled discovery capacity"
+                      : "Discovery capacity setup required"}
+                </h3>
+                <p className="text-sm">
+                  {
+                    {
+                      available: "Available",
+                      busy: "Busy — queued work waits for capacity",
+                      setup_required:
+                        "Current paid entitlement, approved allocation and worker deployment are required",
+                      unavailable:
+                        "Provider capacity could not be verified — queued work waits",
+                      stale:
+                        "Provider observation is stale — refresh to check again",
+                      entitlement_changed:
+                        "Entitlement changed — review configuration before resuming",
+                    }[state.capacity.status]
+                  }
+                </p>
+                {state.capacity.mode && (
+                  <p className="text-sm">
+                    {state.capacity.slots} concurrent discovery runs allocated.{" "}
+                    {state.capacity.running !== null
+                      ? `${state.capacity.running} running · ${state.capacity.queued} queued in this lane.`
+                      : "Current running and queued counts are unknown."}
+                  </p>
+                )}
+                {state.capacity.observedAt && (
+                  <p className="text-xs text-muted-foreground">
+                    Observed{" "}
+                    {new Date(state.capacity.observedAt).toLocaleString()}.
+                    Refresh runs for a current observation.
+                  </p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  Capacity does not guarantee leads or throughput. Privacy,
+                  source permissions and approved budgets apply in both modes.
+                  Reserved work waits in its approved lane; it never silently
+                  moves to pooled execution.
+                </p>
+              </section>
             )}
           </section>
         </TabsContent>

@@ -1,4 +1,5 @@
 "use client";
+import { FormSteps } from "./form-steps";
 import { PageSkeleton } from "./page-skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
@@ -212,6 +213,7 @@ function CampaignEditor({
     weekdays: [] as number[],
   };
   const [timing, setTiming] = useState(restored?.timing ?? emptyTiming);
+  const [formVersion, setFormVersion] = useState(0);
   const [state, setState] = useState(initialState),
     [pending, setPending] = useState(false),
     [feedback, setFeedbackState] = useState({
@@ -369,6 +371,7 @@ function CampaignEditor({
     }
   }
   function resetDraft() {
+    setFormVersion((version) => version + 1);
     setTiming(emptyTiming);
     setEditing(null);
     setName("");
@@ -902,431 +905,516 @@ function CampaignEditor({
                 onChange={() => setRequestKey(crypto.randomUUID())}
               >
                 <FieldGroup className="gap-5">
-                  <fieldset disabled={pending} className="flex flex-col gap-6">
-                    <Field className="flex flex-col gap-2">
-                      <Label htmlFor="campaign-name">Campaign name</Label>
-                      <Input
-                        id="campaign-name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                        maxLength={2000}
-                      />
-                    </Field>
-                    <Field className="flex flex-col gap-2">
-                      <Label htmlFor="campaign-channel">Channel</Label>
-                      <NativeSelect
-                        id="campaign-channel"
-                        value="email"
-                        onChange={() => {}}
-                      >
-                        <option value="email">Email</option>
-                      </NativeSelect>
-                      <p className="text-sm text-muted-foreground">
-                        Review uses configured email identities. Execution and
-                        sending adapters are not activated here.
-                      </p>
-                    </Field>
-                    <Field className="flex flex-col gap-2">
-                      <Label htmlFor="campaign-sender">Sending identity</Label>
-                      <NativeSelect
-                        id="campaign-sender"
-                        value={senderId}
-                        onChange={(e) => setSenderId(e.target.value)}
-                        required
-                      >
-                        <option value="">Choose an identity</option>
-                        {state.senders.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.configuration.fromAddress} ·{" "}
-                            {s.configuration.purpose.replaceAll("_", " ")} ·
-                            version {s.version}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                      {!state.senders.length && (
-                        <p>
-                          Create an identity in{" "}
-                          <Link
-                            href={`/businesses/${businessId}/senders`}
-                            className="text-primary underline"
-                          >
-                            Sending identities
-                          </Link>{" "}
-                          before saving.
-                        </p>
-                      )}
-                    </Field>
-                    <fieldset className="flex flex-col gap-4">
-                      <legend className="mb-3 font-semibold">
-                        Fixed recipient and evidence selection
-                      </legend>
-                      <p className="text-sm text-muted-foreground">
-                        Select exact published contacts. Later discoveries stay
-                        outside saved versions. Duplicate addresses cannot
-                        appear twice in one plan.
-                      </p>
-                      {!state.candidates.length && (
-                        <p>
-                          Run{" "}
-                          <Link
-                            href={`/businesses/${businessId}/discovery`}
-                            className="text-primary underline"
-                          >
-                            prospect discovery
-                          </Link>{" "}
-                          to collect sourced email contacts.
-                        </p>
-                      )}
-                      {state.candidates.map((r) => (
-                        <div
-                          key={selectionKey(r)}
-                          className="rounded-xl border border-border p-4"
-                        >
-                          <label className="mb-3 flex min-h-11 cursor-pointer items-center gap-3">
-                            <input
-                              type="checkbox"
-                              className="size-5 accent-primary"
-                              checked={selected.includes(selectionKey(r))}
-                              onChange={(e) =>
-                                setSelected((v) =>
-                                  e.target.checked
-                                    ? [...v, selectionKey(r)]
-                                    : v.filter((k) => k !== selectionKey(r)),
-                                )
-                              }
-                            />
-                            <span>
-                              Select {r.prospect.name} · {r.address}
-                            </span>
-                          </label>
-                          <RecipientEvidence recipient={r} />
-                        </div>
-                      ))}
-                      {selected.some(
-                        (key) =>
-                          !state.candidates.some(
-                            (c) => selectionKey(c) === key,
-                          ),
-                      ) && (
-                        <Alert variant="warning">
-                          Selected evidence changed.{" "}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => {
-                              setSelected((v) =>
-                                v.filter((k) =>
-                                  state.candidates.some(
-                                    (c) => selectionKey(c) === k,
-                                  ),
-                                ),
-                              );
-                              setRequestKey(crypto.randomUUID());
-                            }}
-                          >
-                            Remove outdated selections
-                          </Button>{" "}
-                          Then explicitly select the current contacts.
-                        </Alert>
-                      )}
-                    </fieldset>
-                    <fieldset className="flex flex-col gap-4">
-                      <legend className="mb-3 font-semibold">
-                        Initial message and follow-ups
-                      </legend>
-                      <p className="text-sm text-muted-foreground">
-                        Every selected recipient receives the exact text below.
-                        No inferred personalization or commercial authority is
-                        added. Each message can be attempted once; delays start
-                        after the previous successful attempt.
-                      </p>
-                      {steps.map((s, i) => (
-                        <Field
-                          key={i}
-                          className="flex flex-col gap-3 rounded-xl border border-border p-4"
-                        >
-                          <h3 className="font-medium">
-                            {i === 0 ? "Initial message" : `Follow-up ${i}`}
-                          </h3>
-                          <Label htmlFor={`campaign-subject-${i}`}>
-                            Subject
-                          </Label>
-                          <Input
-                            id={`campaign-subject-${i}`}
-                            value={s.subject}
-                            required
-                            maxLength={2000}
-                            onChange={(e) =>
-                              setSteps((v) =>
-                                v.map((s, n) =>
-                                  n === i
-                                    ? { ...s, subject: e.target.value }
-                                    : s,
-                                ),
-                              )
-                            }
-                          />
-                          <Label htmlFor={`campaign-body-${i}`}>Message</Label>
-                          <Textarea
-                            id={`campaign-body-${i}`}
-                            value={s.body}
-                            required
-                            maxLength={2000}
-                            onChange={(e) =>
-                              setSteps((v) =>
-                                v.map((s, n) =>
-                                  n === i ? { ...s, body: e.target.value } : s,
-                                ),
-                              )
-                            }
-                          />
-                          {i === 0 ? (
-                            <p className="text-sm text-muted-foreground">
-                              Initial delay: 0 minutes. Approval does not
-                              schedule this message.
-                            </p>
-                          ) : (
-                            <>
-                              <Label htmlFor={`campaign-delay-${i}`}>
-                                Delay after previous successful attempt
-                                (minutes)
+                  <FormSteps
+                    key={`${editing?.campaignId ?? "new"}:${formVersion}`}
+                    disabled={pending}
+                    steps={[
+                      {
+                        id: "contacts",
+                        label: "Recipients and sender",
+                        description:
+                          "Name the campaign, choose a sending address and select the prospects to contact.",
+                        content: (
+                          <>
+                            <Field className="flex flex-col gap-2">
+                              <Label htmlFor="campaign-name">
+                                Campaign name
                               </Label>
                               <Input
-                                id={`campaign-delay-${i}`}
-                                type="number"
-                                min={1}
-                                step={1}
+                                id="campaign-name"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
                                 required
-                                value={s.delayMinutes}
-                                onChange={(e) =>
-                                  setSteps((v) =>
-                                    v.map((s, n) =>
-                                      n === i
-                                        ? { ...s, delayMinutes: e.target.value }
-                                        : s,
-                                    ),
-                                  )
-                                }
+                                maxLength={2000}
+                                placeholder="For example, data tools for online stores"
                               />
+                            </Field>
+                            <Field className="flex flex-col gap-2">
+                              <Label htmlFor="campaign-channel">Channel</Label>
+                              <NativeSelect
+                                id="campaign-channel"
+                                value="email"
+                                onChange={() => {}}
+                              >
+                                <option value="email">Email</option>
+                              </NativeSelect>
+                              <p className="text-sm text-muted-foreground">
+                                Review uses configured email identities.
+                                Execution and sending adapters are not activated
+                                here.
+                              </p>
+                            </Field>
+                            <Field className="flex flex-col gap-2">
+                              <Label htmlFor="campaign-sender">
+                                Sending identity
+                              </Label>
+                              <NativeSelect
+                                id="campaign-sender"
+                                value={senderId}
+                                onChange={(e) => setSenderId(e.target.value)}
+                                required
+                              >
+                                <option value="">Choose an identity</option>
+                                {state.senders.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.configuration.fromAddress} ·{" "}
+                                    {s.configuration.purpose.replaceAll(
+                                      "_",
+                                      " ",
+                                    )}{" "}
+                                    · version {s.version}
+                                  </option>
+                                ))}
+                              </NativeSelect>
+                              {!state.senders.length && (
+                                <p>
+                                  Create an identity in{" "}
+                                  <Link
+                                    href={`/businesses/${businessId}/senders`}
+                                    className="text-primary underline"
+                                  >
+                                    Sending identities
+                                  </Link>{" "}
+                                  before saving.
+                                </p>
+                              )}
+                            </Field>
+                            <fieldset className="flex flex-col gap-4">
+                              <legend className="mb-3 font-semibold">
+                                Fixed recipient and evidence selection
+                              </legend>
+                              <p className="text-sm text-muted-foreground">
+                                Select exact published contacts. Later
+                                discoveries stay outside saved versions.
+                                Duplicate addresses cannot appear twice in one
+                                plan.
+                              </p>
+                              {!state.candidates.length && (
+                                <p>
+                                  Run{" "}
+                                  <Link
+                                    href={`/businesses/${businessId}/discovery`}
+                                    className="text-primary underline"
+                                  >
+                                    prospect discovery
+                                  </Link>{" "}
+                                  to collect sourced email contacts.
+                                </p>
+                              )}
+                              {state.candidates.map((r) => (
+                                <div
+                                  key={selectionKey(r)}
+                                  className="rounded-xl border border-border p-4"
+                                >
+                                  <label className="mb-3 flex min-h-11 cursor-pointer items-center gap-3">
+                                    <input
+                                      type="checkbox"
+                                      className="size-5 accent-primary"
+                                      checked={selected.includes(
+                                        selectionKey(r),
+                                      )}
+                                      onChange={(e) =>
+                                        setSelected((v) =>
+                                          e.target.checked
+                                            ? [...v, selectionKey(r)]
+                                            : v.filter(
+                                                (k) => k !== selectionKey(r),
+                                              ),
+                                        )
+                                      }
+                                    />
+                                    <span>
+                                      Select {r.prospect.name} · {r.address}
+                                    </span>
+                                  </label>
+                                  <RecipientEvidence recipient={r} />
+                                </div>
+                              ))}
+                              {selected.some(
+                                (key) =>
+                                  !state.candidates.some(
+                                    (c) => selectionKey(c) === key,
+                                  ),
+                              ) && (
+                                <Alert variant="warning">
+                                  Selected evidence changed.{" "}
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelected((v) =>
+                                        v.filter((k) =>
+                                          state.candidates.some(
+                                            (c) => selectionKey(c) === k,
+                                          ),
+                                        ),
+                                      );
+                                      setRequestKey(crypto.randomUUID());
+                                    }}
+                                  >
+                                    Remove outdated selections
+                                  </Button>{" "}
+                                  Then explicitly select the current contacts.
+                                </Alert>
+                              )}
+                            </fieldset>
+                          </>
+                        ),
+                      },
+                      {
+                        id: "messages",
+                        label: "Write your messages",
+                        description:
+                          "Write the first email and any follow-ups. Each selected contact receives this text.",
+                        content: (
+                          <>
+                            <fieldset className="flex flex-col gap-4">
+                              <legend className="mb-3 font-semibold">
+                                Initial message and follow-ups
+                              </legend>
+                              <p className="text-sm text-muted-foreground">
+                                Every selected recipient receives the exact text
+                                below. No inferred personalization or commercial
+                                authority is added. Each message can be
+                                attempted once; delays start after the previous
+                                successful attempt.
+                              </p>
+                              {steps.map((s, i) => (
+                                <Field
+                                  key={i}
+                                  className="flex flex-col gap-3 rounded-xl border border-border p-4"
+                                >
+                                  <h3 className="font-medium">
+                                    {i === 0
+                                      ? "Initial message"
+                                      : `Follow-up ${i}`}
+                                  </h3>
+                                  <Label htmlFor={`campaign-subject-${i}`}>
+                                    Subject
+                                  </Label>
+                                  <Input
+                                    id={`campaign-subject-${i}`}
+                                    value={s.subject}
+                                    required
+                                    maxLength={2000}
+                                    onChange={(e) =>
+                                      setSteps((v) =>
+                                        v.map((s, n) =>
+                                          n === i
+                                            ? { ...s, subject: e.target.value }
+                                            : s,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                  <Label htmlFor={`campaign-body-${i}`}>
+                                    Message
+                                  </Label>
+                                  <Textarea
+                                    id={`campaign-body-${i}`}
+                                    value={s.body}
+                                    required
+                                    maxLength={2000}
+                                    onChange={(e) =>
+                                      setSteps((v) =>
+                                        v.map((s, n) =>
+                                          n === i
+                                            ? { ...s, body: e.target.value }
+                                            : s,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                  {i === 0 ? (
+                                    <p className="text-sm text-muted-foreground">
+                                      Initial delay: 0 minutes. Approval does
+                                      not schedule this message.
+                                    </p>
+                                  ) : (
+                                    <>
+                                      <Label htmlFor={`campaign-delay-${i}`}>
+                                        Delay after previous successful attempt
+                                        (minutes)
+                                      </Label>
+                                      <Input
+                                        id={`campaign-delay-${i}`}
+                                        type="number"
+                                        min={1}
+                                        step={1}
+                                        required
+                                        value={s.delayMinutes}
+                                        onChange={(e) =>
+                                          setSteps((v) =>
+                                            v.map((s, n) =>
+                                              n === i
+                                                ? {
+                                                    ...s,
+                                                    delayMinutes:
+                                                      e.target.value,
+                                                  }
+                                                : s,
+                                            ),
+                                          )
+                                        }
+                                      />
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() => {
+                                          setSteps((v) =>
+                                            v.filter((_, n) => n !== i),
+                                          );
+                                          setRequestKey(crypto.randomUUID());
+                                        }}
+                                      >
+                                        Remove follow-up {i}
+                                      </Button>
+                                    </>
+                                  )}
+                                </Field>
+                              ))}
                               <Button
                                 type="button"
                                 variant="outline"
                                 onClick={() => {
-                                  setSteps((v) => v.filter((_, n) => n !== i));
+                                  setSteps((v) => [
+                                    ...v,
+                                    { subject: "", body: "", delayMinutes: "" },
+                                  ]);
                                   setRequestKey(crypto.randomUUID());
                                 }}
                               >
-                                Remove follow-up {i}
+                                Add follow-up
                               </Button>
-                            </>
-                          )}
-                        </Field>
-                      ))}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setSteps((v) => [
-                            ...v,
-                            { subject: "", body: "", delayMinutes: "" },
-                          ]);
-                          setRequestKey(crypto.randomUUID());
-                        }}
-                      >
-                        Add follow-up
-                      </Button>
-                    </fieldset>
-                    <Field className="flex flex-col gap-2">
-                      <Label htmlFor="campaign-attempts">
-                        Maximum attempts per recipient, including initial
-                        contact
-                      </Label>
-                      <Input
-                        id="campaign-attempts"
-                        type="number"
-                        min={1}
-                        step={1}
-                        required
-                        value={attempts}
-                        onChange={(e) => setAttempts(e.target.value)}
-                      />
-                      <p className="text-sm text-muted-foreground">
-                        Enter {steps.length} for this {steps.length}-message
-                        plan. Reservations include failed and uncertain
-                        transport calls. A retry consumes the same cap and may
-                        leave no attempt for a later reminder.
-                      </p>
-                    </Field>
-                    <Field className="flex flex-col gap-2">
-                      <h3 className="font-semibold">
-                        Mandatory stop conditions
-                      </h3>
-                      <p>{stopText}</p>
-                      <Label htmlFor="campaign-stops">
-                        Additional stop conditions (one per line, optional)
-                      </Label>
-                      <Textarea
-                        id="campaign-stops"
-                        value={additional}
-                        onChange={(e) => setAdditional(e.target.value)}
-                      />
-                    </Field>
-                    <fieldset className="flex flex-col gap-4 rounded-xl border border-border p-4">
-                      <legend className="px-2 font-semibold">
-                        Local timing for automated sequences
-                      </legend>
-                      <div className="flex min-h-11 items-center gap-3">
-                        <Checkbox
-                          id="campaign-timing-enabled"
-                          checked={timing.enabled}
-                          onCheckedChange={(v) =>
-                            setTiming({ ...timing, enabled: v === true })
-                          }
-                        />
-                        <Label htmlFor="campaign-timing-enabled">
-                          Include a local send window in this approval
-                        </Label>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Choose the intended time zone and send days for this
-                        campaign. Delays are minimum elapsed minutes after
-                        actual provider acceptance. Missed work moves to an
-                        allowed window; it does not send overdue reminders in a
-                        burst. Without a window, this version supports manual
-                        email handoff only.
-                      </p>
-                      {timing.enabled && (
-                        <>
-                          <Field className="flex flex-col gap-2">
-                            <Label htmlFor="campaign-timezone">
-                              IANA time zone
-                            </Label>
-                            <Input
-                              id="campaign-timezone"
-                              value={timing.timeZone}
-                              onChange={(e) =>
-                                setTiming({
-                                  ...timing,
-                                  timeZone: e.target.value,
-                                })
-                              }
-                              required
-                              placeholder="For example, America/New_York"
-                            />
-                          </Field>
-                          <div className="grid gap-4 sm:grid-cols-2">
+                            </fieldset>
+                          </>
+                        ),
+                      },
+                      {
+                        id: "limits",
+                        label: "Timing and limits",
+                        description:
+                          "Set the maximum sending attempts and the times when messages may be sent.",
+                        content: (
+                          <>
                             <Field className="flex flex-col gap-2">
-                              <Label htmlFor="campaign-window-start">
-                                Local window starts
+                              <Label htmlFor="campaign-attempts">
+                                Maximum attempts per recipient, including
+                                initial contact
                               </Label>
                               <Input
-                                id="campaign-window-start"
-                                type="time"
-                                value={timing.startTime}
+                                id="campaign-attempts"
+                                type="number"
+                                min={1}
+                                step={1}
                                 required
-                                onChange={(e) =>
-                                  setTiming({
-                                    ...timing,
-                                    startTime: e.target.value,
-                                  })
-                                }
+                                value={attempts}
+                                onChange={(e) => setAttempts(e.target.value)}
                               />
+                              <p className="text-sm text-muted-foreground">
+                                Enter {steps.length} for this {steps.length}
+                                -message plan. Reservations include failed and
+                                uncertain transport calls. A retry consumes the
+                                same cap and may leave no attempt for a later
+                                reminder.
+                              </p>
                             </Field>
                             <Field className="flex flex-col gap-2">
-                              <Label htmlFor="campaign-window-end">
-                                Local window ends
+                              <h3 className="font-semibold">
+                                Mandatory stop conditions
+                              </h3>
+                              <p>{stopText}</p>
+                              <Label htmlFor="campaign-stops">
+                                Additional stop conditions (one per line,
+                                optional)
                               </Label>
-                              <Input
-                                id="campaign-window-end"
-                                type="time"
-                                value={timing.endTime}
-                                required
-                                onChange={(e) =>
-                                  setTiming({
-                                    ...timing,
-                                    endTime: e.target.value,
-                                  })
-                                }
+                              <Textarea
+                                id="campaign-stops"
+                                value={additional}
+                                onChange={(e) => setAdditional(e.target.value)}
                               />
                             </Field>
-                          </div>
-                          <fieldset>
-                            <legend className="mb-2 text-sm font-medium">
-                              Send days
-                            </legend>
-                            <div className="flex flex-wrap gap-4">
-                              {[
-                                "Mon",
-                                "Tue",
-                                "Wed",
-                                "Thu",
-                                "Fri",
-                                "Sat",
-                                "Sun",
-                              ].map((day, i) => (
-                                <div
-                                  key={day}
-                                  className="flex min-h-11 items-center gap-2"
+                            <fieldset className="flex flex-col gap-4 rounded-xl border border-border p-4">
+                              <legend className="px-2 font-semibold">
+                                Local timing for automated sequences
+                              </legend>
+                              <div className="flex min-h-11 items-center gap-3">
+                                <Checkbox
+                                  id="campaign-timing-enabled"
+                                  checked={timing.enabled}
+                                  onCheckedChange={(v) =>
+                                    setTiming({
+                                      ...timing,
+                                      enabled: v === true,
+                                    })
+                                  }
+                                />
+                                <Label htmlFor="campaign-timing-enabled">
+                                  Include a local send window in this approval
+                                </Label>
+                              </div>
+                              <p className="text-sm text-muted-foreground">
+                                Choose the intended time zone and send days for
+                                this campaign. Delays are minimum elapsed
+                                minutes after actual provider acceptance. Missed
+                                work moves to an allowed window; it does not
+                                send overdue reminders in a burst. Without a
+                                window, this version supports manual email
+                                handoff only.
+                              </p>
+                              {timing.enabled && (
+                                <>
+                                  <Field className="flex flex-col gap-2">
+                                    <Label htmlFor="campaign-timezone">
+                                      IANA time zone
+                                    </Label>
+                                    <Input
+                                      id="campaign-timezone"
+                                      value={timing.timeZone}
+                                      onChange={(e) =>
+                                        setTiming({
+                                          ...timing,
+                                          timeZone: e.target.value,
+                                        })
+                                      }
+                                      required
+                                      placeholder="For example, America/New_York"
+                                    />
+                                  </Field>
+                                  <div className="grid gap-4 sm:grid-cols-2">
+                                    <Field className="flex flex-col gap-2">
+                                      <Label htmlFor="campaign-window-start">
+                                        Local window starts
+                                      </Label>
+                                      <Input
+                                        id="campaign-window-start"
+                                        type="time"
+                                        value={timing.startTime}
+                                        required
+                                        onChange={(e) =>
+                                          setTiming({
+                                            ...timing,
+                                            startTime: e.target.value,
+                                          })
+                                        }
+                                      />
+                                    </Field>
+                                    <Field className="flex flex-col gap-2">
+                                      <Label htmlFor="campaign-window-end">
+                                        Local window ends
+                                      </Label>
+                                      <Input
+                                        id="campaign-window-end"
+                                        type="time"
+                                        value={timing.endTime}
+                                        required
+                                        onChange={(e) =>
+                                          setTiming({
+                                            ...timing,
+                                            endTime: e.target.value,
+                                          })
+                                        }
+                                      />
+                                    </Field>
+                                  </div>
+                                  <fieldset>
+                                    <legend className="mb-2 text-sm font-medium">
+                                      Send days
+                                    </legend>
+                                    <div className="flex flex-wrap gap-4">
+                                      {[
+                                        "Mon",
+                                        "Tue",
+                                        "Wed",
+                                        "Thu",
+                                        "Fri",
+                                        "Sat",
+                                        "Sun",
+                                      ].map((day, i) => (
+                                        <div
+                                          key={day}
+                                          className="flex min-h-11 items-center gap-2"
+                                        >
+                                          <Checkbox
+                                            id={`campaign-day-${i}`}
+                                            checked={timing.weekdays.includes(
+                                              i + 1,
+                                            )}
+                                            onCheckedChange={(v) =>
+                                              setTiming({
+                                                ...timing,
+                                                weekdays:
+                                                  v === true
+                                                    ? [
+                                                        ...timing.weekdays,
+                                                        i + 1,
+                                                      ]
+                                                    : timing.weekdays.filter(
+                                                        (d) => d !== i + 1,
+                                                      ),
+                                              })
+                                            }
+                                          />
+                                          <Label htmlFor={`campaign-day-${i}`}>
+                                            {day}
+                                          </Label>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </fieldset>
+                                  <p className="text-sm text-muted-foreground">
+                                    At daylight-saving changes, a repeated start
+                                    uses its first occurrence; a missing local
+                                    start moves forward by the gap.
+                                  </p>
+                                </>
+                              )}
+                            </fieldset>
+                          </>
+                        ),
+                      },
+                      {
+                        id: "review",
+                        label: "Save for review",
+                        description:
+                          "Explain the campaign and save the draft. Saving does not approve or send it.",
+                        content: (
+                          <>
+                            <Field className="flex flex-col gap-2">
+                              <Label htmlFor="campaign-note">
+                                Reason for this version
+                              </Label>
+                              <Textarea
+                                id="campaign-note"
+                                value={note}
+                                required
+                                maxLength={2000}
+                                onChange={(e) => setNote(e.target.value)}
+                                placeholder="For example, introduce our product to the selected contacts"
+                              />
+                            </Field>
+                            <div className="flex flex-wrap gap-3">
+                              {feedbackFor("draft")}
+                              <Button type="submit">
+                                {pending
+                                  ? "Saving…"
+                                  : "Save version for review"}
+                              </Button>
+                              {editing && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={resetDraft}
                                 >
-                                  <Checkbox
-                                    id={`campaign-day-${i}`}
-                                    checked={timing.weekdays.includes(i + 1)}
-                                    onCheckedChange={(v) =>
-                                      setTiming({
-                                        ...timing,
-                                        weekdays:
-                                          v === true
-                                            ? [...timing.weekdays, i + 1]
-                                            : timing.weekdays.filter(
-                                                (d) => d !== i + 1,
-                                              ),
-                                      })
-                                    }
-                                  />
-                                  <Label htmlFor={`campaign-day-${i}`}>
-                                    {day}
-                                  </Label>
-                                </div>
-                              ))}
+                                  Cancel revision
+                                </Button>
+                              )}
                             </div>
-                          </fieldset>
-                          <p className="text-sm text-muted-foreground">
-                            At daylight-saving changes, a repeated start uses
-                            its first occurrence; a missing local start moves
-                            forward by the gap.
-                          </p>
-                        </>
-                      )}
-                    </fieldset>
-                    <Field className="flex flex-col gap-2">
-                      <Label htmlFor="campaign-note">
-                        Reason for this version
-                      </Label>
-                      <Textarea
-                        id="campaign-note"
-                        value={note}
-                        required
-                        maxLength={2000}
-                        onChange={(e) => setNote(e.target.value)}
-                      />
-                    </Field>
-                    <div className="flex flex-wrap gap-3">
-                      {feedbackFor("draft")}
-                      <Button type="submit">
-                        {pending ? "Saving…" : "Save version for review"}
-                      </Button>
-                      {editing && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={resetDraft}
-                        >
-                          Cancel revision
-                        </Button>
-                      )}
-                    </div>
-                  </fieldset>
+                          </>
+                        ),
+                      },
+                    ]}
+                  />
                 </FieldGroup>
               </form>
             </CardContent>

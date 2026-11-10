@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
@@ -330,7 +331,7 @@ export function WhatsAppSendingManager({
       )}
       <Card>
         <CardHeader>
-          <CardTitle>Current sending checks</CardTitle>
+          <CardTitle>WhatsApp sending status</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <Badge>
@@ -372,720 +373,840 @@ export function WhatsAppSendingManager({
           </div>
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>WhatsApp permission evidence</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
-          <p className="text-sm text-muted-foreground">
-            Record attributable evidence held in the approved case archive.
-            Public phone numbers, paid reach and Meta template approval do not
-            establish opt-in. Do not enter credentials or private documents.
-          </p>
-          <form onSubmit={permission} className="flex flex-col gap-4">
-            <FieldGroup className="gap-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field id="wa-peer" label="Recipient international number">
-                  <Input id="wa-peer" name="peer" type="tel" required />
-                </Field>
-                <Field id="wa-purpose" label="Permission purpose">
-                  <NativeSelect id="wa-purpose" name="purpose">
-                    <option value="conversation">Conversation replies</option>
-                    <option value="outreach">
-                      Approved outreach and follow-up
-                    </option>
-                  </NativeSelect>
-                </Field>
-                <Field
-                  id="wa-opportunity"
-                  label="Opportunity (optional; blank covers this recipient and purpose)"
-                >
-                  <NativeSelect id="wa-opportunity" name="opportunity">
-                    <option value="">Recipient and purpose</option>
-                    {[
-                      ...new Set(state.actions.map((a) => a.opportunityId)),
-                    ].map((id) => (
-                      <option key={id} value={id}>
-                        {state.actions.find((a) => a.opportunityId === id)
-                          ?.title ?? id}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <Field id="wa-reference" label="Evidence case reference">
-                  <Input
-                    id="wa-reference"
-                    name="reference"
-                    required
-                    pattern="[A-Z][A-Z0-9-]{5,100}"
-                  />
-                </Field>
-                <Field id="wa-digest" label="Redacted evidence SHA-256">
-                  <Input
-                    id="wa-digest"
-                    name="digest"
-                    required
-                    pattern="[a-f0-9]{64}"
-                  />
-                </Field>
-                <Field id="wa-observed" label="Evidence observed (UTC)">
-                  <Input
-                    id="wa-observed"
-                    name="observed"
-                    type="datetime-local"
-                    required
-                  />
-                </Field>
-                <Field id="wa-expiry" label="Evidence valid until (UTC)">
-                  <Input
-                    id="wa-expiry"
-                    name="expiry"
-                    type="datetime-local"
-                    required
-                  />
-                </Field>
-              </div>
-              {[
-                [
-                  "numberProvided",
-                  "The recipient provided this number to this Business.",
-                ],
-                [
-                  "optedIn",
-                  "The recipient opted in to messages for this purpose.",
-                ],
-                [
-                  "notices",
-                  "Required notices and applicable permission rules were reviewed.",
-                ],
-              ].map(([name, label]) => (
-                <label key={name} className="flex min-h-11 items-center gap-3">
-                  <Checkbox name={name} required />
-                  {label}
-                </label>
-              ))}
-              <Button disabled={pending}>Record permission evidence</Button>
-            </FieldGroup>
-          </form>
-          <details>
-            <summary className="min-h-11 cursor-pointer py-3 font-medium">
-              Saved permission history
-            </summary>
-            <div className="flex flex-col gap-3">
-              {state.permissions.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex flex-col gap-2 rounded-xl border p-4"
-                >
-                  <p>
-                    +{p.permission.peer} · {p.permission.purpose} ·{" "}
-                    {p.revoked
-                      ? "Revoked"
-                      : `Valid until ${p.permission.validUntil}`}
-                  </p>
-                  <p className="text-sm">
-                    {p.permission.reference} · observed{" "}
-                    {p.permission.observedAt}
-                  </p>
-                  {!p.revoked && (
-                    <Button
-                      variant="outline"
-                      disabled={pending}
-                      onClick={() =>
-                        void command("revokePermission", {
-                          permissionId: p.id,
-                          reason: "Business revoked recipient permission",
-                        })
-                      }
-                    >
-                      Revoke this permission
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </details>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Current approved templates</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
-          <p className="text-sm text-muted-foreground">
-            Retrieve the exact language and positional text parameters from your
-            selected Meta account. Body-only informational templates are
-            supported. Unsupported components and financial promises need
-            separate review.
-          </p>
-          <form onSubmit={template} className="flex flex-col gap-4">
-            <FieldGroup className="gap-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field id="wa-template" label="Template name">
-                  <Input id="wa-template" name="name" required />
-                </Field>
-                <Field id="wa-language" label="Exact language code">
-                  <Input
-                    id="wa-language"
-                    name="language"
-                    required
-                    placeholder="en_US"
-                  />
-                </Field>
-              </div>
-              <Field
-                id="wa-parameters"
-                label="Positional text parameters, one per line (blank when none)"
-              >
-                <Textarea id="wa-parameters" name="parameters" />
-              </Field>
-              <Button variant="outline" disabled={pending}>
-                Retrieve current template
-              </Button>
-            </FieldGroup>
-          </form>
-          {activeTemplates.map((t) => (
-            <div key={t.id} className="rounded-xl bg-muted p-4">
-              <p className="font-medium">
-                {t.template.name} · {t.template.language} ·{" "}
-                {t.template.category}
-              </p>
-              <p className="mt-2 whitespace-pre-wrap">{t.template.rendered}</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Observed {t.observedAt}. Status and exact contents are checked
-                again before transport.
-              </p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Bounded outreach plan</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
-          <p className="text-sm text-muted-foreground">
-            Choose current sourced contacts. Saving a version sends nothing; the
-            Owner reviews its fixed recipient set, evidence, sender, exact
-            messages, timing, attempt cap and stop rules before approval.
-            Execution is a separate action.
-          </p>
-          <form onSubmit={savePlan} className="flex flex-col gap-4">
-            <FieldGroup className="gap-4">
-              <Field
-                id="wa-plan-name"
-                label={
-                  revision
-                    ? `New version after ${revision.plan.expectedVersion + 1}`
-                    : "New campaign name"
-                }
-              >
-                <Input
-                  key={revision?.id ?? "new"}
-                  id="wa-plan-name"
-                  name="name"
-                  defaultValue={revision?.plan.name}
-                  required
-                />
-              </Field>
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-2 font-medium">
-                  Fixed recipient set
-                </legend>
-                {!state.candidates.length && (
-                  <p className="text-sm text-muted-foreground">
-                    No current sourced phone contacts. Review Prospect discovery
-                    first.
-                  </p>
-                )}
-                {state.candidates.map((c) => (
-                  <label
-                    key={c.contactId}
-                    className="flex min-h-11 items-start gap-3 rounded-xl border p-3"
-                  >
-                    <Checkbox
-                      checked={selected.includes(c.contactId)}
-                      onCheckedChange={(checked) =>
-                        setSelected((v) =>
-                          checked
-                            ? [...v, c.contactId]
-                            : v.filter((id) => id !== c.contactId),
-                        )
-                      }
-                    />
-                    <span>
-                      {c.name} · +{c.peer}
-                      <span className="block text-sm text-muted-foreground">
-                        {c.market} · {c.sources.length} retained source
-                        references
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              {steps.map((s, i) => (
-                <div
-                  key={i}
-                  className="flex flex-col gap-3 rounded-xl border p-4"
-                >
-                  <Field id={`wa-step-${i}`} label={`Message ${i + 1}`}>
-                    {templateChoices(
-                      s.templateId,
-                      (id) =>
-                        setSteps((v) =>
-                          v.map((r, n) =>
-                            n === i ? { ...r, templateId: id } : r,
-                          ),
-                        ),
-                      `wa-step-${i}`,
-                    )}
-                  </Field>
-                  {i > 0 && (
-                    <Field
-                      id={`wa-delay-${i}`}
-                      label="Minimum minutes after the previous message"
-                    >
-                      <Input
-                        id={`wa-delay-${i}`}
-                        type="number"
-                        min="1"
-                        required
-                        value={s.delayMinutes}
-                        onChange={(e) =>
-                          setSteps((v) =>
-                            v.map((r, n) =>
-                              n === i
-                                ? { ...r, delayMinutes: e.target.value }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                  )}
-                </div>
-              ))}
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={steps.length >= 10}
-                  onClick={() =>
-                    setSteps((v) => [
-                      ...v,
-                      { templateId: "", delayMinutes: "" },
-                    ])
-                  }
-                >
-                  Add bounded follow-up
-                </Button>
-                {steps.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setSteps((v) => v.slice(0, -1))}
-                  >
-                    Remove last follow-up
-                  </Button>
-                )}
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {[
-                  ["notBefore", "Earliest start (UTC)", "datetime-local"],
-                  ["expiresAt", "Plan expiry (UTC)", "datetime-local"],
-                  ["zone", "Sending time zone, such as Asia/Kolkata", "text"],
-                  [
-                    "weekdays",
-                    "Allowed weekdays, comma-separated (Monday 1, Sunday 7)",
-                    "text",
-                  ],
-                  ["start", "Local sending window starts", "time"],
-                  ["end", "Local sending window ends", "time"],
-                ].map(([name, label, type]) => (
-                  <Field key={name} id={`wa-plan-${name}`} label={label}>
-                    <Input
-                      id={`wa-plan-${name}`}
-                      name={name}
-                      type={type}
-                      required
-                    />
-                  </Field>
-                ))}
-              </div>
-              <p className="text-sm">
-                Attempt cap: {steps.length} messages per recipient. Repeated
-                work never increases it. Missed sends wait for the next approved
-                local window; ambiguous acceptance blocks subsequent attempts.
-              </p>
-              <Button
-                disabled={
-                  pending || !selected.length || !state.connectionVersion
-                }
-              >
-                Save version for Owner review
-              </Button>
-              {revision && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setRevision(null)}
-                >
-                  Start a separate campaign
-                </Button>
-              )}
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
-      {state.plans.map((p) => (
-        <Card key={p.id}>
-          <CardHeader>
-            <CardTitle>
-              {p.plan.name} · version {p.plan.expectedVersion + 1}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <Badge>
-              {p.cancelled
-                ? "Stopped"
-                : !p.current
-                  ? "Superseded"
-                  : p.approved
-                    ? "Owner approved"
-                    : "Awaiting Owner approval"}
-            </Badge>
-            <p className="font-medium">
-              Approved sender: {p.sender.number} · connection version{" "}
-              {p.plan.connectionVersion}
-            </p>
-            {p.blockedReason && (
-              <p className="text-sm text-warning">
-                Current execution check: {p.blockedReason.replaceAll("_", " ")}
-              </p>
-            )}
-            {planSummary(p.plan)}
-            <details>
-              <summary className="min-h-11 cursor-pointer py-3 font-medium">
-                Saved source and contact evidence
-              </summary>
-              <div className="flex flex-col gap-4">
-                {p.sources.map((s) => (
-                  <div
-                    key={s.contactId}
-                    className="flex flex-col gap-2 rounded-xl bg-muted p-4"
-                  >
-                    <p className="font-medium">
-                      {s.name} · +{s.peer}
+      <WorkspaceTabs
+        label="WhatsApp campaigns sections"
+        tabs={[
+          {
+            id: "contacts",
+            label: "Contact permissions",
+            description:
+              "Save each contact's WhatsApp permission before planning a message.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Contact permission</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-5">
+                    <p className="text-sm text-muted-foreground">
+                      Record attributable evidence held in the approved case
+                      archive. Public phone numbers, paid reach and Meta
+                      template approval do not establish opt-in. Do not enter
+                      credentials or private documents.
                     </p>
-                    {s.sources.map((source, i) => (
-                      <div key={i}>
-                        <a
-                          href={source.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-11 items-center text-primary underline"
+                    <form onSubmit={permission} className="flex flex-col gap-4">
+                      <FieldGroup className="gap-4">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field
+                            id="wa-peer"
+                            label="Recipient international number"
+                          >
+                            <Input
+                              id="wa-peer"
+                              name="peer"
+                              type="tel"
+                              required
+                            />
+                          </Field>
+                          <Field id="wa-purpose" label="Permission purpose">
+                            <NativeSelect id="wa-purpose" name="purpose">
+                              <option value="conversation">
+                                Conversation replies
+                              </option>
+                              <option value="outreach">
+                                Approved outreach and follow-up
+                              </option>
+                            </NativeSelect>
+                          </Field>
+                          <Field
+                            id="wa-opportunity"
+                            label="Opportunity (optional; blank covers this recipient and purpose)"
+                          >
+                            <NativeSelect
+                              id="wa-opportunity"
+                              name="opportunity"
+                            >
+                              <option value="">Recipient and purpose</option>
+                              {[
+                                ...new Set(
+                                  state.actions.map((a) => a.opportunityId),
+                                ),
+                              ].map((id) => (
+                                <option key={id} value={id}>
+                                  {state.actions.find(
+                                    (a) => a.opportunityId === id,
+                                  )?.title ?? id}
+                                </option>
+                              ))}
+                            </NativeSelect>
+                          </Field>
+                          <Field
+                            id="wa-reference"
+                            label="Evidence case reference"
+                          >
+                            <Input
+                              id="wa-reference"
+                              name="reference"
+                              required
+                              pattern="[A-Z][A-Z0-9-]{5,100}"
+                            />
+                          </Field>
+                          <Field
+                            id="wa-digest"
+                            label="Redacted evidence SHA-256"
+                          >
+                            <Input
+                              id="wa-digest"
+                              name="digest"
+                              required
+                              pattern="[a-f0-9]{64}"
+                            />
+                          </Field>
+                          <Field
+                            id="wa-observed"
+                            label="Evidence observed (UTC)"
+                          >
+                            <Input
+                              id="wa-observed"
+                              name="observed"
+                              type="datetime-local"
+                              required
+                            />
+                          </Field>
+                          <Field
+                            id="wa-expiry"
+                            label="Evidence valid until (UTC)"
+                          >
+                            <Input
+                              id="wa-expiry"
+                              name="expiry"
+                              type="datetime-local"
+                              required
+                            />
+                          </Field>
+                        </div>
+                        {[
+                          [
+                            "numberProvided",
+                            "The recipient provided this number to this Business.",
+                          ],
+                          [
+                            "optedIn",
+                            "The recipient opted in to messages for this purpose.",
+                          ],
+                          [
+                            "notices",
+                            "Required notices and applicable permission rules were reviewed.",
+                          ],
+                        ].map(([name, label]) => (
+                          <label
+                            key={name}
+                            className="flex min-h-11 items-center gap-3"
+                          >
+                            <Checkbox name={name} required />
+                            {label}
+                          </label>
+                        ))}
+                        <Button disabled={pending}>
+                          Record permission evidence
+                        </Button>
+                      </FieldGroup>
+                    </form>
+                    <details>
+                      <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                        Saved permissions
+                      </summary>
+                      <div className="flex flex-col gap-3">
+                        {state.permissions.map((p) => (
+                          <div
+                            key={p.id}
+                            className="flex flex-col gap-2 rounded-xl border p-4"
+                          >
+                            <p>
+                              +{p.permission.peer} · {p.permission.purpose} ·{" "}
+                              {p.revoked
+                                ? "Revoked"
+                                : `Valid until ${p.permission.validUntil}`}
+                            </p>
+                            <p className="text-sm">
+                              {p.permission.reference} · observed{" "}
+                              {p.permission.observedAt}
+                            </p>
+                            {!p.revoked && (
+                              <Button
+                                variant="outline"
+                                disabled={pending}
+                                onClick={() =>
+                                  void command("revokePermission", {
+                                    permissionId: p.id,
+                                    reason:
+                                      "Business revoked recipient permission",
+                                  })
+                                }
+                              >
+                                Revoke this permission
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  </CardContent>
+                </Card>
+              </>
+            ),
+          },
+          {
+            id: "templates",
+            label: "Message templates",
+            description:
+              "Sync approved templates and choose the one to use for an eligible message.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Approved message templates</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-5">
+                    <p className="text-sm text-muted-foreground">
+                      Retrieve the exact language and positional text parameters
+                      from your selected Meta account. Body-only informational
+                      templates are supported. Unsupported components and
+                      financial promises need separate review.
+                    </p>
+                    <form onSubmit={template} className="flex flex-col gap-4">
+                      <FieldGroup className="gap-4">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field id="wa-template" label="Template name">
+                            <Input id="wa-template" name="name" required />
+                          </Field>
+                          <Field id="wa-language" label="Exact language code">
+                            <Input
+                              id="wa-language"
+                              name="language"
+                              required
+                              placeholder="en_US"
+                            />
+                          </Field>
+                        </div>
+                        <Field
+                          id="wa-parameters"
+                          label="Positional text parameters, one per line (blank when none)"
                         >
-                          View recorded public source (new tab)
-                        </a>
-                        <blockquote className="border-l-2 border-border pl-3">
-                          {source.quote}
-                        </blockquote>
-                        <p className="text-sm text-muted-foreground">
-                          Checked {source.checkedAt}
+                          <Textarea id="wa-parameters" name="parameters" />
+                        </Field>
+                        <Button variant="outline" disabled={pending}>
+                          Retrieve current template
+                        </Button>
+                      </FieldGroup>
+                    </form>
+                    {activeTemplates.map((t) => (
+                      <div key={t.id} className="rounded-xl bg-muted p-4">
+                        <p className="font-medium">
+                          {t.template.name} · {t.template.language} ·{" "}
+                          {t.template.category}
+                        </p>
+                        <p className="mt-2 whitespace-pre-wrap">
+                          {t.template.rendered}
+                        </p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Observed {t.observedAt}. Status and exact contents are
+                          checked again before transport.
                         </p>
                       </div>
                     ))}
-                  </div>
-                ))}
-              </div>
-            </details>
-            {p.current && !p.cancelled && (
-              <div className="flex flex-col gap-3">
-                {!p.approved && state.canApprove && (
-                  <form
-                    onSubmit={(e) => approval(e, p)}
-                    className="flex flex-col gap-3"
-                  >
-                    <FieldGroup className="gap-3">
-                      <label className="flex min-h-11 items-start gap-3">
-                        <Checkbox required className="mt-1" />I reviewed this
-                        sender version, recipient set, retained source/contact
-                        evidence, exact messages, timing, attempt cap and stop
-                        conditions.
-                      </label>
-                      <Button disabled={pending}>
-                        Approve this exact version
-                      </Button>
-                    </FieldGroup>
-                  </form>
-                )}
-                {p.approved && (
-                  <Button
-                    disabled={pending || !state.sendingReady}
-                    onClick={() =>
-                      void command("start", { planId: p.id, hash: p.hash })
-                    }
-                  >
-                    Start approved execution
-                  </Button>
-                )}
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setRevision(p);
-                      setSelected(p.plan.recipients.map((r) => r.contactId));
-                      setSteps(
-                        p.plan.recipients[0].steps.map((s) => ({
-                          templateId:
-                            activeTemplates.find(
-                              (t) =>
-                                JSON.stringify(t.template) ===
-                                JSON.stringify(s.template),
-                            )?.id ?? "",
-                          delayMinutes: String(s.delayMinutes),
-                        })),
-                      );
-                    }}
-                  >
-                    Prepare a new version
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() =>
-                      void command("cancelPlan", {
-                        planId: p.id,
-                        reason: "Business stopped pending execution",
-                      })
-                    }
-                  >
-                    Stop pending execution
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ))}
-      <Card>
-        <CardHeader>
-          <CardTitle>Message evidence and customer Meta usage</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
-          <p className="text-sm text-muted-foreground">
-            Accepted is distinct from Sent, delivered and read. Missing or
-            unsupported evidence remains unresolved; reconciliation never
-            resends. Meta callbacks can arrive late and do not establish a final
-            bill or price. No Meta credit, prepaid balance or duplicate
-            subscription charge is created.
-          </p>
-          {!state.actions.length && (
-            <p>
-              No saved WhatsApp actions yet. Ordinary replies start in the
-              Opportunity’s Answer and qualify flow.
-            </p>
-          )}
-          {state.actions.map((a) => (
-            <div
-              key={a.id}
-              className="flex flex-col gap-3 rounded-xl border p-4"
-            >
-              <Link
-                href={`/businesses/${businessId}/opportunities/${a.opportunityId}`}
-                className="inline-flex min-h-11 items-center text-primary underline"
-              >
-                Review Opportunity: {a.title}
-              </Link>
-              <p>
-                {a.state} · {a.evidence} · due {a.dueAt}
-              </p>
-              {a.intent && (
-                <p className="whitespace-pre-wrap">
-                  +{a.intent.peer}: {a.intent.body}
-                </p>
-              )}
-              <p className="text-sm">
-                {a.reason?.replaceAll("_", " ")}{" "}
-                {a.reconciliationReason?.replaceAll("_", " ")}
-              </p>
-              {a.providerMessageRef && (
-                <p className="text-sm">
-                  Provider reference: {a.providerMessageRef}
-                </p>
-              )}
-              <Button
-                variant="outline"
-                disabled={pending}
-                onClick={() => void command("reconcile", { actionId: a.id })}
-              >
-                Reconcile saved provider evidence
-              </Button>
-              {a.state === "pending" && (
-                <form
-                  className="flex flex-col gap-3"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void command("bindReplyTemplate", {
-                      actionId: a.id,
-                      templateId: new FormData(e.currentTarget).get(
-                        "templateId",
-                      ),
-                    });
-                  }}
-                >
-                  <FieldGroup className="gap-3">
-                    <Field
-                      id={`wa-bind-${a.id}`}
-                      label="For an expired reply window: select a template whose exact rendering equals the saved grounded answer"
-                    >
-                      <NativeSelect
-                        id={`wa-bind-${a.id}`}
-                        name="templateId"
-                        required
-                      >
-                        <option value="">
-                          Select matching approved template
-                        </option>
-                        {activeTemplates.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.template.name} · {t.template.language} ·{" "}
-                            {t.template.rendered}
-                          </option>
+                  </CardContent>
+                </Card>
+              </>
+            ),
+          },
+          {
+            id: "campaigns",
+            label: "WhatsApp campaigns",
+            description:
+              "Choose permitted contacts, prepare the messages and review the sending limits before approval.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Prepare a WhatsApp campaign</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-5">
+                    <p className="text-sm text-muted-foreground">
+                      Choose current sourced contacts. Saving a version sends
+                      nothing; the Owner reviews its fixed recipient set,
+                      evidence, sender, exact messages, timing, attempt cap and
+                      stop rules before approval. Execution is a separate
+                      action.
+                    </p>
+                    <form onSubmit={savePlan} className="flex flex-col gap-4">
+                      <FieldGroup className="gap-4">
+                        <Field
+                          id="wa-plan-name"
+                          label={
+                            revision
+                              ? `New version after ${revision.plan.expectedVersion + 1}`
+                              : "New campaign name"
+                          }
+                        >
+                          <Input
+                            key={revision?.id ?? "new"}
+                            id="wa-plan-name"
+                            name="name"
+                            defaultValue={revision?.plan.name}
+                            required
+                          />
+                        </Field>
+                        <fieldset className="flex flex-col gap-2">
+                          <legend className="mb-2 font-medium">
+                            Fixed recipient set
+                          </legend>
+                          {!state.candidates.length && (
+                            <p className="text-sm text-muted-foreground">
+                              No current sourced phone contacts. Review Prospect
+                              discovery first.
+                            </p>
+                          )}
+                          {state.candidates.map((c) => (
+                            <label
+                              key={c.contactId}
+                              className="flex min-h-11 items-start gap-3 rounded-xl border p-3"
+                            >
+                              <Checkbox
+                                checked={selected.includes(c.contactId)}
+                                onCheckedChange={(checked) =>
+                                  setSelected((v) =>
+                                    checked
+                                      ? [...v, c.contactId]
+                                      : v.filter((id) => id !== c.contactId),
+                                  )
+                                }
+                              />
+                              <span>
+                                {c.name} · +{c.peer}
+                                <span className="block text-sm text-muted-foreground">
+                                  {c.market} · {c.sources.length} retained
+                                  source references
+                                </span>
+                              </span>
+                            </label>
+                          ))}
+                        </fieldset>
+                        {steps.map((s, i) => (
+                          <div
+                            key={i}
+                            className="flex flex-col gap-3 rounded-xl border p-4"
+                          >
+                            <Field
+                              id={`wa-step-${i}`}
+                              label={`Message ${i + 1}`}
+                            >
+                              {templateChoices(
+                                s.templateId,
+                                (id) =>
+                                  setSteps((v) =>
+                                    v.map((r, n) =>
+                                      n === i ? { ...r, templateId: id } : r,
+                                    ),
+                                  ),
+                                `wa-step-${i}`,
+                              )}
+                            </Field>
+                            {i > 0 && (
+                              <Field
+                                id={`wa-delay-${i}`}
+                                label="Minimum minutes after the previous message"
+                              >
+                                <Input
+                                  id={`wa-delay-${i}`}
+                                  type="number"
+                                  min="1"
+                                  required
+                                  value={s.delayMinutes}
+                                  onChange={(e) =>
+                                    setSteps((v) =>
+                                      v.map((r, n) =>
+                                        n === i
+                                          ? {
+                                              ...r,
+                                              delayMinutes: e.target.value,
+                                            }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </Field>
+                            )}
+                          </div>
                         ))}
-                      </NativeSelect>
-                    </Field>
-                    <Button variant="outline" disabled={pending}>
-                      Bind exact reply template
-                    </Button>
-                  </FieldGroup>
-                </form>
-              )}
-              {state.usage
-                .filter((u) => u.actionId === a.id)
-                .map((u, i) => (
-                  <div
-                    key={i}
-                    className="flex flex-col gap-1 text-sm text-muted-foreground"
-                  >
-                    <p>
-                      Customer Meta usage: {u.state.replaceAll("_", " ")} ·{" "}
-                      {u.minor !== null
-                        ? `${u.currency} ${u.minor} minor units`
-                        : "amount not established"}
-                    </p>
-                    <p>
-                      Source: {u.provenance}; provider observed{" "}
-                      {u.observedAt ?? "pending"}; received{" "}
-                      {u.receivedAt ?? "pending"}.
-                    </p>
-                    {u.pricing !== null && (
+                        <div className="flex flex-wrap gap-3">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={steps.length >= 10}
+                            onClick={() =>
+                              setSteps((v) => [
+                                ...v,
+                                { templateId: "", delayMinutes: "" },
+                              ])
+                            }
+                          >
+                            Add bounded follow-up
+                          </Button>
+                          {steps.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setSteps((v) => v.slice(0, -1))}
+                            >
+                              Remove last follow-up
+                            </Button>
+                          )}
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {[
+                            [
+                              "notBefore",
+                              "Earliest start (UTC)",
+                              "datetime-local",
+                            ],
+                            [
+                              "expiresAt",
+                              "Plan expiry (UTC)",
+                              "datetime-local",
+                            ],
+                            [
+                              "zone",
+                              "Sending time zone, such as Asia/Kolkata",
+                              "text",
+                            ],
+                            [
+                              "weekdays",
+                              "Allowed weekdays, comma-separated (Monday 1, Sunday 7)",
+                              "text",
+                            ],
+                            ["start", "Local sending window starts", "time"],
+                            ["end", "Local sending window ends", "time"],
+                          ].map(([name, label, type]) => (
+                            <Field
+                              key={name}
+                              id={`wa-plan-${name}`}
+                              label={label}
+                            >
+                              <Input
+                                id={`wa-plan-${name}`}
+                                name={name}
+                                type={type}
+                                required
+                              />
+                            </Field>
+                          ))}
+                        </div>
+                        <p className="text-sm">
+                          Attempt cap: {steps.length} messages per recipient.
+                          Repeated work never increases it. Missed sends wait
+                          for the next approved local window; ambiguous
+                          acceptance blocks subsequent attempts.
+                        </p>
+                        <Button
+                          disabled={
+                            pending ||
+                            !selected.length ||
+                            !state.connectionVersion
+                          }
+                        >
+                          Save version for Owner review
+                        </Button>
+                        {revision && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => setRevision(null)}
+                          >
+                            Start a separate campaign
+                          </Button>
+                        )}
+                      </FieldGroup>
+                    </form>
+                  </CardContent>
+                </Card>
+                {state.plans.map((p) => (
+                  <Card key={p.id}>
+                    <CardHeader>
+                      <CardTitle>
+                        {p.plan.name} · version {p.plan.expectedVersion + 1}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-5">
+                      <Badge>
+                        {p.cancelled
+                          ? "Stopped"
+                          : !p.current
+                            ? "Superseded"
+                            : p.approved
+                              ? "Owner approved"
+                              : "Awaiting Owner approval"}
+                      </Badge>
+                      <p className="font-medium">
+                        Approved sender: {p.sender.number} · connection version{" "}
+                        {p.plan.connectionVersion}
+                      </p>
+                      {p.blockedReason && (
+                        <p className="text-sm text-warning">
+                          Current execution check:{" "}
+                          {p.blockedReason.replaceAll("_", " ")}
+                        </p>
+                      )}
+                      {planSummary(p.plan)}
                       <details>
-                        <summary className="min-h-11 cursor-pointer py-3">
-                          Provider usage classification
+                        <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                          Saved source and contact evidence
                         </summary>
-                        <pre className="whitespace-pre-wrap">
-                          {JSON.stringify(u.pricing, null, 2)}
-                        </pre>
+                        <div className="flex flex-col gap-4">
+                          {p.sources.map((s) => (
+                            <div
+                              key={s.contactId}
+                              className="flex flex-col gap-2 rounded-xl bg-muted p-4"
+                            >
+                              <p className="font-medium">
+                                {s.name} · +{s.peer}
+                              </p>
+                              {s.sources.map((source, i) => (
+                                <div key={i}>
+                                  <a
+                                    href={source.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex min-h-11 items-center text-primary underline"
+                                  >
+                                    View recorded public source (new tab)
+                                  </a>
+                                  <blockquote className="border-l-2 border-border pl-3">
+                                    {source.quote}
+                                  </blockquote>
+                                  <p className="text-sm text-muted-foreground">
+                                    Checked {source.checkedAt}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
                       </details>
-                    )}
-                  </div>
+                      {p.current && !p.cancelled && (
+                        <div className="flex flex-col gap-3">
+                          {!p.approved && state.canApprove && (
+                            <form
+                              onSubmit={(e) => approval(e, p)}
+                              className="flex flex-col gap-3"
+                            >
+                              <FieldGroup className="gap-3">
+                                <label className="flex min-h-11 items-start gap-3">
+                                  <Checkbox required className="mt-1" />I
+                                  reviewed this sender version, recipient set,
+                                  retained source/contact evidence, exact
+                                  messages, timing, attempt cap and stop
+                                  conditions.
+                                </label>
+                                <Button disabled={pending}>
+                                  Approve this exact version
+                                </Button>
+                              </FieldGroup>
+                            </form>
+                          )}
+                          {p.approved && (
+                            <Button
+                              disabled={pending || !state.sendingReady}
+                              onClick={() =>
+                                void command("start", {
+                                  planId: p.id,
+                                  hash: p.hash,
+                                })
+                              }
+                            >
+                              Start approved execution
+                            </Button>
+                          )}
+                          <div className="flex flex-wrap gap-3">
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                setRevision(p);
+                                setSelected(
+                                  p.plan.recipients.map((r) => r.contactId),
+                                );
+                                setSteps(
+                                  p.plan.recipients[0].steps.map((s) => ({
+                                    templateId:
+                                      activeTemplates.find(
+                                        (t) =>
+                                          JSON.stringify(t.template) ===
+                                          JSON.stringify(s.template),
+                                      )?.id ?? "",
+                                    delayMinutes: String(s.delayMinutes),
+                                  })),
+                                );
+                              }}
+                            >
+                              Prepare a new version
+                            </Button>
+                            <Button
+                              variant="outline"
+                              disabled={pending}
+                              onClick={() =>
+                                void command("cancelPlan", {
+                                  planId: p.id,
+                                  reason: "Business stopped pending execution",
+                                })
+                              }
+                            >
+                              Stop pending execution
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 ))}
-              {a.intent && (
-                <details>
-                  <summary className="min-h-11 cursor-pointer py-3 font-medium">
-                    Record a sourced customer Meta cost estimate
-                  </summary>
-                  <p className="mb-4 text-sm text-muted-foreground">
-                    Optional assisted estimate for this one message, from your
-                    reviewed Meta account/rate evidence. This is not a charge or
-                    an observed final bill. Do not enter payment credentials.
-                  </p>
-                  <form
-                    className="flex flex-col gap-4"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const f = new FormData(e.currentTarget);
-                      void command("estimate", {
-                        actionId: a.id,
-                        currency: f.get("currency"),
-                        minor: f.get("minor"),
-                        reference: f.get("reference"),
-                        observedAt: iso(f.get("observed")),
-                        validUntil: iso(f.get("valid")),
-                      });
-                    }}
-                  >
-                    <FieldGroup className="gap-4">
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <Field
-                          id={`wa-cost-currency-${a.id}`}
-                          label="Meta billing currency"
+              </>
+            ),
+          },
+          {
+            id: "usage",
+            label: "Sending and costs",
+            description:
+              "Check message outcomes and separately billed Meta usage.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Message results and Meta charges</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-5">
+                    <p className="text-sm text-muted-foreground">
+                      Accepted is distinct from Sent, delivered and read.
+                      Missing or unsupported evidence remains unresolved;
+                      reconciliation never resends. Meta callbacks can arrive
+                      late and do not establish a final bill or price. No Meta
+                      credit, prepaid balance or duplicate subscription charge
+                      is created.
+                    </p>
+                    {!state.actions.length && (
+                      <p>
+                        No saved WhatsApp actions yet. Ordinary replies start in
+                        the Opportunity’s Answer and qualify flow.
+                      </p>
+                    )}
+                    {state.actions.map((a) => (
+                      <div
+                        key={a.id}
+                        className="flex flex-col gap-3 rounded-xl border p-4"
+                      >
+                        <Link
+                          href={`/businesses/${businessId}/opportunities/${a.opportunityId}`}
+                          className="inline-flex min-h-11 items-center text-primary underline"
                         >
-                          <Input
-                            id={`wa-cost-currency-${a.id}`}
-                            name="currency"
-                            required
-                            pattern="[A-Z]{3}"
-                          />
-                        </Field>
-                        <Field
-                          id={`wa-cost-minor-${a.id}`}
-                          label="Estimated minor units for this message"
+                          Review Opportunity: {a.title}
+                        </Link>
+                        <p>
+                          {a.state} · {a.evidence} · due {a.dueAt}
+                        </p>
+                        {a.intent && (
+                          <p className="whitespace-pre-wrap">
+                            +{a.intent.peer}: {a.intent.body}
+                          </p>
+                        )}
+                        <p className="text-sm">
+                          {a.reason?.replaceAll("_", " ")}{" "}
+                          {a.reconciliationReason?.replaceAll("_", " ")}
+                        </p>
+                        {a.providerMessageRef && (
+                          <p className="text-sm">
+                            Provider reference: {a.providerMessageRef}
+                          </p>
+                        )}
+                        <Button
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() =>
+                            void command("reconcile", { actionId: a.id })
+                          }
                         >
-                          <Input
-                            id={`wa-cost-minor-${a.id}`}
-                            name="minor"
-                            inputMode="numeric"
-                            required
-                            pattern="[0-9]+"
-                          />
-                        </Field>
-                        <Field
-                          id={`wa-cost-ref-${a.id}`}
-                          label="Rate evidence case reference"
-                        >
-                          <Input
-                            id={`wa-cost-ref-${a.id}`}
-                            name="reference"
-                            required
-                            pattern="[A-Z][A-Z0-9-]{5,100}"
-                          />
-                        </Field>
-                        <Field
-                          id={`wa-cost-observed-${a.id}`}
-                          label="Rate observed (UTC)"
-                        >
-                          <Input
-                            id={`wa-cost-observed-${a.id}`}
-                            name="observed"
-                            type="datetime-local"
-                            required
-                          />
-                        </Field>
-                        <Field
-                          id={`wa-cost-valid-${a.id}`}
-                          label="Estimate valid until (UTC)"
-                        >
-                          <Input
-                            id={`wa-cost-valid-${a.id}`}
-                            name="valid"
-                            type="datetime-local"
-                            required
-                          />
-                        </Field>
+                          Reconcile saved provider evidence
+                        </Button>
+                        {a.state === "pending" && (
+                          <form
+                            className="flex flex-col gap-3"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void command("bindReplyTemplate", {
+                                actionId: a.id,
+                                templateId: new FormData(e.currentTarget).get(
+                                  "templateId",
+                                ),
+                              });
+                            }}
+                          >
+                            <FieldGroup className="gap-3">
+                              <Field
+                                id={`wa-bind-${a.id}`}
+                                label="For an expired reply window: select a template whose exact rendering equals the saved grounded answer"
+                              >
+                                <NativeSelect
+                                  id={`wa-bind-${a.id}`}
+                                  name="templateId"
+                                  required
+                                >
+                                  <option value="">
+                                    Select matching approved template
+                                  </option>
+                                  {activeTemplates.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                      {t.template.name} · {t.template.language}{" "}
+                                      · {t.template.rendered}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                              </Field>
+                              <Button variant="outline" disabled={pending}>
+                                Bind exact reply template
+                              </Button>
+                            </FieldGroup>
+                          </form>
+                        )}
+                        {state.usage
+                          .filter((u) => u.actionId === a.id)
+                          .map((u, i) => (
+                            <div
+                              key={i}
+                              className="flex flex-col gap-1 text-sm text-muted-foreground"
+                            >
+                              <p>
+                                Customer Meta usage:{" "}
+                                {u.state.replaceAll("_", " ")} ·{" "}
+                                {u.minor !== null
+                                  ? `${u.currency} ${u.minor} minor units`
+                                  : "amount not established"}
+                              </p>
+                              <p>
+                                Source: {u.provenance}; provider observed{" "}
+                                {u.observedAt ?? "pending"}; received{" "}
+                                {u.receivedAt ?? "pending"}.
+                              </p>
+                              {u.pricing !== null && (
+                                <details>
+                                  <summary className="min-h-11 cursor-pointer py-3">
+                                    Meta usage details
+                                  </summary>
+                                  <pre className="whitespace-pre-wrap">
+                                    {JSON.stringify(u.pricing, null, 2)}
+                                  </pre>
+                                </details>
+                              )}
+                            </div>
+                          ))}
+                        {a.intent && (
+                          <details>
+                            <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                              Add an estimate from Meta pricing
+                            </summary>
+                            <p className="mb-4 text-sm text-muted-foreground">
+                              Optional assisted estimate for this one message,
+                              from your reviewed Meta account/rate evidence.
+                              This is not a charge or an observed final bill. Do
+                              not enter payment credentials.
+                            </p>
+                            <form
+                              className="flex flex-col gap-4"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                const f = new FormData(e.currentTarget);
+                                void command("estimate", {
+                                  actionId: a.id,
+                                  currency: f.get("currency"),
+                                  minor: f.get("minor"),
+                                  reference: f.get("reference"),
+                                  observedAt: iso(f.get("observed")),
+                                  validUntil: iso(f.get("valid")),
+                                });
+                              }}
+                            >
+                              <FieldGroup className="gap-4">
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                  <Field
+                                    id={`wa-cost-currency-${a.id}`}
+                                    label="Meta billing currency"
+                                  >
+                                    <Input
+                                      id={`wa-cost-currency-${a.id}`}
+                                      name="currency"
+                                      required
+                                      pattern="[A-Z]{3}"
+                                    />
+                                  </Field>
+                                  <Field
+                                    id={`wa-cost-minor-${a.id}`}
+                                    label="Estimated minor units for this message"
+                                  >
+                                    <Input
+                                      id={`wa-cost-minor-${a.id}`}
+                                      name="minor"
+                                      inputMode="numeric"
+                                      required
+                                      pattern="[0-9]+"
+                                    />
+                                  </Field>
+                                  <Field
+                                    id={`wa-cost-ref-${a.id}`}
+                                    label="Rate evidence case reference"
+                                  >
+                                    <Input
+                                      id={`wa-cost-ref-${a.id}`}
+                                      name="reference"
+                                      required
+                                      pattern="[A-Z][A-Z0-9-]{5,100}"
+                                    />
+                                  </Field>
+                                  <Field
+                                    id={`wa-cost-observed-${a.id}`}
+                                    label="Rate observed (UTC)"
+                                  >
+                                    <Input
+                                      id={`wa-cost-observed-${a.id}`}
+                                      name="observed"
+                                      type="datetime-local"
+                                      required
+                                    />
+                                  </Field>
+                                  <Field
+                                    id={`wa-cost-valid-${a.id}`}
+                                    label="Estimate valid until (UTC)"
+                                  >
+                                    <Input
+                                      id={`wa-cost-valid-${a.id}`}
+                                      name="valid"
+                                      type="datetime-local"
+                                      required
+                                    />
+                                  </Field>
+                                </div>
+                                <Button variant="outline" disabled={pending}>
+                                  Record separate Meta estimate
+                                </Button>
+                              </FieldGroup>
+                            </form>
+                          </details>
+                        )}
                       </div>
-                      <Button variant="outline" disabled={pending}>
-                        Record separate Meta estimate
-                      </Button>
-                    </FieldGroup>
-                  </form>
-                </details>
-              )}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+                    ))}
+                  </CardContent>
+                </Card>
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

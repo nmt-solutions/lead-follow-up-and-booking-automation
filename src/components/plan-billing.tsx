@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import { CreditUsageBars } from "./credit-usage";
 import Link from "next/link";
 import { Loader2, RefreshCw } from "lucide-react";
 import {
@@ -146,32 +147,13 @@ export function PlanBilling({
                   </dd>
                 </div>
               </dl>
-              {state.allowances && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {[
-                    ["Discovery credits", state.allowances.discovery],
-                    ["Outreach actions", state.allowances.automation],
-                  ].map(
-                    ([label, value]) =>
-                      typeof value !== "string" && (
-                        <div
-                          className="rounded-xl border border-border p-5"
-                          key={String(label)}
-                        >
-                          <p className="text-sm text-muted-foreground">
-                            {String(label)} remaining
-                          </p>
-                          <p className="mt-2 font-display text-2xl">
-                            {value.remaining.toLocaleString("en-IN")}
-                            <span className="ml-2 text-sm text-muted-foreground">
-                              of {value.included.toLocaleString("en-IN")}
-                            </span>
-                          </p>
-                        </div>
-                      ),
-                  )}
-                </div>
-              )}
+              <CreditUsageBars
+                usage={{
+                  active: state.access.active,
+                  paidThrough: state.access.paidThrough,
+                  allowances: state.allowances,
+                }}
+              />
               {cancellation && (
                 <p className="text-sm leading-7 text-muted-foreground">
                   {cancelled

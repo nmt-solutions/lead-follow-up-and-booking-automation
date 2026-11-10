@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -6,7 +6,7 @@ import { pageFailure } from "@/server/page";
 import { KnowledgeManager } from "@/components/knowledge-manager";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Saved answers" };
+export const metadata = { title: "Answers and sales info" };
 export default async function KnowledgePage({
   params,
 }: {
@@ -27,16 +27,7 @@ export default async function KnowledgePage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Saved answers</>}
-        description={
-          <>
-            Review the information sales conversations can use. Profile
-            descriptions and private files become authoritative only after an
-            explicit review here.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="knowledge"></BusinessPageHeader>
       <KnowledgeManager
         businessId={businessId}
         initialState={state.workspace}

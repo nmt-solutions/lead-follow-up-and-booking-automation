@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { getServices } from "./services";
-import type { BillingProfile } from "../models/billing";
+import { billingDefaults } from "../models/billing-defaults";
 import { isPlanId } from "../content/plans";
 import {
   productionSubscriptionIssues,
@@ -29,31 +29,11 @@ export async function subscriptionSetupData(
         : isPlanId(remembered)
           ? remembered
           : undefined;
-  const address = profile.configuration?.address;
-  const country = address?.country.trim() ?? "";
-  const defaults: BillingProfile = quotes.billing.current?.profile ?? {
-    legalName: profile.name,
-    registrationNumber: "",
-    address: {
-      line1: address?.street ?? "",
-      line2: "",
-      city: address?.locality ?? "",
-      region: address?.region ?? "",
-      postalCode: address?.postalCode ?? "",
-      country:
-        !country || /^(in|india)$/i.test(country)
-          ? "IN"
-          : country.length === 2
-            ? country.toUpperCase()
-            : "",
-    },
-    invoiceContact: { name: identity.user.name, email: identity.user.email },
-    businessStatus:
-      identity.user.accountType === "personal" ? "individual" : "business",
-    taxIdentifierStatus: "not_applicable",
-    taxIdentifiers: [],
-    evidence: [],
-  };
+  const defaults = billingDefaults(
+    quotes.billing.current?.profile,
+    profile,
+    identity.user,
+  );
   return {
     businessId,
     selected,

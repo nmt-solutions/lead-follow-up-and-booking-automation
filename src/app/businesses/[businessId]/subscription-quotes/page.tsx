@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { SubscriptionQuoteManager } from "@/components/subscription-quote-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Subscription quotes" };
+export const metadata = { title: "Plan quotes" };
 export default async function SubscriptionQuotesPage({
   params,
 }: {
@@ -29,16 +29,7 @@ export default async function SubscriptionQuotesPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Subscription quotes</>}
-        description={
-          <>
-            Review the configured reach, automation allowances, capacity and
-            monthly renewal price for this Business before any commercial
-            checkout.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="subscription-quotes"></BusinessPageHeader>
       <SubscriptionQuoteManager businessId={businessId} initial={data.state} />
     </div>
   );

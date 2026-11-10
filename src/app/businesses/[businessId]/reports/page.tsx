@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -6,7 +6,7 @@ import { pageFailure } from "@/server/page";
 import { BusinessReportPanel } from "@/components/business-report-panel";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Reports" };
+export const metadata = { title: "Results" };
 export default async function ReportsPage({
   params,
 }: PageProps<"/businesses/[businessId]/reports">) {
@@ -22,15 +22,7 @@ export default async function ReportsPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Reports</>}
-        description={
-          <>
-            Review sourced prospects, recorded conversations and confirmed
-            outcomes. Every measure names its evidence and population.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="reports"></BusinessPageHeader>
       <BusinessReportPanel businessId={businessId} initialReport={report} />
     </div>
   );

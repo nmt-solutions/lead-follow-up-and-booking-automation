@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -27,15 +27,7 @@ export default async function DiscoveryPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Find prospects</>}
-        description={
-          <>
-            Find potential customers in your search areas. Review the sources
-            behind each match before choosing who to contact.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="discovery"></BusinessPageHeader>
       <DiscoveryManager
         businessId={businessId}
         initialState={state.workspace}

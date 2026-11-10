@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -6,7 +6,7 @@ import { pageFailure } from "@/server/page";
 import { CommercialAuthorityManager } from "@/components/commercial-authority-manager";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Commercial authority" };
+export const metadata = { title: "Sales approval rules" };
 export default async function CommercialAuthorityPage({
   params,
 }: {
@@ -30,16 +30,7 @@ export default async function CommercialAuthorityPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Commercial authority</>}
-        description={
-          <>
-            Control prices, custom quotations, discounts and order acceptance.
-            Every action requires approval until an Owner or Admin explicitly
-            enables automation within configured limits.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="commercial-authority"></BusinessPageHeader>
       <CommercialAuthorityManager
         businessId={businessId}
         initialState={state.workspace}

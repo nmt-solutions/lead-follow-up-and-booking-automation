@@ -6,10 +6,10 @@ import type {
 import { Badge } from "./ui/badge";
 
 export const billingStatuses = {
-  missing: "Missing information or evidence",
-  conflicting: "Conflicting evidence",
-  pending_review: "Awaiting tax-operator review",
-  reviewed: "Evidence reviewed",
+  missing: "Details needed",
+  conflicting: "Details need checking",
+  pending_review: "Billing review in progress",
+  reviewed: "Billing review complete",
 };
 export const evidenceKinds = {
   legal_identity: "Legal identity",
@@ -126,7 +126,7 @@ export function BillingStatus({ state }: { state: BillingWorkspace }) {
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="billing-status" className="text-xl font-semibold">
-          Billing readiness
+          Billing status
         </h2>
         <Badge>
           {state.current?.profile.declaration && state.status === "reviewed"
@@ -135,7 +135,7 @@ export function BillingStatus({ state }: { state: BillingWorkspace }) {
         </Badge>
       </div>
       <p>
-        Billing country classification:{" "}
+        Billing country:{" "}
         {state.classification === "unknown"
           ? "Unknown"
           : state.classification === "india"
@@ -144,9 +144,8 @@ export function BillingStatus({ state }: { state: BillingWorkspace }) {
         . Billing currency: {state.currency ?? "Not determined"}.
       </p>
       <p className="text-sm text-muted-foreground">
-        Billing country is separate from discovery markets and planning exchange
-        rates. Identity review assigns no price, tax rate, exemption or export
-        treatment.
+        Checkout shows the tax and total before you pay. Your billing address
+        does not change where you search for prospects.
       </p>
       {state.issues.length > 0 && (
         <ul className="flex flex-col list-inside list-disc gap-2 wrap-anywhere">

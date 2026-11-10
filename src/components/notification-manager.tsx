@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { Field as UiField, FieldGroup } from "./ui/field";
 import Link from "next/link";
 import { RecoveryLink } from "./recovery-link";
@@ -263,7 +264,7 @@ function Preferences({
   return (
     <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 sm:p-8">
       <h2 className="text-xl font-semibold tracking-tight">
-        My platform email notices
+        Your email updates
       </h2>
       <p className="text-sm text-muted-foreground">
         Choose notices for your current verified account. Operations use the
@@ -748,8 +749,8 @@ export function BusinessNotifications({
       {status && <Alert variant="success">{status}</Alert>}
       <Alert variant={state.sendingReady ? "success" : "warning"}>
         {state.sendingReady
-          ? "The platform sender has current native verification."
-          : "The platform sender needs setup or a fresh verification. Ask the notification operator to review it."}
+          ? "Notification email is connected."
+          : "Notification email needs attention from Lead Relay support. You can still save your preferences."}
       </Alert>
       <div className="flex flex-wrap gap-4">
         <Button variant="outline" disabled={busy} onClick={() => void run()}>
@@ -759,16 +760,40 @@ export function BusinessNotifications({
           href={`/businesses/${businessId}/team`}
           className="inline-flex min-h-11 items-center text-primary underline"
         >
-          Review or retry an invitation
+          Manage invitations
         </Link>
       </div>
-      <Preferences
-        allowed={state.allowedPreferences}
-        values={state.preferences}
-        busy={busy}
-        save={(input) => void run(input)}
+      <WorkspaceTabs
+        tabs={[
+          {
+            id: "preferences",
+            label: "Your preferences",
+            description:
+              "Choose the updates you want to receive for this business.",
+            content: (
+              <>
+                <Preferences
+                  allowed={state.allowedPreferences}
+                  values={state.preferences}
+                  busy={busy}
+                  save={(input) => void run(input)}
+                />
+              </>
+            ),
+          },
+          {
+            id: "delivery",
+            label: "Delivery history",
+            description:
+              "Check whether a notification was delivered or needs attention.",
+            content: (
+              <>
+                <History notices={state.notices} busy={busy} />
+              </>
+            ),
+          },
+        ]}
       />
-      <History notices={state.notices} busy={busy} />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { Field, FieldGroup } from "./ui/field";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
@@ -74,7 +75,7 @@ function Detail({ document: d }: { document: SellerDocument }) {
   return (
     <details className="mt-4">
       <summary className="min-h-11 cursor-pointer py-3 text-primary">
-        Review frozen legal details, lines and evidence
+        Invoice details recorded at issue
       </summary>
       <div className="flex flex-col gap-4 wrap-anywhere">
         <dl className="grid gap-4 sm:grid-cols-2">
@@ -169,7 +170,7 @@ function Detail({ document: d }: { document: SellerDocument }) {
         )}
         <details>
           <summary className="min-h-11 cursor-pointer py-3">
-            Original source and review snapshots
+            Original payment and billing details
           </summary>
           <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">
             {JSON.stringify(s, null, 2)}
@@ -282,192 +283,248 @@ export function SellerDocumentManager({
       )}
       {status && <p role="status">{status}</p>}
       {busy && <p role="status">Saving or retrieving the document…</p>}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-xl font-semibold">Confirmed payments</h2>
-        {!state.periods.length && (
-          <p>
-            No confirmed paid periods yet. Complete a reviewed subscription
-            purchase to establish invoice amounts.
-          </p>
-        )}
-        {state.periods.map((p) => {
-          const invoice = state.documents.find(
-            (d) => d.kind === "invoice" && d.periodId === p.id,
-          );
-          return (
-            <div
-              key={p.id}
-              className="rounded-xl border border-border bg-card p-6 wrap-anywhere"
-            >
-              <p className="font-medium">
-                {p.totalMinor
-                  ? formatTaxMoney(p.totalMinor, p.currency)
-                  : "Financial review required"}
-              </p>
-              <p className="text-sm">
-                {p.start} to {p.end}
-              </p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Payment {p.paymentId}
-              </p>
-              {invoice ? (
-                <a
-                  className="mt-3 inline-flex min-h-11 items-center text-primary underline"
-                  href={`#document-${invoice.id}`}
-                >
-                  View {invoice.number}
-                </a>
-              ) : (
-                <Button
-                  className="mt-4"
-                  disabled={busy || !state.storageReady}
-                  onClick={() =>
-                    run(async () => {
-                      let requestKey = keys.current.get(p.id);
-                      if (!requestKey) {
-                        requestKey = crypto.randomUUID();
-                        keys.current.set(p.id, requestKey);
-                      }
-                      const d = await sellerResponse(
-                        await post(base, { periodId: p.id, requestKey }),
-                        sellerDocumentSchema,
-                      );
-                      await refresh();
-                      setStatus(
-                        `${d.number} issued. ${d.artifact.state === "ready" ? "The artifact is ready." : "Artifact recovery is required; the number is retained."}`,
-                      );
-                    })
-                  }
-                >
-                  Issue seller invoice
-                </Button>
-              )}
-            </div>
-          );
-        })}
-      </section>
-      <section className="flex flex-col gap-4">
-        <h2 className="text-xl font-semibold">Invoices and credit notes</h2>
-        <p className="text-muted-foreground">
-          Seller documents preserve the original transaction. Gateway receipts
-          are separate payment records.
-        </p>
-        {!state.documents.length && (
-          <p>
-            No seller documents have been issued. Choose a confirmed payment
-            above.
-          </p>
-        )}
-        {state.documents.map((d) => (
-          <article
-            id={`document-${d.id}`}
-            key={d.id}
-            className="rounded-xl border border-border bg-card p-6 wrap-anywhere"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold">
-                {d.number} · {d.kind === "invoice" ? "Invoice" : "Credit note"}
-              </h3>
-              <Badge>
-                {d.artifact.state === "ready"
-                  ? "Download ready"
-                  : d.artifact.state === "failed"
-                    ? "Artifact recovery required"
-                    : "Artifact pending"}
-              </Badge>
-            </div>
-            <p className="mt-3 text-lg font-semibold">
-              {d.kind === "credit_note" ? "Credit " : ""}
-              {formatTaxMoney(
-                d.snapshot.totals.totalMinor,
-                d.snapshot.currency,
-              )}
-            </p>
-            {d.snapshot.issuer.revision.configuration.mode === "fixture" && (
-              <p className="mt-2 text-sm">
-                Fixture document · payment mode{" "}
-                {d.snapshot.financial.provider.mode}
-              </p>
-            )}
-            <p>
-              Before tax{" "}
-              {formatTaxMoney(d.snapshot.totals.netMinor, d.snapshot.currency)}{" "}
-              · Tax{" "}
-              {formatTaxMoney(d.snapshot.totals.taxMinor, d.snapshot.currency)}
-            </p>
-            {d.snapshot.original && (
-              <a
-                href={`#document-${d.snapshot.original.id}`}
-                className="inline-flex min-h-11 items-center text-primary underline"
-              >
-                Original invoice {d.snapshot.original.number}
-              </a>
-            )}
-            {d.artifact.state !== "ready" && (
-              <p className="mt-3 text-sm">
-                The document and number are saved. Retry artifact recovery; it
-                preserves this identity.
-              </p>
-            )}
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Button
-                disabled={
-                  busy || !state.storageReady || d.artifact.state !== "ready"
-                }
-                onClick={() => run(() => download(d))}
-              >
-                Download {d.number}
-              </Button>
-              {d.artifact.state !== "ready" && (
-                <Button
-                  variant="outline"
-                  disabled={busy || !state.storageReady}
-                  onClick={() =>
-                    run(async () => {
-                      await sellerResponse(
-                        await post(`${base}/recover`, { documentId: d.id }),
-                        sellerDocumentSchema,
-                      );
-                      await refresh();
-                      setStatus(
-                        "Artifact status refreshed. Review its download status.",
-                      );
-                    })
-                  }
-                >
-                  Recover artifact
-                </Button>
-              )}
-            </div>
-            <Detail document={d} />
-          </article>
-        ))}
-      </section>
-      {operator && (
-        <CreditForm
-          documents={state.documents}
-          busy={busy}
-          onSave={(input) =>
-            run(async () => {
-              const d = await sellerResponse(
-                await post(`${base}/credits`, input),
-                sellerDocumentSchema,
-              );
-              await refresh();
-              setStatus(
-                `${d.number} recorded. No payment refund was executed.`,
-              );
-            })
-          }
-        />
-      )}
-      <p className="text-sm text-muted-foreground">
-        Stored artifact bytes: {state.storageUsage.storedBytes}. Storage
-        attempts: {state.storageUsage.putAttempts} writes,{" "}
-        {state.storageUsage.getAttempts} reads;{" "}
-        {state.storageUsage.uncertainAttempts} unconfirmed. These are
-        application observations.
-      </p>
+      <WorkspaceTabs
+        label="Invoices sections"
+        tabs={[
+          {
+            id: "invoices",
+            label: "Invoices and credits",
+            description:
+              "Download the document for a confirmed charge or refund.",
+            content: (
+              <>
+                <section className="flex flex-col gap-4">
+                  <h2 className="text-xl font-semibold">
+                    Invoices and credit notes
+                  </h2>
+                  <p className="text-muted-foreground">
+                    Seller documents preserve the original transaction. Gateway
+                    receipts are separate payment records.
+                  </p>
+                  {!state.documents.length && (
+                    <p>
+                      No seller documents have been issued. Choose a confirmed
+                      payment above.
+                    </p>
+                  )}
+                  {state.documents.map((d) => (
+                    <article
+                      id={`document-${d.id}`}
+                      key={d.id}
+                      className="rounded-xl border border-border bg-card p-6 wrap-anywhere"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <h3 className="text-lg font-semibold">
+                          {d.number} ·{" "}
+                          {d.kind === "invoice" ? "Invoice" : "Credit note"}
+                        </h3>
+                        <Badge>
+                          {d.artifact.state === "ready"
+                            ? "Download ready"
+                            : d.artifact.state === "failed"
+                              ? "Artifact recovery required"
+                              : "Artifact pending"}
+                        </Badge>
+                      </div>
+                      <p className="mt-3 text-lg font-semibold">
+                        {d.kind === "credit_note" ? "Credit " : ""}
+                        {formatTaxMoney(
+                          d.snapshot.totals.totalMinor,
+                          d.snapshot.currency,
+                        )}
+                      </p>
+                      {d.snapshot.issuer.revision.configuration.mode ===
+                        "fixture" && (
+                        <p className="mt-2 text-sm">
+                          Fixture document · payment mode{" "}
+                          {d.snapshot.financial.provider.mode}
+                        </p>
+                      )}
+                      <p>
+                        Before tax{" "}
+                        {formatTaxMoney(
+                          d.snapshot.totals.netMinor,
+                          d.snapshot.currency,
+                        )}{" "}
+                        · Tax{" "}
+                        {formatTaxMoney(
+                          d.snapshot.totals.taxMinor,
+                          d.snapshot.currency,
+                        )}
+                      </p>
+                      {d.snapshot.original && (
+                        <a
+                          href={`#document-${d.snapshot.original.id}`}
+                          className="inline-flex min-h-11 items-center text-primary underline"
+                        >
+                          Original invoice {d.snapshot.original.number}
+                        </a>
+                      )}
+                      {d.artifact.state !== "ready" && (
+                        <p className="mt-3 text-sm">
+                          The document and number are saved. Retry artifact
+                          recovery; it preserves this identity.
+                        </p>
+                      )}
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <Button
+                          disabled={
+                            busy ||
+                            !state.storageReady ||
+                            d.artifact.state !== "ready"
+                          }
+                          onClick={() => run(() => download(d))}
+                        >
+                          Download {d.number}
+                        </Button>
+                        {d.artifact.state !== "ready" && (
+                          <Button
+                            variant="outline"
+                            disabled={busy || !state.storageReady}
+                            onClick={() =>
+                              run(async () => {
+                                await sellerResponse(
+                                  await post(`${base}/recover`, {
+                                    documentId: d.id,
+                                  }),
+                                  sellerDocumentSchema,
+                                );
+                                await refresh();
+                                setStatus(
+                                  "Artifact status refreshed. Review its download status.",
+                                );
+                              })
+                            }
+                          >
+                            Recover artifact
+                          </Button>
+                        )}
+                      </div>
+                      <Detail document={d} />
+                    </article>
+                  ))}
+                </section>
+                <p className="text-sm text-muted-foreground">
+                  Stored artifact bytes: {state.storageUsage.storedBytes}.
+                  Storage attempts: {state.storageUsage.putAttempts} writes,{" "}
+                  {state.storageUsage.getAttempts} reads;{" "}
+                  {state.storageUsage.uncertainAttempts} unconfirmed. These are
+                  application observations.
+                </p>
+              </>
+            ),
+          },
+          {
+            id: "payments",
+            label: "Payments needing an invoice",
+            description:
+              "Review confirmed payments and any invoice still being prepared.",
+            content: (
+              <>
+                <section className="flex flex-col gap-4">
+                  <h2 className="text-xl font-semibold">Confirmed payments</h2>
+                  {!state.periods.length && (
+                    <p>
+                      No confirmed paid periods yet. Complete a reviewed
+                      subscription purchase to establish invoice amounts.
+                    </p>
+                  )}
+                  {state.periods.map((p) => {
+                    const invoice = state.documents.find(
+                      (d) => d.kind === "invoice" && d.periodId === p.id,
+                    );
+                    return (
+                      <div
+                        key={p.id}
+                        className="rounded-xl border border-border bg-card p-6 wrap-anywhere"
+                      >
+                        <p className="font-medium">
+                          {p.totalMinor
+                            ? formatTaxMoney(p.totalMinor, p.currency)
+                            : "Financial review required"}
+                        </p>
+                        <p className="text-sm">
+                          {p.start} to {p.end}
+                        </p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Payment {p.paymentId}
+                        </p>
+                        {invoice ? (
+                          <a
+                            className="mt-3 inline-flex min-h-11 items-center text-primary underline"
+                            href={`#document-${invoice.id}`}
+                          >
+                            View {invoice.number}
+                          </a>
+                        ) : (
+                          <Button
+                            className="mt-4"
+                            disabled={busy || !state.storageReady}
+                            onClick={() =>
+                              run(async () => {
+                                let requestKey = keys.current.get(p.id);
+                                if (!requestKey) {
+                                  requestKey = crypto.randomUUID();
+                                  keys.current.set(p.id, requestKey);
+                                }
+                                const d = await sellerResponse(
+                                  await post(base, {
+                                    periodId: p.id,
+                                    requestKey,
+                                  }),
+                                  sellerDocumentSchema,
+                                );
+                                await refresh();
+                                setStatus(
+                                  `${d.number} issued. ${d.artifact.state === "ready" ? "The artifact is ready." : "Artifact recovery is required; the number is retained."}`,
+                                );
+                              })
+                            }
+                          >
+                            Issue seller invoice
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </section>
+              </>
+            ),
+          },
+          ...(operator
+            ? [
+                {
+                  id: "credit",
+                  label: "Create a credit note",
+                  description:
+                    "Link a credit note to the original invoice and the reviewed adjustment.",
+                  content: (
+                    <>
+                      {operator && (
+                        <CreditForm
+                          documents={state.documents}
+                          busy={busy}
+                          onSave={(input) =>
+                            run(async () => {
+                              const d = await sellerResponse(
+                                await post(`${base}/credits`, input),
+                                sellerDocumentSchema,
+                              );
+                              await refresh();
+                              setStatus(
+                                `${d.number} recorded. No payment refund was executed.`,
+                              );
+                            })
+                          }
+                        />
+                      )}
+                    </>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
     </div>
   );
 }
@@ -504,7 +561,9 @@ function CreditForm({
   })();
   return (
     <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6">
-      <h2 className="text-xl font-semibold">Record a linked credit note</h2>
+      <h2 className="text-xl font-semibold">
+        Create a credit note for an invoice
+      </h2>
       <p>
         Choose the original invoice, explain the correction and credit exact
         line amounts. This records the adjustment; payment refunds and disputes

@@ -7,10 +7,8 @@ import {
   BookOpen,
   Building2,
   Check,
-  ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  FileText,
   Folder,
   HelpCircle,
   Inbox,
@@ -22,13 +20,13 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
-  Users,
-  Wallet,
   BarChart3,
   CalendarDays,
 } from "lucide-react";
 import { MotionConfig } from "framer-motion";
 import { Brand } from "./brand";
+import { businessSections } from "@/content/business-sections";
+import { SidebarCreditUsage } from "./credit-usage";
 import { SignOut } from "./sign-out";
 import {
   Sidebar,
@@ -53,11 +51,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "./ui/collapsible";
 import {
   CommandDialog,
   CommandEmpty,
@@ -88,73 +81,34 @@ const work: Item[] = [
   { path: "", label: "Overview", icon: LayoutDashboard },
   { path: "/discovery", label: "Find prospects", icon: Search },
   { path: "/inbox", label: "Conversations", icon: Inbox },
-  { path: "/campaigns", label: "Outreach", icon: Send },
-  { path: "/reports", label: "Reports", icon: BarChart3 },
+  { path: "/campaigns", label: "Email campaigns", icon: Send },
+  { path: "/reports", label: "Results", icon: BarChart3 },
   { path: "/ai", label: "AI assistant", icon: Sparkles, ai: true },
 ];
 const resources: Item[] = [
-  { path: "/knowledge", label: "Business knowledge", icon: BookOpen },
-  { path: "/files", label: "Files", icon: Folder },
+  { path: "/configuration", label: "Search setup", icon: Settings2 },
+  { path: "/knowledge", label: "Answers and sales info", icon: BookOpen },
+  { path: "/files", label: "Documents", icon: Folder },
 ];
 const connections: Item[] = [
   { path: "/mailboxes", label: "Email accounts", icon: Mail },
   { path: "/calendar", label: "Calendar", icon: CalendarDays, manage: true },
-];
-const settings: Item[] = [
-  { path: "/configuration", label: "Business setup", icon: Settings2 },
-  { path: "/profile", label: "Business profile", icon: Building2 },
   { path: "/whatsapp", label: "WhatsApp", icon: Inbox, manage: true },
-  { path: "/senders", label: "Advanced sending", icon: Send },
-  { path: "/team", label: "Team members", icon: Users, manage: true },
-  {
-    path: "/commercial-authority",
-    label: "Sales approval rules",
-    icon: ShieldCheck,
-    manage: true,
-  },
-  { path: "/email-eligibility", label: "Email permissions", icon: ShieldCheck },
-  {
-    path: "/sender-health",
-    label: "Email delivery health",
-    icon: Mail,
-    manage: true,
-  },
-  { path: "/notifications", label: "Notifications", icon: Inbox },
-  { path: "/billing", label: "Billing details", icon: Wallet, manage: true },
-  {
-    path: "/plan",
-    label: "Plan & billing",
-    icon: Wallet,
-    manage: true,
-  },
-  {
-    path: "/subscription-quotes",
-    label: "Subscription quotes",
-    icon: FileText,
-    manage: true,
-  },
-  {
-    path: "/seller-documents",
-    label: "Invoices",
-    icon: FileText,
-    manage: true,
-  },
-  {
-    path: "/reach-changes",
-    label: "Search coverage",
-    icon: Search,
-    manage: true,
-  },
-  {
-    path: "/financial-adjustments",
-    label: "Refunds and disputes",
-    icon: Wallet,
-    manage: true,
-  },
-  { path: "/tax", label: "Tax details", icon: FileText, manage: true },
-  { path: "/pilots", label: "Paid pilot", icon: CalendarDays, manage: true },
-  { path: "/operations", label: "Activity and recovery", icon: FileText },
-  { path: "/data", label: "Export or remove data", icon: Folder },
+];
+const settings: Item[] = Object.entries(businessSections)
+  .filter(
+    ([key, entry]) =>
+      entry.group !== "Sales" &&
+      ![...resources, ...connections].some((item) => item.path === "/" + key),
+  )
+  .map(([key, entry]) => ({
+    path: "/" + key,
+    label: entry.title,
+    icon: entry.icon,
+    manage: "manage" in entry ? entry.manage : false,
+  }));
+const shortcuts: Item[] = [
+  { path: "/settings", label: "Business settings", icon: Settings2 },
 ];
 function Navigation({
   businesses,
@@ -352,33 +306,12 @@ function Navigation({
                 {menu(connections)}
               </SidebarGroup>
               <SidebarGroup>
-                <SidebarGroupLabel>Resources</SidebarGroupLabel>
+                <SidebarGroupLabel>Business info</SidebarGroupLabel>
                 {menu(resources)}
               </SidebarGroup>
               <SidebarGroup>
-                <Collapsible
-                  key={`${base}:${settings.some((item) => pathname === base + item.path || pathname.startsWith(base + item.path + "/"))}`}
-                  defaultOpen={settings.some(
-                    (item) =>
-                      pathname === base + item.path ||
-                      pathname.startsWith(base + item.path + "/"),
-                  )}
-                  className="group/settings"
-                >
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton>
-                      <Settings2 aria-hidden="true" />
-                      <span>More settings</span>
-                      <ChevronDown
-                        className="ml-auto transition-transform group-data-[state=open]/settings:rotate-180"
-                        aria-hidden="true"
-                      />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-1 border-l border-border pl-2">
-                    {menu(settings)}
-                  </CollapsibleContent>
-                </Collapsible>
+                <SidebarGroupLabel>Manage business</SidebarGroupLabel>
+                {menu(shortcuts)}
               </SidebarGroup>
             </>
           ) : (
@@ -414,6 +347,13 @@ function Navigation({
           )}
         </SidebarContent>
         <SidebarFooter className="gap-4 p-4">
+          {business && (
+            <SidebarCreditUsage
+              key={business.id}
+              businessId={business.id}
+              canManagePlan={business.canManage}
+            />
+          )}
           <Button asChild variant="ghost" className="w-full justify-start">
             <Link href="/getting-started">
               <BookOpen aria-hidden="true" />

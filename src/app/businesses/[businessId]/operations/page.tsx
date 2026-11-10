@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { OperationsPanel } from "@/components/operations-panel";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Activity and recovery" };
+export const metadata = { title: "Activity and fixes" };
 export default async function OperationsPage({
   params,
 }: PageProps<"/businesses/[businessId]/operations">) {
@@ -21,14 +21,7 @@ export default async function OperationsPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Activity and recovery</>}
-        description={
-          <>
-            See what was authorized, what happened and who owns the next step.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="operations"></BusinessPageHeader>
       <OperationsPanel initialState={state} businessId={businessId} />
     </div>
   );

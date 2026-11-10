@@ -1,11 +1,11 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
 import { ReachChangeManager } from "@/components/reach-change-manager";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Change geographic reach" };
+export const metadata = { title: "Search areas" };
 export default async function ReachChangesPage({
   params,
 }: {
@@ -27,16 +27,7 @@ export default async function ReachChangesPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Change geographic reach</>}
-        description={
-          <>
-            Review the exact prorated payment and monthly renewal before
-            approving. Reductions begin with a paid eligible renewal. Stored
-            prospects and incoming or engaged conversations remain available.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="reach-changes"></BusinessPageHeader>
       <ReachChangeManager
         businessId={businessId}
         initial={data.state}

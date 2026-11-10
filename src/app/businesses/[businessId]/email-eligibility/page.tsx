@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -6,7 +6,7 @@ import { pageFailure } from "@/server/page";
 import { EmailEligibilityManager } from "@/components/email-eligibility-manager";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Email eligibility and opt-outs" };
+export const metadata = { title: "Contact permissions" };
 export default async function EmailEligibilityPage({
   params,
 }: PageProps<"/businesses/[businessId]/email-eligibility">) {
@@ -22,16 +22,7 @@ export default async function EmailEligibilityPage({
   })();
   return (
     <div className="app-page">
-      <PageHeader
-        title={<>Email eligibility and opt-outs</>}
-        description={
-          <>
-            Understand why a prepared email is allowed, blocked or unknown.
-            Record purpose-specific evidence and honor effective opt-outs
-            without losing sales history.
-          </>
-        }
-      ></PageHeader>
+      <BusinessPageHeader section="email-eligibility"></BusinessPageHeader>
       <EmailEligibilityManager businessId={businessId} initialState={state} />
     </div>
   );

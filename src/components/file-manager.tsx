@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceTabs } from "./workspace-tabs";
 import { FieldGroup } from "./ui/field";
 import { RecoveryLink } from "./recovery-link";
 import { useRef, useState } from "react";
@@ -166,309 +167,378 @@ export function FileManager({
       >
         {status}
       </p>
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {purpose === "billing"
-              ? "Private billing evidence"
-              : "Upload a Business file"}
-          </CardTitle>
-          <CardDescription>
-            Files belong to this Business. Owners and Admins can upload or
-            delete. General files are available to current members. Billing
-            evidence is restricted to Owners, Admins and authorized tax
-            reviewers.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
-          {policy && (
-            <p id="file-rules" className="text-sm text-muted-foreground">
-              Up to {policy.maxBytes.toLocaleString()} bytes per file. Allowed
-              types: {policy.allowedTypes.join(", ")}. Retention:{" "}
-              {policy.retentionSeconds.toLocaleString()} seconds from upload
-              reservation. Download access expires after at most{" "}
-              {policy.accessTtlSeconds.toLocaleString()} seconds.
-            </p>
-          )}
-          {listing.canManage ? (
-            <form
-              className="flex flex-col gap-4"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!file || selectionError) return;
-                void action(async () => {
-                  setStatus("Reserving your private upload…");
-                  const upload = await readResult(
-                    await post(base, {
-                      name: file.name,
-                      contentType: selectedType,
-                      size: file.size,
-                      ...(purpose ? { purpose } : {}),
-                    }),
-                    uploadGrantSchema,
-                  );
-                  setStatus("Uploading and confirming your file…");
-                  await readResult(
-                    await fetch(`${base}/${upload.file.id}/content`, {
-                      method: "PUT",
-                      headers: {
-                        "content-type": selectedType,
-                        "x-file-token": upload.token,
-                      },
-                      body: file,
-                    }),
-                    fileViewSchema,
-                  );
-                  setFile(null);
-                  if (input.current) input.current.value = "";
-                  setStatus(
-                    "Upload completed. Your file is available privately.",
-                  );
-                });
-              }}
-            >
-              <FieldGroup className="gap-4">
-                <Label htmlFor="business-file">Choose a file</Label>
-                <Input
-                  ref={input}
-                  id="business-file"
-                  type="file"
-                  accept={policy?.allowedTypes.join(",")}
-                  aria-describedby="file-rules file-selection-error"
-                  disabled={busy || listing.readiness !== "configured"}
-                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                />
-                <p
-                  id="file-selection-error"
-                  className="text-sm text-destructive"
+      <WorkspaceTabs
+        label="Documents sections"
+        tabs={[
+          {
+            id: "documents",
+            label: "Your documents",
+            description:
+              "Open or manage the documents saved for this business.",
+            content: (
+              <>
+                <section
+                  className="flex flex-col gap-4"
+                  aria-labelledby="files-heading"
                 >
-                  {selectionError}
-                </p>
-                <Button
-                  type="submit"
-                  disabled={
-                    busy ||
-                    !file ||
-                    Boolean(selectionError) ||
-                    listing.readiness !== "configured"
-                  }
-                >
-                  Upload file
-                </Button>
-              </FieldGroup>
-            </form>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Ask an Owner or Admin to upload or delete a file.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-      <section className="flex flex-col gap-4" aria-labelledby="files-heading">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2
-            id="files-heading"
-            className="text-xl font-semibold tracking-tight"
-          >
-            {purpose === "billing" ? "Billing documents" : "Business files"}
-          </h2>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              void action(async () => {
-                setStatus("File list refreshed.");
-              })
-            }
-          >
-            Refresh files
-          </Button>
-        </div>
-        {visibleFiles.length === 0 && (
-          <p className="rounded-xl border border-border bg-card p-6 text-muted-foreground">
-            No files yet. Upload an approved Business document when storage is
-            activated.
-          </p>
-        )}
-        <ul className="flex flex-col gap-4">
-          {visibleFiles.map((file) => (
-            <li
-              key={file.id}
-              className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <h3 className="min-w-0 font-semibold wrap-anywhere">
-                  {file.name}
-                </h3>
-                <Badge>
-                  {file.purpose === "billing" && "Billing evidence · "}
-                  {file.state === "ready" && !file.accessAvailable
-                    ? "Access unavailable"
-                    : stateNames[file.state]}
-                </Badge>
-              </div>
-              <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <dt className="text-muted-foreground">Type and size</dt>
-                  <dd className="wrap-anywhere">
-                    {file.contentType} · {file.size.toLocaleString()} bytes
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Uploaded by</dt>
-                  <dd className="wrap-anywhere">{file.ownerId}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Retention deadline</dt>
-                  <dd>{stamp(file.retentionUntil)}</dd>
-                </div>
-                {file.cleanupAfter && (
-                  <div>
-                    <dt className="text-muted-foreground">
-                      Next cleanup eligibility
-                    </dt>
-                    <dd>{stamp(file.cleanupAfter)}</dd>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h2
+                      id="files-heading"
+                      className="text-xl font-semibold tracking-tight"
+                    >
+                      {purpose === "billing"
+                        ? "Billing documents"
+                        : "Business files"}
+                    </h2>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        void action(async () => {
+                          setStatus("File list refreshed.");
+                        })
+                      }
+                    >
+                      Refresh files
+                    </Button>
                   </div>
-                )}
-                {file.deletedAt && (
-                  <div>
-                    <dt className="text-muted-foreground">
-                      Deletion confirmed
-                    </dt>
-                    <dd>{stamp(file.deletedAt)}</dd>
-                  </div>
-                )}
-              </dl>
-              {file.failure && (
-                <p className="text-sm text-warning">
-                  {file.failure === "CLEANUP_FAILED"
-                    ? "Storage deletion failed. Cleanup will retry; the file cannot be downloaded."
-                    : "Upload could not be confirmed. The file cannot be downloaded. Cleanup is pending; upload a new copy."}
-                </p>
-              )}
-              {file.state === "pending" && (
-                <p className="text-sm text-muted-foreground">
-                  Upload is incomplete and cannot be downloaded. The reservation
-                  expires at {stamp(file.uploadExpiresAt)}. Upload a new copy if
-                  interrupted.
-                </p>
-              )}
-              <div className="flex flex-wrap gap-3">
-                {file.state === "ready" && (
-                  <Button
-                    variant="outline"
-                    disabled={
-                      busy ||
-                      !file.accessAvailable ||
-                      listing.readiness !== "configured"
-                    }
-                    onClick={() =>
-                      void action(async () => {
-                        setStatus("Authorizing your download…");
-                        const grant = await readResult(
-                          await post(`${base}/${file.id}/access`),
-                          fileGrantSchema,
-                        );
-                        const response = await fetch(
-                          `${base}/${file.id}/content`,
-                          {
-                            headers: { "x-file-token": grant.token },
-                            cache: "no-store",
-                          },
-                        );
-                        if (!response.ok) {
-                          await readResult(response, fileViewSchema);
-                          return;
-                        }
-                        const blob = await response.blob();
-                        const url = URL.createObjectURL(blob),
-                          link = document.createElement("a");
-                        link.href = url;
-                        link.download = file.name;
-                        document.body.append(link);
-                        link.click();
-                        link.remove();
-                        setTimeout(() => URL.revokeObjectURL(url), 1000);
-                        setStatus("Your private download is ready.");
-                      })
-                    }
-                  >
-                    Download {file.name}
-                  </Button>
-                )}
-                {listing.canManage &&
-                  !["deleted", "deleting"].includes(file.state) && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          disabled={busy || listing.readiness !== "configured"}
-                        >
-                          Delete {file.name}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogTitle>Delete this file?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Download access stops immediately. Storage cleanup
-                          removes {file.name} permanently and may need to retry.
-                          This cannot be undone.
-                        </AlertDialogDescription>
-                        <div className="flex flex-wrap justify-end gap-3">
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() =>
-                              void action(async () => {
-                                await readResult(
-                                  await post(`${base}/${file.id}/delete`),
-                                  fileViewSchema,
-                                );
-                                setStatus(
-                                  "Deletion requested. Cleanup status is shown with the file.",
-                                );
-                              })
+                  {visibleFiles.length === 0 && (
+                    <p className="rounded-xl border border-border bg-card p-6 text-muted-foreground">
+                      No files yet. Upload an approved Business document when
+                      storage is activated.
+                    </p>
+                  )}
+                  <ul className="flex flex-col gap-4">
+                    {visibleFiles.map((file) => (
+                      <li
+                        key={file.id}
+                        className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <h3 className="min-w-0 font-semibold wrap-anywhere">
+                            {file.name}
+                          </h3>
+                          <Badge>
+                            {file.purpose === "billing" &&
+                              "Billing evidence · "}
+                            {file.state === "ready" && !file.accessAvailable
+                              ? "Access unavailable"
+                              : stateNames[file.state]}
+                          </Badge>
+                        </div>
+                        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Type and size
+                            </dt>
+                            <dd className="wrap-anywhere">
+                              {file.contentType} · {file.size.toLocaleString()}{" "}
+                              bytes
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Uploaded by
+                            </dt>
+                            <dd className="wrap-anywhere">{file.ownerId}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Retention deadline
+                            </dt>
+                            <dd>{stamp(file.retentionUntil)}</dd>
+                          </div>
+                          {file.cleanupAfter && (
+                            <div>
+                              <dt className="text-muted-foreground">
+                                Next cleanup eligibility
+                              </dt>
+                              <dd>{stamp(file.cleanupAfter)}</dd>
+                            </div>
+                          )}
+                          {file.deletedAt && (
+                            <div>
+                              <dt className="text-muted-foreground">
+                                Deletion confirmed
+                              </dt>
+                              <dd>{stamp(file.deletedAt)}</dd>
+                            </div>
+                          )}
+                        </dl>
+                        {file.failure && (
+                          <p className="text-sm text-warning">
+                            {file.failure === "CLEANUP_FAILED"
+                              ? "Storage deletion failed. Cleanup will retry; the file cannot be downloaded."
+                              : "Upload could not be confirmed. The file cannot be downloaded. Cleanup is pending; upload a new copy."}
+                          </p>
+                        )}
+                        {file.state === "pending" && (
+                          <p className="text-sm text-muted-foreground">
+                            Upload is incomplete and cannot be downloaded. The
+                            reservation expires at {stamp(file.uploadExpiresAt)}
+                            . Upload a new copy if interrupted.
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-3">
+                          {file.state === "ready" && (
+                            <Button
+                              variant="outline"
+                              disabled={
+                                busy ||
+                                !file.accessAvailable ||
+                                listing.readiness !== "configured"
+                              }
+                              onClick={() =>
+                                void action(async () => {
+                                  setStatus("Authorizing your download…");
+                                  const grant = await readResult(
+                                    await post(`${base}/${file.id}/access`),
+                                    fileGrantSchema,
+                                  );
+                                  const response = await fetch(
+                                    `${base}/${file.id}/content`,
+                                    {
+                                      headers: { "x-file-token": grant.token },
+                                      cache: "no-store",
+                                    },
+                                  );
+                                  if (!response.ok) {
+                                    await readResult(response, fileViewSchema);
+                                    return;
+                                  }
+                                  const blob = await response.blob();
+                                  const url = URL.createObjectURL(blob),
+                                    link = document.createElement("a");
+                                  link.href = url;
+                                  link.download = file.name;
+                                  document.body.append(link);
+                                  link.click();
+                                  link.remove();
+                                  setTimeout(
+                                    () => URL.revokeObjectURL(url),
+                                    1000,
+                                  );
+                                  setStatus("Your private download is ready.");
+                                })
+                              }
+                            >
+                              Download {file.name}
+                            </Button>
+                          )}
+                          {listing.canManage &&
+                            !["deleted", "deleting"].includes(file.state) && (
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    disabled={
+                                      busy || listing.readiness !== "configured"
+                                    }
+                                  >
+                                    Delete {file.name}
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogTitle>
+                                    Delete this file?
+                                  </AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Download access stops immediately. Storage
+                                    cleanup removes {file.name} permanently and
+                                    may need to retry. This cannot be undone.
+                                  </AlertDialogDescription>
+                                  <div className="flex flex-wrap justify-end gap-3">
+                                    <AlertDialogCancel>
+                                      Cancel
+                                    </AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() =>
+                                        void action(async () => {
+                                          await readResult(
+                                            await post(
+                                              `${base}/${file.id}/delete`,
+                                            ),
+                                            fileViewSchema,
+                                          );
+                                          setStatus(
+                                            "Deletion requested. Cleanup status is shown with the file.",
+                                          );
+                                        })
+                                      }
+                                    >
+                                      Delete file
+                                    </AlertDialogAction>
+                                  </div>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              </>
+            ),
+          },
+          {
+            id: "upload",
+            label: "Upload a document",
+            description:
+              "Choose a file and its purpose. Wait for the upload to finish before leaving this view.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      {purpose === "billing"
+                        ? "Private billing evidence"
+                        : "Upload a Business file"}
+                    </CardTitle>
+                    <CardDescription>
+                      Files belong to this Business. Owners and Admins can
+                      upload or delete. General files are available to current
+                      members. Billing evidence is restricted to Owners, Admins
+                      and authorized tax reviewers.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-5">
+                    {policy && (
+                      <p
+                        id="file-rules"
+                        className="text-sm text-muted-foreground"
+                      >
+                        Up to {policy.maxBytes.toLocaleString()} bytes per file.
+                        Allowed types: {policy.allowedTypes.join(", ")}.
+                        Retention: {policy.retentionSeconds.toLocaleString()}{" "}
+                        seconds from upload reservation. Download access expires
+                        after at most {policy.accessTtlSeconds.toLocaleString()}{" "}
+                        seconds.
+                      </p>
+                    )}
+                    {listing.canManage ? (
+                      <form
+                        className="flex flex-col gap-4"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          if (!file || selectionError) return;
+                          void action(async () => {
+                            setStatus("Reserving your private upload…");
+                            const upload = await readResult(
+                              await post(base, {
+                                name: file.name,
+                                contentType: selectedType,
+                                size: file.size,
+                                ...(purpose ? { purpose } : {}),
+                              }),
+                              uploadGrantSchema,
+                            );
+                            setStatus("Uploading and confirming your file…");
+                            await readResult(
+                              await fetch(`${base}/${upload.file.id}/content`, {
+                                method: "PUT",
+                                headers: {
+                                  "content-type": selectedType,
+                                  "x-file-token": upload.token,
+                                },
+                                body: file,
+                              }),
+                              fileViewSchema,
+                            );
+                            setFile(null);
+                            if (input.current) input.current.value = "";
+                            setStatus(
+                              "Upload completed. Your file is available privately.",
+                            );
+                          });
+                        }}
+                      >
+                        <FieldGroup className="gap-4">
+                          <Label htmlFor="business-file">Choose a file</Label>
+                          <Input
+                            ref={input}
+                            id="business-file"
+                            type="file"
+                            accept={policy?.allowedTypes.join(",")}
+                            aria-describedby="file-rules file-selection-error"
+                            disabled={
+                              busy || listing.readiness !== "configured"
+                            }
+                            onChange={(event) =>
+                              setFile(event.target.files?.[0] ?? null)
+                            }
+                          />
+                          <p
+                            id="file-selection-error"
+                            className="text-sm text-destructive"
+                          >
+                            {selectionError}
+                          </p>
+                          <Button
+                            type="submit"
+                            disabled={
+                              busy ||
+                              !file ||
+                              Boolean(selectionError) ||
+                              listing.readiness !== "configured"
                             }
                           >
-                            Delete file
-                          </AlertDialogAction>
-                        </div>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <Card>
-        <CardHeader>
-          <CardTitle>Usage attributed to this Business</CardTitle>
-          <CardDescription>
-            R2 storage and request allowances are shared across the Cloudflare
-            account. These records are not a per-Business free allowance or the
-            provider bill.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
-          <p>
-            {listing.usage.storedBytes.toLocaleString()} bytes stored or
-            awaiting confirmation/deletion. {listing.usage.putAttempts} upload,{" "}
-            {listing.usage.getAttempts} download and{" "}
-            {listing.usage.deleteAttempts} deletion attempts;{" "}
-            {listing.usage.uncertainAttempts} unconfirmed outcomes.
-          </p>
-          <p>
-            Access stops at the retention deadline even if storage cleanup is
-            delayed. Deleted metadata and attributed request records are kept
-            for the configured record retention period
-            {policy
-              ? ` (${policy.recordRetentionSeconds.toLocaleString()} seconds after confirmed deletion)`
-              : ""}
-            , then removed. US jurisdiction does not establish a specific state
-            or data center.
-          </p>
-        </CardContent>
-      </Card>
+                            Upload file
+                          </Button>
+                        </FieldGroup>
+                      </form>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Ask an Owner or Admin to upload or delete a file.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            ),
+          },
+          {
+            id: "storage",
+            label: "Storage use",
+            description:
+              "Check storage, upload and download records for these documents.",
+            content: (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Document storage and transfers</CardTitle>
+                    <CardDescription>
+                      R2 storage and request allowances are shared across the
+                      Cloudflare account. These records are not a per-Business
+                      free allowance or the provider bill.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
+                    <p>
+                      {listing.usage.storedBytes.toLocaleString()} bytes stored
+                      or awaiting confirmation/deletion.{" "}
+                      {listing.usage.putAttempts} upload,{" "}
+                      {listing.usage.getAttempts} download and{" "}
+                      {listing.usage.deleteAttempts} deletion attempts;{" "}
+                      {listing.usage.uncertainAttempts} unconfirmed outcomes.
+                    </p>
+                    <p>
+                      Access stops at the retention deadline even if storage
+                      cleanup is delayed. Deleted metadata and attributed
+                      request records are kept for the configured record
+                      retention period
+                      {policy
+                        ? ` (${policy.recordRetentionSeconds.toLocaleString()} seconds after confirmed deletion)`
+                        : ""}
+                      , then removed. US jurisdiction does not establish a
+                      specific state or data center.
+                    </p>
+                  </CardContent>
+                </Card>
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

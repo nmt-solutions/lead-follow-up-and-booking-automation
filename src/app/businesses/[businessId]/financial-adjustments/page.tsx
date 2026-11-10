@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/page-header";
+import { BusinessPageHeader } from "@/components/business-page-header";
 
 import { headers } from "next/headers";
 import { getServices } from "@/server/services";
@@ -23,7 +23,7 @@ export default async function FinancialWorkspace({
   })();
   return (
     <div className="app-page">
-      <PageHeader title={<>Refunds and disputes</>}></PageHeader>
+      <BusinessPageHeader section="financial-adjustments"></BusinessPageHeader>
       <FinancialAdjustmentManager
         businessId={businessId}
         initial={initial}

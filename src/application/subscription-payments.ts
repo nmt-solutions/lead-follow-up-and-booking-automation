@@ -314,6 +314,13 @@ export function createSubscriptionPaymentApplication<Credentials>(d: {
         ),
       );
     },
+    async usage(credentials: Credentials, businessId: unknown) {
+      return d.repository.usage(
+        await d.authenticate(credentials),
+        parse(businessIdSchema, businessId),
+        d.clock.now(),
+      );
+    },
     async workspace(credentials: Credentials, businessId: unknown) {
       return publicPaymentWorkspace(
         await d.repository.workspace(
