@@ -49,6 +49,16 @@ export function createNotificationApplication<C>(d: {
   };
   const payloadBinding = (id: string, purpose: string, sourceId: string) =>
     JSON.stringify([config.account, id, purpose, sourceId]);
+  async function refreshStaleSetup() {
+    const inspection = await r.maintenanceSetup(binding);
+    if (!inspection) return;
+    await r.saveSetup(
+      { userId: inspection.actorId },
+      binding,
+      inspection,
+      await d.provider.inspect(),
+    );
+  }
   async function deliver(work: NoticeWork) {
     const saved = await r.outcome(work);
     if (saved.providerId) return { id: saved.providerId };
@@ -105,6 +115,7 @@ export function createNotificationApplication<C>(d: {
       },
       { ...binding, from: mail.from },
     );
+    if (source.purpose === "authentication") await refreshStaleSetup();
     return deliver(work);
   }
   const signInMailer: SignInMailer = {
@@ -318,14 +329,7 @@ export function createNotificationApplication<C>(d: {
     async recoverPending() {
       let recovered = 0;
       await r.syncCosts(config.account);
-      const inspection = await r.maintenanceSetup(binding);
-      if (inspection)
-        await r.saveSetup(
-          { userId: inspection.actorId },
-          binding,
-          inspection,
-          await d.provider.inspect(),
-        );
+      await refreshStaleSetup();
       for (const candidate of await r.candidates(config.account)) {
         const source = await r.source(candidate);
         if (!source?.email) continue;

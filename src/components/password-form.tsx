@@ -61,6 +61,7 @@ export function PasswordForm({
           name="password"
           type="password"
           autoComplete="new-password"
+          placeholder="Create a new password"
           minLength={12}
           maxLength={128}
           required

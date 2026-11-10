@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
@@ -11,6 +11,29 @@ import { Field, FieldGroup, FieldLabel } from "./ui/field";
 import { Alert, AlertDescription } from "./ui/alert";
 
 type Mode = "password" | "signup" | "magic" | "reset" | "verify";
+const headings = {
+  password: {
+    title: "Sign in to Lead Relay",
+    description: "Enter your email and password.",
+  },
+  signup: {
+    title: "Sign up for Lead Relay",
+    description: "Enter your details to create an account.",
+  },
+  magic: {
+    title: "Passwordless sign in",
+    description: "Get a secure sign-in link by email.",
+  },
+  reset: {
+    title: "Reset your password",
+    description:
+      "Use an email link and your authenticator to choose a new password.",
+  },
+  verify: {
+    title: "Verify your email",
+    description: "Open the verification link in your email to finish sign-up.",
+  },
+} satisfies Record<Mode, { title: string; description: string }>;
 export function SignInForm({
   linkFailed,
   callbackURL = "/security",
@@ -24,6 +47,7 @@ export function SignInForm({
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [unverified, setUnverified] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
   const [error, setError] = useState(
     linkFailed ? "This link expired. Request a new one." : "",
   );
@@ -32,12 +56,27 @@ export function SignInForm({
     setError("");
     setSent(false);
     setUnverified(false);
+    requestAnimationFrame(() => heading.current?.focus());
   }
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-3">
+        <h1
+          id="sign-in-title"
+          ref={heading}
+          tabIndex={-1}
+          className="font-display text-4xl leading-tight font-medium tracking-[-0.045em]"
+        >
+          {headings[mode].title}
+        </h1>
+        <p className="text-sm leading-7 text-muted-foreground">
+          {headings[mode].description}
+        </p>
+      </div>
       <form
         className="flex flex-col gap-5"
         aria-busy={pending}
+        aria-labelledby="sign-in-title"
         onSubmit={async (event) => {
           event.preventDefault();
           const values = new FormData(event.currentTarget);
@@ -56,7 +95,7 @@ export function SignInForm({
                     ? "Please wait before trying again."
                     : result.error.code === "EMAIL_NOT_VERIFIED"
                       ? "Verify your email before signing in."
-                      : "Check your email and password, or use a magic link.",
+                      : "Check your email and password, or try passwordless sign in.",
                 );
                 setUnverified(result.error.code === "EMAIL_NOT_VERIFIED");
                 return;
@@ -143,17 +182,6 @@ export function SignInForm({
           }
         }}
       >
-        {mode !== "password" && (
-          <h2 className="font-display text-xl font-medium">
-            {mode === "signup"
-              ? "Create your account"
-              : mode === "reset"
-                ? "Reset your password"
-                : mode === "verify"
-                  ? "Verify your email"
-                  : "Sign in with a magic link"}
-          </h2>
-        )}
         <FieldGroup className="gap-4">
           {mode === "signup" && <RegistrationFields disabled={pending} />}
           <Field>
@@ -194,6 +222,11 @@ export function SignInForm({
                 autoComplete={
                   mode === "signup" ? "new-password" : "current-password"
                 }
+                placeholder={
+                  mode === "signup"
+                    ? "Create a password"
+                    : "Enter your password"
+                }
                 minLength={mode === "signup" ? 12 : undefined}
                 maxLength={128}
                 required
@@ -209,12 +242,6 @@ export function SignInForm({
               )}
             </Field>
           )}
-          {mode === "reset" && (
-            <p className="text-sm text-muted-foreground">
-              Open the email link and verify with your authenticator to choose a
-              new password.
-            </p>
-          )}
           {error && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
@@ -225,10 +252,12 @@ export function SignInForm({
               role="status"
               className="rounded-xl border border-success/20 bg-success/5 p-4 text-sm leading-6"
             >
-              Check your email for a link, valid for 10 minutes.
-              {mode === "signup"
-                ? " Open it to verify your email and finish setup."
-                : ""}
+              {mode === "verify"
+                ? "Check your email to verify your account."
+                : mode === "reset"
+                  ? "Check your email to continue resetting your password."
+                  : "Check your email for your sign-in link."}{" "}
+              The link is valid for 10 minutes.
             </p>
           )}
           <Button type="submit" disabled={pending}>
@@ -238,10 +267,18 @@ export function SignInForm({
               : mode === "password"
                 ? "Sign in"
                 : mode === "signup"
-                  ? "Create account"
-                  : sent
-                    ? "Send another link"
-                    : "Email me a link"}
+                  ? "Sign up"
+                  : mode === "verify"
+                    ? sent
+                      ? "Resend verification email"
+                      : "Send verification email"
+                    : mode === "reset"
+                      ? sent
+                        ? "Resend reset link"
+                        : "Send password reset link"
+                      : sent
+                        ? "Resend sign-in link"
+                        : "Send sign-in link"}
           </Button>
         </FieldGroup>
       </form>
@@ -254,7 +291,7 @@ export function SignInForm({
               disabled={pending}
               onClick={() => changeMode("magic")}
             >
-              Use a magic link
+              Passwordless sign in
             </Button>
             <Button
               type="button"
@@ -262,7 +299,7 @@ export function SignInForm({
               disabled={pending}
               onClick={() => changeMode("signup")}
             >
-              New to Lead Relay? Create account
+              New to Lead Relay? Sign up
             </Button>
           </>
         ) : (
@@ -272,7 +309,21 @@ export function SignInForm({
             disabled={pending}
             onClick={() => changeMode("password")}
           >
-            Back to sign in
+            {mode === "signup"
+              ? "Already have an account? Sign in"
+              : mode === "magic"
+                ? "Sign in with a password"
+                : "Back to sign in"}
+          </Button>
+        )}
+        {mode === "magic" && (
+          <Button
+            type="button"
+            variant="link"
+            disabled={pending}
+            onClick={() => changeMode("signup")}
+          >
+            New to Lead Relay? Sign up
           </Button>
         )}
         {mode === "password" && unverified && (

@@ -60,28 +60,19 @@ export default async function SignInPage({
             <div className="lg:hidden">
               <Brand />
             </div>
-            <div className="flex flex-col gap-3">
-              <p className="text-sm font-medium text-primary">
-                Welcome to Lead Relay
-              </p>
-              <h1
-                id="sign-in-title"
-                className="font-display text-4xl leading-tight font-medium tracking-[-0.045em]"
-              >
-                Let&apos;s get to work.
-              </h1>
-              <p className="text-sm leading-7 text-muted-foreground">
-                Sign in to your account or create one to get started.
-              </p>
-            </div>
             {available ? (
               <SignInForm linkFailed={Boolean((await searchParams).error)} />
             ) : (
-              <Alert>
-                <AlertDescription>
-                  Sign-in is temporarily unavailable. Please try again later.
-                </AlertDescription>
-              </Alert>
+              <div className="flex flex-col gap-4">
+                <h1 className="font-display text-4xl font-medium tracking-tight">
+                  Sign in to Lead Relay
+                </h1>
+                <Alert>
+                  <AlertDescription>
+                    Sign-in is temporarily unavailable. Please try again later.
+                  </AlertDescription>
+                </Alert>
+              </div>
             )}
             <p className="flex items-start gap-3 text-xs leading-6 text-muted-foreground">
               <LockKeyhole

@@ -46,7 +46,7 @@ const steps = [
       "Create an account with your name, email, a password, and a Company or Personal account choice. Add a company name if applicable.",
     tasks: [
       "Verify your email using the link we send. Scan the authenticator QR code or enter the setup key manually. Enter its 6-digit code and save your recovery codes.",
-      "Sign in with your password and authenticator, or choose the optional magic link. Use Forgot password to receive a link, verify your authenticator, and choose a new password.",
+      "Sign in with your password and authenticator, or choose Passwordless sign in to receive an email link. Use Forgot password to receive a link, verify your authenticator, and choose a new password.",
       "If you were invited, use the invited email and accept the invitation. Ask the business owner if the link has expired.",
     ],
     outcome:

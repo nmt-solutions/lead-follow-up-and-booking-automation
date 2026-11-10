@@ -486,6 +486,7 @@ export function SecurityManager({
                         id="enrollment-password"
                         type="password"
                         autoComplete="current-password"
+                        placeholder="Enter your password"
                         value={currentPassword}
                         onChange={(event) =>
                           setCurrentPassword(event.target.value)
@@ -550,6 +551,7 @@ export function SecurityManager({
                               id="security-password"
                               type="password"
                               autoComplete="current-password"
+                              placeholder="Enter your password"
                               value={currentPassword}
                               onChange={(event) =>
                                 setCurrentPassword(event.target.value)

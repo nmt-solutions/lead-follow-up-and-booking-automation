@@ -257,6 +257,44 @@ describe("Transactional notifications at the public application seam", () => {
       headers: new Headers({ origin: config.origin }),
     });
   }
+  async function requestSignupVerification(
+    notifications: ReturnType<typeof app>,
+    email: string,
+  ) {
+    const auth = createAuth({
+      database: runtimeDatabase(h.runtime),
+      baseURL: config.origin,
+      secret: "fixture-signup-verification-secret",
+      mailer: notifications.signInMailer,
+    });
+    const headers = {
+      origin: config.origin,
+      "content-type": "application/json",
+    };
+    const signup = await auth.handler(
+      new Request(`${config.origin}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          email,
+          password: "fixture-signup-password",
+          name: "Asha Rao",
+          firstName: "Asha",
+          lastName: "Rao",
+          accountType: "personal",
+        }),
+      }),
+    );
+    expect(signup.status).toBe(200);
+    const verification = await auth.handler(
+      new Request(`${config.origin}/api/auth/send-verification-email`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ email, callbackURL: "/security" }),
+      }),
+    );
+    expect(verification.status).toBe(200);
+  }
 
   it("classifies a notifications-only operator centrally and requires current MFA", async () => {
     const headers = await h.signIn("notification-operator@example.com", false);
@@ -349,6 +387,89 @@ describe("Transactional notifications at the public application seam", () => {
       to: ["private-auth@example.com"],
     });
   });
+
+  it.each(["sign-in", "sign-up"] as const)(
+    "refreshes a stale sender check during %s without waiting for recovery",
+    async (intent) => {
+      const { headers, notifications } = await prepared(
+        `notification-inline-refresh-${intent}@example.com`,
+      );
+      await h.admin.query(
+        "update notification_setup set at=statement_timestamp()-interval '6 minutes',completed_at=statement_timestamp()-interval '6 minutes' where account=$1",
+        [config.account],
+      );
+      wire.length = 0;
+
+      if (intent === "sign-in")
+        expect(
+          await requestLink(notifications, "inline-auth-recipient@example.com"),
+        ).toEqual({ status: true });
+      else
+        await requestSignupVerification(
+          notifications,
+          "inline-verification-recipient@example.com",
+        );
+
+      expect(
+        wire.filter((request) => request.url.endsWith("/usage")),
+      ).toHaveLength(1);
+      expect(
+        wire.filter((request) => request.url.endsWith("/emails")),
+      ).toHaveLength(1);
+      const workspace = await notifications.workspace(headers);
+      expect(workspace.notices).toEqual([
+        expect.objectContaining({
+          purpose: "authentication",
+          sourceStage:
+            intent === "sign-in"
+              ? "magic_link_requested"
+              : "email_verification_requested",
+          state: "accepted",
+        }),
+      ]);
+      expect(workspace.setupFresh).toBe(true);
+    },
+  );
+
+  it.each(["revoked", "mfa-incomplete"])(
+    "does not refresh stale sender checks through a %s operator during sign-in",
+    async (readiness) => {
+      const { headers, notifications } = await prepared(
+        `notification-inline-${readiness}@example.com`,
+      );
+      const actor = await h.access.primary(headers);
+      await h.admin.query(
+        "update notification_setup set at=statement_timestamp()-interval '6 minutes',completed_at=statement_timestamp()-interval '6 minutes' where account=$1",
+        [config.account],
+      );
+      if (readiness === "revoked")
+        await h.admin.query(
+          "update platform_operator set notifications=false where user_id=$1",
+          [actor.user.id],
+        );
+      else
+        await h.admin.query(
+          "update two_factor set verified=false where user_id=$1",
+          [actor.user.id],
+        );
+      wire.length = 0;
+
+      expect(
+        await requestLink(
+          notifications,
+          "blocked-inline-recipient@example.com",
+        ),
+      ).toEqual({ status: true });
+      expect(wire).toHaveLength(0);
+      const notices = await h.admin.query(
+        "select state,reason,provider_id from notification_notice where account=$1",
+        [config.account],
+      );
+      expect(notices.rows).toEqual([
+        { state: "pending", reason: "setup_required", provider_id: null },
+      ]);
+    },
+  );
 
   it("retries the same frozen invitation after ambiguous native acceptance and Business rename, then denies revoked authority", async () => {
     const owner = await h.signIn("notification-inviter@example.com");

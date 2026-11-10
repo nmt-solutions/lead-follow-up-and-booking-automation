@@ -20,6 +20,7 @@ export function RegistrationFields({
             id="first-name"
             name="firstName"
             autoComplete="given-name"
+            placeholder="e.g. Asha"
             required
             maxLength={80}
             disabled={disabled}
@@ -31,6 +32,7 @@ export function RegistrationFields({
             id="last-name"
             name="lastName"
             autoComplete="family-name"
+            placeholder="e.g. Rao"
             required
             maxLength={80}
             disabled={disabled}
@@ -68,6 +70,7 @@ export function RegistrationFields({
             id="company-name"
             name="companyName"
             autoComplete="organization"
+            placeholder="e.g. Rao Metals"
             required
             maxLength={120}
             disabled={disabled}
