@@ -168,12 +168,12 @@ export function ConversationList({
               <EmptyTitle>
                 {conversations.length
                   ? "No matching conversations"
-                  : "Start with a connected inbox"}
+                  : "No conversations yet"}
               </EmptyTitle>
               <EmptyDescription>
                 {conversations.length
                   ? "Try another name, subject, or filter. Search covers the conversations currently loaded."
-                  : "Connect a sales inbox to process selected mail, or import a received inquiry from the section below."}
+                  : "Replies to your Lead Relay outreach appear here. Start with a prospect search, or add a received inquiry from the section below."}
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
@@ -190,8 +190,8 @@ export function ConversationList({
                 </Button>
               ) : (
                 <Button asChild variant="outline">
-                  <Link href={`/businesses/${businessId}/mailboxes`}>
-                    Connect a sales inbox
+                  <Link href={`/businesses/${businessId}/discovery`}>
+                    Find prospects
                   </Link>
                 </Button>
               )}

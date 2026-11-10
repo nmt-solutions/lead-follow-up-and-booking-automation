@@ -175,22 +175,22 @@ export function OnboardingForm() {
     },
   };
   return (
-    <div className="app-page max-w-5xl">
-      <div>
-        <h1 className="page-title">Set up your business</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Tell us what you sell and who you want to reach. You can change this
-          later.
-        </p>
-      </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
-        <aside className="flex flex-col gap-6 rounded-2xl border border-border bg-card p-5 lg:sticky lg:top-24">
-          <div className="flex flex-col gap-3">
-            <p className="text-sm font-semibold">Your progress</p>
-            <Progress
-              value={((step + 1) / steps.length) * 100}
-              aria-label={`Step ${step + 1} of ${steps.length}`}
-            />
+    <div className="mx-auto w-full max-w-6xl py-4 sm:py-8">
+      <div className="grid items-start gap-8 lg:grid-cols-[20rem_minmax(0,1fr)] lg:gap-14">
+        <aside className="flex flex-col gap-7 lg:sticky lg:top-28">
+          <div className="flex flex-col gap-4">
+            <p className="text-sm font-medium text-primary">
+              Let&apos;s get you started
+            </p>
+            <h1 className="font-brand text-4xl leading-[1.1] font-medium tracking-[-0.045em] sm:text-5xl">
+              Welcome to
+              <br />
+              Lead Relay.
+            </h1>
+            <p className="max-w-sm text-sm leading-7 text-muted-foreground">
+              Tell us about your business. We&apos;ll use these details to find
+              potential buyers who fit what you sell.
+            </p>
           </div>
           <SetupStepper
             steps={steps}
@@ -199,18 +199,20 @@ export function OnboardingForm() {
             disabled={pending || uncertain}
             orientation="vertical"
           />
-          <div className="hidden flex-col gap-3 border-t border-border pt-5 text-xs leading-6 text-muted-foreground lg:flex">
-            <BookOpen className="size-5 text-primary" aria-hidden="true" />
-            <p>Need a hand with setup?</p>
-            <Link href="/getting-started" className="font-medium text-primary">
-              Read the vendor guide
+          <div className="hidden items-center gap-2 text-sm text-muted-foreground lg:flex">
+            <BookOpen className="size-4" aria-hidden="true" />
+            <Link
+              href="/getting-started"
+              className="text-primary underline underline-offset-4"
+            >
+              Help with getting started
             </Link>
           </div>
         </aside>
         <form
           noValidate
           aria-busy={pending}
-          className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
+          className="glass-panel overflow-hidden rounded-[24px]"
           onSubmit={async (event) => {
             event.preventDefault();
             if (submitting.current || uncertain) return;
@@ -262,7 +264,9 @@ export function OnboardingForm() {
                 return;
               }
               saved.current = true;
-              router.push(`/businesses/${result.data.data.id}?created=1`);
+              router.push(
+                `/businesses/${result.data.data.id}/mailboxes?welcome=1`,
+              );
               router.refresh();
             } catch {
               setUncertain(true);
@@ -277,6 +281,11 @@ export function OnboardingForm() {
             }
           }}
         >
+          <Progress
+            value={((step + 1) / steps.length) * 100}
+            aria-label={`Step ${step + 1} of ${steps.length}`}
+            className="h-1 rounded-none"
+          />
           <FieldGroup className="gap-5">
             <fieldset disabled={pending} className="min-w-0">
               <legend className="sr-only">Set up your business</legend>
@@ -291,7 +300,7 @@ export function OnboardingForm() {
                   bounce: 0,
                   duration: reducedMotion ? 0 : 0.25,
                 }}
-                className="flex flex-col gap-6 p-6 sm:p-8"
+                className="flex flex-col gap-7 p-6 sm:p-9"
               >
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">
@@ -300,7 +309,7 @@ export function OnboardingForm() {
                   <h2
                     ref={heading}
                     tabIndex={-1}
-                    className="mt-2 text-2xl font-semibold tracking-tight outline-none"
+                    className="mt-3 font-display text-3xl leading-tight font-medium tracking-[-0.045em] outline-none"
                   >
                     {
                       [
@@ -315,7 +324,7 @@ export function OnboardingForm() {
                     {
                       [
                         "A short description helps us find relevant prospects.",
-                        "Choose the types of customers you want to find. Nothing is selected for you.",
+                        "Choose the types of customers you want to reach.",
                         "We'll use your location as the starting area for prospect searches.",
                         "Review your customer types and location. Creating a business does not send any messages.",
                       ][step]
@@ -714,7 +723,7 @@ export function OnboardingForm() {
                     ) : (
                       <>
                         Continue
-                        <ArrowRight aria-hidden="true" />
+                        <ArrowRight data-icon="inline-end" aria-hidden="true" />
                       </>
                     )}
                   </Button>

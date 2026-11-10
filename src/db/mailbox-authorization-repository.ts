@@ -1,4 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
+import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import { isPendingEmailAccount } from "../models/email-setup";
 import type { Database } from "./runtime";
 import { scoped, requireCapability } from "./scope";
 import { requireSalesSession } from "./sales-session";
@@ -9,6 +12,9 @@ import {
   gmailOauth,
   mailboxPolicy,
   senderConnection,
+  senderReplyRoute,
+  senderIdentity,
+  business,
 } from "./schema";
 import type { Clock } from "../models/business";
 import { ApplicationError } from "../models/application-error";
@@ -153,6 +159,97 @@ export function createMailboxAuthorizationRepository(
                     eq(states.id, id),
                   ),
                 );
+            },
+            async bindPendingAccount(value) {
+              const account = z.email().max(254).parse(value).toLowerCase();
+              if (
+                !isPendingEmailAccount(policy.account) ||
+                grant?.accountSubject
+              )
+                throw new ApplicationError("CONFLICT");
+              const [duplicate] = await tx
+                .select({ id: mailboxPolicy.id })
+                .from(mailboxPolicy)
+                .where(
+                  and(
+                    eq(mailboxPolicy.businessId, businessId),
+                    eq(mailboxPolicy.provider, provider),
+                    eq(mailboxPolicy.account, account),
+                  ),
+                );
+              if (duplicate) throw new ApplicationError("CONFLICT");
+              const configuration = {
+                ...connection.configuration,
+                account,
+                label: account,
+              };
+              await tx
+                .update(senderConnection)
+                .set({
+                  configuration,
+                  version: connection.version + 1,
+                  updatedAt: clock.now(),
+                })
+                .where(
+                  and(
+                    eq(senderConnection.id, connection.id),
+                    eq(senderConnection.businessId, businessId),
+                  ),
+                );
+              await tx
+                .update(mailboxPolicy)
+                .set({
+                  account,
+                  connectionVersion: connection.version + 1,
+                  version: policy.version + 1,
+                  updatedAt: clock.now(),
+                })
+                .where(
+                  and(
+                    eq(mailboxPolicy.id, mailboxId),
+                    eq(mailboxPolicy.businessId, businessId),
+                  ),
+                );
+              const [profile] = await tx
+                .select({ name: business.name })
+                .from(business)
+                .where(eq(business.id, businessId));
+              if (!profile) throw new ApplicationError("NOT_FOUND");
+              const replyRouteId = randomUUID();
+              await tx.insert(senderReplyRoute).values({
+                id: replyRouteId,
+                businessId,
+                version: 1,
+                createdBy: identity.userId,
+                updatedAt: clock.now(),
+                connectionId: connection.id,
+                inboxConnectionId: mailboxId,
+                configuration: {
+                  address: account,
+                  connectionId: connection.id,
+                  inboxConnectionId: mailboxId,
+                  enabled: true,
+                },
+              });
+              await tx.insert(senderIdentity).values({
+                id: randomUUID(),
+                businessId,
+                version: 1,
+                createdBy: identity.userId,
+                updatedAt: clock.now(),
+                connectionId: connection.id,
+                replyRouteId,
+                configuration: {
+                  origin: "customer_mailbox",
+                  purpose: "ordinary_sales",
+                  fromAddress: account,
+                  displayName: profile.name,
+                  uses: ["inbound", "existing_conversation"],
+                  connectionId: connection.id,
+                  replyRouteId,
+                  enabled: true,
+                },
+              });
             },
             invalidate: () =>
               invalidateMailboxVisibility(tx, businessId, mailboxId),

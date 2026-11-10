@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { isPendingEmailAccount } from "../models/email-setup";
 import type { Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import { ApplicationError } from "../models/application-error";
@@ -36,7 +37,7 @@ function safeGmailFailure(error: unknown): NonNullable<GmailView["reason"]> {
 export function createGmailGrantService(options: {
   repository: GmailRepository;
   clock: Clock;
-  client: { clientId: string; origin: string } | null;
+  client: { clientId: string; origin: string; redirectPath?: string } | null;
   http: GmailAuthorizationProvider | null;
   vault: GmailCredentialVault | null;
 }) {
@@ -85,6 +86,7 @@ export function createGmailGrantService(options: {
     });
   }
   const callbackPath = (businessId: string, mailboxId: string) =>
+    configuration?.redirectPath ??
     `/api/businesses/${businessId}/mailboxes/${mailboxId}/gmail/callback`;
   async function saveFailure(
     actor: WorkIdentity,
@@ -285,7 +287,9 @@ export function createGmailGrantService(options: {
           state,
           access_type: "offline",
           prompt: "consent",
-          login_hint: p.account,
+          ...(isPendingEmailAccount(p.account)
+            ? {}
+            : { login_hint: p.account }),
           include_granted_scopes: "false",
           code_challenge: createHash("sha256")
             .update(verifier)
@@ -344,7 +348,9 @@ export function createGmailGrantService(options: {
           });
           account = await http.identity(token.access_token);
           if (
-            account.email.toLowerCase() !== captured.p.account.toLowerCase() ||
+            (!isPendingEmailAccount(captured.p.account) &&
+              account.email.toLowerCase() !==
+                captured.p.account.toLowerCase()) ||
             (captured.g.accountSubject &&
               captured.g.accountSubject !== account.sub)
           )
@@ -385,6 +391,8 @@ export function createGmailGrantService(options: {
           return;
         }
         if (!token || !account) throw new ApplicationError("CONFLICT");
+        if (isPendingEmailAccount(p.account))
+          await tx.bindPendingAccount(account.email);
         const scopes = token.scope?.split(/\s+/).filter(Boolean) ?? [];
         const refreshToken =
           token.refresh_token ??

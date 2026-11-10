@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { isPendingEmailAccount } from "../models/email-setup";
 import type { Clock } from "../models/business";
 import type { WorkIdentity } from "../models/discovery";
 import type {
@@ -55,7 +56,7 @@ function safeReason(error: unknown): NonNullable<MicrosoftMailView["reason"]> {
 export function createMicrosoftMailGrantService(options: {
   repository: MicrosoftMailRepository;
   clock: Clock;
-  client: { clientId: string; origin: string } | null;
+  client: { clientId: string; origin: string; redirectPath?: string } | null;
   http: ReturnType<typeof createMicrosoftMailHttp> | null;
   vault: MailboxCredentialVault | null;
 }) {
@@ -255,6 +256,7 @@ export function createMicrosoftMailGrantService(options: {
     );
   }
   const callbackPath = (businessId: string, id: string) =>
+    client?.redirectPath ??
     `/api/businesses/${businessId}/mailboxes/${id}/microsoft/callback`;
   return {
     http,
@@ -367,7 +369,9 @@ export function createMicrosoftMailGrantService(options: {
           state,
           nonce: hash,
           prompt: "consent",
-          login_hint: p.account,
+          ...(isPendingEmailAccount(p.account)
+            ? {}
+            : { login_hint: p.account }),
           code_challenge: digestBase64(verifier),
           code_challenge_method: "S256",
         }).toString();
@@ -408,7 +412,8 @@ export function createMicrosoftMailGrantService(options: {
         throw new ApplicationError("CHANNEL_SETUP_REQUIRED");
       let token: MicrosoftToken | undefined,
         subject: string | undefined,
-        ownerId: string | undefined;
+        ownerId: string | undefined,
+        accountEmail: string | undefined;
       let reason: MicrosoftMailView["reason"] = input.error
         ? "consent_denied"
         : null;
@@ -430,8 +435,11 @@ export function createMicrosoftMailGrantService(options: {
           );
           subject = `${account.accountKind}:${account.tenantId}:${digest(JSON.stringify([account.subject, account.ownerId]))}`;
           ownerId = account.ownerId;
+          accountEmail = account.email;
           if (
-            account.email.toLowerCase() !== captured.p.account.toLowerCase() ||
+            (!isPendingEmailAccount(captured.p.account) &&
+              account.email.toLowerCase() !==
+                captured.p.account.toLowerCase()) ||
             (captured.g.accountSubject && captured.g.accountSubject !== subject)
           )
             throw new MicrosoftMailFailure("account_mismatch");
@@ -473,6 +481,10 @@ export function createMicrosoftMailGrantService(options: {
         }
         const scopes = scopesOf(token),
           refresh = token.refresh_token;
+        if (isPendingEmailAccount(p.account)) {
+          if (!accountEmail) throw new ApplicationError("CONFLICT");
+          await tx.bindPendingAccount(accountEmail);
+        }
         const read =
             p.configuration.requestedRead &&
             scopes.includes(microsoftMailReadScope),

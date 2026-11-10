@@ -4,6 +4,7 @@ import { ApplicationError } from "../models/application-error";
 import { microsoftMailCallbackSchema } from "../models/microsoft-mail";
 import { createResponder, type FailureDiagnostic } from "./respond";
 import { createJsonBodyReader } from "./request-body";
+import { setOAuthContext } from "./oauth-context";
 
 export function createMicrosoftMailHttpHandlers(options: {
   application: ReturnType<typeof createMicrosoftMailApplication>;
@@ -41,8 +42,12 @@ export function createMicrosoftMailHttpHandlers(options: {
     start: (request: Request, businessId: string, mailboxId: string) =>
       respond(async () => {
         await empty(request);
-        return dataResponse(
-          await app.start(request.headers, businessId, mailboxId),
+        const result = await app.start(request.headers, businessId, mailboxId);
+        return setOAuthContext(
+          dataResponse(result),
+          result.authorizationUrl,
+          "microsoft",
+          { businessId, mailboxId },
         );
       }),
     disconnect: (request: Request, businessId: string, mailboxId: string) =>

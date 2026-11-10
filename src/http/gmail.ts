@@ -4,6 +4,7 @@ import { ApplicationError } from "../models/application-error";
 import { gmailCallbackSchema } from "../models/gmail";
 import { createResponder, type FailureDiagnostic } from "./respond";
 import { createJsonBodyReader } from "./request-body";
+import { setOAuthContext } from "./oauth-context";
 
 export function createGmailHttpHandlers(options: {
   application: ReturnType<typeof createGmailApplication>;
@@ -37,8 +38,12 @@ export function createGmailHttpHandlers(options: {
     start: (request: Request, businessId: string, mailboxId: string) =>
       respond(async () => {
         await empty(request);
-        return dataResponse(
-          await app.start(request.headers, businessId, mailboxId),
+        const result = await app.start(request.headers, businessId, mailboxId);
+        return setOAuthContext(
+          dataResponse(result),
+          result.authorizationUrl,
+          "gmail",
+          { businessId, mailboxId },
         );
       }),
     disconnect: (request: Request, businessId: string, mailboxId: string) =>

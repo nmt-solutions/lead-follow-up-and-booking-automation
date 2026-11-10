@@ -1,9 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (@media (prefers-color-scheme: dark));
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
+  --color-brand-purple: var(--brand-purple);
   --color-brand-deep: var(--brand-deep);
   --color-brand-ink: var(--brand-ink);
   --color-brand-paper: var(--brand-paper);
@@ -49,38 +50,43 @@
 }
 
 :root {
-  color-scheme: light dark;
-  --brand-deep: #202655;
+  color-scheme: light;
+  --brand-purple: #4e1a70;
+  --brand-deep: #253fc7;
+  --brand-gradient: linear-gradient(115deg, #4e1a70, #2b4cf2);
+  --button-gradient: linear-gradient(125deg, #343bbd, #2b4cf2);
+  --button-gradient-hover: linear-gradient(125deg, #3036af, #2444e0);
   --brand-ink: #ffffff;
   --brand-paper: #f5f6ff;
   --brand-halo: #dfe3ff;
-  --background: #f5f6fa;
-  --foreground: #24283e;
+  --background: #f4f6ff;
+  --foreground: #17213b;
   --card: #ffffff;
-  --primary: #3d43cf;
+  --primary: #2b4cf2;
   --primary-foreground: #ffffff;
-  --muted: #f0f1f6;
-  --muted-foreground: #626a80;
-  --accent: #eceeff;
-  --border: #e0e3ec;
-  --input: #81899e;
+  --muted: #eef2fc;
+  --muted-foreground: #53607b;
+  --accent: #e8edfc;
+  --border: #dce2f2;
+  --input: #a8b8d6;
   --destructive: #ae2929;
   --success: #166345;
   --warning: #855017;
   --overlay: #0c1c32a6;
-  --glass-fill: #ffffffe6;
+  --glass-fill: rgb(255 255 255 / 77%);
   --glass-edge: #ffffff;
-  --glass-blur: 24px;
-  --control-radius: 0.5rem;
-  --group-radius: 0.75rem;
-  --panel-radius: 1rem;
-  --elevation-panel: 0 1px 3px #24283e05, 0 3px 12px #24283e03;
+  --glass-blur: 28px;
+  --control-radius: 0.8125rem;
+  --group-radius: 1rem;
+  --panel-radius: 1.5rem;
+  --elevation-panel:
+    0 14px 45px rgb(38 49 104 / 7%), 0 2px 8px rgb(42 55 115 / 2.5%);
   --elevation-overlay: 0 20px 70px #0c1c3233;
   --content-width: 72rem;
   --page-gutter: clamp(1.25rem, 4vw, 3rem);
   --section-gap: 2rem;
   --type-title: clamp(1.5rem, 3vw, 2rem);
-  --sidebar: var(--card);
+  --sidebar: rgb(255 255 255 / 77%);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -95,37 +101,18 @@
   --ring: var(--primary);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #11131d;
-    --brand-deep: #242a5c;
-    --brand-paper: #1e223a;
-    --brand-halo: #373e73;
-    --foreground: #f0f1fc;
-    --card: #1b1e30;
-    --primary: #b8bbff;
-    --primary-foreground: #23265b;
-    --muted: #282d43;
-    --muted-foreground: #b7bdd4;
-    --accent: #30355c;
-    --border: #434963;
-    --input: #838ba8;
-    --destructive: #ffb4b0;
-    --success: #8bd7b2;
-    --warning: #f6c784;
-    --glass-fill: #1b1e30eb;
-    --glass-edge: #758ba03b;
-    --elevation-panel: 0 2px 6px #0000001a, 0 12px 32px #00000014;
-    --elevation-overlay: 0 20px 70px #00000066;
-  }
-}
-
 @layer base {
   * {
     @apply border-border;
   }
   body {
     @apply min-h-svh bg-background font-sans text-foreground antialiased;
+    background-image: radial-gradient(
+      ellipse at 85% 5%,
+      rgb(43 76 242 / 5.5%),
+      transparent 35%
+    );
+    background-attachment: fixed;
     font-optical-sizing: auto;
     font-weight: 450;
     overflow-wrap: anywhere;
@@ -154,9 +141,82 @@
 }
 
 @layer components {
+  .brand-gradient-text {
+    background-image: var(--brand-gradient);
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .glass-panel {
+    background: rgb(255 255 255 / 83%);
+    border: 1px solid rgb(255 255 255 / 98%);
+    box-shadow:
+      inset 0 1px 0 #fffffffa,
+      0 6px 24px rgb(36 55 113 / 4.5%),
+      0 0 0 1px rgb(122 144 198 / 12%);
+  }
+  .nmt-workbench {
+    background:
+      radial-gradient(
+        ellipse at 60% 35%,
+        rgb(221 228 255 / 38%),
+        transparent 70%
+      ),
+      rgb(255 255 255 / 52%);
+    box-shadow:
+      var(--elevation-panel),
+      inset 0 1px 0 #fffffffa,
+      0 0 0 1px rgb(112 133 191 / 12%);
+    backdrop-filter: blur(18px) saturate(1.1);
+  }
+  .nmt-button {
+    background: var(--button-gradient);
+    border: 1px solid rgb(73 94 246 / 90%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 30%),
+      0 5px 13px rgb(43 76 242 / 16%);
+  }
+  .nmt-button:hover {
+    background: var(--button-gradient-hover);
+    transform: translateY(-2px);
+  }
+  .nmt-button:active {
+    transform: translateY(1px);
+  }
+  .nmt-button-secondary {
+    color: #344361;
+    background: rgb(255 255 255 / 82%);
+    border: 1px solid #d4ddf2;
+    box-shadow:
+      inset 0 1px 0 #fffffffa,
+      0 3px 8px rgb(43 61 126 / 4%);
+  }
+  .nmt-button-secondary:hover {
+    background: #fff;
+    border-color: #a8b8e4;
+  }
+  .nmt-button::after {
+    content: "";
+    position: absolute;
+    inset: 1px 1px auto;
+    height: 45%;
+    border-radius: 11px 11px 18px 18px;
+    background: linear-gradient(rgb(255 255 255 / 12%), transparent);
+    pointer-events: none;
+  }
+  .nmt-button > [data-icon="inline-end"] {
+    width: 27px;
+    height: 27px;
+    padding: 5px;
+    box-sizing: content-box;
+    margin-block: -5px;
+    margin-right: -8px;
+    background: rgb(255 255 255 / 12%);
+    border: 1px solid rgb(255 255 255 / 15%);
+    border-radius: 8px;
+  }
   .glass-chrome {
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 1px solid rgb(255 255 255 / 98%);
     box-shadow:
       var(--elevation-panel),
       inset 0 1px 0 var(--glass-edge);
@@ -214,7 +274,7 @@
     background-size: 32px 32px;
   }
   .app-content > .app-page > header:first-child {
-    @apply flex flex-col gap-3 border-b border-border pb-6;
+    @apply pb-2;
   }
   .app-content > .app-page > header:first-child > a:first-child {
     @apply mb-0 w-fit text-xs text-muted-foreground no-underline hover:text-primary;
@@ -232,7 +292,8 @@
 }
 
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .glass-chrome {
+  .glass-chrome,
+  .glass-panel {
     background: var(--card);
     backdrop-filter: none;
     box-shadow: none;
@@ -245,6 +306,10 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .nmt-button:hover,
+  .nmt-button:active {
+    transform: none;
+  }
   *,
   *::before,
   *::after {
@@ -254,6 +319,18 @@
   }
 }
 @media (forced-colors: active) {
+  .brand-gradient-text {
+    background: none;
+    -webkit-text-fill-color: CanvasText;
+  }
+  .nmt-button,
+  .nmt-button-secondary {
+    background: ButtonFace;
+    color: ButtonText;
+  }
+  .nmt-button::after {
+    display: none;
+  }
   :root {
     --background: Canvas;
     --card: Canvas;

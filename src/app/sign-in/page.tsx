@@ -62,7 +62,7 @@ export default async function SignInPage({
             </div>
             <div className="flex flex-col gap-3">
               <p className="text-sm font-medium text-primary">
-                Welcome to LeadRelay
+                Welcome to Lead Relay
               </p>
               <h1
                 id="sign-in-title"

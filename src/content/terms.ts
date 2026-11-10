@@ -3,9 +3,9 @@ import type { PolicySection } from "@/components/policy-document";
 export const termsSections: PolicySection[] = [
   {
     id: "agreement",
-    title: "Using LeadRelay",
+    title: "Using Lead Relay",
     paragraphs: [
-      "These terms govern your use of LeadRelay at leadrelay.nmtsolutions.in, operated by NMT Solutions OPC PVT LTD, India. By using the service, you agree to these terms. If you use LeadRelay for a business, you confirm that you are authorized to act for that business.",
+      "These terms govern your use of Lead Relay at leadrelay.nmtsolutions.in, operated by NMT Solutions OPC PVT LTD, India. By using the service, you agree to these terms. If you use Lead Relay for a business, you confirm that you are authorized to act for that business.",
       "You must be at least 18 years old and provide accurate account and business information. Our privacy policy explains how we handle personal information. A separate signed agreement or accepted order can set additional commercial terms for your subscription.",
     ],
   },
@@ -21,7 +21,7 @@ export const termsSections: PolicySection[] = [
     id: "service",
     title: "What the service does",
     paragraphs: [
-      "LeadRelay supports prospect research, sales conversations, business knowledge, AI-assisted drafting, and authorized follow-up or booking workflows. Available features depend on your subscription, configuration, supported providers, permissions, and current service readiness.",
+      "Lead Relay supports prospect research, sales conversations, business knowledge, AI-assisted drafting, and authorized follow-up or booking workflows. Available features depend on your subscription, configuration, supported providers, permissions, and current service readiness.",
       "A prospect is a possible buyer, not a guaranteed lead, permission to contact, or a promised sale. Public contact information and buying signals may be incomplete or outdated. A prepared email is not evidence that a message was sent, accepted, delivered, or read.",
       "Some work runs in the background. A request can be queued, interrupted, or uncertain after a provider timeout. Review the saved action history before retrying a message, payment, booking, or other action that could be repeated.",
     ],
@@ -32,7 +32,7 @@ export const termsSections: PolicySection[] = [
     paragraphs: [
       "Connect only services and business identities that you are authorized to control. Select the mailbox or calendar access you intend to grant. Connecting a mailbox does not by itself authorize importing all past mail, sending outreach, or making commercial commitments.",
       "You remain responsible for the recipients you select, the messages and sequences you approve, your sales approval limits, and any execution you start. Follow-ups must respect opt-outs, replies, human takeover, and the stop conditions shown in the service.",
-      "Connected providers have their own terms, charges, availability, and account rules. You are responsible for charges billed directly to you by those providers. Removing a connection in LeadRelay may not remove consent in every provider account or cancel a separate provider subscription.",
+      "Connected providers have their own terms, charges, availability, and account rules. You are responsible for charges billed directly to you by those providers. Removing a connection in Lead Relay may not remove consent in every provider account or cancel a separate provider subscription.",
     ],
   },
   {
@@ -47,7 +47,7 @@ export const termsSections: PolicySection[] = [
     id: "acceptable-use",
     title: "Acceptable use",
     paragraphs: [
-      "Use LeadRelay lawfully and respect the rights of the people whose information you process. You must have a lawful basis and any required consent or other permission for your data and communications. Public availability is not a substitute for permission.",
+      "Use Lead Relay lawfully and respect the rights of the people whose information you process. You must have a lawful basis and any required consent or other permission for your data and communications. Public availability is not a substitute for permission.",
     ],
     bullets: [
       "Do not send spam, deceptive messages, threats, unlawful content, or messages that ignore a recipient's opt-out.",
@@ -62,7 +62,7 @@ export const termsSections: PolicySection[] = [
     title: "Your information and content",
     paragraphs: [
       "You retain your rights in the information and content you submit, subject to the rights of other people and source providers. You give us the permission needed to host, process, transmit, and display that content to provide the service and perform your authorized actions.",
-      "You are responsible for the accuracy, legality, and necessary permissions for your content. NMT Solutions retains its rights in LeadRelay's software, branding, and service materials. These terms do not give you ownership of the application or permission to misuse its branding.",
+      "You are responsible for the accuracy, legality, and necessary permissions for your content. NMT Solutions retains its rights in Lead Relay's software, branding, and service materials. These terms do not give you ownership of the application or permission to misuse its branding.",
     ],
   },
   {
@@ -78,7 +78,7 @@ export const termsSections: PolicySection[] = [
     id: "availability",
     title: "Availability and service limits",
     paragraphs: [
-      "We work to keep LeadRelay available, but do not promise uninterrupted service, a particular response time, a minimum number of prospects, or a sales result unless we expressly agree to it in writing.",
+      "We work to keep Lead Relay available, but do not promise uninterrupted service, a particular response time, a minimum number of prospects, or a sales result unless we expressly agree to it in writing.",
       "Maintenance, security controls, provider failures, account restrictions, and changes to third-party services can affect features. We may change or retire features and will provide notice where required by law or an applicable agreement. Subject to mandatory law and express written commitments, the service is provided as available without a guarantee that all output will be accurate or suitable for your purpose.",
     ],
   },

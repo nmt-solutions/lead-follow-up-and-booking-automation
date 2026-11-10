@@ -96,18 +96,15 @@ const resources: Item[] = [
   { path: "/knowledge", label: "Business knowledge", icon: BookOpen },
   { path: "/files", label: "Files", icon: Folder },
 ];
+const connections: Item[] = [
+  { path: "/mailboxes", label: "Email accounts", icon: Mail },
+  { path: "/calendar", label: "Calendar", icon: CalendarDays, manage: true },
+];
 const settings: Item[] = [
   { path: "/configuration", label: "Business setup", icon: Settings2 },
   { path: "/profile", label: "Business profile", icon: Building2 },
-  { path: "/mailboxes", label: "Email inboxes", icon: Mail },
-  {
-    path: "/calendar",
-    label: "Booking calendar",
-    icon: CalendarDays,
-    manage: true,
-  },
   { path: "/whatsapp", label: "WhatsApp", icon: Inbox, manage: true },
-  { path: "/senders", label: "Email senders", icon: Send },
+  { path: "/senders", label: "Advanced sending", icon: Send },
   { path: "/team", label: "Team members", icon: Users, manage: true },
   {
     path: "/commercial-authority",
@@ -181,7 +178,7 @@ function Navigation({
   const visible = (item: Item) =>
     (!item.manage || business?.canManage) &&
     (!item.ai || business?.canManageAi);
-  const current = [...work, ...resources, ...settings].find(
+  const current = [...work, ...connections, ...resources, ...settings].find(
     (item) =>
       item.path &&
       (pathname === base + item.path ||
@@ -212,6 +209,25 @@ function Navigation({
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, []);
+  if (
+    pathname === "/businesses/new" ||
+    (pathname === "/businesses" && !businesses.length)
+  )
+    return (
+      <div className="min-w-0 flex-1">
+        <header className="glass-chrome mx-3 mt-3 flex items-center justify-between gap-4 rounded-[22px] px-5 py-3 sm:mx-6 sm:mt-4">
+          <Link href="/" aria-label="Lead Relay home">
+            <Brand />
+          </Link>
+          <Button variant="outline" asChild>
+            <Link href="/businesses">Exit setup</Link>
+          </Button>
+        </header>
+        <main id="main-content" className="px-5 py-8 sm:px-10">
+          {children}
+        </main>
+      </div>
+    );
   function menu(items: Item[]) {
     return (
       <SidebarMenu>
@@ -245,9 +261,13 @@ function Navigation({
   }
   return (
     <>
-      <Sidebar collapsible="offcanvas" className="border-r border-border">
+      <Sidebar
+        collapsible="offcanvas"
+        variant="floating"
+        className="p-3 pr-0 [&_[data-slot=sidebar-inner]]:glass-chrome [&_[data-slot=sidebar-inner]]:rounded-[22px]"
+      >
         <SidebarHeader className="gap-6 px-5 pb-4 pt-6">
-          <Link href="/businesses" aria-label="LeadRelay home" onClick={close}>
+          <Link href="/businesses" aria-label="Lead Relay home" onClick={close}>
             <Brand />
           </Link>
           <DropdownMenu>
@@ -317,6 +337,10 @@ function Navigation({
                 {menu(work)}
               </SidebarGroup>
               <SidebarGroup>
+                <SidebarGroupLabel>Connections</SidebarGroupLabel>
+                {menu(connections)}
+              </SidebarGroup>
+              <SidebarGroup>
                 <SidebarGroupLabel>Resources</SidebarGroupLabel>
                 {menu(resources)}
               </SidebarGroup>
@@ -333,7 +357,7 @@ function Navigation({
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton>
                       <Settings2 aria-hidden="true" />
-                      <span>Business settings</span>
+                      <span>More settings</span>
                       <ChevronDown
                         className="ml-auto transition-transform group-data-[state=open]/settings:rotate-180"
                         aria-hidden="true"
@@ -379,19 +403,12 @@ function Navigation({
           )}
         </SidebarContent>
         <SidebarFooter className="gap-4 p-4">
-          <div className="flex flex-col gap-2 rounded-xl border border-border bg-muted/40 p-4">
-            <BookOpen className="size-5 text-primary" aria-hidden="true" />
-            <p className="text-sm font-semibold">New to LeadRelay?</p>
-            <p className="text-xs leading-5 text-muted-foreground">
-              Set up your business and run your first search.
-            </p>
-            <Button asChild variant="outline" className="mt-1 w-full">
-              <Link href="/getting-started">
-                Read the vendor guide
-                <ChevronRight data-icon="inline-end" aria-hidden="true" />
-              </Link>
-            </Button>
-          </div>
+          <Button asChild variant="ghost" className="w-full justify-start">
+            <Link href="/getting-started">
+              <BookOpen aria-hidden="true" />
+              Getting started
+            </Link>
+          </Button>
           <Separator />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -440,7 +457,7 @@ function Navigation({
         </SidebarFooter>
       </Sidebar>
       <div className="min-w-0 flex-1">
-        <header className="glass-chrome sticky top-0 z-20 flex min-h-17 items-center gap-4 border-x-0 border-t-0 px-4 shadow-none sm:px-8">
+        <header className="glass-chrome sticky top-3 z-20 mx-3 mt-3 flex min-h-17 items-center gap-3 rounded-[22px] px-4 sm:top-4 sm:mx-6 sm:mt-4 sm:px-5">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-5" />
           <nav
@@ -451,7 +468,7 @@ function Navigation({
               href={base || "/businesses"}
               className="hidden max-w-56 truncate text-muted-foreground sm:block"
             >
-              {business?.name || "LeadRelay"}
+              {business?.name || "Lead Relay"}
             </Link>
             <ChevronRight
               className="hidden size-3 text-muted-foreground sm:block"
@@ -495,7 +512,7 @@ function Navigation({
         open={searchOpen}
         onOpenChange={setSearchOpen}
         title="Go to a page"
-        description="Find a LeadRelay page or switch your business."
+        description="Find a Lead Relay page or switch your business."
       >
         <CommandInput
           aria-label="Search pages or businesses"
@@ -506,15 +523,17 @@ function Navigation({
           {business && (
             <>
               <CommandGroup heading="Sales">
-                {[...work, ...resources].filter(visible).map((item) => (
-                  <CommandItem
-                    key={item.path}
-                    onSelect={() => navigate(base + item.path)}
-                  >
-                    <item.icon aria-hidden="true" />
-                    <span>{item.label}</span>
-                  </CommandItem>
-                ))}
+                {[...work, ...connections, ...resources]
+                  .filter(visible)
+                  .map((item) => (
+                    <CommandItem
+                      key={item.path}
+                      onSelect={() => navigate(base + item.path)}
+                    >
+                      <item.icon aria-hidden="true" />
+                      <span>{item.label}</span>
+                    </CommandItem>
+                  ))}
               </CommandGroup>
               <CommandSeparator />
               <CommandGroup heading="Business settings">

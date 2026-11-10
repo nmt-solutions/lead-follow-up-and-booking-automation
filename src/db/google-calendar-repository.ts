@@ -276,7 +276,7 @@ export function createGoogleCalendarRepository(
         const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
         url.search = new URLSearchParams({
           client_id: configuration.clientId,
-          redirect_uri: `${configuration.origin}/api/businesses/${businessId}/calendar/google/callback`,
+          redirect_uri: `${configuration.origin}${configuration.redirectPath ?? `/api/businesses/${businessId}/calendar/google/callback`}`,
           response_type: "code",
           scope: googleCalendarScopes.join(" "),
           state,
@@ -352,7 +352,7 @@ export function createGoogleCalendarRepository(
               `${aad(g)}:${state.stateHash}`,
             ),
             grant_type: "authorization_code",
-            redirect_uri: `${configuration.origin}/api/businesses/${businessId}/calendar/google/callback`,
+            redirect_uri: `${configuration.origin}${configuration.redirectPath ?? `/api/businesses/${businessId}/calendar/google/callback`}`,
           });
           const granted = scopes(token);
           if (!sufficient(granted))

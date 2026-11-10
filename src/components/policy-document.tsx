@@ -29,7 +29,7 @@ export function PolicyDocument({
             className="inline-flex min-h-11 w-fit items-center gap-2 text-sm text-muted-foreground"
           >
             <ArrowLeft className="size-4" aria-hidden="true" />
-            Back to LeadRelay
+            Back to Lead Relay
           </Link>
           <p className="text-sm text-muted-foreground">
             Last updated 10 November 2026

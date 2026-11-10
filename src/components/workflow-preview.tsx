@@ -52,7 +52,7 @@ export function WorkflowPreview() {
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between gap-3">
-        <CardTitle>How LeadRelay works</CardTitle>
+        <CardTitle>How Lead Relay works</CardTitle>
         <Badge variant="primary">
           <Sparkles aria-hidden="true" />
           AI-assisted

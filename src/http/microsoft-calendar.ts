@@ -3,6 +3,7 @@ import { dataResponse } from "../models/api";
 import { createResponder, type FailureDiagnostic } from "./respond";
 import { createJsonBodyReader } from "./request-body";
 import { ApplicationError } from "../models/application-error";
+import { setOAuthContext } from "./oauth-context";
 
 export function createMicrosoftCalendarHttp(options: {
   application: ReturnType<typeof createMicrosoftCalendarApplication>;
@@ -24,15 +25,19 @@ export function createMicrosoftCalendarHttp(options: {
         ),
       ),
     start: (request: Request, businessId: string) =>
-      respond(async () =>
-        dataResponse(
-          await options.application.start(
-            request.headers,
-            businessId,
-            await body(request),
-          ),
-        ),
-      ),
+      respond(async () => {
+        const result = await options.application.start(
+          request.headers,
+          businessId,
+          await body(request),
+        );
+        return setOAuthContext(
+          dataResponse(result),
+          result.authorizationUrl,
+          "microsoft-calendar",
+          { businessId },
+        );
+      }),
     select: (request: Request, businessId: string) =>
       respond(async () =>
         dataResponse(

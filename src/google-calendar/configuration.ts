@@ -4,6 +4,7 @@ export type GoogleCalendarConfiguration = {
   clientId: string;
   clientSecret: string;
   origin: string;
+  redirectPath?: string;
   activeKeyId: string;
   keys: Record<string, string>;
 };
@@ -42,6 +43,9 @@ export function configuredGoogleCalendar(
   )
     return null;
   return {
+    ...(env.GOOGLE_CALENDAR_FIXED_CALLBACK_ENABLED === "true"
+      ? { redirectPath: "/api/connections/google-calendar/callback" }
+      : {}),
     clientId: parsed.data.GOOGLE_CALENDAR_CLIENT_ID,
     clientSecret: parsed.data.GOOGLE_CALENDAR_CLIENT_SECRET,
     origin,

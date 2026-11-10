@@ -4,6 +4,7 @@ export type MicrosoftCalendarConfiguration = {
   clientId: string;
   clientSecret: string;
   origin: string;
+  redirectPath?: string;
   activeKeyId: string;
   keys: Record<string, string>;
 };
@@ -44,6 +45,9 @@ export function configuredMicrosoftCalendar(
   )
     return null;
   return {
+    ...(env.MICROSOFT_CALENDAR_FIXED_CALLBACK_ENABLED === "true"
+      ? { redirectPath: "/api/connections/microsoft-calendar/callback" }
+      : {}),
     clientId: parsed.data.MICROSOFT_CALENDAR_CLIENT_ID,
     clientSecret: parsed.data.MICROSOFT_CALENDAR_CLIENT_SECRET,
     origin,

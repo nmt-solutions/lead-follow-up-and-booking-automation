@@ -1,6 +1,6 @@
 # NMT website typography
 
-These are the same self-hosted font files served by https://www.nmtsolutions.in on 10 November 2026. LeadRelay loads them through `next/font/local`.
+These are the same self-hosted font files served by https://www.nmtsolutions.in on 10 November 2026. Lead Relay loads them through `next/font/local`.
 
 - `display.woff2`: Space Grotesk, headings, weights 300 to 700.
 - `body.woff2`: Manrope, body and controls, weights 200 to 800.

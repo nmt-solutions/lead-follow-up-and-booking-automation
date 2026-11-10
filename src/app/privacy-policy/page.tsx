@@ -4,7 +4,7 @@ import { privacySections } from "@/content/privacy";
 export const metadata: Metadata = {
   title: "Privacy policy",
   description:
-    "How LeadRelay handles business, account, connected service, and sales data.",
+    "How Lead Relay handles business, account, connected service, and sales data.",
   robots: { index: true, follow: true },
 };
 export default function PrivacyPolicyPage() {

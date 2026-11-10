@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { headers } from "next/headers";
@@ -28,7 +29,12 @@ import { Badge } from "@/components/ui/badge";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Your businesses" };
 
-export default async function BusinessesPage() {
+export default async function BusinessesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ connection?: string }>;
+}) {
+  const query = await searchParams;
   const operationsLink = await (async () => {
     try {
       await (
@@ -300,6 +306,14 @@ export default async function BusinessesPage() {
     );
   return (
     <div className="flex flex-col gap-8">
+      {query.connection === "expired" && (
+        <Alert>
+          <AlertDescription>
+            Your connection session expired. Open your business and try
+            connecting again.
+          </AlertDescription>
+        </Alert>
+      )}
       <PageHeader
         title="Your businesses"
         description="Choose the business you want to work with. Each business has separate records and team access."

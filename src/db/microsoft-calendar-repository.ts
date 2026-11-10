@@ -316,7 +316,7 @@ export function createMicrosoftCalendarRepository(
         );
         url.search = new URLSearchParams({
           client_id: configuration.clientId,
-          redirect_uri: `${configuration.origin}/api/businesses/${businessId}/calendar/microsoft/callback`,
+          redirect_uri: `${configuration.origin}${configuration.redirectPath ?? `/api/businesses/${businessId}/calendar/microsoft/callback`}`,
           response_type: "code",
           scope: microsoftCalendarScopes.join(" "),
           state,
@@ -390,7 +390,7 @@ export function createMicrosoftCalendarRepository(
               `${aad(g)}:${state.stateHash}`,
             ),
             grant_type: "authorization_code",
-            redirect_uri: `${configuration.origin}/api/businesses/${businessId}/calendar/microsoft/callback`,
+            redirect_uri: `${configuration.origin}${configuration.redirectPath ?? `/api/businesses/${businessId}/calendar/microsoft/callback`}`,
           });
           const granted = scopes(token);
           if (!sufficient(granted))

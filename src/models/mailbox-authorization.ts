@@ -68,6 +68,7 @@ export type MailboxAuthorizationStore = {
   state(hash: string): Promise<MailboxStoredState | undefined>;
   createState(state: Omit<MailboxStoredState, "consumed">): Promise<void>;
   consumeState(id: string): Promise<void>;
+  bindPendingAccount(account: string): Promise<void>;
   invalidate(): Promise<void>;
   googlePrimaryRevocable(): Promise<boolean>;
 };

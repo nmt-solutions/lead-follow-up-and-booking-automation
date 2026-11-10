@@ -55,3 +55,7 @@ No live OAuth, event creation, invitation, send or UI check is established by au
 - [Free/busy query](https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query)
 - [Event insert and client event IDs](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert), [event list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list), [delete](https://developers.google.com/workspace/calendar/api/v3/reference/events/delete), [versioned resources](https://developers.google.com/workspace/calendar/api/guides/version-resources)
 - [Calendar error/retry/conflict semantics](https://developers.google.com/workspace/calendar/api/guides/errors)
+
+The customer connection UI supports the fixed callback `/api/connections/google-calendar/callback` under `BETTER_AUTH_URL`. Register this exact URI once in the provider console before deployment. Customers approve access, then select their work calendar. Existing business-specific endpoints remain for older integrations.
+
+Set `GOOGLE_CALENDAR_FIXED_CALLBACK_ENABLED=true` only after registering the fixed callback. Until then, established connections retain their legacy callback URI. New consent-first email setup requires its fixed-callback flag as well as the existing approved provider configuration.

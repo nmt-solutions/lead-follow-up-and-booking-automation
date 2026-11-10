@@ -11,7 +11,7 @@ export function configuredMicrosoftMail(
     return null;
   if (env.MICROSOFT_MAIL_CLOUD && env.MICROSOFT_MAIL_CLOUD !== "global")
     return null;
-  return configuredMicrosoftCalendar({
+  const configuration = configuredMicrosoftCalendar({
     BETTER_AUTH_URL: env.BETTER_AUTH_URL,
     MICROSOFT_CALENDAR_APPROVED: env.MICROSOFT_MAIL_OAUTH_APPROVED,
     MICROSOFT_CALENDAR_CLIENT_ID: env.MICROSOFT_MAIL_CLIENT_ID,
@@ -19,4 +19,12 @@ export function configuredMicrosoftMail(
     MICROSOFT_CALENDAR_TOKEN_KEY_ID: env.MICROSOFT_MAIL_TOKEN_KEY_ID,
     MICROSOFT_CALENDAR_TOKEN_KEYS: env.MICROSOFT_MAIL_TOKEN_KEYS,
   });
+  return configuration
+    ? {
+        ...configuration,
+        ...(env.MICROSOFT_MAIL_FIXED_CALLBACK_ENABLED === "true"
+          ? { redirectPath: "/api/connections/microsoft/callback" }
+          : {}),
+      }
+    : null;
 }

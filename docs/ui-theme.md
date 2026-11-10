@@ -1,12 +1,12 @@
-# LeadRelay UI
+# Lead Relay UI
 
-The interface helps people identify their Business, understand their access and complete the next setup action. Its character comes from a neutral page background, white content panels, NMT indigo actions, explicit status, and one translucent header. Product copy describes capabilities that exist.
+The interface helps people identify their Business, understand their access and complete the next setup action. Its character comes from a NMT pale blue background, white glass panels, blue gradient actions, explicit status, and one translucent header. Product copy describes capabilities that exist.
 
 ## Theme
 
-`src/app/globals.css` is the source of truth for light/dark semantic colors, material opacity, radii, type, spacing and elevation. Use Tailwind semantic utilities; extend the global tokens when a new role is needed. Components consume the same roles in both appearances.
+`src/app/globals.css` is the source of truth for light-only semantic colors, material opacity, radii, type, spacing and elevation. Use Tailwind semantic utilities; extend the global tokens when a new role is needed. The application stays light regardless of the operating system appearance preference.
 
-- Surface: `background` for the page; opaque `card` for data, forms and dialogs; `muted` for subordinate groups.
+- Surface: `background` for the page; `card` for readable data, forms and dialogs; `muted` for subordinate groups.
 - Content: `foreground` and `muted-foreground`; `primary` for the main action and links; `success`, `warning` and `destructive` paired with text that names the state.
 - Boundaries: `border` groups content; `input` identifies controls; `ring` supplies visible keyboard focus.
 - Shape: control, group and panel radius tokens map to `rounded-lg`, `rounded-xl` and `rounded-2xl`. Elevation separates panels and modal overlays.
@@ -15,7 +15,7 @@ The interface helps people identify their Business, understand their access and 
 
 ## Material
 
-`glass-chrome` belongs to functional navigation above scrolling content. Its high-opacity fill, restrained blur, fine edge and shallow shadow preserve hierarchy. Form, credential, record and dialog content stays opaque. Use one glass layer; avoid nested blurred surfaces.
+`glass-chrome` follows NMT's floating header: 77% white, a white edge, 28px blur, 22px corners, an inset highlight, and soft blue shadows. `glass-panel` follows its service cards: 83% white, a fine white edge, 19px corners, an inset highlight, and a subtle outline. Keep text and form fields readable; avoid nested blur. Buttons use NMT's blue gradient, 13px Space Grotesk text, 13px corners, and a pressed state.
 
 Opaque fallback is automatic without backdrop-filter support, with reduced transparency, increased contrast or forced colors. Reduced motion removes transitions and animations. Browser conventions take precedence over native Apple navigation conventions.
 
@@ -35,8 +35,14 @@ New business setup has four steps: business, customers, location, and review. Sa
 
 Use Framer Motion for brief step changes, with reduced-motion support. The welcome illustration uses a lazy-loaded React Three Fiber scene with demand rendering and a fallback. Keep it out of forms and sales records. Route loading uses shared skeletons. Prospect searches, AI previews, and outreach use task tabs. Preserve form contents when changing tabs.
 
-Public routes `/getting-started`, `/privacy-policy`, and `/terms` use the same fonts, logo, and controls. The vendor guide explains the implemented flow. Policies describe current capabilities without inventing retention periods, guaranteed results, free trials, or blanket permission to contact prospects.
+The public `/` landing page explains the product, includes a labeled interactive walkthrough, and links to sign-in. Public routes `/getting-started`, `/privacy-policy`, and `/terms` use the same fonts, logo, and controls. The vendor guide explains the implemented flow. Policies describe current capabilities without inventing retention periods, guaranteed results, free trials, or blanket permission to contact prospects.
 
 ## Review
 
-Use both required design skills from `docs/agents/frontend.md`. Review the complete path at compact/desktop widths and 200% text size, by keyboard, in both appearances and with accessibility preferences. Measure contrast from actual theme tokens against every surface they appear on; target 4.5:1 for ordinary text and 3:1 for control boundaries/focus. Record the measurements and verification limits with completion evidence.
+Use both required design skills from `docs/agents/frontend.md`. Review the complete path at compact/desktop widths and 200% text size, by keyboard, in the light appearance and with accessibility preferences. Measure contrast from actual theme tokens against every surface they appear on; target 4.5:1 for ordinary text and 3:1 for control boundaries/focus. Record the measurements and verification limits with completion evidence.
+
+## Consent-first connections
+
+Email setup starts with Connect Google or Connect Microsoft. The server creates a reserved draft, requests read/send consent, and binds the verified provider address after callback. A successful new connection also creates its ordinary sales reply identity and route; it does not authorize first-contact campaigns. History stays off. Drafts and technical connection IDs stay out of the customer's normal view. Advanced processing/history controls are optional.
+
+Calendars use a provider card, external consent, and one calendar choice. Ready connections collapse to the chosen calendar and an explicit Manage connection menu. Email and calendar grants remain separate. After operator registration, fixed OAuth callback URLs use short-lived callback-only cookies to route the existing single-use, actor/session-bound database state. Existing callback behavior stays active until the corresponding fixed-callback environment flag is enabled.

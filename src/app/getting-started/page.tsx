@@ -34,7 +34,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 export const metadata: Metadata = {
   title: "Vendor getting-started guide",
   description:
-    "Set up your business, find prospects, connect sales channels, and review AI-assisted outreach in LeadRelay.",
+    "Set up your business, find prospects, connect sales channels, and review AI-assisted outreach in Lead Relay.",
   robots: { index: true, follow: true },
 };
 const steps = [
@@ -60,11 +60,11 @@ const steps = [
     tasks: [
       "Describe what you sell in everyday language. Include the product or service a buyer would search for.",
       "Choose the customer types you serve. For individual consumers, discovery requires a public buying request.",
-      "Enter your address. LeadRelay uses its city, state, and country as the default search area. Choose a different area if you serve another location or work remotely.",
+      "Enter your address. Lead Relay uses its city, state, and country as the default search area. Choose a different area if you serve another location or work remotely.",
       "Review the customer types and search area, then create your business. Your address remains available for setup and billing.",
     ],
     outcome:
-      "Your overview shows a saved business and completed customer and location preferences.",
+      "Your business is saved and you can connect email next, or continue and connect later.",
   },
   {
     id: "knowledge",
@@ -85,11 +85,11 @@ const steps = [
     title: "Connect only the channels you need",
     icon: Mail,
     description:
-      "Open Business settings to connect supported email inboxes, a booking calendar, or your WhatsApp business identity.",
+      "Open Email accounts or Calendar in the sidebar. Connect the services your team needs. WhatsApp setup is in More settings.",
     tasks: [
-      "For email, choose the account and sales mailboxes, folders, or conversations you want LeadRelay to process. Read the permissions before authorizing access.",
-      "Import old sales mail only if you need it. Historical import has a separate time range and message limit.",
-      "For booking, connect a supported calendar and review which booking actions are available. For WhatsApp, complete the customer-owned Meta business setup and any review shown.",
+      "For email, choose Connect Google or Connect Microsoft. Choose your account and approve access on the provider page. Lead Relay saves the connection and prepares your ordinary sales reply identity.",
+      "Your connection starts with new email. To import older messages or change the selection, open Advanced email settings. Choose the date range and message limit before importing.",
+      "For bookings, connect Google Calendar or Microsoft Calendar, approve access, and choose your work calendar. You can change that calendar later.",
       "Check the connection status. A saved account name alone does not mean that reading, sending, or reply capture is ready.",
     ],
     outcome:
@@ -159,7 +159,7 @@ const questions = [
     "Your saved address is reused in business setup and can prefill billing. Check that the legal billing address is correct before saving. Use a separate search area only if you serve somewhere different.",
   ],
   [
-    "Can I send to every contact LeadRelay finds?",
+    "Can I send to every contact Lead Relay finds?",
     "No. Public contact details do not establish permission. Review the recipient, applicable rules, sending identity, opt-outs, and the approval required for the campaign.",
   ],
   [
@@ -183,7 +183,7 @@ export default function GettingStartedPage() {
               Vendor guide
             </Badge>
             <h1 className="max-w-2xl text-4xl leading-tight font-medium tracking-[-0.045em] sm:text-5xl">
-              Your first day with LeadRelay.
+              Your first day with Lead Relay.
             </h1>
             <p className="max-w-xl text-lg leading-8 text-muted-foreground">
               Set up your business, find relevant buyers, and manage the
@@ -337,7 +337,7 @@ export default function GettingStartedPage() {
             </CardHeader>
             <CardContent>
               <Button asChild variant="outline">
-                <a href="mailto:wafa.khan@nmtsolutions.in?subject=LeadRelay%20setup%20help">
+                <a href="mailto:wafa.khan@nmtsolutions.in?subject=Lead Relay%20setup%20help">
                   <Mail data-icon="inline-start" aria-hidden="true" />
                   Contact NMT Solutions
                 </a>

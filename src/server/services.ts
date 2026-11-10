@@ -50,6 +50,8 @@ import { configuredMailboxQueue } from "../mailboxes/queue";
 import { createMailboxApplication } from "../application/mailboxes";
 import { createMailboxRepository } from "../db/mailbox-repository";
 import { createMailboxHttp } from "../http/mailboxes";
+import { createEmailSetup } from "../application/email-setup";
+import { createEmailSetupHttp } from "../http/email-setup";
 import { createGmailConnection } from "../gmail/connection";
 import { createNativeMailboxProvider } from "../mailboxes/provider";
 import { createMicrosoftMailConnection } from "../microsoft-mail/connection";
@@ -346,6 +348,20 @@ async function composeServices() {
       mailboxes.queue(credentials, businessId, mailboxId, {
         mode: "incremental",
       }),
+  });
+  const emailSetup = createEmailSetup({
+    mailboxes,
+    senders,
+    providers: {
+      gmail: {
+        configured: Boolean(configuredGmail(process.env)?.redirectPath),
+        start: gmail.start,
+      },
+      microsoft: {
+        configured: Boolean(configuredMicrosoftMail(process.env)?.redirectPath),
+        start: microsoftMail.start,
+      },
+    },
   });
   const application = createBusinessApplication({
     authenticate,
@@ -813,6 +829,16 @@ async function composeServices() {
       origin: new URL(environment.BETTER_AUTH_URL).origin,
       reportFailure,
     }),
+    emailSetup,
+    emailSetupHttp: createEmailSetupHttp({
+      application: emailSetup,
+      origin: new URL(environment.BETTER_AUTH_URL).origin,
+      reportFailure,
+    }),
+    emailSetupAvailable: {
+      gmail: Boolean(configuredGmail(process.env)?.redirectPath),
+      microsoft: Boolean(configuredMicrosoftMail(process.env)?.redirectPath),
+    },
     senders,
     senderHealth,
     senderHealthHttp: createSenderHealthHttp({

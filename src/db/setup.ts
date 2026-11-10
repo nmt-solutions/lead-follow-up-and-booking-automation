@@ -1,4 +1,5 @@
 import { preparePilotSecurity, securePilots } from "./pilot-security";
+import { secureEmailSetup } from "./email-setup-security";
 import {
   prepareDiscoveryCapacity,
   secureDiscoveryCapacity,
@@ -675,7 +676,7 @@ export async function prepareDatabaseRole(pool: Pool) {
       END IF;
       IF to_regclass('public.mailbox_policy') IS NOT NULL THEN
         REVOKE ALL PRIVILEGES ON public.mailbox_policy, public.mailbox_job FROM app_runtime;
-        REVOKE UPDATE (version, connection_version, configuration, incremental_since, cursor, permission_observation, updated_at) ON public.mailbox_policy FROM app_runtime;
+        REVOKE UPDATE (account, version, connection_version, configuration, incremental_since, cursor, permission_observation, updated_at) ON public.mailbox_policy FROM app_runtime;
         REVOKE UPDATE (state, cursor, seen, identity) ON public.mailbox_job FROM app_runtime;
         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mailbox_job' AND column_name='successor_id') THEN
           REVOKE UPDATE (successor_id) ON public.mailbox_job FROM app_runtime;
@@ -1510,6 +1511,7 @@ export async function secureDatabase(
     await secureDiscoveryCapacity(client);
     await secureTaxFilings(client);
     await securePilots(client);
+    await secureEmailSetup(client);
     await client.query("SET LOCAL ROLE app_runtime");
     await verifyRuntimeRole(client, options);
     await client.query("COMMIT");

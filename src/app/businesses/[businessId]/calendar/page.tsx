@@ -1,3 +1,4 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PageHeader } from "@/components/page-header";
 
 import { headers } from "next/headers";
@@ -11,8 +12,10 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Booking calendar" };
 export default async function CalendarPage({
   params,
+  searchParams,
 }: PageProps<"/businesses/[businessId]/calendar">) {
   const { businessId } = await params;
+  const query = await searchParams;
   const state = await (async () => {
     try {
       const services = await getServices();
@@ -31,23 +34,32 @@ export default async function CalendarPage({
   })();
   return (
     <div className="app-page">
+      {query.connection === "failed" && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            The calendar connection wasn&apos;t completed. Choose your provider
+            below to try again.
+          </AlertDescription>
+        </Alert>
+      )}
       <PageHeader
-        title={<>Booking calendar</>}
-        description={
-          <>
-            Connect a customer-owned calendar, review its permission and choose
-            where appointments are booked.
-          </>
-        }
-      ></PageHeader>
-      <GoogleCalendarManager
-        businessId={businessId}
-        initialState={state.calendar}
+        title="Connect your calendar"
+        description="Choose Google or Microsoft, approve access, and select your work calendar. Lead Relay checks availability and saves approved appointments there."
       />
-      <MicrosoftCalendarManager
-        businessId={businessId}
-        initialState={state.microsoft}
-      />
+      <div className="grid items-start gap-6 xl:grid-cols-2">
+        <GoogleCalendarManager
+          businessId={businessId}
+          initialState={state.calendar}
+        />
+        <MicrosoftCalendarManager
+          businessId={businessId}
+          initialState={state.microsoft}
+        />
+      </div>
+      <p className="max-w-2xl text-sm leading-7 text-muted-foreground">
+        Calendar access is separate from email. Connecting a calendar does not
+        send invitations. You can disconnect whenever you need to.
+      </p>
     </div>
   );
 }

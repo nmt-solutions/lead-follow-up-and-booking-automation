@@ -82,8 +82,19 @@ export function createMailboxAuthorizationApplication<
         data.data,
       );
       const state = await repository.read(c.actor, c.businessId, c.mailboxId);
-      if (state.read && options.queueInitialSync)
-        await options.queueInitialSync(credentials, c.businessId, c.mailboxId);
+      if (state.read && options.queueInitialSync) {
+        try {
+          await options.queueInitialSync(
+            credentials,
+            c.businessId,
+            c.mailboxId,
+          );
+        } catch {
+          // Consent is already saved. A missing worker or usage allowance must
+          // not turn successful provider consent into a failed connection.
+          // The mailbox keeps its unsafe visibility until a real sync completes.
+        }
+      }
       return result;
     },
     async disconnect(credentials: Headers, id: unknown, mailboxId: unknown) {

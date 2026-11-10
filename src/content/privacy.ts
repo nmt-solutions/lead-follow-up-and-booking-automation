@@ -5,7 +5,7 @@ export const privacySections: PolicySection[] = [
     id: "who-we-are",
     title: "Who we are",
     paragraphs: [
-      "LeadRelay is a prospect discovery and sales follow-up service operated by NMT Solutions OPC PVT LTD, India. This policy covers leadrelay.nmtsolutions.in and the LeadRelay service. It explains how we handle information about business users, team members, prospects, and people who contact our customers.",
+      "Lead Relay is a prospect discovery and sales follow-up service operated by NMT Solutions OPC PVT LTD, India. This policy covers leadrelay.nmtsolutions.in and the Lead Relay service. It explains how we handle information about business users, team members, prospects, and people who contact our customers.",
       "For privacy questions or requests, email wafa.khan@nmtsolutions.in. Include the business name and enough information for us to find the relevant record. Do not email passwords, authenticator codes, payment credentials, or private access tokens.",
     ],
   },
@@ -29,7 +29,7 @@ export const privacySections: PolicySection[] = [
     title: "How we use information",
     paragraphs: [
       "We use information to sign you in, protect your account, separate business records, find relevant prospects, manage sales conversations, prepare drafts, perform actions you authorize, provide support, and administer subscriptions and billing.",
-      "We also use security and operational records to prevent misuse, investigate failures, reconcile uncertain actions, and meet legal obligations. Adding a public contact to LeadRelay does not establish permission to send that person a message.",
+      "We also use security and operational records to prevent misuse, investigate failures, reconcile uncertain actions, and meet legal obligations. Adding a public contact to Lead Relay does not establish permission to send that person a message.",
     ],
   },
   {
@@ -38,7 +38,7 @@ export const privacySections: PolicySection[] = [
     paragraphs: [
       "You choose whether to connect a supported Google, Microsoft, or WhatsApp business account. We access the data and permissions needed for the functions you authorize. Mailbox processing follows the sales mailboxes, folders, or conversations selected for the connection. Importing historical correspondence requires a separate selection of its time range and limits.",
       "Calendar access supports availability checks and approved booking actions. WhatsApp access supports the connected business identity and authorized conversation functions. We store the connection records and credentials needed to provide these functions.",
-      "You can disable or disconnect a connection in LeadRelay. You can also remove access in the provider's account settings. Disconnecting stops future use of that connection, but it does not automatically erase records already saved or remove every form of provider consent. Microsoft consent and some provider account changes may require action in the provider's own dashboard.",
+      "You can disable or disconnect a connection in Lead Relay. You can also remove access in the provider's account settings. Disconnecting stops future use of that connection, but it does not automatically erase records already saved or remove every form of provider consent. Microsoft consent and some provider account changes may require action in the provider's own dashboard.",
       "We use Google account data to provide the user-facing features you request. We do not use Google account data for advertising, sell it to data brokers, or use it to train general-purpose AI models. Our use and transfer of information received from Google APIs must follow the Google API Services User Data Policy, including its Limited Use requirements.",
     ],
   },
@@ -46,7 +46,7 @@ export const privacySections: PolicySection[] = [
     id: "ai",
     title: "AI processing",
     paragraphs: [
-      "LeadRelay uses AI for supported research review and sales drafting. When you use an AI feature, relevant inputs can include your business offering, approved answers, public source information, and the message or sample being processed. The enabled workflow sends those inputs to its configured AI provider, directly or through the configured AI gateway.",
+      "Lead Relay uses AI for supported research review and sales drafting. When you use an AI feature, relevant inputs can include your business offering, approved answers, public source information, and the message or sample being processed. The enabled workflow sends those inputs to its configured AI provider, directly or through the configured AI gateway.",
       "The current application supports approved OpenAI models and a Vercel AI Gateway route. Feature availability depends on the business's approved configuration. Providers process requests under the terms that apply to the service and account used.",
       "AI output can contain mistakes. Review contact details, source evidence, prices, promises, and proposed messages before approving an action. A generated draft or a model's recommendation does not itself authorize sending, booking, spending, or accepting an order.",
     ],
@@ -57,7 +57,7 @@ export const privacySections: PolicySection[] = [
     paragraphs: [
       "Authorized members of your business can access records according to their role. Our service providers process information needed to operate the service, such as hosting, databases, private file storage, email delivery, background jobs, search, AI processing, connected communication services, and payments.",
       "Depending on the features enabled, these services can include Google, Microsoft, Meta, OpenAI, Vercel AI Gateway, Exa, Cloudflare R2, Resend, Trigger.dev, and Razorpay. A provider may be unavailable or unused for your business. Contact us for information about the providers involved in a particular workflow.",
-      "Payment providers collect the payment credentials needed for checkout or payment authorization. LeadRelay keeps the billing and payment references needed to manage your subscription. Do not upload full payment card details or banking passwords to business files or sales messages.",
+      "Payment providers collect the payment credentials needed for checkout or payment authorization. Lead Relay keeps the billing and payment references needed to manage your subscription. Do not upload full payment card details or banking passwords to business files or sales messages.",
       "We may disclose information when lawfully required, to investigate fraud or abuse, or to protect the service and the people using it. We do not sell your connected mailbox contents or customer conversation records.",
     ],
   },
@@ -75,7 +75,7 @@ export const privacySections: PolicySection[] = [
     id: "cookies",
     title: "Cookies and browser storage",
     paragraphs: [
-      "LeadRelay uses cookies for sessions and security. The sidebar also stores your navigation preference. Some forms use browser session storage to preserve a draft after an interrupted request. These functions are needed for account access, navigation, or form recovery.",
+      "Lead Relay uses cookies for sessions and security. The sidebar also stores your navigation preference. Some forms use browser session storage to preserve a draft after an interrupted request. These functions are needed for account access, navigation, or form recovery.",
       "Blocking cookies can prevent sign-in or protected actions from working. You can clear browser storage through your browser settings. Clearing a local draft does not delete records already saved to the service.",
     ],
   },
@@ -85,8 +85,8 @@ export const privacySections: PolicySection[] = [
     paragraphs: [
       "You can update business information, manage team access, change notification preferences, and disable supported connections in the application. Owners and admins can use Export or remove data to review available business export and offboarding options. Some operations depend on configured policies and may require operator assistance.",
       "To ask about access, correction, deletion, consent withdrawal, or a privacy complaint, contact wafa.khan@nmtsolutions.in. We may ask for information to verify your identity and authority. The rights and restrictions that apply depend on your location and the law in force.",
-      "If you are a prospect or a customer of a business using LeadRelay, contact that business about its messages and use of your information. You can also contact us with the relevant source link or message details so we can identify the record and help route your request.",
-      "LeadRelay is intended for adults acting for businesses. Do not submit children's personal information or sensitive personal information that is not needed for the sales task.",
+      "If you are a prospect or a customer of a business using Lead Relay, contact that business about its messages and use of your information. You can also contact us with the relevant source link or message details so we can identify the record and help route your request.",
+      "Lead Relay is intended for adults acting for businesses. Do not submit children's personal information or sensitive personal information that is not needed for the sales task.",
     ],
   },
   {
