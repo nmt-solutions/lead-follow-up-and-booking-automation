@@ -18,8 +18,10 @@ import {
 import type { Database } from "../db/runtime";
 import * as schema from "../db/schema";
 import { APP_NAME } from "../lib/brand";
+import { profileSchema } from "../models/registration";
+import { createHash } from "node:crypto";
 
-export type SignInMail = { email: string; url: string };
+export type SignInMail = { email: string; url: string; kind?: "verification" };
 export type SignInMailer = { send(message: SignInMail): Promise<void> };
 
 export function createAuth(options: {
@@ -49,6 +51,49 @@ export function createAuth(options: {
       transaction: true,
     }),
     trustedOrigins: [new URL(options.baseURL).origin],
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 12,
+      maxPasswordLength: 128,
+      requireEmailVerification: true,
+      autoSignIn: false,
+    },
+    emailVerification: {
+      expiresIn: 600,
+      sendOnSignUp: false,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url, token }) => {
+        // Native email verification preserves the password selected at signup.
+        // Magic links deliberately revoke unproven credentials in Better Auth.
+        const identifier = `email-verification:${createHash("sha256").update(token).digest("base64url")}`;
+        await options.database
+          .insert(schema.verification)
+          .values({
+            id: identifier,
+            identifier,
+            value: JSON.stringify({
+              type: "email-verification",
+              email: user.email,
+              userId: user.id,
+            }),
+            expiresAt: new Date(Date.now() + 599000),
+          })
+          .onConflictDoNothing();
+        await options.mailer.send({
+          email: user.email,
+          url,
+          kind: "verification",
+        });
+      },
+    },
+    user: {
+      additionalFields: {
+        firstName: { type: "string", required: false },
+        lastName: { type: "string", required: false },
+        accountType: { type: "string", required: false },
+        companyName: { type: "string", required: false },
+      },
+    },
     session: {
       cookieCache: { enabled: false },
       additionalFields: {
@@ -59,6 +104,36 @@ export function createAuth(options: {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (
+          ["/change-password", "/set-password", "/reset-password"].includes(
+            ctx.path,
+          )
+        )
+          throw new APIError("FORBIDDEN", {
+            message: "Use Account security to set your password.",
+          });
+        if (
+          ctx.path === "/sign-up/email" ||
+          (ctx.path === "/update-user" &&
+            ["firstName", "lastName", "accountType", "companyName"].some(
+              (key) => key in (ctx.body ?? {}),
+            ))
+        ) {
+          const profile = profileSchema.safeParse(ctx.body);
+          if (!profile.success)
+            throw new APIError("BAD_REQUEST", {
+              message: "Enter your name and account details.",
+            });
+          return {
+            context: {
+              body: {
+                ...ctx.body,
+                ...profile.data,
+                name: `${profile.data.firstName} ${profile.data.lastName}`,
+              },
+            },
+          };
+        }
         if (
           !ctx.path.startsWith("/two-factor/") &&
           !sessionManagementPaths.has(ctx.path)
@@ -74,6 +149,54 @@ export function createAuth(options: {
             message: "Use an authenticator or recovery code.",
           });
         const identity = await getSessionFromCtx(ctx);
+        const verifying =
+          ctx.path === "/two-factor/verify-totp" ||
+          ctx.path === "/two-factor/verify-backup-code";
+        if (verifying) {
+          const input = z.strictObject({
+            code: ctx.path.endsWith("verify-totp")
+              ? z.string().regex(/^\d{6}$/)
+              : z.string().regex(/^[A-Za-z0-9]{5}-[A-Za-z0-9]{5}$/),
+            trustDevice: z.literal(false).optional(),
+            disableSession: z.literal(false).optional(),
+          });
+          if (!input.safeParse(ctx.body).success)
+            throw new APIError("BAD_REQUEST", { message: "Check your code." });
+        }
+        // Password sign-in has no primary session until Better Auth consumes
+        // its signed, short-lived two-factor challenge. Snapshot that factor
+        // so the after hook can bind assurance to the factor actually used.
+        if (!identity && verifying) {
+          const cookie = ctx.context.createAuthCookie("two_factor");
+          const challengeId = await ctx.getSignedCookie(
+            cookie.name,
+            ctx.context.secret,
+          );
+          const challenge =
+            challengeId && challengeId.startsWith("2fa-")
+              ? await ctx.context.internalAdapter.findVerificationValue(
+                  challengeId,
+                )
+              : null;
+          if (!challenge || challenge.expiresAt <= new Date())
+            throw new APIError("UNAUTHORIZED", { message: "Sign in again." });
+          const [factor] = await options.database
+            .select()
+            .from(schema.twoFactor)
+            .where(
+              and(
+                eq(schema.twoFactor.userId, challenge.value),
+                eq(schema.twoFactor.verified, true),
+              ),
+            );
+          if (!factor)
+            throw new APIError("UNAUTHORIZED", { message: "Sign in again." });
+          attemptedFactors.set(ctx.context, {
+            id: factor.id,
+            secret: factor.secret,
+          });
+          return;
+        }
         if (!identity)
           throw new APIError("UNAUTHORIZED", { message: "Sign in again." });
         if (sessionManagementPaths.has(ctx.path)) {
@@ -104,15 +227,6 @@ export function createAuth(options: {
           ctx.path === "/two-factor/verify-totp" ||
           ctx.path === "/two-factor/verify-backup-code"
         ) {
-          const input = z.strictObject({
-            code: ctx.path.endsWith("verify-totp")
-              ? z.string().regex(/^\d{6}$/)
-              : z.string().regex(/^[A-Za-z0-9]{5}-[A-Za-z0-9]{5}$/),
-            trustDevice: z.literal(false).optional(),
-            disableSession: z.literal(false).optional(),
-          });
-          if (!input.safeParse(ctx.body).success)
-            throw new APIError("BAD_REQUEST", { message: "Check your code." });
           // The plugin's built-in account lock applies to its credential-login
           // challenge. Magic-link sessions need the same account-wide budget.
           const allowed = await options.database.transaction(async (tx) => {
@@ -222,7 +336,11 @@ export function createAuth(options: {
     rateLimit: { enabled: true, storage: "database", window: 60, max: 60 },
     logger: { disabled: true },
     plugins: [
-      twoFactor({ issuer: APP_NAME, allowPasswordless: true }),
+      twoFactor({
+        issuer: APP_NAME,
+        allowPasswordless: true,
+        accountLockout: { maxFailedAttempts: 5 },
+      }),
       magicLink({
         expiresIn: 600,
         storeToken: "hashed",

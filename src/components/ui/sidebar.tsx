@@ -187,6 +187,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
+          showCloseButton={false}
           className="max-w-[90vw] w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground"
           style={
             {
@@ -201,7 +202,7 @@ function Sidebar({
               Choose a page or switch your business.
             </SheetDescription>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col pt-12">{children}</div>
+          <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
       </Sheet>
     );

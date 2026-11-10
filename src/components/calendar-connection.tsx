@@ -77,10 +77,12 @@ export function CalendarConnection({
   provider,
   businessId,
   initialState,
+  onboarding = false,
 }: {
   provider: "google" | "microsoft";
   businessId: string;
   initialState: GoogleCalendarView | MicrosoftCalendarView;
+  onboarding?: boolean;
 }) {
   const [state, setState] = useState(initialState);
   const [selection, setSelection] = useState(
@@ -112,10 +114,17 @@ export function CalendarConnection({
           ? { cache: "no-store" }
           : {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                ...(onboarding ? { "x-lead-relay-onboarding": "1" } : {}),
+              },
               body: JSON.stringify(
                 action === "start"
-                  ? { returnPath: `/businesses/${businessId}/calendar` }
+                  ? {
+                      returnPath: onboarding
+                        ? `/onboarding/${businessId}?step=calendar`
+                        : `/businesses/${businessId}/calendar`,
+                    }
                   : action === "select"
                     ? { calendarId: selection }
                     : {},

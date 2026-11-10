@@ -136,6 +136,13 @@ export default async function BusinessPage({
         description={`Your sales activity for ${profile.name}.`}
         actions={
           <>
+            {mailboxes?.canManage && (
+              <Button asChild variant="outline">
+                <Link href={`/onboarding/${businessId}?step=email`}>
+                  Finish setup
+                </Link>
+              </Button>
+            )}
             <Button asChild variant="outline">
               <Link href={base + "/inbox"}>
                 <Inbox data-icon="inline-start" aria-hidden="true" />
@@ -147,7 +154,7 @@ export default async function BusinessPage({
                 href={base + (configured ? "/discovery" : "/configuration")}
               >
                 <Search data-icon="inline-start" aria-hidden="true" />
-                {configured ? "Find prospects" : "Finish setup"}
+                {configured ? "Find prospects" : "Review business details"}
               </Link>
             </Button>
           </>

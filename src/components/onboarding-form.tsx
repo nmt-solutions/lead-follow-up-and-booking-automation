@@ -43,6 +43,7 @@ import { emptyAddress, LocationFields } from "./location-fields";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Progress } from "./ui/progress";
 import { BookOpen } from "lucide-react";
+import { SetupIllustration } from "./setup-illustration";
 
 const steps = ["Your business", "Your customers", "Your location", "Review"];
 const responseSchema = z.object({
@@ -80,12 +81,16 @@ const customerOptions = [
   },
 ];
 
-export function OnboardingForm() {
+export function OnboardingForm({
+  initialCompanyName = "",
+}: {
+  initialCompanyName?: string;
+}) {
   const router = useRouter();
   const reducedMotion = useReducedMotion();
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState({
-    name: "",
+    name: initialCompanyName,
     website: "",
     offering: "",
     homeMarket: "",
@@ -178,7 +183,12 @@ export function OnboardingForm() {
     <div className="mx-auto w-full max-w-6xl py-4 sm:py-8">
       <div className="grid items-start gap-8 lg:grid-cols-[20rem_minmax(0,1fr)] lg:gap-14">
         <aside className="flex flex-col gap-7 lg:sticky lg:top-28">
-          <div className="flex flex-col gap-4">
+          <SetupIllustration
+            stage={
+              step === 1 ? "customers" : step === 2 ? "location" : "business"
+            }
+          />
+          <div className="hidden flex-col gap-4 lg:flex">
             <p className="text-sm font-medium text-primary">
               Let&apos;s get you started
             </p>
@@ -192,13 +202,15 @@ export function OnboardingForm() {
               potential buyers who fit what you sell.
             </p>
           </div>
-          <SetupStepper
-            steps={steps}
-            current={step}
-            onChange={go}
-            disabled={pending || uncertain}
-            orientation="vertical"
-          />
+          <div className="hidden lg:block">
+            <SetupStepper
+              steps={steps}
+              current={step}
+              onChange={go}
+              disabled={pending || uncertain}
+              orientation="vertical"
+            />
+          </div>
           <div className="hidden items-center gap-2 text-sm text-muted-foreground lg:flex">
             <BookOpen className="size-4" aria-hidden="true" />
             <Link
@@ -264,9 +276,7 @@ export function OnboardingForm() {
                 return;
               }
               saved.current = true;
-              router.push(
-                `/businesses/${result.data.data.id}/mailboxes?welcome=1`,
-              );
+              router.push(`/onboarding/${result.data.data.id}?step=email`);
               router.refresh();
             } catch {
               setUncertain(true);

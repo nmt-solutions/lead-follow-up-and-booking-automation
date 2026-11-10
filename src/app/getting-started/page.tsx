@@ -40,12 +40,13 @@ export const metadata: Metadata = {
 const steps = [
   {
     id: "access",
-    title: "Sign in and secure your account",
+    title: "Create your account",
     icon: KeyRound,
     description:
-      "Use an email you can access. Open the sign-in link and complete the security steps shown for your role.",
+      "Create an account with your name, email, a password, and a Company or Personal account choice. Add a company name if applicable.",
     tasks: [
-      "Owners, admins, and protected roles may need an authenticator. Save recovery codes somewhere private.",
+      "Verify your email using the link we send. Scan the authenticator QR code or enter the setup key manually. Enter its 6-digit code and save your recovery codes.",
+      "Sign in with your password and authenticator, or choose the optional magic link. Use Forgot password to receive a link, verify your authenticator, and choose a new password.",
       "If you were invited, use the invited email and accept the invitation. Ask the business owner if the link has expired.",
     ],
     outcome:
@@ -56,7 +57,7 @@ const steps = [
     title: "Add your business once",
     icon: Building2,
     description:
-      "Choose Add business. Complete the four steps: your business, your customers, your location, and review.",
+      "Follow the full-screen setup: your business, your customers, your location, and review. Your company name is filled in from sign-up.",
     tasks: [
       "Describe what you sell in everyday language. Include the product or service a buyer would search for.",
       "Choose the customer types you serve. For individual consumers, discovery requires a public buying request.",
@@ -64,7 +65,7 @@ const steps = [
       "Review the customer types and search area, then create your business. Your address remains available for setup and billing.",
     ],
     outcome:
-      "Your business is saved and you can connect email next, or continue and connect later.",
+      "Continue to optional email, calendar, and first-search steps. Skip any of them or choose Set up later. Open Finish setup from the business overview to return.",
   },
   {
     id: "knowledge",
@@ -85,9 +86,9 @@ const steps = [
     title: "Connect only the channels you need",
     icon: Mail,
     description:
-      "Open Email accounts or Calendar in the sidebar. Connect the services your team needs. WhatsApp setup is in More settings.",
+      "Connect Gmail or Outlook and your calendar during setup, or use Email and Calendar in the sidebar later. Each connection is optional.",
     tasks: [
-      "For email, choose Connect Google or Connect Microsoft. Choose your account and approve access on the provider page. Lead Relay saves the connection using the email address confirmed by your provider.",
+      "For email, choose Connect Gmail or Connect Outlook. Choose your account and approve access on the provider page. Lead Relay saves the connection using the email address confirmed by your provider.",
       "Your connection starts with new email. To import older messages or change the selection, open Advanced email settings. Choose the date range and message limit before importing.",
       "For bookings, connect Google Calendar or Microsoft Calendar, approve access, and choose your work calendar. You can change that calendar later.",
       "Check the connection status. A saved account name alone does not mean that reading, sending, or reply capture is ready.",

@@ -68,6 +68,7 @@ import { configuredMicrosoftCalendar } from "../microsoft-calendar/configuration
 import { createMicrosoftCalendarHttp } from "../http/microsoft-calendar";
 import { combineCalendarProviders } from "../appointments/providers";
 import "server-only";
+import { createPasswordApplication } from "../application/password";
 import { createWhatsAppApplication } from "../application/whatsapp";
 import { createWhatsAppIntakeApplication } from "../application/whatsapp-intake";
 import { createWhatsAppIntakeRepository } from "../db/whatsapp-intake-repository";
@@ -236,6 +237,12 @@ async function composeServices() {
   });
   const access = createSessionAccess({
     auth,
+    database: runtimeDatabase(pool),
+    clock: { now: () => new Date() },
+  });
+  const passwords = createPasswordApplication({
+    auth,
+    access,
     database: runtimeDatabase(pool),
     clock: { now: () => new Date() },
   });
@@ -752,6 +759,7 @@ async function composeServices() {
     }),
   });
   return {
+    passwords,
     pilots,
     pilotsHttp: createPilotHttp({
       application: pilots,

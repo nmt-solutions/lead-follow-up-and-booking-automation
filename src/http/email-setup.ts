@@ -23,7 +23,11 @@ export function createEmailSetupHttp(options: {
           dataResponse(result),
           result.authorizationUrl,
           result.provider,
-          { businessId, mailboxId: result.mailboxId },
+          {
+            businessId,
+            mailboxId: result.mailboxId,
+            onboarding: request.headers.get("x-lead-relay-onboarding") === "1",
+          },
         );
       }),
   };

@@ -6,6 +6,7 @@ export type OAuthProvider =
 const contextSchema = z.object({
   businessId: z.uuid(),
   mailboxId: z.uuid().optional(),
+  onboarding: z.boolean().optional(),
 });
 const stateSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export function oauthCallbackPath(provider: OAuthProvider) {

@@ -71,7 +71,7 @@ export default async function SignInPage({
                 Let&apos;s get to work.
               </h1>
               <p className="text-sm leading-7 text-muted-foreground">
-                Sign in or create your account with a secure email link.
+                Sign in to your account or create one to get started.
               </p>
             </div>
             {available ? (
@@ -88,8 +88,7 @@ export default async function SignInPage({
                 className="mt-1 size-4 shrink-0"
                 aria-hidden="true"
               />
-              Your sign-in link expires in 10 minutes. Account security checks
-              protect sensitive business actions.
+              Your authenticator protects your account after sign-in.
             </p>
             <div className="flex flex-col gap-4 border-t border-border pt-6">
               <p className="text-xs leading-6 text-muted-foreground">

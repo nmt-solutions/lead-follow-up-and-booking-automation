@@ -36,8 +36,13 @@ export function createGoogleCalendarApplication(options: {
         z.strictObject({ returnPath: z.string().max(512) }),
         input,
       );
-      // Only this Business's fixed settings path can receive a callback redirect.
-      if (returnPath !== `/businesses/${c.businessId}/calendar`)
+      // Only this Business's settings or onboarding can receive the redirect.
+      if (
+        ![
+          `/businesses/${c.businessId}/calendar`,
+          `/onboarding/${c.businessId}?step=calendar`,
+        ].includes(returnPath)
+      )
         throw new ApplicationError("INVALID_INPUT");
       return repository.start(c.actor, c.businessId, returnPath);
     },

@@ -40,7 +40,12 @@ export function createMicrosoftCalendarApplication(options: {
         input,
       );
       // Only this Business's fixed settings path can receive a callback redirect.
-      if (returnPath !== `/businesses/${c.businessId}/calendar`)
+      if (
+        ![
+          `/businesses/${c.businessId}/calendar`,
+          `/onboarding/${c.businessId}?step=calendar`,
+        ].includes(returnPath)
+      )
         throw new ApplicationError("INVALID_INPUT");
       return repository.start(c.actor, c.businessId, returnPath);
     },

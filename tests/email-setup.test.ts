@@ -360,6 +360,7 @@ describe("fixed callback routing", () => {
       const result = setOAuthContext(new Response(), url.toString(), "gmail", {
         businessId,
         mailboxId,
+        onboarding: state === states[0],
       });
       const cookie = result.headers.get("set-cookie") ?? "";
       expect(cookie).toContain("HttpOnly; SameSite=Lax; Max-Age=600; Secure");
@@ -372,7 +373,11 @@ describe("fixed callback routing", () => {
         { headers: { cookie: cookies.join("; ") } },
       );
       const context = readOAuthContext(request, "gmail");
-      expect(context).toMatchObject({ businessId, mailboxId });
+      expect(context).toMatchObject({
+        businessId,
+        mailboxId,
+        onboarding: state === states[0],
+      });
       expect(
         clearOAuthContext(
           new Response(),

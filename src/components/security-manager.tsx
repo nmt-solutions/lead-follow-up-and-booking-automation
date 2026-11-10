@@ -1,14 +1,10 @@
 "use client";
-import { Field, FieldGroup } from "./ui/field";
+import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRef, useState } from "react";
-import {
-  KeyRound,
-  ShieldCheck,
-  ShieldAlert,
-  Copy,
-  ArrowRight,
-} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
+import { REGEXP_ONLY_DIGITS } from "input-otp";
+import { ArrowRight, Check, Copy, Loader2, ShieldCheck } from "lucide-react";
 import { z } from "zod";
 import {
   enrollmentSchema,
@@ -18,74 +14,152 @@ import {
 } from "@/models/security";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import { Badge } from "./ui/badge";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "./ui/input-otp";
+import { Field, FieldLabel, FieldGroup } from "./ui/field";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Card, CardHeader, CardContent, CardDescription } from "./ui/card";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "./ui/accordion";
 import {
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogTitle,
   AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
 } from "./ui/alert-dialog";
+import { PasswordForm } from "./password-form";
 
 export function SecurityManager({
   initialStatus,
+  passwordRequested = false,
+  initialHasPassword = false,
 }: {
-  initialStatus: SecurityStatus;
+  initialStatus: SecurityStatus | null;
+  passwordRequested?: boolean;
+  initialHasPassword?: boolean;
 }) {
-  const [status, setStatus] = useState(initialStatus);
-  const [setupKey, setSetupKey] = useState("");
+  const router = useRouter();
+  const [status, setStatus] = useState<SecurityStatus>(
+    initialStatus ?? {
+      email: "",
+      enrolled: true,
+      required: true,
+      verified: false,
+      operatorVerified: false,
+      operator: false,
+      readiness: "mfa-incomplete",
+    },
+  );
+  const [editingPassword, setEditingPassword] = useState(passwordRequested);
+  const [hasPassword, setHasPassword] = useState(initialHasPassword);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [setupURI, setSetupURI] = useState("");
   const [codes, setCodes] = useState<string[]>([]);
+  const [method, setMethod] = useState<"authenticator" | "recovery">(
+    "authenticator",
+  );
+  const [code, setCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [signInRequired, setSignInRequired] = useState(false);
+  const [managementVerification, setManagementVerification] = useState(
+    Boolean(
+      passwordRequested && initialStatus && !initialStatus.operatorVerified,
+    ),
+  );
   const feedback = useRef<HTMLDivElement>(null);
+  const otpInput = useRef<HTMLInputElement>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
+  const needsVerification =
+    status.readiness !== "mfa-satisfied" || managementVerification;
+  const setupKey = setupURI
+    ? (new URL(setupURI).searchParams.get("secret") ?? "")
+    : "";
+  const savingCodes = codes.length > 0 && !setupURI && !needsVerification;
 
   async function request(path: string, body: unknown = {}): Promise<unknown> {
     const response = await fetch(`/api/auth/two-factor/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(
+        hasPassword &&
+          ["enable", "disable", "generate-backup-codes"].includes(path)
+          ? {
+              ...(typeof body === "object" && body ? body : {}),
+              password: currentPassword,
+            }
+          : body,
+      ),
     });
-    const expired =
-      response.status === 401 &&
-      (await fetch("/api/security", { cache: "no-store" })).status === 401;
-    if (expired) setSignInRequired(true);
-    if (!response.ok)
+    if (!response.ok) {
+      const failure = z
+        .object({ code: z.string().optional() })
+        .safeParse(await response.json().catch(() => null));
+      const retryable =
+        failure.success &&
+        ["INVALID_CODE", "INVALID_BACKUP_CODE"].includes(
+          failure.data.code ?? "",
+        );
+      if (failure.success && failure.data.code === "INVALID_PASSWORD")
+        throw new Error("Check your current password and try again.");
+      if (failure.success && failure.data.code === "ACCOUNT_TEMPORARILY_LOCKED")
+        throw new Error(
+          "Too many attempts. Wait 15 minutes, then sign out and sign in again.",
+        );
+      if (
+        failure.success &&
+        failure.data.code === "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE"
+      ) {
+        setSignInRequired(true);
+        throw new Error("This verification attempt has ended. Sign in again.");
+      }
+      if (response.status === 403 && path === "enable")
+        throw new Error(
+          "Sign out, then sign in again to set up your authenticator.",
+        );
+      const expired =
+        response.status === 401 &&
+        !retryable &&
+        (await fetch("/api/security", { cache: "no-store" })).status === 401;
+      if (expired) setSignInRequired(true);
+      if (
+        response.status === 403 &&
+        ["disable", "generate-backup-codes"].includes(path)
+      ) {
+        setManagementVerification(true);
+        throw new Error("Verify your identity to continue.");
+      }
       throw new Error(
         response.status === 429
-          ? "Too many attempts. Wait up to 15 minutes before trying again."
+          ? "Too many attempts. Try again in 15 minutes."
           : expired
-            ? "Your session has ended. Sign in again to continue."
-            : "We could not confirm this step. Check your code, or sign in again if your security session has expired.",
+            ? "Your session expired. Sign in again."
+            : "That code didn't work. Please try again.",
       );
+    }
     return response.json();
   }
   async function refresh() {
     const response = await fetch("/api/security", { cache: "no-store" });
-    const parsed = z
+    const result = z
       .object({ success: z.literal(true), data: securityStatusSchema })
       .safeParse(await response.json());
-    if (!response.ok || !parsed.success)
-      throw new Error(
-        "We could not refresh your security status. Reload this page.",
-      );
-    setStatus(parsed.data.data);
+    if (!response.ok || !result.success)
+      throw new Error("Unable to confirm your session. Please try again.");
+    setStatus(result.data.data);
     setSignInRequired(false);
+    return result.data.data;
   }
-  async function run(operation: () => Promise<void>, focusTarget?: string) {
+  async function run(operation: () => Promise<void>, focus?: string) {
+    if (pending) return;
     setPending(true);
     setError("");
     setMessage("");
@@ -100,411 +174,530 @@ export function SecurityManager({
       );
     } finally {
       setPending(false);
-      if (focusTarget)
-        requestAnimationFrame(() =>
-          document.getElementById(focusTarget)?.focus(),
-        );
-      else feedback.current?.focus();
+      requestAnimationFrame(() => {
+        if (focus) document.getElementById(focus)?.focus();
+        else feedback.current?.focus();
+      });
     }
   }
-  function verifyForm(recovery: boolean) {
-    return (
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const code = String(
-            new FormData(event.currentTarget).get("code") ?? "",
-          ).trim();
-          const form = event.currentTarget;
-          void run(async () => {
-            await request(recovery ? "verify-backup-code" : "verify-totp", {
-              code,
-            });
-            await refresh();
-            form.reset();
-            setSetupKey("");
-            setMessage(
-              recovery
-                ? "Recovery code accepted. This code cannot be used again. Save new recovery codes or replace your lost authenticator below."
-                : "Authenticator verified. You can continue to your Businesses.",
-            );
-          });
-        }}
-      >
-        <FieldGroup className="gap-4">
-          <Field className="flex flex-col gap-2">
-            <Label htmlFor={recovery ? "recovery-code" : "authenticator-code"}>
-              {recovery ? "Recovery code" : "Authenticator code"}
-            </Label>
-            <Input
-              id={recovery ? "recovery-code" : "authenticator-code"}
-              name="code"
-              type={recovery ? "password" : "text"}
-              inputMode={recovery ? "text" : "numeric"}
-              autoComplete={recovery ? "off" : "one-time-code"}
-              pattern={recovery ? "[A-Za-z0-9]{5}-[A-Za-z0-9]{5}" : "[0-9]{6}"}
-              maxLength={recovery ? 11 : 6}
-              minLength={recovery ? 11 : 6}
-              required
-              disabled={pending}
-              aria-describedby={
-                recovery ? "recovery-hint" : "authenticator-hint"
-              }
-              className="font-mono text-lg tracking-widest"
-            />
-            <p
-              id={recovery ? "recovery-hint" : "authenticator-hint"}
-              className="text-sm text-muted-foreground"
-            >
-              {recovery
-                ? "Enter one unused code, including the hyphen. Each code works once."
-                : "Enter the six-digit code from your authenticator app."}
-            </p>
-          </Field>
-          <Button type="submit" disabled={pending}>
-            <ShieldCheck aria-hidden="true" />
-            {pending
-              ? "Verifying…"
-              : recovery
-                ? "Use recovery code"
-                : "Verify authenticator"}
-          </Button>
-        </FieldGroup>
-      </form>
+  async function beginSetup() {
+    const setup = enrollmentSchema.parse(await request("enable"));
+    const uri = new URL(setup.totpURI);
+    if (
+      uri.protocol !== "otpauth:" ||
+      uri.hostname !== "totp" ||
+      !uri.searchParams.get("secret")
+    )
+      throw new Error(
+        "Unable to prepare your authenticator. Please try again.",
+      );
+    setSetupURI(setup.totpURI);
+    setCodes(setup.backupCodes);
+    setCode("");
+    setMethod("authenticator");
+    setCurrentPassword("");
+  }
+  function continueToApp() {
+    if (editingPassword) return;
+    router.replace("/onboarding");
+    router.refresh();
+  }
+  function verify(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const recovery = !setupURI && method === "recovery";
+    void run(async () => {
+      await request(recovery ? "verify-backup-code" : "verify-totp", {
+        code: recovery ? recoveryCode.trim() : code,
+      });
+      const current = await refresh();
+      if (current.readiness !== "mfa-satisfied")
+        throw new Error("Unable to confirm verification. Please try again.");
+      setCode("");
+      setRecoveryCode("");
+      setSetupURI("");
+      if (managementVerification) {
+        setManagementVerification(false);
+        return;
+      }
+      if (!codes.length && !editingPassword) continueToApp();
+    });
+  }
+  function changeMethod() {
+    const next = method === "authenticator" ? "recovery" : "authenticator";
+    setMethod(next);
+    setError("");
+    setMessage("");
+    setCode("");
+    setRecoveryCode("");
+    requestAnimationFrame(() =>
+      (next === "authenticator"
+        ? otpInput.current
+        : backupInput.current
+      )?.focus(),
     );
   }
+  const title = savingCodes
+    ? "Save your recovery codes"
+    : setupURI
+      ? "Add your authenticator"
+      : needsVerification && status.enrolled
+        ? method === "recovery"
+          ? "Use a recovery code"
+          : "Verify your identity"
+        : !status.enrolled
+          ? "Secure your account"
+          : "Account security";
+  const description = savingCodes
+    ? "Keep these somewhere safe. Each code works once."
+    : setupURI
+      ? "Scan the QR code, then enter the code from your app."
+      : needsVerification && status.enrolled
+        ? method === "recovery"
+          ? "Enter one of your saved recovery codes."
+          : "Enter the 6-digit code from your authenticator app."
+        : !status.enrolled
+          ? "Add an authenticator app to protect your account."
+          : status.email;
   return (
-    <div
-      className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
-      aria-busy={pending}
-    >
-      <div className="flex flex-col min-w-0 gap-6">
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle>Protect your access</CardTitle>
-              <Badge
-                className={status.verified ? "text-success" : "text-warning"}
+    <div className="w-full max-w-md" aria-busy={pending}>
+      <Card>
+        <CardHeader className="items-center gap-3 pb-5 pt-8 text-center">
+          <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <ShieldCheck className="size-6" aria-hidden="true" />
+          </span>
+          <h1 className="font-display text-2xl font-medium tracking-tight">
+            {title}
+          </h1>
+          <CardDescription className="max-w-xs text-center">
+            {description}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5 pb-7">
+          {savingCodes ? (
+            <>
+              <ul
+                aria-label="Recovery codes"
+                className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-muted/50 p-4 font-mono text-sm"
               >
-                {status.verified ? (
-                  <ShieldCheck className="size-3.5" aria-hidden="true" />
-                ) : (
-                  <ShieldAlert className="size-3.5" aria-hidden="true" />
-                )}
-                {status.verified
-                  ? "Session verified"
-                  : status.enrolled
-                    ? "Verification needed"
-                    : "Setup needed"}
-              </Badge>
-            </div>
-            <CardDescription>
-              Owners, Admins and platform operators need an authenticator or
-              recovery code before using protected capabilities.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-6">
-            <dl className="grid gap-4 rounded-xl bg-muted p-4 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-muted-foreground">Authenticator</dt>
-                <dd className="mt-1 font-medium">
-                  {status.enrolled
-                    ? "Enrolled"
-                    : setupKey
-                      ? "Waiting for confirmation"
-                      : "Not enrolled"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">MFA prerequisite</dt>
-                <dd className="mt-1 font-medium">
-                  {status.readiness === "mfa-satisfied"
-                    ? "Satisfied for this session"
-                    : "Incomplete"}
-                </dd>
-              </div>
-            </dl>
-            {!status.enrolled && !setupKey && (
-              <div className="flex flex-col gap-5">
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Add this account to an authenticator app, then save your
-                  recovery codes somewhere private. Your email sign-in link
-                  remains the first step.
-                </p>
-                <Button
-                  disabled={pending}
-                  onClick={() =>
-                    void run(async () => {
-                      const setup = enrollmentSchema.parse(
-                        await request("enable"),
-                      );
-                      const key = new URL(setup.totpURI).searchParams.get(
-                        "secret",
-                      );
-                      if (!key)
-                        throw new Error(
-                          "Setup could not be confirmed. Try again.",
-                        );
-                      setSetupKey(key);
-                      setCodes(setup.backupCodes);
-                      setMessage(
-                        "Setup key created. Add it to your authenticator, save your recovery codes, then verify a code.",
-                      );
-                    }, "setup-key")
-                  }
+                {codes.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() =>
+                  void run(async () => {
+                    await navigator.clipboard.writeText(codes.join("\n"));
+                    setMessage("Recovery codes copied.");
+                  })
+                }
+              >
+                <Copy data-icon="inline-start" aria-hidden="true" />
+                Copy codes
+              </Button>
+              <Button
+                disabled={pending}
+                onClick={() => {
+                  setCodes([]);
+                  continueToApp();
+                }}
+              >
+                I&apos;ve saved my codes
+                <ArrowRight data-icon="inline-end" aria-hidden="true" />
+              </Button>
+            </>
+          ) : (
+            <>
+              {setupURI && (
+                <>
+                  <div className="mx-auto rounded-2xl border border-border bg-white p-2 [forced-color-adjust:none]">
+                    <QRCodeSVG
+                      value={setupURI}
+                      size={208}
+                      marginSize={4}
+                      level="M"
+                      title="Scan to add Lead Relay to your authenticator"
+                      bgColor="#ffffff"
+                      fgColor="#000000"
+                    />
+                  </div>
+                  <Accordion type="single" collapsible>
+                    <AccordionItem value="manual" className="border-0">
+                      <AccordionTrigger className="justify-center gap-2 py-2 text-sm">
+                        Enter setup key manually
+                      </AccordionTrigger>
+                      <AccordionContent className="flex flex-col gap-3 pt-2">
+                        <Field>
+                          <FieldLabel htmlFor="setup-key">Setup key</FieldLabel>
+                          <Input
+                            id="setup-key"
+                            value={setupKey}
+                            readOnly
+                            className="font-mono text-xs"
+                          />
+                        </Field>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() =>
+                            void run(async () => {
+                              await navigator.clipboard.writeText(setupKey);
+                              setMessage("Setup key copied.");
+                            })
+                          }
+                        >
+                          <Copy data-icon="inline-start" aria-hidden="true" />
+                          Copy setup key
+                        </Button>
+                        <p className="text-xs leading-6 text-muted-foreground">
+                          In your authenticator app, choose Enter setup key and
+                          select time-based codes.
+                        </p>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                </>
+              )}
+              {(setupURI || (status.enrolled && needsVerification)) && (
+                <form onSubmit={verify}>
+                  <FieldGroup className="gap-5">
+                    <Field
+                      data-invalid={Boolean(error)}
+                      className="items-center"
+                    >
+                      <FieldLabel
+                        className="sr-only"
+                        htmlFor={
+                          method === "recovery" && !setupURI
+                            ? "recovery-code"
+                            : "authenticator-code"
+                        }
+                      >
+                        {method === "recovery" && !setupURI
+                          ? "Recovery code"
+                          : "Authenticator code"}
+                      </FieldLabel>
+                      {method === "recovery" && !setupURI ? (
+                        <Input
+                          ref={backupInput}
+                          id="recovery-code"
+                          type="password"
+                          value={recoveryCode}
+                          onChange={(event) =>
+                            setRecoveryCode(event.target.value)
+                          }
+                          autoComplete="off"
+                          autoFocus
+                          pattern="[A-Za-z0-9]{5}-[A-Za-z0-9]{5}"
+                          maxLength={11}
+                          minLength={11}
+                          placeholder="XXXXX-XXXXX"
+                          required
+                          disabled={pending}
+                          aria-invalid={Boolean(error)}
+                          aria-describedby={
+                            error ? "verification-error" : undefined
+                          }
+                          className="text-center font-mono text-lg tracking-wider"
+                        />
+                      ) : (
+                        <InputOTP
+                          ref={otpInput}
+                          id="authenticator-code"
+                          maxLength={6}
+                          minLength={6}
+                          value={code}
+                          onChange={setCode}
+                          pattern={REGEXP_ONLY_DIGITS}
+                          pasteTransformer={(value) =>
+                            value.replace(/[\s-]/g, "")
+                          }
+                          autoComplete="one-time-code"
+                          inputMode="numeric"
+                          pushPasswordManagerStrategy="none"
+                          required
+                          autoFocus
+                          disabled={pending}
+                          aria-invalid={Boolean(error)}
+                          aria-describedby={
+                            error ? "verification-error" : undefined
+                          }
+                          containerClassName="justify-center"
+                        >
+                          <InputOTPGroup>
+                            {[0, 1, 2, 3, 4, 5].map((index) => (
+                              <InputOTPSlot key={index} index={index} />
+                            ))}
+                          </InputOTPGroup>
+                        </InputOTP>
+                      )}
+                    </Field>
+                    <Button
+                      className="w-full"
+                      type="submit"
+                      disabled={
+                        pending ||
+                        (method === "recovery" && !setupURI
+                          ? recoveryCode.trim().length !== 11
+                          : code.length !== 6)
+                      }
+                    >
+                      {pending && (
+                        <Loader2
+                          className="animate-spin"
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {pending ? "Verifying..." : "Continue"}
+                    </Button>
+                  </FieldGroup>
+                  {!setupURI && (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="mt-3 w-full"
+                      disabled={pending}
+                      onClick={changeMethod}
+                    >
+                      {method === "authenticator"
+                        ? "Use a recovery code"
+                        : "Use authenticator code"}
+                    </Button>
+                  )}
+                </form>
+              )}
+              {!status.enrolled && !setupURI && (
+                <form
+                  className="flex flex-col gap-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void run(beginSetup, "authenticator-code");
+                  }}
                 >
-                  <KeyRound aria-hidden="true" />
-                  {pending ? "Preparing setup…" : "Set up authenticator"}
-                </Button>
-              </div>
-            )}
-            {setupKey && (
-              <div className="flex flex-col gap-5">
-                <Field className="flex flex-col gap-3">
-                  <h3 className="font-semibold">Add your account</h3>
-                  <p className="text-sm leading-relaxed text-muted-foreground">
-                    In your authenticator app, choose to enter a setup key. Use{" "}
-                    <strong className="wrap-anywhere">{status.email}</strong> as
-                    the account name and choose time-based codes.
-                  </p>
-                  <Label htmlFor="setup-key">Private setup key</Label>
-                  <Input
-                    id="setup-key"
-                    value={setupKey}
-                    readOnly
-                    className="font-mono"
-                  />
-                  <Button
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() =>
-                      void run(async () => {
-                        await navigator.clipboard.writeText(setupKey);
-                        setMessage("Setup key copied. Keep it private.");
-                      })
-                    }
-                  >
-                    <Copy aria-hidden="true" />
-                    Copy setup key
+                  {hasPassword && (
+                    <Field>
+                      <FieldLabel htmlFor="enrollment-password">
+                        Confirm your password
+                      </FieldLabel>
+                      <Input
+                        id="enrollment-password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={currentPassword}
+                        onChange={(event) =>
+                          setCurrentPassword(event.target.value)
+                        }
+                        required
+                        maxLength={128}
+                        disabled={pending}
+                      />
+                    </Field>
+                  )}
+                  <Button className="w-full" type="submit" disabled={pending}>
+                    {pending && (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                        aria-hidden="true"
+                      />
+                    )}
+                    {pending ? "Preparing..." : "Set up authenticator"}
                   </Button>
-                </Field>
-                {verifyForm(false)}
-              </div>
-            )}
-            {status.enrolled && (
-              <Tabs defaultValue="authenticator">
-                <TabsList aria-label="Verification method" className="w-full">
-                  <TabsTrigger value="authenticator">Authenticator</TabsTrigger>
-                  <TabsTrigger value="recovery">Recovery code</TabsTrigger>
-                </TabsList>
-                <TabsContent value="authenticator">
-                  {verifyForm(false)}
-                </TabsContent>
-                <TabsContent value="recovery">{verifyForm(true)}</TabsContent>
-              </Tabs>
-            )}
-            {status.verified && (
-              <Alert variant="success">
-                <AlertTitle>MFA confirmed</AlertTitle>
-                <AlertDescription>
-                  Your current Business permissions still apply. MFA does not
-                  grant access to another Business or add platform permissions.
+                </form>
+              )}
+              {!needsVerification && status.enrolled && !setupURI && (
+                <>
+                  <p className="flex items-center justify-center gap-2 text-sm text-success">
+                    <Check className="size-4" aria-hidden="true" />
+                    Authenticator enabled
+                  </p>
+                  {editingPassword ? (
+                    <>
+                      <PasswordForm
+                        onVerify={() => setManagementVerification(true)}
+                        onSaved={() => {
+                          setHasPassword(true);
+                          setEditingPassword(false);
+                          setMessage("Password saved.");
+                        }}
+                      />
+                      <Button
+                        variant="ghost"
+                        onClick={() => setEditingPassword(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button onClick={continueToApp}>
+                      Continue to app
+                      <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                    </Button>
+                  )}
+                  <Accordion type="single" collapsible>
+                    <AccordionItem value="manage" className="border-0">
+                      <AccordionTrigger>Manage security</AccordionTrigger>
+                      <AccordionContent className="flex flex-col gap-3">
+                        {hasPassword && (
+                          <Field>
+                            <FieldLabel htmlFor="security-password">
+                              Current password
+                            </FieldLabel>
+                            <Input
+                              id="security-password"
+                              type="password"
+                              autoComplete="current-password"
+                              value={currentPassword}
+                              onChange={(event) =>
+                                setCurrentPassword(event.target.value)
+                              }
+                              maxLength={128}
+                              disabled={pending}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Required to replace your authenticator or recovery
+                              codes.
+                            </p>
+                          </Field>
+                        )}
+                        <Button
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() => {
+                            setEditingPassword(true);
+                            if (!status.operatorVerified)
+                              setManagementVerification(true);
+                          }}
+                        >
+                          Set or change password
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              disabled={pending}
+                              onClick={(event) => {
+                                if (!status.operatorVerified) {
+                                  event.preventDefault();
+                                  setManagementVerification(true);
+                                }
+                              }}
+                            >
+                              Create new recovery codes
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogTitle>
+                              Replace recovery codes?
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Your previous codes will stop working. Save the
+                              new codes before leaving.
+                            </AlertDialogDescription>
+                            <div className="flex flex-wrap justify-end gap-3">
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() =>
+                                  void run(async () => {
+                                    const result = recoveryCodesSchema.parse(
+                                      await request("generate-backup-codes"),
+                                    );
+                                    setCodes(result.backupCodes);
+                                    setCurrentPassword("");
+                                  })
+                                }
+                              >
+                                Replace codes
+                              </AlertDialogAction>
+                            </div>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              disabled={pending}
+                              onClick={(event) => {
+                                if (!status.operatorVerified) {
+                                  event.preventDefault();
+                                  setManagementVerification(true);
+                                }
+                              }}
+                            >
+                              Replace authenticator
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogTitle>
+                              Replace your authenticator?
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Your current authenticator and recovery codes will
+                              stop working. Set up and verify the replacement to
+                              continue.
+                            </AlertDialogDescription>
+                            <div className="flex flex-wrap justify-end gap-3">
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() =>
+                                  void run(async () => {
+                                    await request("disable");
+                                    setCodes([]);
+                                    setSetupURI("");
+                                    await refresh();
+                                    await beginSetup();
+                                  }, "authenticator-code")
+                                }
+                              >
+                                Replace authenticator
+                              </AlertDialogAction>
+                            </div>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                </>
+              )}
+            </>
+          )}
+          <div
+            ref={feedback}
+            tabIndex={-1}
+            className="flex flex-col gap-3 outline-none"
+            aria-live="polite"
+          >
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription id="verification-error">
+                  {error}
                 </AlertDescription>
               </Alert>
             )}
-          </CardContent>
-        </Card>
-        {codes.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Save your recovery codes</CardTitle>
-              <CardDescription>
-                Keep these somewhere private, separate from your authenticator.
-                Each code works once. They disappear from this page when you
-                leave.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5">
-              <ul
-                aria-label="Recovery codes"
-                className="grid gap-2 rounded-xl bg-muted p-4 font-mono text-sm sm:grid-cols-2"
+            {message && (
+              <p
+                role="status"
+                className="text-center text-sm text-muted-foreground"
               >
-                {codes.map((code) => (
-                  <li key={code}>{code}</li>
-                ))}
-              </ul>
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  variant="outline"
-                  disabled={pending}
-                  onClick={() =>
-                    void run(async () => {
-                      await navigator.clipboard.writeText(codes.join("\n"));
-                      setMessage(
-                        "Recovery codes copied. Save them in a private place.",
-                      );
-                    })
-                  }
-                >
-                  <Copy aria-hidden="true" />
-                  Copy recovery codes
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={pending}
-                  onClick={() => {
-                    setCodes([]);
-                    setMessage(
-                      "Recovery codes hidden. Your saved codes remain valid.",
-                    );
-                  }}
-                >
-                  I’ve saved my codes
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        <div
-          ref={feedback}
-          tabIndex={-1}
-          className="flex flex-col gap-3 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
-        >
-          {error && (
-            <Alert variant="destructive">
-              <AlertTitle>Check this step</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {message && (
-            <Alert>
-              <AlertDescription>{message}</AlertDescription>
-            </Alert>
-          )}
-          {signInRequired && (
-            <Button asChild variant="outline">
-              <Link href="/sign-in">Sign in again</Link>
-            </Button>
-          )}
-        </div>
-        {status.verified && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Recovery options</CardTitle>
-              <CardDescription>
-                If you have lost your authenticator, use a saved recovery code
-                above, then replace the authenticator. Security changes require
-                MFA within the last 15 minutes.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3">
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="outline" disabled={pending}>
-                    Create new recovery codes
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogTitle>
-                    Replace your recovery codes?
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    All previous recovery codes will stop working immediately.
-                    Save the new codes somewhere private before leaving this
-                    page.
-                  </AlertDialogDescription>
-                  <div className="flex flex-wrap justify-end gap-3">
-                    <AlertDialogCancel>Keep existing codes</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() =>
-                        void run(async () => {
-                          const result = recoveryCodesSchema.parse(
-                            await request("generate-backup-codes"),
-                          );
-                          setCodes(result.backupCodes);
-                          setMessage(
-                            "New recovery codes created. All previous recovery codes are now invalid.",
-                          );
-                        })
-                      }
-                    >
-                      Create new recovery codes
-                    </AlertDialogAction>
-                  </div>
-                </AlertDialogContent>
-              </AlertDialog>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="outline" disabled={pending}>
-                    Replace authenticator
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogTitle>
-                    Replace your authenticator?
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Your current authenticator and recovery codes will stop
-                    working. Protected access will be blocked until you enroll
-                    and verify a new authenticator. Your Business permissions
-                    stay the same.
-                  </AlertDialogDescription>
-                  <div className="flex flex-wrap justify-end gap-3">
-                    <AlertDialogCancel>Keep authenticator</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() =>
-                        void run(async () => {
-                          await request("disable");
-                          setCodes([]);
-                          setSetupKey("");
-                          await refresh();
-                          setMessage(
-                            "Old authenticator removed. Set up and verify your replacement to restore protected access.",
-                          );
-                        })
-                      }
-                    >
-                      Replace authenticator
-                    </AlertDialogAction>
-                  </div>
-                </AlertDialogContent>
-              </AlertDialog>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-      <aside className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 text-sm leading-relaxed">
-        <ShieldCheck className="size-6 text-primary" aria-hidden="true" />
-        <h2 className="text-base font-semibold">Your access, explained</h2>
-        <p className="text-muted-foreground">
-          A sign-in link confirms your email. Your authenticator confirms a
-          second factor for this session.
+                {message}
+              </p>
+            )}
+            {signInRequired && (
+              <Button asChild variant="outline">
+                <Link href="/sign-in">Sign in again</Link>
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+      {needsVerification && (
+        <p className="mt-5 text-center text-xs text-muted-foreground">
+          {status.email}
         </p>
-        <p className="text-muted-foreground">
-          Business access is verified for up to 12 hours. Platform operations
-          require verification within 15 minutes and a separate operator grant.
-        </p>
-        <p className="text-muted-foreground">
-          If you lose both your authenticator and recovery codes, email alone
-          cannot restore privileged access. Ask your service operator for a
-          reviewed recovery process.
-        </p>
-        <Button
-          asChild
-          variant={status.verified ? "default" : "outline"}
-          className="w-full"
-        >
-          <Link href="/businesses">
-            {status.verified ? "Continue to Businesses" : "Your Businesses"}
-            <ArrowRight aria-hidden="true" />
-          </Link>
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          MFA is one production prerequisite. Other setup may still be
-          incomplete.
-        </p>
-      </aside>
+      )}
     </div>
   );
 }

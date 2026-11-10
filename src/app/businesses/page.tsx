@@ -5,7 +5,6 @@ import { headers } from "next/headers";
 import { ArrowUpRight, Plus } from "lucide-react";
 import { getServices } from "@/server/services";
 import { pageFailure } from "@/server/page";
-import { OnboardingForm } from "@/components/onboarding-form";
 import { Button } from "@/components/ui/button";
 
 import {
@@ -280,7 +279,26 @@ export default async function BusinessesPage({
   if (!businesses.length)
     return (
       <div className="app-page">
-        <OnboardingForm />
+        <PageHeader
+          title="Your businesses"
+          description="Create your business when you're ready. Your account is saved."
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle>Let&apos;s set up your business</CardTitle>
+            <CardDescription>
+              Add what you sell, then connect your tools and find prospects.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href="/onboarding">
+                Start setup
+                <ArrowUpRight data-icon="inline-end" aria-hidden="true" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
         {hasPlatformAccess && (
           <details className="rounded-xl border border-border bg-card p-5">
             <summary className="cursor-pointer text-sm font-medium">

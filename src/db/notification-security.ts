@@ -45,8 +45,11 @@ export async function prepareNotificationSecurity(pool: Pool | PoolClient) {
     RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$ DECLARE v record; p record; e record; current_event record; BEGIN
       IF nullif(current_setting('app.business_id',true),'') IS NOT NULL AND tenant::text IS DISTINCT FROM current_setting('app.business_id',true) THEN RETURN NULL; END IF;
       IF purpose='authentication' AND tenant IS NULL THEN
-        SELECT * INTO v FROM public.verification x WHERE x.identifier=authority AND x.identifier LIKE 'magic-link:%'
-          AND x.expires_at>statement_timestamp() AND x.value::jsonb->>'type'='magic-link' LIMIT 1;
+        SELECT * INTO v FROM public.verification x WHERE x.identifier=authority AND x.expires_at>statement_timestamp() AND (
+          x.identifier LIKE 'magic-link:%' AND x.value::jsonb->>'type'='magic-link' OR
+          x.identifier LIKE 'email-verification:%' AND x.value::jsonb->>'type'='email-verification' AND EXISTS(
+            SELECT 1 FROM public."user" u WHERE u.id=x.value::jsonb->>'userId' AND lower(u.email)=lower(x.value::jsonb->>'email') AND NOT u.email_verified)
+        ) LIMIT 1;
         IF FOUND THEN RETURN jsonb_build_object('expiresAt',least(v.expires_at,statement_timestamp()+interval '600 seconds'),
           'recipientDigest',md5(lower(v.value::jsonb->>'email')),'userId',(SELECT u.id FROM public."user" u WHERE lower(u.email)=lower(v.value::jsonb->>'email'))); END IF;
       END IF;

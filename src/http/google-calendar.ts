@@ -35,7 +35,10 @@ export function createGoogleCalendarHttp(options: {
           dataResponse(result),
           result.authorizationUrl,
           "google-calendar",
-          { businessId },
+          {
+            businessId,
+            onboarding: request.headers.get("x-lead-relay-onboarding") === "1",
+          },
         );
       }),
     select: (request: Request, businessId: string) =>

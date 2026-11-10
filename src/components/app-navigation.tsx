@@ -167,7 +167,7 @@ function Navigation({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, state: sidebarState, isMobile } = useSidebar();
   const [searchOpen, setSearchOpen] = useState(false);
   const business = businesses.find(
     (item) =>
@@ -266,10 +266,21 @@ function Navigation({
         variant="floating"
         className="p-3 pr-0 [&_[data-slot=sidebar-inner]]:glass-chrome [&_[data-slot=sidebar-inner]]:rounded-[22px]"
       >
-        <SidebarHeader className="gap-6 px-5 pb-4 pt-6">
-          <Link href="/businesses" aria-label="Lead Relay home" onClick={close}>
-            <Brand />
-          </Link>
+        <SidebarHeader className="gap-6 px-4 pb-4 pt-5">
+          <div className="flex items-center justify-between gap-2">
+            <Link
+              className="min-w-0"
+              href="/businesses"
+              aria-label="Lead Relay home"
+              onClick={close}
+            >
+              <Brand />
+            </Link>
+            <SidebarTrigger
+              className="size-11 shrink-0"
+              aria-label="Close sidebar"
+            />
+          </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -458,8 +469,9 @@ function Navigation({
       </Sidebar>
       <div className="min-w-0 flex-1">
         <header className="glass-chrome sticky top-3 z-20 mx-3 mt-3 flex min-h-17 items-center gap-3 rounded-[22px] px-4 sm:top-4 sm:mx-6 sm:mt-4 sm:px-5">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-5" />
+          {(isMobile || sidebarState === "collapsed") && (
+            <SidebarTrigger className="size-11" aria-label="Open sidebar" />
+          )}
           <nav
             aria-label="Breadcrumb"
             className="flex min-w-0 items-center gap-2 text-xs"

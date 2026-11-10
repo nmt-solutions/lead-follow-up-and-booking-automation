@@ -33,7 +33,23 @@ export async function connectionCallback(
         : services.microsoftCalendarHttp
     ).callback(request, context.businessId);
   }
-  if (!response.ok && response.status !== 303) {
+  if (context.onboarding) {
+    const failed =
+      response.status !== 303 ||
+      new URL(request.url).searchParams.has("error") ||
+      response.headers.get("Location")?.includes("connection=failed");
+    response = new Response(null, {
+      status: 303,
+      headers: {
+        Location: new URL(
+          `/onboarding/${context.businessId}?step=${provider === "gmail" || provider === "microsoft" ? "email" : "calendar"}${failed ? "&connection=failed" : ""}`,
+          request.url,
+        ).toString(),
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+      },
+    });
+  } else if (!response.ok && response.status !== 303) {
     const destination = `/businesses/${context.businessId}/${provider === "gmail" || provider === "microsoft" ? "mailboxes" : "calendar"}?connection=failed`;
     response = new Response(null, {
       status: 303,

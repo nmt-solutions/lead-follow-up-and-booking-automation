@@ -35,7 +35,10 @@ export function createMicrosoftCalendarHttp(options: {
           dataResponse(result),
           result.authorizationUrl,
           "microsoft-calendar",
-          { businessId },
+          {
+            businessId,
+            onboarding: request.headers.get("x-lead-relay-onboarding") === "1",
+          },
         );
       }),
     select: (request: Request, businessId: string) =>

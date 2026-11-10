@@ -16,7 +16,7 @@ export const privacySections: PolicySection[] = [
       "We collect the information needed to provide the features you use. Some information comes from you, some comes from connected services you authorize, and some comes from public sources used for prospect searches.",
     ],
     bullets: [
-      "Account and security information, including your email, team role, session records, authenticator enrollment, and security events.",
+      "Account and security information, including your first and last name, email, Company or Personal account choice, company name where provided, password hash, team role, session records, authenticator enrollment, and security events.",
       "Business information, including your name, website, products or services, address, search areas, customer types, and approved business knowledge.",
       "Sales information, including prospect details, public source links, contact details, messages, drafts, inquiries, notes, call records, appointments, and approvals.",
       "Connected service information, including the account identity, granted permissions, selected mailboxes or calendars, synchronization records, and credentials needed to maintain an authorized connection.",
@@ -75,7 +75,7 @@ export const privacySections: PolicySection[] = [
     id: "cookies",
     title: "Cookies and browser storage",
     paragraphs: [
-      "Lead Relay uses cookies for sessions and security. The sidebar also stores your navigation preference. Some forms use browser session storage to preserve a draft after an interrupted request. These functions are needed for account access, navigation, or form recovery.",
+      "Lead Relay uses cookies for sessions and security. The sidebar and setup flow also remember navigation preferences. Some forms use browser session storage to preserve a draft after an interrupted request. These functions are needed for account access, navigation, or form recovery.",
       "Blocking cookies can prevent sign-in or protected actions from working. You can clear browser storage through your browser settings. Clearing a local draft does not delete records already saved to the service.",
     ],
   },

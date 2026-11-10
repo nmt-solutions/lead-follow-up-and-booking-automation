@@ -189,6 +189,10 @@ export const appRuntime = pgRole("app_runtime").existing();
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  accountType: text("account_type"),
+  companyName: text("company_name"),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),

@@ -108,7 +108,7 @@ export function createNotificationApplication<C>(d: {
     return deliver(work);
   }
   const signInMailer: SignInMailer = {
-    async send({ email, url }) {
+    async send({ email, url, kind }) {
       // The public response never reveals provider acceptance, account existence,
       // queued work or setup. Better Auth has already committed its hashed token.
       try {
@@ -116,7 +116,10 @@ export function createNotificationApplication<C>(d: {
           token = parsed.searchParams.get("token");
         if (
           parsed.origin !== new URL(config.origin).origin ||
-          parsed.pathname !== "/api/auth/magic-link/verify" ||
+          parsed.pathname !==
+            (kind === "verification"
+              ? "/api/auth/verify-email"
+              : "/api/auth/magic-link/verify") ||
           !token
         )
           throw new ApplicationError("INVALID_INPUT");
@@ -125,18 +128,27 @@ export function createNotificationApplication<C>(d: {
           {
             id,
             purpose: "authentication",
-            sourceStage: "magic_link_requested",
+            sourceStage:
+              kind === "verification"
+                ? "email_verification_requested"
+                : "magic_link_requested",
             sourceId: id,
             businessId: null,
             actorId: null,
-            authority: `magic-link:${createHash("sha256").update(token).digest("base64url")}`,
+            authority: `${kind === "verification" ? "email-verification" : "magic-link"}:${createHash("sha256").update(token).digest("base64url")}`,
             key: `authentication/${id}`,
           },
           {
             from: config.from,
             to: [email],
-            subject: `Sign in to ${APP_NAME}`,
-            text: `Use this link to sign in to ${APP_NAME}:\n\n${url}\n\nIt expires in 10 minutes and can only be used once. If you did not request it, ignore this email.`,
+            subject:
+              kind === "verification"
+                ? `Verify your ${APP_NAME} email`
+                : `Sign in to ${APP_NAME}`,
+            text:
+              kind === "verification"
+                ? `Verify your email to finish setting up ${APP_NAME}:\n\n${url}\n\nThis link expires in 10 minutes. If you did not request it, ignore this email.`
+                : `Use this link to sign in to ${APP_NAME}:\n\n${url}\n\nIt expires in 10 minutes and can only be used once. If you did not request it, ignore this email.`,
           },
         );
       } catch {
