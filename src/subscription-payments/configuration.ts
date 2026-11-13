@@ -7,6 +7,15 @@ import { lifecyclePolicySchema } from "../models/subscription-lifecycle";
 import { reachPolicySchema } from "../models/reach-changes";
 import { paymentAccount } from "./accounts";
 import { upiSandboxVerifier } from "./upi-sandbox";
+import { productionCheckoutIssues } from "../production/subscriptions";
+import type { PaymentSnapshot } from "../models/subscription-payments";
+
+function checkoutPolicy(env: Record<string, string | undefined>, clock: Clock) {
+  return (snapshot: PaymentSnapshot) =>
+    env.NODE_ENV === "production"
+      ? productionCheckoutIssues(snapshot, env, clock.now())
+      : [];
+}
 
 export function configuredReachPolicy(
   env: Record<string, string | undefined> = process.env,
@@ -60,6 +69,10 @@ function configuredSinglePayments(
       webhookSecrets: secrets,
       fetch: options.fetch ?? fetch,
       clock: options.clock ?? { now: () => new Date() },
+      newCheckoutIssues: checkoutPolicy(
+        env,
+        options.clock ?? { now: () => new Date() },
+      ),
     });
     try {
       gateway.lifecyclePolicy = lifecyclePolicySchema.parse(
@@ -121,6 +134,10 @@ export function configuredPayments(
     webhookSecrets: JSON.parse(env.RAZORPAY_UPI_WEBHOOK_SECRETS!),
     fetch: options.fetch ?? fetch,
     clock: options.clock ?? { now: () => new Date() },
+    newCheckoutIssues: checkoutPolicy(
+      env,
+      options.clock ?? { now: () => new Date() },
+    ),
     ...(reviewed.upiPath?.sandbox.kind === "native_sandbox" &&
     env.RAZORPAY_UPI_SANDBOX_KEY_ID?.startsWith("rzp_test_") &&
     env.RAZORPAY_UPI_SANDBOX_KEY_SECRET

@@ -10,7 +10,7 @@ import {
   type LifecyclePolicy,
 } from "../models/subscription-lifecycle";
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "./runtime";
 import {
   scoped,
@@ -30,6 +30,9 @@ import {
   subscriptionPaymentHistory,
   subscriptionLifecycleEvent,
   platformOperator,
+  business,
+  discoveryConfiguration,
+  aiActivation,
 } from "./schema";
 import {
   subscriptionQuoteSchema,
@@ -68,6 +71,8 @@ import {
   businessMfaLifetime,
 } from "../auth/access";
 import { session } from "./schema";
+import { discoveryPolicySchema } from "../models/discovery";
+import { availableMarkets } from "../discovery/repository";
 
 type Row = typeof subscriptionPayment.$inferSelect;
 type Work = { id: string; business_id: string; recovery_key: string };
@@ -209,7 +214,39 @@ async function assurePaymentActor(
     throw new ApplicationError("MFA_REQUIRED");
 }
 
-export function createSubscriptionPaymentRepository(database: Database) {
+export function createSubscriptionPaymentRepository(
+  database: Database,
+  options: { requireServiceSetup?: boolean } = {},
+) {
+  async function serviceIssues(tx: Transaction, businessId: string) {
+    if (!options.requireServiceSetup) return [];
+    const [profile] = await tx
+      .select()
+      .from(business)
+      .where(eq(business.id, businessId));
+    const [configuration] = await tx
+      .select()
+      .from(discoveryConfiguration)
+      .where(eq(discoveryConfiguration.businessId, businessId));
+    const [activation] = await tx
+      .select()
+      .from(aiActivation)
+      .orderBy(desc(aiActivation.version))
+      .limit(1);
+    const policy = discoveryPolicySchema.safeParse(configuration?.policy);
+    return profile &&
+      activation?.profileId &&
+      policy.success &&
+      policy.data.allowanceUnit === "discovery credits" &&
+      policy.data.exa &&
+      availableMarkets(profile, policy.data).includes("India")
+      ? []
+      : ["discovery_service_setup_required"];
+  }
+  async function requireService(tx: Transaction, businessId: string) {
+    if ((await serviceIssues(tx, businessId)).length)
+      throw new ApplicationError("SETUP_REQUIRED");
+  }
   async function renewalSnapshot(
     tx: Transaction,
     row: Row,
@@ -711,6 +748,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
       return scoped(database, actor, work.business_id, async (tx) => {
         await lockBusiness(tx, work.business_id);
         await requireCapability(tx, actor, work.business_id, "billing.manage");
+        await requireService(tx, work.business_id);
         const [row] = await tx
           .select()
           .from(subscriptionPayment)
@@ -992,6 +1030,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
         businessId,
         async (tx) => {
           await requireCapability(tx, actor, businessId, "billing.manage");
+          await requireService(tx, businessId);
           const [previous] = await tx
             .select()
             .from(subscriptionPayment)
@@ -1140,6 +1179,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           reserved: item.allowance.quantity - item.remaining,
           remaining: item.remaining,
         });
+        const deliveryIssues = await serviceIssues(tx, businessId);
         const result = {
           actions: await (async () => {
             const result: PaymentAction[] = [];
@@ -1168,8 +1208,10 @@ export function createSubscriptionPaymentRepository(database: Database) {
             key: gateway.key,
             mode: gateway.mode,
             ready:
-              gateway.mode !== "unconfigured" && !gateway.readiness?.().length,
-            reasons: gateway.readiness?.(),
+              gateway.mode !== "unconfigured" &&
+              !gateway.readiness?.().length &&
+              deliveryIssues.length === 0,
+            reasons: [...(gateway.readiness?.() ?? []), ...deliveryIssues],
             review: gateway.review,
           },
         };
@@ -1204,6 +1246,7 @@ export function createSubscriptionPaymentRepository(database: Database) {
           if (!row) throw new ApplicationError("NOT_FOUND");
           if (row.started || row.state !== "reviewed")
             return { action: paymentView(row), work: null };
+          await requireService(tx, businessId);
           const binding = row.snapshot.provider;
           if (
             binding.key !== gateway.key ||

@@ -533,9 +533,9 @@ export function SubscriptionSetup({
                 {!available && (
                   <Alert>
                     <AlertDescription>
-                      Payments are not available yet. You can keep setting up
-                      your business and return here when payments open. No
-                      payment is taken during setup.
+                      {defaults.address.country !== "IN"
+                        ? "Subscriptions currently support Indian billing addresses and INR payments. International checkout will be available later."
+                        : "Payments are not available yet. You can keep setting up your business and return here when payments open. No payment is taken during setup."}
                     </AlertDescription>
                   </Alert>
                 )}

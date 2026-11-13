@@ -25,16 +25,19 @@ async function main() {
       issuer: boolean;
       discovery: number;
       businesses: number;
+      ai: boolean;
     }>(`select
       exists(select 1 from tax_rule_revision r where r.rule->>'mode'='live' and (r.rule->>'effectiveFrom')::timestamptz<=now() and ((r.rule->>'effectiveUntil') is null or (r.rule->>'effectiveUntil')::timestamptz>now()) and (select d.outcome from tax_rule_decision d where d.revision_id=r.id order by d.version desc limit 1)='approved') as tax,
       exists(select 1 from seller_issuer_revision r where r.configuration->>'mode'='live' and (r.configuration->>'effectiveFrom')::timestamptz<=now() and ((r.configuration->>'effectiveUntil') is null or (r.configuration->>'effectiveUntil')::timestamptz>now()) and (select d.outcome from seller_issuer_decision d where d.revision_id=r.id order by d.version desc limit 1)='approved') as issuer,
       (select count(*)::int from discovery_configuration) as discovery,
-      (select count(*)::int from business) as businesses`);
+      (select count(*)::int from business) as businesses,
+      exists(select 1 from ai_activation) as ai`);
     if (!setup.rows[0]?.tax) issues.push("approved_live_tax_coverage_required");
     if (!setup.rows[0]?.issuer)
       issues.push("approved_live_invoice_issuer_required");
     if (setup.rows[0].discovery < setup.rows[0].businesses)
       issues.push("discovery_provisioning_incomplete");
+    if (!setup.rows[0]?.ai) issues.push("active_ai_profile_required");
     console.log(JSON.stringify({ catalog: "checked", ...setup.rows[0] }));
     if (process.env.TRIGGER_SECRET_KEY) {
       configure({ secretKey: process.env.TRIGGER_SECRET_KEY });
@@ -45,6 +48,10 @@ async function main() {
         );
         if (current.status !== "DEPLOYED")
           issues.push("promoted_worker_required");
+        if (
+          current.version !== process.env.TRIGGER_PRODUCTION_DEPLOYMENT_VERSION
+        )
+          issues.push("promoted_worker_version_mismatch");
       } catch {
         issues.push("promoted_worker_unavailable");
       }

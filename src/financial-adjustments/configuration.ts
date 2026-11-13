@@ -28,6 +28,8 @@ function configuredSingleAdjustments(
     const review = razorpayAccountReviewSchema.parse(
       JSON.parse(env.RAZORPAY_ACCOUNT_REVIEW ?? "null"),
     );
+    if (env.NODE_ENV === "production" && review.mode !== "live")
+      throw new Error("Live payment configuration required");
     const keyId = z
         .string()
         .startsWith(`rzp_${review.mode}_`)

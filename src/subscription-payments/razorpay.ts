@@ -89,6 +89,7 @@ export function createRazorpayGateway(d: {
     method?: "POST" | "PATCH",
   ): Promise<unknown>;
   verifySandbox?(): Promise<void>;
+  newCheckoutIssues?(snapshot: PaymentSnapshot): string[];
 }): PaymentGateway {
   const review = d.review;
   const account = `${review.account}:${review.mode}`;
@@ -159,6 +160,8 @@ export function createRazorpayGateway(d: {
   const financialHash = (s: PaymentSnapshot) =>
     createHash("sha256").update(JSON.stringify(s)).digest("hex");
   function planFor(s: PaymentSnapshot) {
+    if (d.newCheckoutIssues?.(s).length)
+      throw new ApplicationError("SETUP_REQUIRED");
     const plans = review.plans.filter(
       (p) =>
         p.offerId === s.quote.selection.offerId &&
@@ -655,6 +658,8 @@ export function createRazorpayGateway(d: {
     readiness,
     supports,
     reviewSnapshot(snapshot) {
+      const issues = d.newCheckoutIssues?.(snapshot) ?? [];
+      if (issues.length) return issues;
       if (snapshot.term.kind === "days") return pilot.review(snapshot);
       try {
         planFor(snapshot);
@@ -793,6 +798,8 @@ export function createRazorpayGateway(d: {
       };
     },
     async create(input) {
+      if (d.newCheckoutIssues?.(input.snapshot).length)
+        throw new PaymentCreationNotAttempted();
       if (input.snapshot.term.kind === "days") return pilot.create(input);
       let mapping;
       try {

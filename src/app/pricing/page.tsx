@@ -24,6 +24,11 @@ export default function PricingPage() {
             team. Set up your business first and review the full total before
             paying.
           </p>
+          <p className="text-sm text-muted-foreground">
+            Available to customers with an Indian billing address. Payments are
+            collected in INR through Razorpay. International checkout is coming
+            later.
+          </p>
         </header>
         <PlanCards />
         <section className="flex flex-col gap-5">

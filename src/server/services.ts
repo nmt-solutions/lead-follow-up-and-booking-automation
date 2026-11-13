@@ -432,7 +432,9 @@ async function composeServices() {
     authenticate: access.authenticateForWork,
     authenticateForWork: access.authenticateForWork,
     authenticatePlatform: access.authenticatePlatformForWork,
-    repository: createSubscriptionPaymentRepository(runtimeDatabase(pool)),
+    repository: createSubscriptionPaymentRepository(runtimeDatabase(pool), {
+      requireServiceSetup: process.env.NODE_ENV === "production",
+    }),
     clock: { now: () => new Date() },
     gateway: paymentGateway,
   });
